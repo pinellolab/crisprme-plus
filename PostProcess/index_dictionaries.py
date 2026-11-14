@@ -43,22 +43,26 @@ A search reads the dataset's enrichment in place too, where there is one (Genome
 scans its enriched genome, in place of the variant index, where it holds every chromosome of the
 genome (the search script's STEP 3); and a search builds from it the variant index none serves,
 or the INDELS index its variant index lacks. A data folder upgraded from 2.8.1 holds 2.8.1's
-enrichment of a panel, from its build-index-only or its kit, beside an index of 2.10.0 and the
-Dictionaries the download installed, and a search with no bulges read its alleles with the
-carriers and frequencies of 2.10.0, unchecked (the PP-14 review, round 3: A3-PP14-1). It is
-refused, before the first dataset is searched, where the search reads it (enrichment_refusal), by
-what tells an enrichment's build: its fake-indel genome, cut at the windows of the CRISPRitz that
-enriched it, against those the indel logs record (indel_window.fake_genome_disagreement). Nothing
-else in it tells: on two enrichments of one VCF of chr22 (HGDP + 1000 Genomes, CRISPRitz 2.9.1
-and 2.10.0), each holds its FASTAs alone, of the same names, sizes and headers, and no file of the
-enricher (its change_version.txt, the same text in both releases, stays in the engine's own
-output, INDELs_genome/, which no build puts in place); the enriched genomes differ at the 43,389
-positions where the VCF writes several SNV records, and nowhere else (2.10.0 codes each with
-every ALT, 2.9.1 with the last record's), which only the VCF tells (2.10.0's holds a Q, its
-four-allele code, at 2,448 of them; a genome without one tells nothing); the fake-indel genomes,
-of 13,693,130 and 15,617,586 bytes, are cut at 25/27 and 30/30, and each agrees with its own
-indel logs and disagrees with the other's (measured for 2.10.0's release). Every build and every
-kit writes the two genomes together, from one run of the enricher.
+enrichment of a panel beside an index of 2.10.0 and the Dictionaries the download installed: from
+its build-index-only, of every chromosome of the genome folder it was given (all of hg38, as
+download --what genome installs it), which a search with no bulges scanned, reading its alleles
+with the carriers and frequencies of 2.10.0, unchecked (the PP-14 review, round 3: A3-PP14-1);
+or from its enriched-genome kit, of chr1-22, X and Y alone, which beside all of hg38 such a
+search does not read (it searches the index), and from which a search builds an index it lacks.
+It is refused, before the first dataset is searched, where the search reads it
+(enrichment_refusal), marked unfinished by build-index-only or not, by what tells an
+enrichment's build: its fake-indel genome, cut at the windows of the CRISPRitz that enriched it,
+against those the indel logs record (indel_window.fake_genome_disagreement). Nothing else in it
+tells: on two enrichments of one VCF of chr22 (HGDP + 1000 Genomes, CRISPRitz 2.9.1 and 2.10.0),
+each holds its FASTAs alone, of the same names, the enriched genomes of the same size and header,
+and no file of the enricher (its change_version.txt, the same text in both releases, stays in the
+engine's own output, INDELs_genome/, which no build puts in place); the enriched genomes differ
+at the 43,389 positions where the VCF writes several SNV records, and nowhere else (2.10.0 codes
+each with every ALT, 2.9.1 with the last record's), which only the VCF tells (2.10.0's holds a Q,
+its four-allele code, at 2,448 of them; a genome without one tells nothing); the fake-indel
+genomes, of 13,693,130 and 15,617,586 bytes, are cut at 25/27 and 30/30, and each agrees with its
+own indel logs and disagrees with the other's (measured for 2.10.0's release). Every build and
+every kit writes the two genomes together, from one run of the enricher.
 
     python index_dictionaries.py [--enrichment <genome> scan|build] [--vcf <VCF folder>] \\
         <index folder> <working directory> <dataset>
@@ -244,15 +248,21 @@ def enrichment_refusal(workdir, genome, dataset, reads="scan", index_dir=None, v
       gives them in that step (``vcf_dir``: the dataset's VCF folder, which tells a sites-only
       dataset).
 
-    None where they agree, where nothing tells (no fake-indel genome in place, indel logs
-    without a row), and where the enrichment is unfinished (its .building mark): the search
-    refuses that as such, before it reads it."""
+    None where they agree, and where nothing tells (no fake-indel genome in place, indel logs
+    without a row). A mark of build-index-only (.building) on either part does not stop the
+    comparison (the PP-14 fix review, round 1: ppfA1-1). It marks the fake-indel genome alone
+    while it puts the SNP codes on one already in place (a kit's, an earlier release's), and a
+    run stopped there leaves the mark, which a search whose INDELS index is in place never looks
+    at: a search with no bulges scanned the enriched genome, which carries none, with another
+    build's Dictionaries, unchecked. The overlay rewrites each FASTA whole, its SNP codes alone
+    and never a window, so a marked fake-indel genome still tells its build. It marks the
+    enriched genome while a fresh enrichment goes into place, having cleared the dataset's indel
+    logs first, so its fake-indel genome meets the logs of its own run or none (or another
+    build's, put there since, as a download does); the search refuses that mark itself (STEP 1;
+    complete-search's pre-flight)."""
     if reads not in READS:
         raise ValueError("reads: one of %s, not %r" % (", ".join(READS), reads))
     enriched = os.path.normpath(os.path.join(workdir, "Genomes", "%s+%s" % (genome, dataset)))
-    if any(os.path.isdir(os.path.join(part, ".building"))
-           for part in (enriched, enriched + "_INDELS")):
-        return None
     if reads == "build":
         return indel_window.fake_genome_refusal(workdir, genome, dataset, who="this search",
                                                 vcf_dir=vcf_dir)

@@ -1640,8 +1640,10 @@ while read vcf_f; do
 	# genome tells its build, against the indel logs (index_dictionaries.enrichment_refusal): a
 	# folder upgraded from 2.8.1 holds 2.8.1's enrichment of a panel beside an index of 2.10.0 and
 	# its Dictionaries, which a search with no bulges scanned with them, unchecked (the PP-14
-	# review, round 3: A3-PP14-1). A search with bulges of an index whose INDELS index is there
-	# reads no enrichment.
+	# review, round 3: A3-PP14-1). Read whether build-index-only marked it unfinished or not: it
+	# marks the fake-indel genome alone as it puts the SNP codes on one in place, a mark a search
+	# whose INDELS index is there never looks at (the PP-14 fix review, round 1: ppfA1-1). A search
+	# with bulges of an index whose INDELS index is there reads no enrichment.
 	if [ -z "$_builds_checked" ]; then
 		_this_vcf=$vcf_name
 		while read -r _v; do

@@ -1480,12 +1480,15 @@ class TestFakeIndelWindowNotes(unittest.TestCase):
                 enriched, enriched)), notes)
         self.assertIn("(rm -rf '%s' '%s_INDELS')" % (enriched, enriched), notes[0])
         # what reads it: a search with no bulges scans it in place of the index, and refuses it
-        # now, as a build from it is refused (the PP-14 review, round 3: A3-PP14-1)
-        self.assertIn("A search with no bulges scans that enriched genome in place of the index",
-                      notes[0])
-        self.assertIn("so a search with no bulges, build-index-only, and a search that would "
-                      "build an index from it refuse it (docs/TROUBLESHOOTING.md section 16)",
-                      notes[0])
+        # now, as a build from it is refused (the PP-14 review, round 3: A3-PP14-1); where it
+        # holds every chromosome of the genome, which 2.8.1's kits, of chr1-22, X and Y alone,
+        # do not beside all of hg38 (the PP-14 fix review, round 1: ppfA1-2)
+        self.assertIn("A search with no bulges scans that enriched genome in place of the index "
+                      "where it holds every chromosome of the genome (a build-index-only of all "
+                      "of it leaves one so; an enriched-genome kit of 2.8.1 holds chr1-22, X and "
+                      "Y alone)", notes[0])
+        self.assertIn("so such a search, build-index-only, and a search that would build an "
+                      "index from it refuse it (docs/TROUBLESHOOTING.md section 16)", notes[0])
         self.assertIn("): a search with no bulges then searches the index;", notes[0])
         # its removal, pasted into zsh and into bash (wave 1c-b of 2.10.0), the same
         from test_indel_window import paste_both

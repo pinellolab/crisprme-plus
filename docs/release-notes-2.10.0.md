@@ -80,7 +80,9 @@ describes the methods.
   reads both where they are, and nothing checks them. Remove too 2.8.1's enrichment of the panel,
   `Genomes/hg38+<panel>` and `Genomes/hg38+<panel>_INDELS` (2.8.1's `build-index-only` and its
   enriched-genome kit leave it), or put 2.10.0's kit in its place: a search with no bulges scans it
-  in place of the index, and refuses it, by its fake-indel genome, as another build's
+  in place of the index where it holds every chromosome of the genome (as a `build-index-only` of
+  all of hg38 leaves it; the kit holds chr1-22, X and Y alone), a build of an index from it reads
+  it, and each refuses it, by its fake-indel genome, as another build's
   ([TROUBLESHOOTING §16](https://github.com/pinellolab/crisprme-plus/blob/v2.10.0/docs/TROUBLESHOOTING.md)).
   A new data folder has none of them.
 - Re-run any variant search made with 2.8.1 or earlier where its result matters: the coding of

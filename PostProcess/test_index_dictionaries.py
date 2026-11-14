@@ -17,7 +17,8 @@ scans its enriched genome in place of the variant index, and a search builds fro
 lacks. 2.8.1's enrichment of a panel, left beside an index of 2.10.0 and its Dictionaries in an
 upgraded data folder, was scanned with them, unchecked (the PP-14 review, round 3: A3-PP14-1).
 It is refused now where the search reads it, by its fake-indel genome against the indel logs
-(index_dictionaries.enrichment_refusal).
+(index_dictionaries.enrichment_refusal), whether or not build-index-only left it marked unfinished
+(the PP-14 fix review, round 1: ppfA1-1).
 
 TheRefusal, TheEnrichmentRefusal and TheCommandLine read fixtures of each case.
 ASearchRefusesItFirst runs the real complete-search and the search script as the web launches
@@ -362,7 +363,8 @@ class TheEnrichmentRefusal(_Folder):
     bulges scans in place of the variant index (and from which a search builds an index it
     lacks), against the Dictionaries' indel logs, by its fake-indel genome: what tells its
     build, as two real enrichments of one VCF of chr22 measured, of CRISPRitz 2.9.1 and 2.10.0
-    (the same files, sizes and headers but their fake-indel genomes, cut at 25/27 and 30/30)."""
+    (the same files, enriched genomes of the same sizes and headers, and fake-indel genomes cut
+    at 25/27 and 30/30)."""
 
     def refused(self, fake, logged, reads="scan", index=None):
         enriched = write_enrichment(self.work, fake, logged)
@@ -371,9 +373,9 @@ class TheEnrichmentRefusal(_Folder):
         return enriched, why
 
     def test_2_8_1_s_enrichment_beside_the_dictionaries_of_2_10_0_is_refused(self):
-        """A data folder upgraded from 2.8.1: its build-index-only, or its kit, left the
-        panel's enrichment (25/27), and a download of an index of 2.10.0 installed the
-        Dictionaries (30/30) and the index, which agree with each other."""
+        """A data folder upgraded from 2.8.1: its build-index-only left the panel's enrichment
+        (25/27), of every chromosome of the genome, and a download of an index of 2.10.0
+        installed the Dictionaries (30/30) and the index, which agree with each other."""
         idx = make_index(self.lib, f"20-NRR_3_hg38+{DS}", 2, sub_windows=(30, 30))
         enriched, why = self.refused((25, 27), (30, 30), index=idx)
         self.assertIsNotNone(why)
@@ -424,16 +426,46 @@ class TheEnrichmentRefusal(_Folder):
         shutil.rmtree(os.path.join(self.work, "Dictionaries"))
         self.assertIsNone(self.refused((25, 27), None)[1])
 
-    def test_an_unfinished_enrichment_is_left_to_its_own_refusal(self):
-        """build-index-only marks each part of a dataset it writes in place (.building) until it
-        is whole; the search refuses such a part as unfinished, before it reads it."""
+    def test_a_mark_of_build_index_only_does_not_turn_it_off(self):
+        """build-index-only marks the fake-indel genome alone (.building) while it puts the SNP
+        codes on one already in place (a kit's, an earlier release's), and a run stopped there
+        leaves the mark. The check took a mark on either part for an unfinished part that the
+        search refuses before it reads it, but a search whose INDELS index is in place never
+        looks at the fake-indel genome's: with it marked, a search with no bulges scanned
+        another build's enriched genome with the Dictionaries, unchecked (the PP-14 fix review,
+        round 1: ppfA1-1). The overlay rewrites each FASTA whole, its SNP codes alone and never
+        a window, so a marked fake-indel genome still tells its build: a mark on either part is
+        read through, and the enrichment refused where it is another build's, and not where it
+        is the Dictionaries' own, its SNP codes on or not."""
         enriched = write_enrichment(self.work, (25, 27), (30, 30))
-        for part in (enriched, enriched + "_INDELS"):
-            with self.subTest(part=part):
-                os.makedirs(os.path.join(part, ".building"))
-                self.assertIsNone(index_dictionaries.enrichment_refusal(self.work, "hg38", DS))
-                os.rmdir(os.path.join(part, ".building"))
-        self.assertIsNotNone(index_dictionaries.enrichment_refusal(self.work, "hg38", DS))
+        for part in (enriched + "_INDELS", enriched):
+            for reads in index_dictionaries.READS:
+                with self.subTest(marked=os.path.basename(part), reads=reads):
+                    os.makedirs(os.path.join(part, ".building"))
+                    try:
+                        why = index_dictionaries.enrichment_refusal(self.work, "hg38", DS, reads)
+                    finally:
+                        os.rmdir(os.path.join(part, ".building"))
+                    self.assertIsNotNone(why)
+                    self.assertTrue(why.startswith(
+                        f"the enrichment of {DS} in place ({enriched}, " if reads == "scan" else
+                        f"the fake-indel genome {enriched}_INDELS and the indel logs "), why)
+        # the Dictionaries' own enrichment, marked, a SNP code put on its fake-indel genome (an
+        # IUPAC code standing for the base it covers, as the overlay writes it): nothing to refuse
+        shutil.rmtree(os.path.join(self.work, "Genomes"))
+        enriched = write_enrichment(self.work, (30, 30), (30, 30))
+        fake = os.path.join(enriched + "_INDELS", f"fake_{DS}_chr22", "fakechr22.fa")
+        with open(fake) as fh:
+            head, seq = fh.read().split("\n")[:2]
+        code = {"A": "R", "G": "R", "C": "Y", "T": "Y"}[seq[3]]
+        with open(fake, "w") as fh:
+            fh.write(f"{head}\n{seq[:3]}{code}{seq[4:]}\n")
+        for part in (enriched + "_INDELS", enriched):
+            os.makedirs(os.path.join(part, ".building"))
+        for reads in index_dictionaries.READS:
+            with self.subTest(own=True, reads=reads):
+                self.assertIsNone(index_dictionaries.enrichment_refusal(self.work, "hg38", DS,
+                                                                        reads))
 
     def test_a_search_that_builds_from_it_says_so_as_its_step_does(self):
         """Where the search builds an index from the enrichment in place (the variant index none
@@ -715,9 +747,63 @@ class TheDocsSayWhatItReads(unittest.TestCase):
         pre = _flat("\n".join(line[2:] if line.startswith("> ") else line
                                for line in _read("docs", "PRECOMPUTED_INDEXES.md").splitlines()))
         self.assertIn("So does 2.8.1's enrichment of the panel (`Genomes/hg38+<panel>` and "
-                      "`_INDELS`, from its `build-index-only` or its kit), which a search with no "
-                      "bulges scans in place of the index and refuses as another build's", pre)
-        self.assertIn("An enrichment in place of another build than the panel's Dictionaries", pre)
+                      "`_INDELS`), from its `build-index-only` or its kit: a search with no "
+                      "bulges scans it in place of the index", pre)
+        self.assertIn("whole enrichment in place of another build than the panel's Dictionaries",
+                      pre)
+
+    def test_they_say_a_search_with_no_bulges_scans_an_enrichment_where_it_is_whole(self):
+        """The docs and the download's WARNING said that a search with no bulges scans 2.8.1's
+        enrichment, its kit's too, and refuses it. A search with no bulges scans an enrichment
+        only where it holds every chromosome of the genome (the search script's
+        _enriched_genome_whole): 2.8.1's build-index-only of all of hg38 leaves one so, but its
+        kits hold chr1-22, X and Y alone, and beside all of hg38 (455 FASTAs, as download --what
+        genome installs it) such a search searches the index, and neither reads nor refuses the
+        kit, which only a build of an index from it reads (the PP-14 fix review, round 1:
+        ppfA1-2, on real chr22). Each text says where it scans, as section 16 did; the enriched
+        genomes alone of the two releases are of the same sizes, their fake-indel genomes not
+        (ppfA1-4); and a mark of build-index-only does not stop the check (ppfA1-1)."""
+        whole = "where it holds every chromosome of the genome"
+        pre = _flat("\n".join(line[2:] if line.startswith("> ") else line
+                               for line in _read("docs", "PRECOMPUTED_INDEXES.md").splitlines()))
+        self.assertIn(f"a search with no bulges scans it in place of the index {whole}, as a "
+                      "`build-index-only` of all of hg38 leaves it, and a build of an index from "
+                      "it reads it (2.8.1's kits hold chr1-22, X and Y alone, which beside all of "
+                      "hg38 such a search does not read); each refuses it as another build's",
+                      pre)
+        self.assertIn("2.8.1's kit, of chr1-22, X and Y alone, is not whole beside all of hg38: "
+                      "such a search searches the index, and only a build of an index from the "
+                      "kit reads it, which refuses it too", pre)
+        self.assertNotIn("(2.8.1's kit beside an index of 2.10.0, say) is not scanned", pre)
+        self.assertNotIn("which a search with no bulges scans in place of the index and refuses",
+                         pre)
+        notes = _flat(_read("docs", "release-notes-2.10.0.md"))
+        self.assertIn(f"a search with no bulges scans it in place of the index {whole} (as a "
+                      "`build-index-only` of all of hg38 leaves it; the kit holds chr1-22, X and "
+                      "Y alone), a build of an index from it reads it, and each refuses it", notes)
+        card = _flat(_read("docs", "hf", "crisprme-indexes-format2_README.md"))
+        self.assertIn(f"A search with no bulges scans it in place of the index {whole} (as "
+                      "2.8.1's build of all of hg38 left it; its kits hold chr1-22, X and Y "
+                      "alone), and a build of an index reads it", card)
+        self.assertIn(f"which a search with no bulges scans in place of the index {whole}",
+                      _flat(_read("METHODS.md")))
+        text = _read("docs", "TROUBLESHOOTING.md")
+        s16 = _flat(text[text.index("## 16. "):])
+        self.assertIn("Its kits hold chr1-22, X and Y alone: beside all of hg38, as `download "
+                      "--what genome` installs it, a search with no bulges does not read one and "
+                      "searches the index, and only a build of an index reads it", s16)
+        self.assertIn("(`.building`) does not stop the check", s16)
+        log = _flat(_read("CHANGELOG.md"))
+        entry = log[log.index("**A search refuses an index of one build beside another build's "
+                              "indel logs.**"):]
+        entry = entry[:entry.index("- **An enriched-genome kit's member list**")]
+        self.assertIn("2.8.1's enriched-genome kits hold chr1-22, X and Y alone: beside all of "
+                      "hg38 such a search searches the index", entry)
+        self.assertIn("whether or not `build-index-only` marked it unfinished", entry)
+        self.assertIn("the download's WARNING says that a search with no bulges scans it where it "
+                      "holds every chromosome of the genome", entry)
+        self.assertNotIn("the same files, sizes and headers", entry)
+        self.assertNotIn("of the same names, sizes and headers", index_dictionaries.__doc__)
 
 
 def setUpModule():
@@ -741,7 +827,9 @@ class ASearchRefusesItFirst(atomic._Fixture):
     no bulges, the search scans the enrichment in place, not the index: an enrichment of another
     build than the index and the Dictionaries, which agree, is refused before anything is
     searched, alone or second of two datasets, and is not where a search with bulges reads the
-    indexes alone; once it is removed, a search with no bulges searches the index."""
+    indexes alone; once it is removed, a search with no bulges searches the index. So too where
+    build-index-only left the fake-indel genome marked unfinished, a mark that a search whose
+    INDELS index is in place never looks at."""
 
     def other_builds_logs(self, dataset="ds"):
         """The dataset's indel logs replaced by another build's, of windows of 30/30."""
@@ -901,6 +989,89 @@ class ASearchRefusesItFirst(atomic._Fixture):
         self.assertEqual(rc, 1, out + err)
         self.assertIn("Error: " + said, err)
         self.assertNotIn("Launching job ", out)
+        self.assertEqual(self.searches(), [])
+
+    def forget_the_calls(self):
+        if os.path.exists(self.log):
+            os.remove(self.log)
+
+    def test_a_mark_on_the_fake_indel_genome_does_not_turn_the_check_off(self):
+        """build-index-only marks the fake-indel genome alone (.building) while it puts the SNP
+        codes on one already in place, and a run stopped there (a SIGKILL, no memory left, a
+        reboot) leaves the mark, which a search whose INDELS index is in place never looks at.
+        The check took it for an unfinished part that the search refuses, so beside the index
+        and the Dictionaries of another build, which agree, the web's search with no bulges, and
+        complete-search's, scanned the enrichment, unchecked (the PP-14 fix review, round 1:
+        ppfA1-1, on real chr22 too). Refused now before anything is searched or written; a
+        dataset of one build whose fake-indel genome is so marked is scanned, as before."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        enriched = self.path("Genomes", "hg38+ds")
+        mark = os.path.join(enriched + "_INDELS", ".building")
+        os.makedirs(mark)
+        # one build's index, Dictionaries and enrichment, its fake-indel genome marked: scanned
+        self.forget_the_calls()
+        rc, out, err = self.run_web_search(bulges=0, reference_done=True)
+        self.assertNotIn("the enrichment of ds", err)
+        self.assertNotIn(" is unfinished", err)
+        self.assertEqual([c.split()[1] for c in self.scans()], [enriched + os.sep])
+        self.forget_the_calls()
+        rc, out, err = self.run_search(bulges="0")
+        self.assertNotIn("the enrichment of ds", err)
+        self.assertNotIn(" is unfinished", err)
+        self.assertIn("Launching job ", out)
+        # the index and the Dictionaries of another build, which agree, beside this enrichment
+        self.index_of_their_build()
+        said = (f"the enrichment of ds in place ({enriched}, and its fake-indel genome "
+                f"{enriched}_INDELS) is of another build than the Dictionaries of ds in "
+                f"{self.path('Dictionaries')}: their indel logs "
+                f"({self.path('Dictionaries', 'log_indels_ds')}) record fake-indel windows of "
+                f"30/30 (CRISPRme 2.10.0), and its fake-indel genome is not the one they "
+                f"describe: on chr1, the window of chr1_40_")
+        self.forget_the_calls()
+        rc, out, err = self.run_web_search(bulges=0, reference_done=True)
+        self.assertEqual(rc, 1, out + err)
+        self.assertTrue(err.startswith("ERROR: " + said), err)
+        self.assertEqual(len(err.splitlines()), 1, err)
+        self.assertEqual(self.searches(), [])
+        rc, out, err = self.run_search(bulges="0")
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("Error: " + said, err)
+        self.assertNotIn("Launching job ", out)
+        self.assertEqual(os.listdir(self.path("Results", "search")), [])
+        self.assertEqual(self.searches(), [])
+        self.assertTrue(os.path.isdir(mark))
+        # with bulges, the index and its INDELS index alone: not refused, and searched
+        rc, out, err = self.run_web_search(bulges=1)
+        self.assertNotIn("the enrichment of ds", err)
+        self.assertTrue(self.searches(), out + err)
+
+    def test_a_mark_on_a_later_dataset_s_fake_indel_genome_does_not_turn_it_off(self):
+        """The same, the marked dataset the second of two of a search, the first of its own
+        build: refused before the first is searched, on the web and on the command line."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.a_second_dataset("ds2")
+        self.index_of_their_build("ds2")
+        enriched = self.path("Genomes", "hg38+ds2")
+        os.makedirs(os.path.join(enriched + "_INDELS", ".building"))
+        said = (f"the enrichment of ds2 in place ({enriched}, and its fake-indel genome "
+                f"{enriched}_INDELS) is of another build than the Dictionaries of ds2")
+        for datasets in (("ds", "ds2"), ("ds2", "ds")):
+            with self.subTest(datasets=datasets):
+                self.forget_the_calls()
+                rc, out, err = self.run_web_search(datasets=datasets, bulges=0)
+                self.assertEqual(rc, 1, out + err)
+                self.assertTrue(err.startswith("ERROR: " + said), err)
+                self.assertEqual(len(err.splitlines()), 1, err)
+                self.assertNotIn("Search Reference Start", out)
+                self.assertEqual(self.searches(), [])
+        self.forget_the_calls()
+        rc, out, err = self.run_search(vcfs="ds\nds2\n", bulges="0")
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("Error: " + said, err)
+        self.assertNotIn("Launching job ", out)
+        self.assertEqual(os.listdir(self.path("Results", "search")), [])
         self.assertEqual(self.searches(), [])
 
     def test_another_builds_are_refused_before_anything_is_written(self):

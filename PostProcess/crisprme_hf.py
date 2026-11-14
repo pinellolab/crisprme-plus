@@ -2774,9 +2774,11 @@ def _window_notes(local_dir, workdir, install_name, vcf_name):
     several records), and a search of it reads its alleles with the archive's carriers; and
     one where the dataset's fake-indel genome in the working directory holds other windows
     than the logs record (indel_window.fake_genome_disagreement): the enrichment in place is
-    another one than the archive's, which a search with no bulges scans in place of the index,
-    and which it, build-index-only, and a search that would build an index from it, refuse
-    (index_dictionaries.enrichment_refusal). Read-only, and never fatal."""
+    another one than the archive's, which a search with no bulges scans in place of the index
+    where it holds every chromosome of the genome (not 2.8.1's kits, of chr1-22, X and Y alone,
+    beside all of hg38), and which such a search, build-index-only, and a search that would build
+    an index from it, refuse (index_dictionaries.enrichment_refusal). Read-only, and never
+    fatal."""
     logs = os.path.join(workdir, "Dictionaries", f"log_indels_{vcf_name}")
     notes = []
     try:
@@ -2835,17 +2837,21 @@ def _window_notes(local_dir, workdir, install_name, vcf_name):
         _odd = indel_window.fake_genome_disagreement(_enriched + "_INDELS", logs, vcf_name) \
             if _genome else None
         if _odd:
-            # (a search with no bulges scans the enriched genome in place of the index: it
-            # read it with the archive's dictionaries and tiers, unchecked, up to the PP-14
-            # review, round 3, A3-PP14-1; it is refused now, as a build from it is)
+            # (a search with no bulges scans the enriched genome in place of the index where it
+            # is whole: it read it with the archive's dictionaries and tiers, unchecked, up to
+            # the PP-14 review, round 3, A3-PP14-1; it is refused now, as a build from it is.
+            # Printed whole or not: a build of an index from it refuses it either way, and the
+            # genome a search is given is not known here; the PP-14 fix review, round 1, ppfA1-2)
             notes.append(
                 f"WARNING: the enrichment of {vcf_name} in place ({_enriched}, and its "
                 f"fake-indel genome {_enriched}_INDELS) is another one than the archive's: on "
                 f"{_odd[0]}, {_odd[1]}, in the indel logs installed now ({logs}). A search "
-                f"with no bulges scans that enriched genome in place of the index, and an index "
-                f"built from it would be read with the archive's logs, dictionaries and tiers, "
-                f"so a search with no bulges, build-index-only, and a search that would build "
-                f"an index from it refuse it (docs/TROUBLESHOOTING.md section 16). Remove it "
+                f"with no bulges scans that enriched genome in place of the index where it "
+                f"holds every chromosome of the genome (a build-index-only of all of it leaves "
+                f"one so; an enriched-genome kit of 2.8.1 holds chr1-22, X and Y alone), and an "
+                f"index built from it would be read with the archive's logs, dictionaries and "
+                f"tiers, so such a search, build-index-only, and a search that would build an "
+                f"index from it refuse it (docs/TROUBLESHOOTING.md section 16). Remove it "
                 f"(rm -rf {indel_window.quote(_enriched)} "
                 f"{indel_window.quote(_enriched + '_INDELS')}): a search with no bulges then "
                 f"searches the index; to build an index of another PAM, install the archive's "

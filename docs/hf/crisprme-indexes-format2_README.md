@@ -165,9 +165,10 @@ Two installs of one panel must read one build of its Dictionaries: install an in
 (the older names) in another working directory. A download refuses to put an archive of
 2.8.1's Dictionaries over a bundle of this repo, and says which installed indexes read
 Dictionaries of another build where a bundle replaces them, and where the panel's enrichment in
-place (`Genomes/hg38+<panel>`, which 2.8.1's build or kit left) is of another build: a search
-with no bulges scans it in place of the index, and refuses it, so remove it, or put this repo's
-kit of the panel in its place.
+place (`Genomes/hg38+<panel>`, which 2.8.1's build or kit left) is of another build. A search
+with no bulges scans it in place of the index where it holds every chromosome of the genome (as
+2.8.1's build of all of hg38 left it; its kits hold chr1-22, X and Y alone), and a build of an
+index reads it: each refuses it, so remove it, or put this repo's kit of the panel in its place.
 
 ## Verifying
 

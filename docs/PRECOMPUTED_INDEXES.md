@@ -507,9 +507,11 @@ crisprme.py download --what index \
   `Dictionaries/dictionaries_<panel>`, which no download of 2.10.0 replaces, and its
   `Dictionaries/genotypes_<panel>`, where 2.10.0's store is not installed, stay there, and a
   search reads them: remove them. So does 2.8.1's enrichment of the panel (`Genomes/hg38+<panel>`
-  and `_INDELS`, from its `build-index-only` or its kit), which a search with no bulges scans in
-  place of the index and refuses as another build's: remove it too, or put 2.10.0's kit in its
-  place (`docs/TROUBLESHOOTING.md` §16).
+  and `_INDELS`), from its `build-index-only` or its kit: a search with no bulges scans it in
+  place of the index where it holds every chromosome of the genome, as a `build-index-only` of
+  all of hg38 leaves it, and a build of an index from it reads it (2.8.1's kits hold chr1-22, X
+  and Y alone, which beside all of hg38 such a search does not read); each refuses it as another
+  build's. Remove it too, or put 2.10.0's kit in its place (`docs/TROUBLESHOOTING.md` §16).
 - The **CLI search-list files** `list_vcf.txt` (the dataset, `hg38_HGDP1kGP`)
   and `list_samplesID.txt` (its combined samplesID) are written at the install
   root, so a CLI search works out of the box — the same lists the web form builds
@@ -575,10 +577,13 @@ Only the genome index itself is PAM-specific; everything derived from the varian
 > search scans the enriched genome when every chromosome of it is in place, and otherwise searches
 > the installed variant index, with the same results but for a site whose guide lies within 2 nt
 > of a contig start or end or an `N` run (N − 1 for an index of budget N): only the scan finds
-> its variant version (see the limits of every index at contig ends and `N` runs, above). An
-> enrichment in place of another build than the panel's Dictionaries (2.8.1's kit beside an index
-> of 2.10.0, say) is not scanned: the search refuses it, as its fake-indel genome tells, and once
-> it is removed searches the index ([Troubleshooting §16](TROUBLESHOOTING.md)).
+> its variant version (see the limits of every index at contig ends and `N` runs, above). A
+> whole enrichment in place of another build than the panel's Dictionaries (2.8.1's
+> `build-index-only` of all of hg38 beside an index of 2.10.0, say) is not scanned: the search
+> refuses it, as its fake-indel genome tells, and once it is removed searches the index
+> ([Troubleshooting §16](TROUBLESHOOTING.md)). 2.8.1's kit, of chr1-22, X and Y alone, is not
+> whole beside all of hg38: such a search searches the index, and only a build of an index from
+> the kit reads it, which refuses it too.
 
 ### Prerequisites
 
