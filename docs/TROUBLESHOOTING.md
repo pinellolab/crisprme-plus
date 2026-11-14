@@ -671,20 +671,23 @@ reads it, as above. Or install the indexes of 2.10.0 in a new data folder, which
 
 ## 17. A search on Ubuntu 26.04 stops at Integrating results: Row begins with a tab or space
 
-**Symptom.** A search of a Bioconda or source install of CRISPRme 2.8.1 or earlier, on Ubuntu
-26.04 or another host whose coreutils are uutils' (rust-coreutils), ends with `CRISPRme run
-failed. Failed during stage: Integrating results`, and its `log_error.txt` opens with `Row begins
-with a tab or space at line <N> in <output folder>/<job>.bestMerge.txt.bed.` (BEDOPS' sort-bed,
-which reads the table there). Its `<job>.bestMerge.txt` holds rows of 70 columns where a row has
-72, and blank lines after them; the summaries and the plots the search made from it before that
-stage are wrong too.
+**Symptom.** A search of a Bioconda or source install of CRISPRme 2.2.0 to 2.8.1, on Ubuntu 26.04 or
+another host whose coreutils are uutils' (rust-coreutils), prints `CRISPRme run failed.` and
+`Failed during stage: Integrating results`, and its `log_error.txt` opens with
+`Row begins with a tab or space at line <N> in <output folder>/<job>.bestMerge.txt.bed.` (BEDOPS'
+sort-bed, which reads the table there). Its `<job>.bestMerge.txt` holds rows of 70 columns where a
+row has 72, and blank lines after them. What the search makes of that table is not written: the
+integrated results (at most a part of them, set aside as
+`<job>.bestMerge.txt.integrated_results.tsv.partial`), the plots made of them, the database and the
+report. The summaries and the plots the search made before that stage come from its three lists, not
+from this table, and are right.
 
 **Cause.** The search joins its three lists of each site's best alignment (by CFD, by fewest
-mismatches and bulges, by CRISPR-Bulge) line by line into that table. Up to 2.8.1 it joined them
-with `pr -m -t -J`, and the `pr` of uutils, the default coreutils of Ubuntu 26.04, joins the
-lines with no tab between two lists and pads the table with blank lines (a chr22 search of HPRC:
-3,278 rows of 70 columns, then 84 blank lines). The Docker image runs Debian's GNU coreutils and
-gives the right table.
+mismatches and bulges, and by CRISPR-Bulge, or by CRISTA before 2.6.0) line by line into that table.
+Up to 2.8.1 it joined them with `pr -m -t -J`, and the `pr` of uutils, the default coreutils of
+Ubuntu 26.04, joins the lines with no tab between two lists and pads the table with blank lines (a
+chr22 search of HPRC: 3,278 rows of 70 columns, then 84 blank lines). The Docker image runs Debian's
+GNU coreutils and gives the right table.
 
 **Fix.** Upgrade to CRISPRme 2.10.0 or later and run the search again (a table written this way
 is not mended in place). It joins the lists with `paste`, which gives the same bytes with GNU

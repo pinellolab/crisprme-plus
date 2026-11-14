@@ -2855,8 +2855,9 @@ fi
 # join targets by columns for primary and alternative results: line N of the three lists, joined
 # by a tab, is row N. paste does it on GNU coreutils and on uutils alike, byte for byte. pr -m -t -J
 # did it until 2.10.0: the pr of uutils (Ubuntu 26.04's default) fuses the lists with no tab and
-# pads the table with blank lines, and GNU pr turns a run of spaces into tabs and takes a form feed
-# for a new page.
+# pads the table with blank lines, and GNU pr turns a run of two spaces or more that crosses a tab
+# stop into tabs, and takes a form feed for a new page (it holds the rest of that list back to the
+# next page).
 paste "$final_res.bestCFD.txt" "$final_res.bestmmblg.txt" "$final_res.bestCRISPR_BULGE.txt" >"$final_res"
 if [ -s $logerror ]; then
 	printf "ERROR: targets join on primary targets failed\n" >&2

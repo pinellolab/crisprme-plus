@@ -57,7 +57,7 @@ dependencies:
   - pigz                       # publish-index packs an index on every core with it (else single-threaded gzip); as in the Docker image
   - coreutils                  # GNU coreutils in the env, whatever the host's are: the search and the builds run sort,
                                # cut, head, tail, paste and others, and Ubuntu 26.04's coreutils are uutils' (rust-coreutils),
-                               # whose pr padded and fused the lists a search joined with it before 2.10.0 (README 1.3)
+                               # whose pr padded and fused the lists a search joined with it before 2.10.0 (README 1.1.2)
   - gsl
   - importlib-metadata
   - huggingface_hub            # crisprme.py download / publish-index

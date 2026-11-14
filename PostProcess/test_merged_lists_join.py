@@ -17,8 +17,13 @@ November 2026), that ``pr`` fuses the lists with no tab between them and pads th
 blank lines: 57 lines for three lists of 4 rows, each row with 2 columns fewer. The table
 of a search run outside the release image on such a host (a Bioconda or source install) was
 wrong. GNU ``pr`` changes rows too: it turns a run of two spaces or more into tabs where the
-run crosses a tab stop, and takes a form feed for a new page (it holds that list back a row).
-``paste`` copies each line as it is, and GNU coreutils and uutils give the same bytes.
+run crosses a tab stop, and takes a form feed for a new page, where it holds the rest of that
+list back to the next page (up to 66 rows later), the table longer. ``paste`` copies each line
+as it is, and GNU coreutils and uutils give the same bytes.
+
+What such a table reached: the search stopped at "Integrating results", the stage that reads
+it (docs/TROUBLESHOOTING.md section 17). The summaries and the plots of the stage before,
+"Creating images", are made of the three lists, not of the table, and were right.
 
 WHAT THIS TEST DOES
 -------------------
@@ -33,7 +38,11 @@ ASSERTS:
   * row N is line N of each list joined by a tab, the line as it is: for rows of tab-
     separated columns, a header, a list shorter than the others or empty (its columns are
     empty), a line of 1 MiB, a last line with no newline, empty lines, and the bytes GNU
-    ``pr`` changes (runs of spaces, a form feed) and a carriage return.
+    ``pr`` changes (runs of spaces, a form feed, also in lists longer than its page) and a
+    carriage return;
+  * the summaries and the plots of "Creating images", which comes after the joins, are made of
+    the three lists, and the stage names the table only to rename it, or to remove it on an
+    error; the next stage, "Integrating results", reads it.
 """
 import glob
 import os
@@ -179,11 +188,81 @@ class PasteJoinsLineNOfEachList(unittest.TestCase):
         self.check(b"a1\n\na3\n", b"\nb2\n\n", b"c1\nc2\n\n")
 
     def test_each_line_as_it_is(self):
-        # GNU pr made "a  b<TAB>        c" "a  b<TAB><TAB>    c", and held the list with the
-        # form feed back a row
+        # GNU pr turned a run of two spaces or more that crosses a tab stop into tabs: it made
+        # "abcdef  gh" "abcdef<TAB>gh", a column more, and "a  b<TAB>        c"
+        # "a  b<TAB><TAB>    c"
+        self.check(b"abcdef  gh\n", b"b1\n", b"c1\n")
         self.check(b"a  b\t        c\n", b"two  spaces\n", b"eight        spaces\n")
-        self.check(b"a1\n\fa2\na3\n", b"b1\nb2\nb3\n", b"c1\nc2\nc3\n")
         self.check(b"a\r\n\xc3\xa9\n", b"b\r\n\n", b"c\n\r\n")
+
+    def test_a_form_feed(self):
+        # GNU pr took a form feed for a new page and held the rest of that list back to the
+        # next page, the table longer: here row 2 came out as row 4, of 5, and in the lists of
+        # 100 rows, longer than its page of 66 lines, as row 67, of 165
+        self.check(b"a1\n\fa2\na3\n", b"b1\nb2\nb3\n", b"c1\nc2\nc3\n")
+        first = _rows(100, "a").split(b"\n")
+        first[1] = b"\f" + first[1]
+        table = self.check(b"\n".join(first), _rows(100, "b"), _rows(100, "c"))
+        self.assertEqual(len(table.splitlines()), 100)
+
+
+# the joined tables: $final_res and $final_res_alt with no list's suffix, and the names they take
+TABLE = re.compile(r"\$\{?final_res(?:_alt)?\}?(?![\w.])|\.(?:best|alt)Merge\.txt\b")
+
+
+class TheSummariesAndPlotsAreMadeOfTheListsNotOfTheTable(unittest.TestCase):
+    """On a host whose pr was uutils', a search stopped at "Integrating results", where BEDOPS'
+    sort-bed reads the table, and the summaries and the plots it had made were right: the stage
+    that makes them, "Creating images", comes after the joins and reads the three lists
+    (docs/TROUBLESHOOTING.md section 17 and the CHANGELOG say so)."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(PIPELINE) as fh:
+            cls.lines = fh.read().splitlines()
+
+    def stage(self, name):
+        """The numbers of the lines of the stage's Start and End marks."""
+        marks = [[i for i, ln in enumerate(self.lines)
+                  if ln.startswith("echo -e '%s\\t%s\\t'" % (name, edge))]
+                 for edge in ("Start", "End")]
+        self.assertEqual([len(found) for found in marks], [1, 1], name)
+        return marks[0][0], marks[1][0]
+
+    def commands(self, name):
+        start, end = self.stage(name)
+        return [ln.strip() for ln in self.lines[start:end] if not ln.lstrip().startswith("#")]
+
+    def test_it_comes_after_the_joins_and_before_the_integration(self):
+        joins = [i for i, ln in enumerate(self.lines) if ln in pipeline_join_lines()]
+        self.assertEqual(len(joins), 2)
+        images, integration = self.stage("Creating images"), self.stage("Integrating results")
+        self.assertLess(max(joins), images[0])
+        self.assertLess(images[1], integration[0])
+
+    def test_it_names_the_table_only_to_rename_it_or_to_remove_it(self):
+        named = [ln for ln in self.commands("Creating images") if TABLE.search(ln)]
+        self.assertTrue(any(ln.startswith("mv $final_res ") for ln in named), named)
+        self.assertEqual([ln for ln in named if not ln.startswith(("mv ", "rm "))], [])
+
+    def test_its_summaries_and_plots_read_the_three_lists(self):
+        runs = [ln for ln in self.commands("Creating images") if re.search(r"\.py\b", ln)]
+        lists = {}
+        for ln in runs:
+            script = re.search(r"(\w+)\.py\b", ln).group(1)
+            read = re.findall(r"\$final_res\.(best\w+)\.txt", ln)
+            # populations_distribution.py reads what process_summaries.py wrote of the lists
+            if not read:
+                self.assertRegex(ln, r"\.PopulationDistribution_[\w-]+\.txt")
+            lists.setdefault(script, set()).update(read)
+        self.assertEqual(lists, {"process_summaries": set(LISTS),
+                                 "populations_distribution": set(),
+                                 "radar_chart_dict_generator": set(LISTS)})
+
+    def test_the_integration_reads_the_table(self):
+        self.assertTrue(any(
+            "post_process.sh" in ln and "$(basename ${output_folder}).bestMerge.txt" in ln
+            for ln in self.commands("Integrating results")))
 
 
 if __name__ == "__main__":

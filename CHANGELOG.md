@@ -2251,36 +2251,42 @@ major.minor version (Changed). The main changes, each told in its entry below:
   0.10.0), the default coreutils of Ubuntu 26.04 and of GitHub's ubuntu-latest from November 2026,
   joins the lines with no tab between two lists and pads the table with blank lines. A Bioconda or
   source install on such a host stopped its searches at "Integrating results", where BEDOPS'
-  sort-bed reads the table (`Row begins with a tab or space`), after it had made its summaries and
-  plots of it: the per-sample chr22 search below, with this release's code before the change, wrote
-  3,278 rows of 70 columns where a row has 72, then 84 blank lines (docs/TROUBLESHOOTING.md section
-  17). The release image runs Debian's GNU coreutils and was not affected. The lists are joined
-  with `paste` now. On 29 cases (rows with tabs, empty lists, lists of unequal lengths, lines of 1
-  and 8 MiB, no final newline, empty lines, 10,000 rows) `paste` gives the same bytes with GNU
-  coreutils 8.32 and 9.7 and with uutils 0.10.0, and GNU `pr`'s on all but two, where GNU `pr`
-  changed the row itself: a run of two spaces or more that crosses a tab stop, which it turned into
-  tabs (a column more), and a form feed, which it took for a new page (that list a row behind from
-  there). On real data, the per-sample and the population-level chr22 searches of HPRC (the README
-  guide, NRR, 4 mismatches + 1 DNA + 1 RNA bulge, CFD only) wrote the same bytes before and after
-  the change in the release image (the joined tables of 3,279 and 3,405 lines, the integrated
-  results, the alternative alignments, the database, the summaries and the plots), and the same
-  bytes again from `environment.yml`'s environment on Ubuntu 26.04, with its uutils coreutils and
-  with conda-forge's GNU coreutils 9.12 (the logs' times and the run's own paths aside). The two
-  sorts of the search that ran in the user's locale, `cluster.dict.py`'s of the indel targets and
-  `process_summaries.py`'s of the summary by guide, run with `LC_ALL=C`, as every other sort of its
-  rows does: under en_US.UTF-8 the rows of an indel cluster that tie on its keys came in another
-  order, which the sort by total keeps. And `environment.yml` and the Bioconda recipe install
-  conda-forge's GNU coreutils, so a search or a build run with the environment activated runs
-  those, whatever the host's are (README §1.1.2). Covered by `test_merged_lists_join` (the search's
-  own join lines, on the host's `paste`), which the `unit-tests` job runs, with all its other
-  steps, on ubuntu-24.04 (GNU coreutils) and on ubuntu-26.04 (uutils); `test_reference_rows_once`
-  and `test_merge_sites_only_rows` join their lists with those lines (they ran `pr` themselves, and
-  failed on ubuntu-26.04: pull request #110, run 43614988938). `test_index_resolution`'s owner
-  whose name holds a parenthesis is a link to Python now, not to `sleep`: uutils' coreutils are one
-  program, which refuses to run under a name that is not a tool's, so the owner was gone at once on
-  ubuntu-26.04. And web-e2e's in-image step installs zsh in its container before its tests, as the
-  release gate's step 1 does: the zsh halves of `test_index_resolution`'s paths that hold a quote
-  skipped there, which failed the step (run 43614988845).
+  sort-bed reads the table (`Row begins with a tab or space`), with no integrated results, database
+  or report, though the summaries and the plots made before that stage, of the three lists and not
+  of the table, were right: the per-sample chr22 search below, with this release's code before the
+  change, wrote 3,278 rows of 70 columns where a row has 72, then 84 blank lines, and the same
+  summaries and plots, byte for byte, as the release image (docs/TROUBLESHOOTING.md section 17). The
+  release image runs Debian's GNU coreutils and was not affected. The lists are joined with `paste`
+  now. On 29 cases (rows with tabs, empty lists, lists of unequal lengths, lines of 1 and 8 MiB, no
+  final newline, empty lines, 10,000 rows) `paste` gives the same bytes with GNU coreutils 8.32 and
+  9.7 and with uutils 0.10.0, and GNU `pr`'s on all but two, where GNU `pr` changed the row itself:
+  a run of two spaces or more that crosses a tab stop, which it turned into tabs (a column more),
+  and a form feed, which it took for a new page (the rest of that list held back to the next page,
+  up to 66 rows later, and the table longer). On real data, the per-sample and the population-level
+  chr22 searches of HPRC (the README guide, NRR, 4 mismatches + 1 DNA + 1 RNA bulge, CFD only) wrote
+  the same bytes before and after the change in the release image (the joined tables of 3,279 and
+  3,405 lines, the integrated results, the alternative alignments, the database, the summaries and
+  the plots), and the same bytes again from `environment.yml`'s environment on Ubuntu 26.04, with
+  its uutils coreutils and with conda-forge's GNU coreutils 9.12 (here and in the release image, the
+  logs, the run's own paths, the creation times of the PDF plots, and the report's times and SVG ids
+  aside). The two sorts of the search that ran in the user's locale, `cluster.dict.py`'s of the
+  indel targets and `process_summaries.py`'s of the summary by guide, run with `LC_ALL=C`, as every
+  other sort of its rows does: under en_US.UTF-8 the rows of an indel cluster that tie on its keys
+  came in another order, which the sort by total keeps. And `environment.yml` and the Bioconda
+  recipe install conda-forge's GNU coreutils, so a search or a build run with the environment
+  activated runs those, whatever the host's are (README §1.1.2). Covered by `test_merged_lists_join`
+  (the search's own join lines, on the host's `paste`, and the stage of the summaries and the plots,
+  which reads the three lists), which the `unit-tests` job runs, with all its other steps, on
+  ubuntu-24.04 (GNU coreutils) and on ubuntu-26.04 (uutils); `test_reference_rows_once` and
+  `test_merge_sites_only_rows` join their lists with those lines (they ran `pr` themselves:
+  `test_reference_rows_once` failed on ubuntu-26.04 in pull request #110's run 43614988938, which
+  stopped before `test_merge_sites_only_rows`, and that one failed the same way when run on Ubuntu
+  26.04). `test_index_resolution`'s owner whose name holds a parenthesis is a link to Python now,
+  not to `sleep`: uutils' coreutils are one program, which refuses to run under a name that is not a
+  tool's, so the owner was gone at once on ubuntu-26.04. And web-e2e's in-image step installs zsh in
+  its container before its tests, as the release gate's step 1 does: the zsh halves of
+  `test_index_resolution`'s paths that hold a quote skipped there, which failed the step (run
+  43614988845).
 - **A command a search prints runs as printed where a path holds a quote.** The commands a
   search's refusal gives, to remove an INDELS index and build or download it again
   (`pool_search_indels.py`), to remove a part of a dataset `build-index-only` left unfinished
