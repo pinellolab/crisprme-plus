@@ -57,6 +57,9 @@ import unittest
 
 PP = os.path.dirname(os.path.abspath(__file__))
 PIPELINE = os.path.join(PP, "submit_job_automated_new_multiple_vcfs.sh")
+sys.path.insert(0, PP)
+
+from test_merged_lists_join import join_as_the_search_does
 
 GUIDE = "CTAACAGTTGCTTTTATCACNNN"
 # as the post-analysis writes a row, before adjust_cols.py
@@ -198,8 +201,8 @@ class SitesOnlyRowsInTheMergeStep(unittest.TestCase):
             best, disc = self._merge(paths[name], pivot)
             self.assertEqual([r[POSITION] for r in best], ["100", "5000"], name)
             disc_paths.append(paths[name] + ".trimmed.discarded_samples")
-        pasted = subprocess.run(["pr", "-m", "-t", "-J"] + disc_paths, check=True,
-                                capture_output=True, text=True).stdout.splitlines()
+        # the search's own join of the alternative alignments
+        pasted = join_as_the_search_does(disc_paths, alt=True).decode().splitlines()
         self.assertEqual(len(pasted), 4)  # the header, 1 at site 100, 2 at site 5000
         for line in pasted[1:]:
             cols = line.split("\t")

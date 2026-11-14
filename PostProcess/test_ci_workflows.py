@@ -133,6 +133,31 @@ class TheUnitTestsJobHasTheTimeToFinish(unittest.TestCase):
 
 
 @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+class TheUnitTestsRunWithGNUAndWithUutilsCoreutils(unittest.TestCase):
+    """GitHub's ubuntu-latest became ubuntu-26.04 in November 2026, whose coreutils are uutils'
+    (rust-coreutils 0.10.0), and 2.10.0's pull request #110 failed there (run 43614988938): the
+    search joined its three lists with pr -m -t -J, and uutils' pr fused them with no tab and
+    padded the table with blank lines. The search joins them with paste now. The job runs on
+    ubuntu-24.04 (GNU coreutils) and on ubuntu-26.04 (uutils), each to its end whatever the
+    other gives, and each runs the tests that run the search's own join and sort lines."""
+
+    def test_its_matrix_is_both_images(self):
+        text = workflow("unit-tests.yml")
+        self.assertRegex(text, r"(?m)^    runs-on: \$\{\{ matrix\.os \}\}\s*$")
+        images = re.search(r"(?m)^        os: \[([^\]]*)\]\s*$", text)
+        self.assertEqual([x.strip() for x in images.group(1).split(",")],
+                         ["ubuntu-24.04", "ubuntu-26.04"])
+        self.assertRegex(text, r"(?m)^      fail-fast: false\s*$")
+
+    def test_each_runs_the_search_s_join_and_sort_lines(self):
+        steps = uncommented(workflow("unit-tests.yml"))
+        for module in ("test_merged_lists_join", "test_merge_sites_only_rows",
+                       "test_reference_rows_once"):
+            with self.subTest(module=module):
+                self.assertRegex(steps, r"python -m unittest %s -v" % module)
+
+
+@unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
 class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
     """A pull request starts a workflow only for the paths it lists. web-e2e.yml did not list
     PostProcess/, though it runs test_web_* and test_results_* from there, on code the pages
@@ -305,6 +330,22 @@ class TheTestsThatSkipInTheLightJobRunInCI(unittest.TestCase):
                      "setUpClass (m.C) ... skipped 'crisprme.py dependencies not installed'"):
             with self.subTest(line=line):
                 self.assertEqual(self.guard(f"test_c (m.C.test_c) ... ok\n{line}\n"), 1)
+
+    def test_the_tests_that_paste_into_zsh_have_it(self):
+        # the image has no zsh, and test_index_resolution's paths that hold a quote (pasted into
+        # bash and into zsh) skipped their zsh half: the step failed on 2.10.0's b198729 (run
+        # 43614988845). zsh is installed in the one container the tests run in, before them,
+        # and a failed install fails the step: the skip stays one it does not allow.
+        step = self.in_image_step()
+        self.assertEqual(step.count("docker run"), 1)
+        run = step.index("docker run")
+        install = step.index("apt-get install -y -qq zsh")
+        self.assertLess(run, install)
+        self.assertLess(install, step.index("python -m unittest"))
+        self.assertIn("crisprme:web bash -c '", step)
+        self.assertRegex(step, r'command -v zsh >/dev/null \|\| \{ echo "FAIL: [^"]+"; exit 1; \}')
+        line = "test_x (m.C.test_x) ... skipped 'zsh is not installed'"
+        self.assertEqual(self.guard(f"test_c (m.C.test_c) ... ok\n{line}\n"), 1)
 
     def test_but_the_two_the_image_cannot_help(self):
         log = ("test_c (m.C.test_c) ... ok\n"

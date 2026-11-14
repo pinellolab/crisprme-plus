@@ -67,6 +67,7 @@ from test_reference_row_downstream import (
     _post_adjust_header,
     _to_disk_pre_adjust,
 )
+from test_merged_lists_join import join_as_the_search_does
 
 # POST-ADJUST columns (see test_reference_row_downstream): DNA 2, Reference 3,
 # Position 5, Cluster_Position 6, Total 10, Samples 13, SNP 18, #Seq_in_cluster 19,
@@ -255,7 +256,7 @@ class ReferenceRowsListedOnce(unittest.TestCase):
         itself, and CRISPR-Bulge can give one alignment two values (a real two-dataset
         search: 4.3390600000000004e-23 and 4.33904e-23). Keeping the copy in that list
         alone gives its discarded rows one row more, and as the pipeline pastes the
-        three lists of discarded rows by position (pr -m), every row from there on
+        three lists of discarded rows by position (paste), every row from there on
         pairs a CFD alignment with the next one's CRISPR-Bulge alignment, at the end of
         a cluster with another site's."""
         lists = [[], [], []]
@@ -274,14 +275,13 @@ class ReferenceRowsListedOnce(unittest.TestCase):
         self.assertEqual([r[DNA_COL] for r in cb_disc], [r[DNA_COL] for r in cfd_disc],
                          "row by row the lists must give the same alignment")
 
-        # the pipeline's own paste: every row's blocks at one site
+        # the pipeline's own join (paste): every row's blocks at one site
         paths = []
         for name, disc in (("cfd", cfd_disc), ("few", few_disc), ("cb", cb_disc)):
             paths.append(os.path.join(self.d, name + ".disc"))
             with open(paths[-1], "w") as fh:
                 fh.write("".join("\t".join(r) + "\n" for r in disc))
-        pasted = subprocess.run(["pr", "-m", "-t", "-J"] + paths, capture_output=True,
-                                text=True, check=True).stdout.splitlines()
+        pasted = join_as_the_search_does(paths, alt=True).decode().splitlines()
         self.assertEqual(len(pasted), 4)
         n = len(cfd_disc[0])
         for line in pasted:

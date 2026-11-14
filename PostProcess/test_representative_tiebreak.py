@@ -473,7 +473,7 @@ class IndelRowsKeepTheirOwnCarriers(unittest.TestCase):
 
     def test_the_row_count_does_not_depend_on_the_sort(self):
         """The three files of a search hold the same rows, each sorted by its own
-        criterion, and their alternative alignments are joined line by line (pr -m), so
+        criterion, and their alternative alignments are joined line by line (paste), so
         a cluster must keep one row count in all three."""
         rows = [self._row(self.X, "1.000", 0, "S1"),
                 self._row(self.RNA, "0.900", 1, "S1,S2"),

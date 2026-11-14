@@ -2852,14 +2852,18 @@ if [ -s $logerror ]; then
 	rm -f $output_folder/*.bestCFD.txt $output_folder/*.bestmmblg.txt $output_folder/*.bestCRISPR_BULGE.txt $output_folder/*.bestMerge.txt $output_folder/*.altMerge.txt
 	exit 1
 fi
-# join targets by columns for primary and alternative results
-pr -m -t -J $final_res.bestCFD.txt $final_res.bestmmblg.txt $final_res.bestCRISPR_BULGE.txt >$final_res
+# join targets by columns for primary and alternative results: line N of the three lists, joined
+# by a tab, is row N. paste does it on GNU coreutils and on uutils alike, byte for byte. pr -m -t -J
+# did it until 2.10.0: the pr of uutils (Ubuntu 26.04's default) fuses the lists with no tab and
+# pads the table with blank lines, and GNU pr turns a run of spaces into tabs and takes a form feed
+# for a new page.
+paste "$final_res.bestCFD.txt" "$final_res.bestmmblg.txt" "$final_res.bestCRISPR_BULGE.txt" >"$final_res"
 if [ -s $logerror ]; then
 	printf "ERROR: targets join on primary targets failed\n" >&2
 	rm -f $output_folder/*.bestCFD.txt $output_folder/*.bestmmblg.txt $output_folder/*.bestCRISPR_BULGE.txt $output_folder/*.bestMerge.txt $output_folder/*.altMerge.txt
 	exit 1
 fi
-pr -m -t -J $final_res_alt.bestCFD.txt $final_res_alt.bestmmblg.txt $final_res_alt.bestCRISPR_BULGE.txt >$final_res_alt
+paste "$final_res_alt.bestCFD.txt" "$final_res_alt.bestmmblg.txt" "$final_res_alt.bestCRISPR_BULGE.txt" >"$final_res_alt"
 if [ -s $logerror ]; then
 	printf "ERROR: targets join on alternative targets failed\n" >&2
 	rm -f $output_folder/*.bestCFD.txt $output_folder/*.bestmmblg.txt $output_folder/*.bestCRISPR_BULGE.txt $output_folder/*.bestMerge.txt $output_folder/*.altMerge.txt

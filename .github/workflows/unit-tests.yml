@@ -75,7 +75,16 @@ on:
 
 jobs:
   unit-tests:
-    runs-on: ubuntu-latest
+    # On both of GitHub's Ubuntu images, each with its own coreutils: ubuntu-24.04's are GNU's,
+    # ubuntu-26.04's (ubuntu-latest from November 2026) are uutils' (rust-coreutils), whose pr
+    # fused the three lists the search joined with it and padded the table with blank lines
+    # (2.10.0 joins them with paste). Tests run the search's own join and sort lines
+    # (test_merged_lists_join, test_merge_sites_only_rows), so each image tests its own tools.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
     # The hosted job took 523 s at 2.8.1's first release head, and the steps have grown since:
     # at 2.10.0's ca74f63 it was cancelled at its limit of 20 minutes, in its second-last step,
     # with no step failed (run 43439883388).
@@ -236,6 +245,13 @@ jobs:
       - name: "A sites-only dataset's rows stay at their sites in the merge step (the sorts read tab-separated columns; no empty item in a merged list)"
         working-directory: PostProcess
         run: python -m unittest test_merge_sites_only_rows -v
+
+      - name: "The search joins its three lists line by line with paste (pr, which uutils' pads and fuses, until 2.10.0)"
+        # row N of *.bestMerge.txt and *.altMerge.txt is line N of the CFD, fewest mismatches +
+        # bulges and CRISPR-Bulge lists, joined by a tab: the search's own join lines, on this
+        # runner's paste (GNU's on ubuntu-24.04, uutils' on ubuntu-26.04)
+        working-directory: PostProcess
+        run: python -m unittest test_merged_lists_join -v
 
       - name: "Indel per-chrom subset regression (#172: fakechrom match)"
         working-directory: PostProcess

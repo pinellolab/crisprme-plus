@@ -266,7 +266,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
             # Copies are equal in every column but the count and the two scores: each
             # dataset scores the rows itself, and CRISPR-Bulge can give one alignment
             # two values. Keeping such a copy in that list alone would shift it against
-            # the other two, which the pipeline pastes by position (pr -m). The merge
+            # the other two, which the pipeline pastes by position (paste). The merge
             # step's sort puts the higher score first, and the first copy is the one
             # kept. A row that differs in any other column is another alignment and is
             # kept.

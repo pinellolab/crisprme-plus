@@ -149,8 +149,8 @@ echo 'Sorting and adjusting results'
 # sed -i '1s/.*/_#Bulge_type\t_crRNA\t_DNA\t_Reference\t_Chromosome\t_Position\t_Cluster_Position\t_Direction\t_Mismatches\t_Bulge_Size\t_Total\t_PAM_gen\t_Var_uniq\t_Samples\t_Annotation_Type\t_Real_Guide\t_rsID\t_AF\t_SNP\t_#Seq_in_cluster\t_CFD\t_CFD_ref/' $jobid.bestmmblg.txt
 # sed -i '1s/.*/_#Bulge_type\t_crRNA\t_DNA\t_Reference\t_Chromosome\t_Position\t_Cluster_Position\t_Direction\t_Mismatches\t_Bulge_Size\t_Total\t_PAM_gen\t_Var_uniq\t_Samples\t_Annotation_Type\t_Real_Guide\t_rsID\t_AF\t_SNP\t_#Seq_in_cluster\t_CFD\t_CFD_ref/' $jobid.altmmblg.txt
 
-# pr -m -t -J $jobid.bestCFD.txt $jobid.bestmmblg.txt >$jobid.bestMerge.txt
-# pr -m -t -J $jobid.altCFD.txt $jobid.altmmblg.txt > $jobid.altMerge.txt
+# paste $jobid.bestCFD.txt $jobid.bestmmblg.txt >$jobid.bestMerge.txt
+# paste $jobid.altCFD.txt $jobid.altmmblg.txt > $jobid.altMerge.txt
 
 # rm $jobid.bestCFD.txt
 # rm $jobid.altCFD.txt
