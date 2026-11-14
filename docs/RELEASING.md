@@ -262,9 +262,9 @@ fails. Where the changelog section is longer, write short notes for the release 
 changes in results, what is new, how to upgrade, and links to the tag's `CHANGELOG.md` and
 `METHODS.md` for the full list. 2.8.1's section was about 322,000 characters, and its release
 went out with 5,012 characters of such notes; 2.10.0's `[Unreleased]` section is about 320,000,
-and its short notes are `docs/release-notes-2.10.0.md`: `gh release create v2.10.0 ...
---notes-file docs/release-notes-2.10.0.md`, its links pointing at the tag. Check the size first:
-`wc -c < docs/release-notes-2.10.0.md` under 125,000.
+and its short notes are [`docs/release-notes-2.10.0.md`](release-notes-2.10.0.md): `gh release
+create v2.10.0 ... --notes-file docs/release-notes-2.10.0.md`, its links pointing at the tag. Check
+the size first: `wc -c < docs/release-notes-2.10.0.md` under 125,000 (8,132 when written).
 
 A release that publishes indexes (2.10.0's) follows the order of `RELEASE_CHECKLIST.md`, section E:
 the local gates, the PI's go, the repo and its card, the publish, `indexes/SHA256SUMS`, the archive
