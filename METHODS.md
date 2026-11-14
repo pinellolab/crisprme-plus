@@ -730,7 +730,10 @@ enrichments, and the log would place every row of it wrong), before it writes an
 (complete-search and the search script, for each dataset of the search, read the index it takes
 against the dataset's indel logs, chromosome by chromosome; a variant index of format 1 whose
 INDELS index tells nothing is of 25/27: `index_dictionaries`), as a data folder upgraded from
-2.8.1 can hold them, an index of 2.8.1 beside the Dictionaries a download of 2.10.0 installed;
+2.8.1 can hold them, an index of 2.8.1 beside the Dictionaries a download of 2.10.0 installed; so
+too 2.8.1's enrichment left in place there, which a search with no bulges scans in place of the
+index, and from which a search builds an index it lacks, told by its fake-indel genome against the
+indel logs (`index_dictionaries.enrichment_refusal`);
 build-index-only refuses one in place, and also warns of an enrichment in place whose windows the
 installed CRISPRitz does not write, and says how to enrich the dataset again. Each names for the
 rebuild the variant index of the INDELS index's name too, which a build makes with it from one

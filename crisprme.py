@@ -2649,13 +2649,19 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
 
 def _refuse_mixed_builds(vcf_dirs: List[str], genome: str, motif: str, bdna: int, brna: int,
                          prune: bool, three_prime: bool, guide_len: int,
-                         index_path: str) -> None:
+                         index_path: str, genome_dir: "Optional[str]" = None) -> None:
     """Stops a variant search, before anything is written, where the variant index it takes
     for a dataset (_index_the_search_takes, as the search script takes it) was built from
     another enrichment than the one its Dictionaries in the working directory come from: an
     index of CRISPRme 2.8.1 beside the Dictionaries a download of 2.10.0 put in place of its
     own, or the other way (index_dictionaries.refusal, which tells the two builds by their
-    fake-indel windows). The search script refuses it too, for a search the web launches."""
+    fake-indel windows); and where the dataset's enrichment in place, which the search reads
+    (_enrichment_the_search_reads: a search with no bulges scans it in place of that index,
+    of the genome folder ``genome_dir``; a search builds an index it lacks from it), is of
+    another build than those Dictionaries (index_dictionaries.enrichment_refusal: 2.8.1's
+    enrichment of a panel, left beside an index of 2.10.0 and its Dictionaries in a data folder
+    upgraded from 2.8.1, the PP-14 review, round 3: A3-PP14-1). The search script refuses both
+    too, for a search the web launches."""
     import index_dictionaries
 
     want = max(bdna, brna) + 1
@@ -2666,8 +2672,42 @@ def _refuse_mixed_builds(vcf_dirs: List[str], genome: str, motif: str, bdna: int
                                         three_prime, guide_len, bdna, brna, True)
         why = index_dictionaries.refusal(index, current_working_directory, vcf) if index \
             else None
+        reads = None if why else _enrichment_the_search_reads(genome_dir, genome, vcf, bdna,
+                                                               brna, index)
+        if reads:
+            why = index_dictionaries.enrichment_refusal(current_working_directory, genome, vcf,
+                                                        reads, index_dir=index, vcf_dir=vdir)
         if why:
             error(why)
+
+
+def _enrichment_the_search_reads(genome_dir: "Optional[str]", genome: str, vcf: str, bdna: int,
+                                 brna: int, index: "Optional[str]") -> "Optional[str]":
+    """What the search script reads of the enrichment of dataset ``vcf`` of genome ``genome`` in
+    the working directory (Genomes/<genome>+<vcf>, and its fake-indel genome), where there is
+    one: "scan" for a search with no bulges where it holds a FASTA of every chromosome of the
+    genome folder ``genome_dir`` (the search script's _enriched_genome_whole: every <chrom>.fa
+    there, as <chrom>.enriched.fa, .enriched.fasta or .fa), which it scans in place of the
+    variant index; "build" where no variant index serves the search (``index`` None), which it
+    builds from the enrichment, or where ``index``, in the working directory's library, lacks its
+    INDELS index, which it builds from the fake-indel genome (a search builds none in the
+    --index-path library); else None (index_dictionaries.enrichment_refusal reads it)."""
+    enriched = os.path.join(current_working_directory, "Genomes", f"{genome}+{vcf}")
+    if not bdna and not brna and genome_dir and os.path.isdir(enriched):
+        chroms = [f.rsplit(".", 1)[0] for f in _listdir(genome_dir)
+                  if f.endswith(".fa") and not f.startswith(".")]
+        if chroms and all(any(os.path.exists(os.path.join(enriched, c + end))
+                              for end in (".enriched.fa", ".enriched.fasta", ".fa"))
+                          for c in chroms):
+            return "scan"
+    if not index:
+        return "build"
+    library = os.path.join(current_working_directory, "genome_library")
+    try:
+        here = os.path.samefile(os.path.dirname(index), library)
+    except OSError:
+        here = False
+    return "build" if here and not os.path.isdir(index + "_INDELS") else None
 
 
 def _index_the_search_takes(libs: List[str], motif: str, suffix: str, want: int, prune: bool,
@@ -3542,10 +3582,12 @@ def complete_search() -> None:
             resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref, pam_char,
             bDNA, bRNA, prune_pam, not pam_begin, total_pam_len - pam_len, index_path)
         # (an index of one build of a dataset beside the Dictionaries of another, as a data
-        # folder upgraded from CRISPRme 2.8.1 can hold: refused before anything is written)
+        # folder upgraded from CRISPRme 2.8.1 can hold, or an enrichment in place of another
+        # build that the search reads: refused before anything is written)
         _refuse_mixed_builds(
             resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref, pam_char,
-            bDNA, bRNA, prune_pam, not pam_begin, total_pam_len - pam_len, index_path)
+            bDNA, bRNA, prune_pam, not pam_begin, total_pam_len - pam_len, index_path,
+            genome_dir=genomedir)
         wide_budget_note = _warn_wide_bulge_budget(
             resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref,
             index_path, mm, bDNA, bRNA, max_total_edits)

@@ -570,7 +570,7 @@ scale where it was measured, and §4 gives the rules behind them.
   on the row of each subset too. Build the index with `--samplesID`, or download a published
   one.
 
-## 16. A search refuses an index of one release beside the Dictionaries of another
+## 16. A search refuses an index or an enrichment of one release beside the Dictionaries of another
 
 **Symptom.** `complete-search` stops before it writes anything, with one line:
 `Error: NRG_3_hg38+hg38_HGDP1kGP is an index of a build of hg38_HGDP1kGP whose enrichment wrote
@@ -579,7 +579,15 @@ fake-indel windows of 25/27 (CRISPRme 2.8.1 or earlier), and the Dictionaries of
 (CRISPRme 2.10.0): a search of it would read the alleles of one build with the carriers and
 frequencies of the other. ...`; a search the web app launched ends at once with the same line,
 `ERROR: ...`, in its `log_error.txt`, before it searches any of its datasets. Or the other way: an
-index of 2.10.0 (windows of 30/30) beside Dictionaries of 25/27.
+index of 2.10.0 (windows of 30/30) beside Dictionaries of 25/27. Or, the same way, for the
+enrichment in place, which a search with no bulges scans (the web's bulge menus start at 0;
+`complete-search --bDNA 0 --bRNA 0`): `Error: the enrichment of hg38_HGDP1kGP in place (<data
+folder>/Genomes/hg38+hg38_HGDP1kGP, and its fake-indel genome <data
+folder>/Genomes/hg38+hg38_HGDP1kGP_INDELS) is of another build than the Dictionaries of
+hg38_HGDP1kGP in <data folder>/Dictionaries: their indel logs (...) record fake-indel windows of
+30/30 (CRISPRme 2.10.0), and its fake-indel genome is not the one they describe: on chr22, the
+window of chr22_10524814_TTAG_T, which the log places at 0-61 of the fake sequence, ends elsewhere
+there (no separator after it). ...`.
 
 **Cause.** The data folder holds indexes of CRISPRme 2.8.1 and was upgraded: a download of an index
 of 2.10.0 (`20-NRR_3_hg38+hg38_HGDP1kGP`, say, from the command line or from the web Settings page)
@@ -597,6 +605,20 @@ an index of 2.10.0: an archive of 2.8.1 installed there by CRISPRme 2.8.1 itself
 Dictionaries runs, as does an index of 2.10.0 built from 2.8.1's enriched-genome kit beside that
 kit's Dictionaries.
 
+The enrichment: 2.8.1's `build-index-only` leaves a panel's enrichment in the data folder, its
+enriched genome in `Genomes/hg38+<panel>` and its fake-indel genome in
+`Genomes/hg38+<panel>_INDELS`, and so does 2.8.1's enriched-genome kit of the panel
+(`build-inputs/<panel>.tar.gz` in `lucapinello/crisprme-data`). A download of an index of 2.10.0
+does not replace it, and says so: `WARNING: the enrichment of <panel> in place ... is another one
+than the archive's`. A search with no bulges scans that enriched genome where it holds every
+chromosome of the genome, in place of the variant index, and a search builds from it an index it
+lacks (a variant index of another PAM, or an INDELS index that is not there); either reads it with
+the Dictionaries. Its fake-indel genome tells its build: 2.8.1's CRISPRitz cut it at windows of
+25/27, 2.10.0's at 30/30, and the indel logs record those of the Dictionaries' enrichment. Nothing
+else in it does: the enriched genomes of the two releases have the same files, sizes and headers,
+and differ only at the sites the VCFs write on several records, where 2.10.0 codes every ALT. A
+search with bulges of an installed index and its INDELS index reads no enrichment, and runs.
+
 **Fix.** Either way, keep the indexes of each build in a data folder of their own, with their own
 Dictionaries:
 
@@ -611,11 +633,16 @@ Dictionaries:
   <new data folder>`, after `crisprme.py download --what all --path <new data folder>`.
 - **The other way**, an index of 2.10.0 beside Dictionaries of 2.8.1: download it again into a new
   data folder, which installs the Dictionaries it was built with, and search it there.
+- **The enrichment of 2.8.1**: remove it with the `rm -rf` the message gives (`Genomes/hg38+<panel>`
+  and `Genomes/hg38+<panel>_INDELS`). A search with no bulges then searches the installed variant
+  index, as a search with bulges does. To build an index of another PAM, install the panel's
+  enriched-genome kit of 2.10.0 in its place ([Precomputed indexes](PRECOMPUTED_INDEXES.md)).
 
 **Not checked: 2.8.1's per-sample dictionaries and genotype store.** The check reads the
-Dictionaries by their indel logs alone, which a download of 2.10.0 replaces. It does not read two
-folders of 2.8.1 that a download of an index of 2.10.0 can leave beside them, and that a search of
-that index then reads:
+Dictionaries by their indel logs alone, which a download of 2.10.0 replaces, and the enrichment in
+place by its fake-indel genome (an enriched genome without one, which no build or kit leaves, is
+not checked). It does not read two folders of 2.8.1 that a download of an index of 2.10.0 can
+leave beside them, and that a search of that index then reads:
 
 - `Dictionaries/dictionaries_<panel>`, the per-sample dictionaries that 2.8.1's `build-index-only`
   writes. The Dictionaries bundle of 2.10.0 does not carry them, so its install leaves a panel's
@@ -632,5 +659,7 @@ So after installing an index of 2.10.0 of a panel that 2.8.1 built or installed 
 folder, remove the panel's `Dictionaries/dictionaries_<panel>`, and its
 `Dictionaries/genotypes_<panel>` unless the download said `Installed Tier-1 genotype store
 genotypes_<panel>/`; then download the index again, without `--no-genotypes`, where you want the
-store, which installs 2.10.0's. Or install the indexes of 2.10.0 in a new data folder, which holds
-none of 2.8.1's.
+store, which installs 2.10.0's. Remove too 2.8.1's enrichment of the panel, `Genomes/hg38+<panel>`
+and `Genomes/hg38+<panel>_INDELS`, or put 2.10.0's kit in its place: a search refuses it where it
+reads it, as above. Or install the indexes of 2.10.0 in a new data folder, which holds none of
+2.8.1's.

@@ -38,11 +38,36 @@ of another build, which a download of an index of 2.10.0 can leave in place (its
 bundle carries no per-sample dictionaries, and its genotype store replaces the old one only
 where it is installed), are not read (docs/TROUBLESHOOTING.md section 16 says what to remove).
 
-    python index_dictionaries.py <index folder> <working directory> <dataset>
+A search reads the dataset's enrichment in place too, where there is one (Genomes/<genome>+
+<dataset>, and its fake-indel genome, Genomes/<genome>+<dataset>_INDELS): a search with no bulges
+scans its enriched genome, in place of the variant index, where it holds every chromosome of the
+genome (the search script's STEP 3); and a search builds from it the variant index none serves,
+or the INDELS index its variant index lacks. A data folder upgraded from 2.8.1 holds 2.8.1's
+enrichment of a panel, from its build-index-only or its kit, beside an index of 2.10.0 and the
+Dictionaries the download installed, and a search with no bulges read its alleles with the
+carriers and frequencies of 2.10.0, unchecked (the PP-14 review, round 3: A3-PP14-1). It is
+refused, before the first dataset is searched, where the search reads it (enrichment_refusal), by
+what tells an enrichment's build: its fake-indel genome, cut at the windows of the CRISPRitz that
+enriched it, against those the indel logs record (indel_window.fake_genome_disagreement). Nothing
+else in it tells: on two enrichments of one VCF of chr22 (HGDP + 1000 Genomes, CRISPRitz 2.9.1
+and 2.10.0), each holds its FASTAs alone, of the same names, sizes and headers, and no file of the
+enricher (its change_version.txt, the same text in both releases, stays in the engine's own
+output, INDELs_genome/, which no build puts in place); the enriched genomes differ at the 43,389
+positions where the VCF writes several SNV records, and nowhere else (2.10.0 codes each with
+every ALT, 2.9.1 with the last record's), which only the VCF tells (2.10.0's holds a Q, its
+four-allele code, at 2,448 of them; a genome without one tells nothing); the fake-indel genomes,
+of 13,693,130 and 15,617,586 bytes, are cut at 25/27 and 30/30, and each agrees with its own
+indel logs and disagrees with the other's (measured for 2.10.0's release). Every build and every
+kit writes the two genomes together, from one run of the enricher.
+
+    python index_dictionaries.py [--enrichment <genome> scan|build] [--vcf <VCF folder>] \\
+        <index folder> <working directory> <dataset>
 
 prints the refusal, one line, and exits 3; or prints nothing and exits 0, an empty <index folder>
-(no installed index) included. Stdlib, and the repository's indel_window and index_fit (and
-crisprme_hf, for the name of the index of 2.10.0 that replaces one of 2.8.1).
+(no installed index) included. With --enrichment, the search reads the enrichment in place too:
+it scans it ("scan") or builds an index from it ("build"); --vcf, the dataset's VCF folder, which
+tells a sites-only dataset (indel_window.sites_only). Stdlib, and the repository's indel_window
+and index_fit (and crisprme_hf, for the name of the index of 2.10.0 that replaces one of 2.8.1).
 """
 
 import os
@@ -197,14 +222,89 @@ def refusal(index_dir, workdir, dataset):
     return "%s %s (%s)." % (what, todo, _SECTION)
 
 
+# What a search does with the enrichment in place (enrichment_refusal's ``reads``)
+READS = ("scan", "build")
+
+
+def enrichment_refusal(workdir, genome, dataset, reads="scan", index_dir=None, vcf_dir=None):
+    """Why a search must not read the enrichment of ``dataset`` of genome ``genome`` in place in
+    working directory ``workdir`` (Genomes/<genome>+<dataset> and its fake-indel genome,
+    Genomes/<genome>+<dataset>_INDELS) with the dataset's Dictionaries there (one line, with what
+    to do), or None: its fake-indel genome is not the one the dataset's indel logs describe
+    (indel_window.fake_genome_disagreement), so the two come from two enrichments, and the
+    enriched genome, written with that fake-indel genome by one run of the enricher, goes with
+    it. ``reads``, what the search does with the enrichment:
+
+    - "scan": a search with no bulges, which scans the enriched genome, where it holds every
+      chromosome of the genome, in place of the variant index ``index_dir`` (the one the search
+      takes, None where none is installed), whose alleles the Dictionaries describe; with the
+      enrichment removed, it searches that index, as a search with bulges does.
+    - "build": a search that builds from it the variant index none serves, or the INDELS index
+      its variant index lacks: indel_window.fake_genome_refusal's words, as the search script
+      gives them in that step (``vcf_dir``: the dataset's VCF folder, which tells a sites-only
+      dataset).
+
+    None where they agree, where nothing tells (no fake-indel genome in place, indel logs
+    without a row), and where the enrichment is unfinished (its .building mark): the search
+    refuses that as such, before it reads it."""
+    if reads not in READS:
+        raise ValueError("reads: one of %s, not %r" % (", ".join(READS), reads))
+    enriched = os.path.normpath(os.path.join(workdir, "Genomes", "%s+%s" % (genome, dataset)))
+    if any(os.path.isdir(os.path.join(part, ".building"))
+           for part in (enriched, enriched + "_INDELS")):
+        return None
+    if reads == "build":
+        return indel_window.fake_genome_refusal(workdir, genome, dataset, who="this search",
+                                                vcf_dir=vcf_dir)
+    dicts = os.path.join(os.path.normpath(workdir), "Dictionaries")
+    logs = os.path.join(dicts, "log_indels_%s" % dataset)
+    found = indel_window.fake_genome_disagreement(enriched + "_INDELS", logs, dataset)
+    if not found:
+        return None
+    try:
+        logged = set().union(*indel_window.dataset_windows(logs).values())
+    except (OSError, ValueError, EOFError):
+        logged = set()
+    then = ("; a search with no bulges then searches the variant index %s, as one with bulges "
+            "does" % os.path.basename(os.path.normpath(index_dir)) if index_dir else "")
+    return ("the enrichment of %s in place (%s, and its fake-indel genome %s_INDELS) is of "
+            "another build than the Dictionaries of %s in %s: their indel logs (%s) record "
+            "fake-indel windows%s, and its fake-indel genome is not the one they describe: on "
+            "%s, %s. A search with no bulges scans that enriched genome in place of the variant "
+            "index, and would read the alleles of one build with the carriers and frequencies "
+            "of the other (an enrichment of CRISPRme 2.8.1 codes only the last ALT of a site "
+            "written on several records, one of 2.10.0 every ALT). Remove it (rm -rf %s %s)%s; "
+            "or put in its place the enrichment the Dictionaries come from: of a published "
+            "index, the enriched-genome kit of its release, build-inputs/%s.tar.gz "
+            "(docs/PRECOMPUTED_INDEXES.md) (%s)."
+            % (dataset, enriched, enriched, dataset, dicts, logs,
+               " of " + _built(logged) if logged else "", found[0], found[1],
+               indel_window.quote(enriched), indel_window.quote(enriched + "_INDELS"), then,
+               dataset, _SECTION))
+
+
 def main(argv):
-    """``index_dictionaries.py <index folder> <working directory> <dataset>``: the refusal on
-    stdout and exit 3, or nothing and exit 0 (the search script's check of a dataset)."""
-    if len(argv) != 3:
-        sys.stderr.write("usage: index_dictionaries.py <index folder> <working directory> "
-                         "<dataset>\n")
+    """``index_dictionaries.py [--enrichment <genome> scan|build] [--vcf <VCF folder>] <index
+    folder> <working directory> <dataset>``: the refusal on stdout and exit 3, or nothing and
+    exit 0 (the search script's check of a dataset): of the index (refusal), then, with
+    --enrichment, of the enrichment in place, which the search scans or builds an index from
+    (enrichment_refusal)."""
+    args, genome, reads, vcf_dir = list(argv), None, None, None
+    while args[:1] in (["--enrichment"], ["--vcf"]):
+        if args[0] == "--enrichment" and len(args) > 2:
+            genome, reads, args = args[1], args[2], args[3:]
+        elif args[0] == "--vcf" and len(args) > 1:
+            vcf_dir, args = args[1], args[2:]
+        else:
+            break
+    if len(args) != 3 or (genome is not None and reads not in READS):
+        sys.stderr.write("usage: index_dictionaries.py [--enrichment <genome> scan|build] "
+                         "[--vcf <VCF folder>] <index folder> <working directory> <dataset>\n")
         return 2
-    why = refusal(*argv)
+    why = refusal(*args)
+    if not why and genome is not None:
+        why = enrichment_refusal(args[1], genome, args[2], reads, index_dir=args[0] or None,
+                                 vcf_dir=vcf_dir)
     if why:
         print(why)
         return 3

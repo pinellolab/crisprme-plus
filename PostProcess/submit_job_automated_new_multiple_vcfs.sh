@@ -1632,15 +1632,30 @@ while read vcf_f; do
 	# (index_dictionaries.py; crisprme.py _refuse_mixed_builds); a web search comes here. Once,
 	# with the first dataset, after the pruning decision, which decides the index each takes:
 	# checked in its own turn, a later dataset was refused only after the searches of those
-	# before it, hours on hg38 (the PP-14 review, round 2: A2-PP14-1).
+	# before it, hours on hg38 (the PP-14 review, round 2: A2-PP14-1). So too the dataset's
+	# enrichment in place, where this search reads it: a search with no bulges scans its enriched
+	# genome where it is whole, in place of the variant index (STEP 3), and a search builds from
+	# it the variant index none serves (STEP 2.2) and the INDELS index its variant index lacks in
+	# the working directory's library (STEP 2.3; each checked again in its step). Its fake-indel
+	# genome tells its build, against the indel logs (index_dictionaries.enrichment_refusal): a
+	# folder upgraded from 2.8.1 holds 2.8.1's enrichment of a panel beside an index of 2.10.0 and
+	# its Dictionaries, which a search with no bulges scanned with them, unchecked (the PP-14
+	# review, round 3: A3-PP14-1). A search with bulges of an index whose INDELS index is there
+	# reads no enrichment.
 	if [ -z "$_builds_checked" ]; then
 		_this_vcf=$vcf_name
 		while read -r _v; do
 			[ -n "$_v" ] && [ "$_v" != "_" ] || continue
 			vcf_name=$(basename "$_v")
 			_vi=$(_variant_index </dev/null)
-			[ -n "$_vi" ] || continue
-			_mixed=$(python "$starting_dir/index_dictionaries.py" "$_vi" "$current_working_directory" "$vcf_name" </dev/null)
+			_enr=()
+			if [ "$bDNA" -eq 0 ] && [ "$bRNA" -eq 0 ] && _enriched_genome_whole; then
+				_enr=(--enrichment "$ref_name" scan)
+			elif [ -z "$_vi" ] || { ! [ -d "${_vi}_INDELS" ] \
+				&& [ "$(dirname "$_vi")" -ef "$current_working_directory/genome_library" ]; }; then
+				_enr=(--enrichment "$ref_name" build)
+			fi
+			_mixed=$(python "$starting_dir/index_dictionaries.py" "${_enr[@]}" --vcf "$current_working_directory/VCFs/$_v" "$_vi" "$current_working_directory" "$vcf_name" </dev/null)
 			if [ $? = 3 ]; then
 				printf "ERROR: %s\n" "$_mixed" >&2
 				exit 1

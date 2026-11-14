@@ -77,9 +77,12 @@ describes the methods.
   folder**, remove the panel's `Dictionaries/dictionaries_<panel>` (2.8.1's `build-index-only`
   wrote them; 2.10.0's Dictionaries bundle does not carry them, so they stay), and its
   `Dictionaries/genotypes_<panel>` unless the download installed 2.10.0's genotype store: a search
-  reads both where they are, and nothing checks them
+  reads both where they are, and nothing checks them. Remove too 2.8.1's enrichment of the panel,
+  `Genomes/hg38+<panel>` and `Genomes/hg38+<panel>_INDELS` (2.8.1's `build-index-only` and its
+  enriched-genome kit leave it), or put 2.10.0's kit in its place: a search with no bulges scans it
+  in place of the index, and refuses it, by its fake-indel genome, as another build's
   ([TROUBLESHOOTING §16](https://github.com/pinellolab/crisprme-plus/blob/v2.10.0/docs/TROUBLESHOOTING.md)).
-  A new data folder has neither.
+  A new data folder has none of them.
 - Re-run any variant search made with 2.8.1 or earlier where its result matters: the coding of
   split sites, the indel windows, the index format, the default PAM and HPRC's data all change
   rows.

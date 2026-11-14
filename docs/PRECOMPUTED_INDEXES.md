@@ -506,7 +506,10 @@ crisprme.py download --what index \
   SNPs of one sample together. In a data folder where 2.8.1 built or installed the panel, its
   `Dictionaries/dictionaries_<panel>`, which no download of 2.10.0 replaces, and its
   `Dictionaries/genotypes_<panel>`, where 2.10.0's store is not installed, stay there, and a
-  search reads them: remove them (`docs/TROUBLESHOOTING.md` §16).
+  search reads them: remove them. So does 2.8.1's enrichment of the panel (`Genomes/hg38+<panel>`
+  and `_INDELS`, from its `build-index-only` or its kit), which a search with no bulges scans in
+  place of the index and refuses as another build's: remove it too, or put 2.10.0's kit in its
+  place (`docs/TROUBLESHOOTING.md` §16).
 - The **CLI search-list files** `list_vcf.txt` (the dataset, `hg38_HGDP1kGP`)
   and `list_samplesID.txt` (its combined samplesID) are written at the install
   root, so a CLI search works out of the box — the same lists the web form builds
@@ -572,7 +575,10 @@ Only the genome index itself is PAM-specific; everything derived from the varian
 > search scans the enriched genome when every chromosome of it is in place, and otherwise searches
 > the installed variant index, with the same results but for a site whose guide lies within 2 nt
 > of a contig start or end or an `N` run (N − 1 for an index of budget N): only the scan finds
-> its variant version (see the limits of every index at contig ends and `N` runs, above).
+> its variant version (see the limits of every index at contig ends and `N` runs, above). An
+> enrichment in place of another build than the panel's Dictionaries (2.8.1's kit beside an index
+> of 2.10.0, say) is not scanned: the search refuses it, as its fake-indel genome tells, and once
+> it is removed searches the index ([Troubleshooting §16](TROUBLESHOOTING.md)).
 
 ### Prerequisites
 

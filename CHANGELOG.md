@@ -188,11 +188,30 @@ major.minor version (Changed). The main changes, each told in its entry below:
     they are, so remove them after installing 2.10.0's index of a panel built or installed with
     2.8.1 in that data folder (the genotype store unless the download installed 2.10.0's), or
     install 2.10.0's indexes in a data folder of their own (`docs/TROUBLESHOOTING.md` section 16).
+    So too the dataset's enrichment in place, where the search reads it: a search with no bulges
+    scans the enriched genome (`Genomes/<genome>+<panel>`), where it holds every chromosome of the
+    genome, in place of the variant index, and a search builds from it an index it lacks. 2.8.1's
+    `build-index-only` and its enriched-genome kit leave a panel's enrichment in the data folder,
+    which a download of 2.10.0 does not replace (its WARNING named it, and said only that a build
+    refuses it), and a search with no bulges, the web's or `complete-search --bDNA 0 --bRNA 0`,
+    scanned it with the Dictionaries of 2.10.0, unchecked (the PP-14 review, round 3). Both refuse
+    it now, before the first dataset is searched, by its fake-indel genome against the indel logs
+    (`index_dictionaries.enrichment_refusal`): what tells an enrichment's build is its fake-indel
+    genome, cut at the windows of the CRISPRitz that enriched it, and nothing else in it, as two
+    enrichments of one VCF of chr22 show (CRISPRitz 2.9.1 and 2.10.0: the same files, sizes and
+    headers, no file of the enricher, its `change_version.txt` staying in the engine's own output;
+    the enriched genomes differ only at the 43,389 positions the VCF writes on several SNV
+    records). The refusal gives the enrichment's `rm -rf`, after which a search with no bulges
+    searches the index, and the kit of 2.10.0 to put in its place; the download's WARNING says
+    that a search with no bulges scans it, and section 16 names it among what to remove after
+    installing an index of 2.10.0 in a data folder of 2.8.1. A search with bulges of an installed
+    index and its INDELS index reads no enrichment, and runs.
     Covered by `PostProcess/test_index_dictionaries.py`: each case on fixtures, and the real
     complete-search and search script against `test_build_index_only_atomic`'s stub engine, on a
     dataset `build-index-only` built, then with another build's indel logs, with another build's kit
-    and logs beside the index with its INDELS index removed, and in a search of two datasets, the
-    second of another build's logs.
+    and logs beside the index with its INDELS index removed, in a search of two datasets, the
+    second of another build's logs, and, with no bulges, with the index and the Dictionaries of one
+    build beside the enrichment of another, alone and second of two datasets.
 - **An enriched-genome kit's member list** (`scripts/kit_members.py`): the md5 of each file a
   kit (`build-inputs/<dataset>.tar.gz`) holds, by its path in it, in `md5sum`'s format, from the
   folders the kit packs or from the tarball. The tarball is not byte-reproducible (tar records

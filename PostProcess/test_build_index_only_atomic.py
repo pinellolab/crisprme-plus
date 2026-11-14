@@ -625,12 +625,15 @@ class _Fixture(unittest.TestCase):
         return self.finish(self.start(command=command, CRISPRME_SKIP_SCORER_ENV="1",
                                       **(environ or {})))
 
-    def run_web_search(self, datasets=("ds",), **environ):
+    def run_web_search(self, datasets=("ds",), bulges=1, reference_done=False, **environ):
         """The search the web UI launches (pages/main_page.py): the search script run
         straight, not complete-search, with the job directory, environment and
         arguments it gives it (and environ), into a job directory of its own, of the
         datasets ``datasets`` (a line each of .list_vcfs.txt and .samplesID.txt, as the
-        web writes them). Returns its exit status, stdout and log_error.txt."""
+        web writes them), with ``bulges`` of each type; with ``reference_done``, the
+        reference search's targets file in place, as a search that got past it leaves it,
+        so that the script goes on to the variant search (which the stub engine logs and
+        fails). Returns its exit status, stdout and log_error.txt."""
         job = self.path("Results", "web")
         shutil.rmtree(job, ignore_errors=True)
         for name, text in ((".list_vcfs.txt", "".join(f"{d}\n" for d in datasets)),
@@ -638,11 +641,15 @@ class _Fixture(unittest.TestCase):
                             "".join(f"hg38_{d}.samplesID.txt\n" for d in datasets)),
                            (".guides.txt", GENOME["chr1"][:20] + "NNN\n"), ("vuoto.txt", "")):
             _write(os.path.join(job, name), text)
+        if reference_done:
+            _write(os.path.join(job, "crispritz_targets",
+                                f"hg38_{os.path.basename(PAM)}_.guides.txt_4_{bulges}_{bulges}"
+                                f".targets.txt"), "#Bulge_type\n")
         empty = os.path.join(job, "vuoto.txt")
         args = [self.path("Genomes", "hg38"), os.path.join(job, ".list_vcfs.txt"),
                 os.path.join(job, ".guides.txt"), PAM, empty, os.path.join(job, ".samplesID.txt"),
-                2, 4, 1, 1, 3, job, HERE, 4, self.work + os.sep, empty, "_", 1, 0, "none",
-                "mm+bulges", "mm+bulges,mm", "False", "PASS,.", "_", 6]
+                bulges + 1, 4, bulges, bulges, 3, job, HERE, 4, self.work + os.sep, empty, "_", 1,
+                0, "none", "mm+bulges", "mm+bulges,mm", "False", "PASS,.", "_", 6]
         env = {k: v for k, v in os.environ.items() if not k.startswith(("STUB_", "CRISPRME_"))}
         env.update(PATH=os.pathsep.join([self.bin, os.environ.get("PATH", "")]),
                    PYTHONPATH=os.path.join(SHARED, "py"), MPLCONFIGDIR=os.path.join(SHARED, "mpl"),

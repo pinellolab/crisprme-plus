@@ -1479,6 +1479,14 @@ class TestFakeIndelWindowNotes(unittest.TestCase):
             "another one than the archive's: on chr1, the window of chr1_100_" % (
                 enriched, enriched)), notes)
         self.assertIn("(rm -rf '%s' '%s_INDELS')" % (enriched, enriched), notes[0])
+        # what reads it: a search with no bulges scans it in place of the index, and refuses it
+        # now, as a build from it is refused (the PP-14 review, round 3: A3-PP14-1)
+        self.assertIn("A search with no bulges scans that enriched genome in place of the index",
+                      notes[0])
+        self.assertIn("so a search with no bulges, build-index-only, and a search that would "
+                      "build an index from it refuse it (docs/TROUBLESHOOTING.md section 16)",
+                      notes[0])
+        self.assertIn("): a search with no bulges then searches the index;", notes[0])
         # its removal, pasted into zsh and into bash (wave 1c-b of 2.10.0), the same
         from test_indel_window import paste_both
         paste_both(self, re.search(r"\((rm -rf [^)]*)\)", notes[0]).group(1), self.tmp)
