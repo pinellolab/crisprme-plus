@@ -156,6 +156,15 @@ class TheUnitTestsRunWithGNUAndWithUutilsCoreutils(unittest.TestCase):
             with self.subTest(module=module):
                 self.assertRegex(steps, r"python -m unittest %s -v" % module)
 
+    def test_its_log_says_whose_coreutils_each_image_has(self):
+        # the ubuntu-26.04 lane tests uutils only while that image's coreutils are uutils'
+        # (0.10.0 in November 2026): a runner image whose coreutils changed shows in the log
+        steps = uncommented(workflow("unit-tests.yml"))
+        self.assertIn('run: for tool in pr paste sort; do "$tool" --version | head -n 1; done',
+                      steps)
+        self.assertLess(steps.index('"$tool" --version'),
+                        steps.index("python -m unittest test_merged_lists_join -v"))
+
 
 @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
 class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):

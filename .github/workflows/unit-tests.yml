@@ -119,6 +119,12 @@ jobs:
         # bash and an interactive zsh (wave 1c-b of 2.10.0), and skip the zsh half without it.
         run: command -v zsh || { sudo apt-get update -qq && sudo apt-get install -y -qq zsh; }
 
+      - name: "Whose coreutils this image has (GNU's on ubuntu-24.04, uutils' on ubuntu-26.04)"
+        # The tests that run the search's own join and sort lines test this runner's coreutils,
+        # and the ubuntu-26.04 lane tests uutils only while that image's are theirs: the log
+        # says whose each image runs, so a runner image whose coreutils changed shows here.
+        run: for tool in pr paste sort; do "$tool" --version | head -n 1; done
+
       - name: Byte-compile the pipeline (syntax check)
         # pages/history_page.py + pages/settings_page.py: syntax-only (py_compile
         # doesn't execute imports), included here since test_history_page_assembly.py
