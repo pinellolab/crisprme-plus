@@ -644,6 +644,14 @@ Here `<PAM_MOTIF>` is the PAM region token itself — the IUPAC motif without th
 (e.g. `NGG`, `NRG`, `NNGRRT`, `TTTN`) — the same prefix the index name uses
 (`<PAM_MOTIF>_<N>_hg38+hg38_<ds>`).
 
+An index's targets do not depend on the thread count `<T>`, but its `.bin` files do (`buildTST`
+sorts in parallel): to build a published index's files byte for byte, give `index-genome` the
+threads its archive was built with, `-th 64` for HGDP + 1000 Genomes, `-th 32` for HPRC and `-th
+16` for mega and for the reference indexes (`docs/INDEX_PROVENANCE.md`, 2.10.0, "Threads"; the D7
+readiness audit's re-index of the HGDP + 1000 Genomes kit was byte-identical at 64 threads, and 6
+of its 7 `.bin` files differed at 16). `pool_index_indels.py` builds each `_INDELS` sub-index at
+one thread (`-th 1`), whatever its last argument, the number of chromosomes it indexes at once.
+
 The kit and the panel's Dictionaries must come from one release: `pool_index_indels.py` refuses
 a chromosome whose fake-indel genome and indel log come from two enrichments (2.8.1's kit, of
 CRISPRitz 2.9.1's windows of 25/27, beside 2.10.0's Dictionaries bundle, of 30/30, say: `the

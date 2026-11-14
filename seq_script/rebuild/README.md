@@ -63,8 +63,12 @@ it serves for its own guide length (`index_fit.fits`).
    panel's first index, skips them for the others (the repo holds them, the same), and refuses to
    publish an index built against another build of them (`--replace-companions` replaces them,
    for a whole panel built again).
-2. **Build with the release image only** (the CRISPRme and CRISPRitz the release ships), after the
-   D7 readiness audit: no fix that can change index creation is pending. `$SIF` is that image,
+2. **Build with the release's CRISPRme and CRISPRitz** (the code the release ships), after the
+   D7 readiness audit: no fix that can change index creation is pending. The indexes of 2.10.0
+   were not built with the release image, which is built from the release's tags, after the
+   indexes: they were built with an image of the image route, `rc281f.sif`'s environment with
+   CRISPRme's commit `db50986` and CRISPRitz's `4ded5e6` compiled in it, whose sha256, commits and
+   binaries `docs/INDEX_PROVENANCE.md` records (2.10.0). `$SIF` is that image,
    which the HGDP + 1000 Genomes and HPRC recipes run themselves, and `$RUN` the prefix that runs
    the commands' `crisprme.py`, `hf` and `pigz` in it, e.g. `RUN="apptainer exec --bind /srv/local
    $SIF /usr/local/bin/_entrypoint.sh"` (empty where the release is installed). The recipes bind
@@ -72,9 +76,10 @@ it serves for its own guide length (`index_fit.fits`).
    (`hprc_build.sh`), into the image: their working directories and inputs lie there, and `$RUN`
    binds the working directories and the repository's checkout (mega's recipe runs the
    repository's `PostProcess/` in the image).
-3. **Publish each panel as a unit** into `lucapinello/crisprme-indexes-format2` (the publish half,
-   once: The publish, below), which must exist first: `publish-index` creates no repo, so its owner creates the dataset repo, and pushes its
-   card, `docs/hf/crisprme-indexes-format2_README.md` (`docs/hf/README.md`), before the first
+3. **Publish each panel as a unit** into `lucapinello/crisprme-indexes-format2` (the publish
+   half, once: The publish, below), which must exist first: `publish-index` creates no repo, so
+   its owner creates the dataset repo, and pushes its card,
+   `docs/hf/crisprme-indexes-format2_README.md` (`docs/hf/README.md`), before the first
    publish. Then write `indexes/SHA256SUMS` from the Hub's own
    checksums once its uploads are done, `python scripts/hf_sha256sums.py
    lucapinello/crisprme-indexes-format2 > SHA256SUMS`, and upload it as `indexes/SHA256SUMS`
