@@ -461,14 +461,16 @@ class TheRebuildRuns(unittest.TestCase):
         self.assertIn(f"{script}: this tree holds it, so it is no longer pending: take it out "
                       f"of check_index_set.PENDING_SCRIPTS", problems)
 
-    def run_on_genomes(self, genomes=None, mega_src=None, panels=None, unset=(), preamble=False):
+    def run_on_genomes(self, genomes=None, mega_src=None, panels=None, unset=(), preamble=False,
+                       setup=None):
         """The rebuild's script run from the repository's root on working directories whose
         Genomes/hg38 hold the FASTAs ``genomes`` names ({variable: [contig, ...]}; GENOMES's
         where it names none), mega's merged VCFs of ``mega_src`` (chr1-22, X and Y if None),
         every other variable set but those ``unset`` names, and no program of the image on PATH:
         the build half, or its part of the working directories ``panels`` names (--panels), or,
         with ``preamble``, what of it comes before its first row: (exit status, stderr, whether a
-        command ran: each first makes the PAMs/ of its working directory)."""
+        command ran: each first makes the PAMs/ of its working directory). ``setup``, called with
+        the environment once the folders are made, changes them first."""
         import shutil
         import subprocess
         import tempfile
@@ -489,6 +491,8 @@ class TheRebuildRuns(unittest.TestCase):
             for c in PRIMARY if mega_src is None else mega_src:
                 open(os.path.join(env["MEGA_SRC"], f"mega.{c}.afmax.vcf.gz"), "w").close()
             folders = [env[v] for v in ("REF", "HGDP", "HPRC", "MEGA")]
+            if setup:
+                setup(env)
             for v in unset:
                 del env[v]
             got = subprocess.run([shutil.which("bash"), "-c", script],
@@ -586,6 +590,93 @@ class TheRebuildRuns(unittest.TestCase):
         for panels in (["HGDP"], ["REF", "HPRC", "MEGA"], ["HPRC"], ["MEGA"], ["REF"]):
             with self.subTest(panels=panels, folders="as rule 1 says"):
                 self.assertEqual(self.run_on_genomes(panels=panels, preamble=True), (0, "", False))
+
+    def test_a_ref_of_links_into_a_folder_it_checks_stops_it_first(self):
+        """The README said that on the node of HGDP + 1000 Genomes a $REF of links to $HGDP's
+        own FASTAs would do, as the D7 plan's stub was (ln -sf "$HGDP/Genomes/hg38/"*.fa
+        "$REF/Genomes/hg38/"): against it $HGDP's folder was checked against itself, a FASTA
+        missing there missing from $REF's too (its link dangles, and a FASTA is listed only where
+        it is there), and the node's part went past its checks on a genome folder of chr1-22, X
+        and Y alone, as $REF=$HGDP did (the PP review, round 3: B3-1). $REF holds hg38 of its own:
+        each half stops on a $REF that is a folder it checks, holds a link into one, or a link to
+        nothing; one of links to another folder of hg38 goes past, as a copy does."""
+        import shutil
+
+        def into_hgdp(env, stub_while_whole=True):
+            """$REF/Genomes/hg38 made the D7 plan's stub of links to $HGDP's FASTAs, while $HGDP
+            held all of hg38 (or after it lost the others), then $HGDP left with chr1-22, X and
+            Y."""
+            ref, hgdp = (os.path.join(env[v], "Genomes", "hg38") for v in ("REF", "HGDP"))
+            if not stub_while_whole:
+                self.drop(hgdp)
+            shutil.rmtree(ref)
+            os.makedirs(ref)
+            for name in os.listdir(hgdp):
+                os.symlink(os.path.join(hgdp, name), os.path.join(ref, name))
+            self.drop(hgdp)
+
+        def into_hgdp_later(env):
+            into_hgdp(env, stub_while_whole=False)
+
+        def is_hgdp(env):
+            self.drop(os.path.join(env["HGDP"], "Genomes", "hg38"))
+            env["REF"] = env["HGDP"]
+
+        def dangling(env):
+            os.remove(os.path.join(env["REF"], "Genomes", "hg38", "chrM.fa"))
+            os.symlink(os.path.join(env["REF"], "gone", "chrM.fa"),
+                       os.path.join(env["REF"], "Genomes", "hg38", "chrM.fa"))
+
+        def into_another(env):
+            """$REF of links to a folder of all of hg38 of its own (on the node, the one $HGDP's
+            were copied from), $HGDP whole."""
+            other, ref = os.path.join(env["REF"], "..", "other"), os.path.join(
+                env["REF"], "Genomes", "hg38")
+            shutil.move(ref, other)
+            os.makedirs(ref)
+            for name in os.listdir(other):
+                os.symlink(os.path.join(os.path.abspath(other), name), os.path.join(ref, name))
+
+        said_into = ("/REF/Genomes/hg38 ($REF) is {}/Genomes/hg38 ($HGDP), or holds links to its "
+                     "FASTAs: that folder would be checked against itself, a FASTA missing there "
+                     "missing from $REF's too. $REF's Genomes/hg38 holds hg38 of its own")
+        for panels in (["HGDP"], None):
+            for how, setup in (("the D7 stub", into_hgdp), ("a stub made later", into_hgdp_later),
+                               ("$HGDP itself", is_hgdp)):
+                with self.subTest(panels=panels, ref=how):
+                    rc, err, ran = self.run_on_genomes(panels=panels, setup=setup, preamble=True)
+                    self.assertEqual(rc, 2, err)
+                    self.assertFalse(ran, "a command ran")
+                    self.assertIn("/Genomes/hg38 ($REF) is ", err)
+                    self.assertIn(said_into.split("{}")[1], err)
+            with self.subTest(panels=panels, ref="a link to nothing"):
+                rc, err, ran = self.run_on_genomes(panels=panels, setup=dangling, preamble=True)
+                self.assertEqual(rc, 2, err)
+                self.assertIn("/REF/Genomes/hg38/chrM.fa ($REF) is a link to nothing", err)
+            with self.subTest(panels=panels, ref="links to another folder of hg38"):
+                self.assertEqual(self.run_on_genomes(panels=panels, setup=into_another,
+                                                     preamble=True), (0, "", False))
+        # (ml008's parts: $REF the reference's working directory, $HGDP's folder links to its
+        # FASTAs, which is no $REF of links into a folder it checks)
+        def hgdp_into_ref(env):
+            ref, hgdp = (os.path.join(env[v], "Genomes", "hg38") for v in ("REF", "HGDP"))
+            shutil.rmtree(hgdp)
+            os.makedirs(hgdp)
+            for name in os.listdir(ref):
+                os.symlink(os.path.join(ref, name), os.path.join(hgdp, name))
+        for panels in (["REF", "HPRC", "MEGA"], None):
+            with self.subTest(panels=panels, hgdp="links to $REF's"):
+                self.assertEqual(self.run_on_genomes(panels=panels, setup=hgdp_into_ref,
+                                                     preamble=True), (0, "", False))
+
+    @staticmethod
+    def drop(folder):
+        """Leaves genome folder ``folder`` with its FASTAs of chr1-22, X and Y alone, a folder
+        the build half refuses for HGDP + 1000 Genomes (rule 1)."""
+        for name in os.listdir(folder):
+            if name[: -len(".fa")] not in PRIMARY:
+                os.remove(os.path.join(folder, name))
+        assert sorted(n[: -len(".fa")] for n in os.listdir(folder)) == sorted(PRIMARY)
 
     def test_a_kit_packed_into_the_repository_s_root(self):
         # (the dry run found it before; nothing made it happen: D-R3-5)

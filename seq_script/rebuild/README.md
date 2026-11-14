@@ -123,9 +123,15 @@ variables those rows read: a node runs its part of a half. A part of the build h
 genome folders of its working directories as the whole half does (rule 1), against `$REF`'s
 `Genomes/hg38`, so it asks for `$REF` too where it names `HGDP`, `HPRC` or `MEGA` and not `REF`:
 it reads that folder and writes nothing in it. On a node without the reference's working
-directory (ml007), `REF` is then a folder whose `Genomes/hg38` holds all of hg38, as
-`crisprme.py download --what genome` installs it (links to such FASTAs will do, as the D7 plan's
-stub was), and not `$HGDP` itself, whose folder is the one checked.
+directory (ml007), `REF` is then a folder whose `Genomes/hg38` holds all of hg38 of its own,
+independent of the folders it checks: a copy, as `crisprme.py download --what genome` installs
+it, or links to the FASTAs of another folder of hg38 checked whole against hg38's md5 list (the
+one `$HGDP`'s FASTAs were copied from, which the rebuild's staging checked so). Never `$HGDP`
+itself, nor links into `$HGDP/Genomes/hg38`, as the D7 plan's stub `$R/stub/REF` on ml007 is:
+`$HGDP`'s folder would then be checked against itself, and a FASTA missing there would be missing
+from `$REF`'s too (a link to it dangles, and a FASTA is listed only where it is there), so the
+check would pass. The script stops on such a `$REF`: one that is the genome folder of a panel it
+checks or holds a link into one, or holds a link to nothing.
 
 ```bash
 python seq_script/rebuild/check_index_set.py                          # the check and its dry run (the D7 audit runs it): exit 1 on a problem
@@ -168,7 +174,8 @@ done
 ```
 
 The build half, run on each node for its working directories (`--panels HGDP` on ml007,
-`--panels REF,HPRC,MEGA` on ml008, `$REF` set on both: Commands), then passes those rows; it runs a
+`--panels REF,HPRC,MEGA` on ml008, `$REF` set on both, on ml007 to a folder of hg38 of its own, not
+the D7 plan's stub: Commands), then passes those rows; it runs a
 row with no mark again, an index row kept where it is in place by the tools ("already present", a
 few seconds each), and mega's line refused by its recipe. To build a row again, remove its mark and what it built. A mega build that stopped
 partway, at its checks too, is refused by its recipe until its parts are gone: move `$MEGA` aside,

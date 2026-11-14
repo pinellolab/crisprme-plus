@@ -113,13 +113,18 @@ MAY_BE_EMPTY = ("RUN",)
 # What $REF is to a part of the build half (--panels) that names the rows of HGDP + 1000
 # Genomes', HPRC's or mega's working directory and not the reference's: the genome folder theirs
 # are checked against (README, rule 1), read and not written; on a node without the reference
-# working directory, a folder that holds hg38 in Genomes/hg38 as it does, of links to its FASTAs.
-# A part that named HGDP + 1000 Genomes' alone checked only that its folder held a FASTA, and
-# one of HPRC's or mega's only their names (the PP review, round 2: A2-PP2-1, B2-1). A text of
-# VARIABLES' kind (_VARIABLE_TEXT).
-REF_READ = ("a folder whose Genomes/hg38 holds all of hg38, as the working directory of the "
-            "reference indexes does: that one, or one of links to its FASTAs. The genome folders "
-            "of the rows here are checked against it, and nothing is written there")
+# working directory, a folder that holds hg38 in Genomes/hg38 as it does, of its own: a copy, or
+# links to the FASTAs of another folder of hg38, never to those of a folder it checks. A part
+# that named HGDP + 1000 Genomes' alone checked only that its folder held a FASTA, and one of
+# HPRC's or mega's only their names (the PP review, round 2: A2-PP2-1, B2-1); and the README then
+# offered a $REF of links to $HGDP's own FASTAs, as the D7 plan's stub on ml007 is, against which
+# $HGDP's folder was checked against itself: a FASTA missing there was missing from $REF's too,
+# and the check passed (the PP review, round 3: B3-1). A text of VARIABLES' kind (_VARIABLE_TEXT).
+REF_READ = ("a folder whose Genomes/hg38 holds all of hg38 of its own, as the working directory "
+            "of the reference indexes does: that one, a copy, or links to the FASTAs of another "
+            "such folder, never to those of a genome folder checked against it, which would then "
+            "be checked against itself. The genome folders of the rows here are checked against "
+            "it, and nothing is written there")
 # What each working directory's genome folder, Genomes/hg38, holds (README, rule 1), as 2.8.1's
 # default index of each panel was built (the contigs of the published archives): all of hg38
 # (455 contigs, as `download --what genome` installs it) for the reference indexes and for HGDP
@@ -496,14 +501,16 @@ def pending(root=ROOT):
 def _genome_checks(used):
     """The lines of the rebuild's script that check, before its first command, the genome
     folders of the working directories it uses (README, rule 1; GENOME_FOLDERS): $REF's holds a
-    FASTA of chr1-22, X or Y; HGDP + 1000 Genomes' Genomes/hg38 holds the FASTAs of $REF's (all
-    of hg38); HPRC's and mega's those of them that are chr1-22, X and Y, and no other (given no
-    $REF, FASTAs of chr1-22, X and Y alone, the same in both: commands_script gives it $REF
-    wherever it checks a panel's folder, a part of the build half too, REF_READ); and a panel
-    whose recipe builds every chromosome of its sources (SOURCE_CHROMOSOMES: mega's), the
-    chromosomes of those sources. Otherwise a panel's indexes would hold other contigs than
-    2.8.1's of the panel, and mega's recipe stops on a FASTA it does not build, after hours of
-    the other panels' builds."""
+    FASTA of chr1-22, X or Y, and is hg38 of its own (REF_READ): no link to nothing, and neither
+    the genome folder of a panel it checks nor links into it, against which that folder would be
+    checked against itself, a FASTA missing there missing from $REF's too (the PP review, round
+    3: B3-1); HGDP + 1000 Genomes' Genomes/hg38 holds the FASTAs of $REF's (all of hg38); HPRC's
+    and mega's those of them that are chr1-22, X and Y, and no other (given no $REF, FASTAs of
+    chr1-22, X and Y alone, the same in both: commands_script gives it $REF wherever it checks a
+    panel's folder, a part of the build half too, REF_READ); and a panel whose recipe builds
+    every chromosome of its sources (SOURCE_CHROMOSOMES: mega's), the chromosomes of those
+    sources. Otherwise a panel's indexes would hold other contigs than 2.8.1's of the panel, and
+    mega's recipe stops on a FASTA it does not build, after hours of the other panels' builds."""
     panels = [v for v in GENOME_FOLDERS if v in used]
     if not panels and "REF" not in used:
         return []
@@ -522,6 +529,25 @@ def _genome_checks(used):
             "X or Y: the working directory of the reference indexes holds all of hg38 there, as "
             "crisprme.py download --what genome installs it\"",
         ]
+        if panels:
+            # (0 where folder $1 is folder $2, or a FASTA of $1 is a link into $2)
+            lines.append(
+                "_into() { local f o; o=$(cd -P \"$2\" 2>/dev/null && pwd) || return 1; "
+                "[ \"$1\" -ef \"$2\" ] && return 0; for f in \"$1\"/*.fa; do [ -L \"$f\" ] || "
+                "continue; case \"$(readlink -f \"$f\")\" in \"$o\"/*) return 0 ;; esac; done; "
+                "return 1; }")
+        for v in panels:
+            lines.append(
+                f"! _into \"$REF/Genomes/hg38\" \"${v}/Genomes/hg38\" || _stop \"$REF/Genomes/hg38 "
+                f"(\\$REF) is ${v}/Genomes/hg38 (\\${v}), or holds links to its FASTAs: that "
+                f"folder would be checked against itself, a FASTA missing there missing from "
+                f"\\$REF's too. \\$REF's Genomes/hg38 holds hg38 of its own: the reference's "
+                f"working directory, a copy of hg38 (crisprme.py download --what genome), or "
+                f"links to the FASTAs of another such folder\"")
+        lines.append(
+            "for _f in \"$REF/Genomes/hg38\"/*.fa; do [ -e \"$_f\" ] || ! [ -L \"$_f\" ] || "
+            "_stop \"$_f (\\$REF) is a link to nothing: \\$REF's Genomes/hg38 holds all of hg38, "
+            "and the genome folders here are checked against it\"; done")
     else:
         lines.append("_all=; _want=")
     panel_of = {name: panel for panel, name in WORKDIR.items()}

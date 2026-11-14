@@ -270,7 +270,12 @@ major.minor version (Changed). The main changes, each told in its entry below:
   of HGDP + 1000 Genomes and `--panels REF,HPRC,MEGA` on the other's. A part of the build half
   checks the genome folders of its working directories as the whole half does, against `$REF`'s,
   which it asks for where it names no row of the reference's (it reads it, and writes nothing
-  there). The lines of the build half
+  there). `$REF`'s `Genomes/hg38` is hg38 of its own: the reference's working directory, a copy,
+  or links to the FASTAs of another such folder. A `$REF` of links to `$HGDP`'s own FASTAs, as the
+  D7 plan's stub on the node of HGDP + 1000 Genomes is, checked `$HGDP`'s folder against itself (a
+  FASTA missing there was missing from `$REF`'s too), so each half stops on a `$REF` that is the
+  genome folder of a panel it checks or holds a link into one, or holds a link to nothing. The
+  lines of the build half
   are the manifest's, as the rebuild of 2.10.0's indexes ran them (md5
   `7389f7e234d4e617860f8f9b34abdc49`). The publish half
   uploads with the release image's own `hf` and a token given in the environment, `HF_TOKEN`: the
