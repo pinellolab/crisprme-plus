@@ -57,7 +57,7 @@ recipes, which the docs wave after the build changes (the HPRC recipe's header s
 around each left out, as `check_index_set.half_lines` takes them; the printed script, which holds
 its checks and those lines too, has an md5 of its own); and `git diff db50986 v2.10.0 --
 crisprme.py PostProcess` changes nothing `build-index-only` runs (the changes after `db50986` are
-search, publish and checker code, each named in the CHANGELOG).
+search, download, publish and checker code, each named in the CHANGELOG).
 
 ### Threads
 
