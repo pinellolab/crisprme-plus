@@ -792,7 +792,9 @@ class TheDocsSayWhatItReads(unittest.TestCase):
         self.assertIn("Its kits hold chr1-22, X and Y alone: beside all of hg38, as `download "
                       "--what genome` installs it, a search with no bulges does not read one and "
                       "searches the index, and only a build of an index reads it", s16)
-        self.assertIn("(`.building`) does not stop the check", s16)
+        self.assertIn("It is read marked unfinished too (`.building`, which a `build-index-only` "
+                      "stopped while it put the SNP codes on it leaves there): the SNP codes move "
+                      "no window", s16)
         log = _flat(_read("CHANGELOG.md"))
         entry = log[log.index("**A search refuses an index of one build beside another build's "
                               "indel logs.**"):]

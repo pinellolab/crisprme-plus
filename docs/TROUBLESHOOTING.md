@@ -617,12 +617,12 @@ the Dictionaries. 2.8.1's `build-index-only` of all of hg38 leaves an enrichment
 chromosome. Its kits hold chr1-22, X and Y alone: beside all of hg38, as `download --what genome`
 installs it, a search with no bulges does not read one and searches the index, and only a build of
 an index reads it. Its fake-indel genome tells its build: 2.8.1's CRISPRitz cut it at windows of
-25/27, 2.10.0's at 30/30, and the indel logs record those of the Dictionaries' enrichment; a mark
-that a `build-index-only` stopped as it put the SNP codes on it left there (`.building`) does not
-stop the check. Nothing else in it tells: the enriched genomes of the two releases have the same
-files, sizes and headers, and differ only at the sites the VCFs write on several records, where
-2.10.0 codes every ALT. A search with bulges of an installed index and its INDELS index reads no
-enrichment, and runs.
+25/27, 2.10.0's at 30/30, and the indel logs record those of the Dictionaries' enrichment. It is
+read marked unfinished too (`.building`, which a `build-index-only` stopped while it put the SNP
+codes on it leaves there): the SNP codes move no window. Nothing else in it tells: the enriched
+genomes of the two releases have the same files, sizes and headers, and differ only at the sites
+the VCFs write on several records, where 2.10.0 codes every ALT. A search with bulges of an
+installed index and its INDELS index reads no enrichment, and runs.
 
 **Fix.** Either way, keep the indexes of each build in a data folder of their own, with their own
 Dictionaries:
