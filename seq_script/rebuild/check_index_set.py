@@ -502,9 +502,10 @@ def _genome_checks(used):
     """The lines of the rebuild's script that check, before its first command, the genome
     folders of the working directories it uses (README, rule 1; GENOME_FOLDERS): $REF's holds a
     FASTA of chr1-22, X or Y, and is hg38 of its own (REF_READ): no link to nothing, and neither
-    the genome folder of a panel it checks nor links into it, against which that folder would be
-    checked against itself, a FASTA missing there missing from $REF's too (the PP review, round
-    3: B3-1); HGDP + 1000 Genomes' Genomes/hg38 holds the FASTAs of $REF's (all of hg38); HPRC's
+    the genome folder of a panel it checks nor links that lead into it at any hop, against which
+    that folder would be checked against itself, a FASTA missing there missing from $REF's too
+    (the PP review, round 3: B3-1; the PP fix review, round 1: B1-1, links into a folder of
+    links); HGDP + 1000 Genomes' Genomes/hg38 holds the FASTAs of $REF's (all of hg38); HPRC's
     and mega's those of them that are chr1-22, X and Y, and no other (given no $REF, FASTAs of
     chr1-22, X and Y alone, the same in both: commands_script gives it $REF wherever it checks a
     panel's folder, a part of the build half too, REF_READ); and a panel whose recipe builds
@@ -530,11 +531,18 @@ def _genome_checks(used):
             "crisprme.py download --what genome installs it\"",
         ]
         if panels:
-            # (0 where folder $1 is folder $2, or a FASTA of $1 is a link into $2)
+            # (0 where folder $1 is folder $2, or a FASTA of $1 is a link that leads into $2:
+            # each hop of it read, a relative one from its own folder, and the folder it is in
+            # taken as it is (cd -P). Its last target alone (readlink -f) passed a $REF of links
+            # into a $2 whose own FASTAs are links to another folder, as ml008's $HGDP is: a
+            # FASTA lost there was lost from $REF's too; the PP fix review, round 1: B1-1)
             lines.append(
-                "_into() { local f o; o=$(cd -P \"$2\" 2>/dev/null && pwd) || return 1; "
-                "[ \"$1\" -ef \"$2\" ] && return 0; for f in \"$1\"/*.fa; do [ -L \"$f\" ] || "
-                "continue; case \"$(readlink -f \"$f\")\" in \"$o\"/*) return 0 ;; esac; done; "
+                "_into() { local f t h d o n; o=$(cd -P \"$2\" 2>/dev/null && pwd) || return 1; "
+                "[ \"$1\" -ef \"$2\" ] && return 0; for f in \"$1\"/*.fa; do t=$f; n=0; "
+                "while [ -L \"$t\" ] && [ $n -lt 40 ]; do h=$(readlink -- \"$t\"); "
+                "case $h in /*) ;; *) h=$(dirname -- \"$t\")/$h ;; esac; "
+                "d=$(cd -P \"$(dirname -- \"$h\")\" 2>/dev/null && pwd); "
+                "case \"$d/\" in \"$o\"/*) return 0 ;; esac; t=$h; n=$((n + 1)); done; done; "
                 "return 1; }")
         for v in panels:
             lines.append(

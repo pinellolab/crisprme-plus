@@ -130,8 +130,10 @@ one `$HGDP`'s FASTAs were copied from, which the rebuild's staging checked so). 
 itself, nor links into `$HGDP/Genomes/hg38`, as the D7 plan's stub `$R/stub/REF` on ml007 is:
 `$HGDP`'s folder would then be checked against itself, and a FASTA missing there would be missing
 from `$REF`'s too (a link to it dangles, and a FASTA is listed only where it is there), so the
-check would pass. The script stops on such a `$REF`: one that is the genome folder of a panel it
-checks or holds a link into one, or holds a link to nothing.
+check would pass. The build half, whole or a node's part, stops on such a `$REF`: one that is the
+genome folder of a panel it checks, or holds a link that leads into one at any hop (where that
+folder's own FASTAs are links, as ml008's `$HGDP`'s are, a link into it leads on past it), or
+holds a link to nothing.
 
 ```bash
 python seq_script/rebuild/check_index_set.py                          # the check and its dry run (the D7 audit runs it): exit 1 on a problem

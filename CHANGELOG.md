@@ -281,12 +281,12 @@ major.minor version (Changed). The main changes, each told in its entry below:
   there). `$REF`'s `Genomes/hg38` is hg38 of its own: the reference's working directory, a copy,
   or links to the FASTAs of another such folder. A `$REF` of links to `$HGDP`'s own FASTAs, as the
   D7 plan's stub on the node of HGDP + 1000 Genomes is, checked `$HGDP`'s folder against itself (a
-  FASTA missing there was missing from `$REF`'s too), so each half stops on a `$REF` that is the
-  genome folder of a panel it checks or holds a link into one, or holds a link to nothing. The
-  lines of the build half
-  are the manifest's, as the rebuild of 2.10.0's indexes ran them (md5
-  `7389f7e234d4e617860f8f9b34abdc49`). The publish half
-  uploads with the release image's own `hf` and a token given in the environment, `HF_TOKEN`: the
+  FASTA missing there was missing from `$REF`'s too), so the build half, whole or a node's part,
+  stops on a `$REF` that is the genome folder of a panel it checks, or holds a link that leads into
+  one at any hop (that folder's own FASTAs links too), or holds a link to nothing. The lines of the
+  build half are the manifest's, as the rebuild of 2.10.0's indexes ran them (md5
+  `7389f7e234d4e617860f8f9b34abdc49`). The publish half uploads with the release image's own `hf`
+  and a token given in the environment, `HF_TOKEN`: the
   image sets `HF_HUB_DISABLE_IMPLICIT_TOKEN=1`, so the kits' uploads (`$RUN hf upload ...`) sent no
   token and failed as documented, after the indexes had gone up (PP-1 of the release). It exports
   `APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0` and `PYTHONNOUSERSITE=1`, and checks before its

@@ -598,8 +598,10 @@ class TheRebuildRuns(unittest.TestCase):
         missing there missing from $REF's too (its link dangles, and a FASTA is listed only where
         it is there), and the node's part went past its checks on a genome folder of chr1-22, X
         and Y alone, as $REF=$HGDP did (the PP review, round 3: B3-1). $REF holds hg38 of its own:
-        each half stops on a $REF that is a folder it checks, holds a link into one, or a link to
-        nothing; one of links to another folder of hg38 goes past, as a copy does."""
+        the build half, whole or a node's part, stops on a $REF that is a folder it checks, holds
+        a link that leads into one at any hop (a $HGDP whose own FASTAs are links too: the PP fix
+        review, round 1, B1-1), or a link to nothing; one of links to another folder of hg38 goes
+        past, as a copy does."""
         import shutil
 
         def into_hgdp(env, stub_while_whole=True):
@@ -617,6 +619,24 @@ class TheRebuildRuns(unittest.TestCase):
 
         def into_hgdp_later(env):
             into_hgdp(env, stub_while_whole=False)
+
+        def into_hgdp_of_links(env):
+            """$HGDP's Genomes/hg38 of links to the FASTAs of another folder of hg38 (ml008's
+            layout, there to $REF's), left with chr1-22, X and Y, then $REF made a stub of links
+            into $HGDP's folder: the check took each link's last target alone (readlink -f), in
+            the other folder, past $HGDP's, and the part went past its checks (the PP fix review,
+            round 1: B1-1)."""
+            ref, hgdp = (os.path.join(env[v], "Genomes", "hg38") for v in ("REF", "HGDP"))
+            other = os.path.join(os.path.dirname(env["REF"]), "other")
+            shutil.move(hgdp, other)
+            os.makedirs(hgdp)
+            for name in os.listdir(other):
+                os.symlink(os.path.join(other, name), os.path.join(hgdp, name))
+            self.drop(hgdp)
+            shutil.rmtree(ref)
+            os.makedirs(ref)
+            for name in os.listdir(hgdp):
+                os.symlink(os.path.join(hgdp, name), os.path.join(ref, name))
 
         def is_hgdp(env):
             self.drop(os.path.join(env["HGDP"], "Genomes", "hg38"))
@@ -642,7 +662,8 @@ class TheRebuildRuns(unittest.TestCase):
                      "missing from $REF's too. $REF's Genomes/hg38 holds hg38 of its own")
         for panels in (["HGDP"], None):
             for how, setup in (("the D7 stub", into_hgdp), ("a stub made later", into_hgdp_later),
-                               ("$HGDP itself", is_hgdp)):
+                               ("$HGDP itself", is_hgdp),
+                               ("a stub into a $HGDP of links", into_hgdp_of_links)):
                 with self.subTest(panels=panels, ref=how):
                     rc, err, ran = self.run_on_genomes(panels=panels, setup=setup, preamble=True)
                     self.assertEqual(rc, 2, err)
