@@ -682,6 +682,13 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_index_dictionaries -v
 
+      - name: "An enriched-genome kit's member list is the same for any packing of its files, and checks a kit once unpacked (scripts/kit_members.py)"
+        # A kit's tarball is not byte-reproducible (tar records each file's time, owner and
+        # order), so its SHA256SUMS proves a download, not what the kit holds: the member list,
+        # build-inputs/<dataset>.members.md5 beside it, does (2.10.0).
+        working-directory: PostProcess
+        run: python -m unittest test_kit_members -v
+
       - name: "CI and the documented self-test run what they say (job limit, path filters, in-image tests, every benchmark)"
         # The workflows and the docs, read as text: a job that is cancelled, never starts, or
         # skips what it is there to test passes for nothing.

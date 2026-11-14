@@ -179,6 +179,13 @@ major.minor version (Changed). The main changes, each told in its entry below:
     `PostProcess/test_index_dictionaries.py`: each case on fixtures, and the real complete-search
     and search script against `test_build_index_only_atomic`'s stub engine, on a dataset
     `build-index-only` built, then with another build's indel logs.
+- **An enriched-genome kit's member list** (`scripts/kit_members.py`): the md5 of each file a
+  kit (`build-inputs/<dataset>.tar.gz`) holds, by its path in it, in `md5sum`'s format, from the
+  folders the kit packs or from the tarball. The tarball is not byte-reproducible (tar records
+  each file's time, owner and listing order), so its `SHA256SUMS` proves that a download is the
+  published file, and the list, `build-inputs/<dataset>.members.md5` beside it, what the kit holds,
+  the same for any packing of the same files: `md5sum -c` checks a kit once unpacked. Covered by
+  `PostProcess/test_kit_members.py`.
 - **The index set of 2.10.0, the rebuild manifest** (`seq_script/rebuild/index_set_2.10.0.tsv`,
   `seq_script/rebuild/README.md`; the lean set decided on 2026-11-08). Every archive the rebuild
   builds and publishes, one line each, with its panel, PAM file, PAM, side, spacer length, N, the

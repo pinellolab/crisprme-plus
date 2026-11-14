@@ -176,6 +176,16 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin REF=... HGDP=.
 unset HF_TOKEN
 ```
 
+Beside each kit goes its member list, `build-inputs/<dataset>.members.md5`: the md5 of each
+file the kit holds, by its path in it, which `scripts/kit_members.py <working directory>
+<dataset>` writes into the working directory once the kit is packed (or `--kit <tarball> --out
+<list>`, from the tarball). The tarball is not byte-reproducible (tar records each file's time,
+owner and listing order), so its `SHA256SUMS` proves that a download is the published file, and
+the list what the kit holds, the same for any packing of the same files; a user checks an unpacked
+kit with `md5sum -c <dataset>.members.md5` in the folder it was unpacked in. The lists, and HPRC's
+normalised VCFs, go up after the publish half, with its environment (`docs/RELEASE_CHECKLIST.md`,
+Gate G), and each list's SHA-256 goes in `docs/INDEX_PROVENANCE.md` (2.10.0, each archive).
+
 Run against a stand-in for the Hub on 127.0.0.1 (`HF_ENDPOINT`; it answers the token check and
 refuses every upload) in the image the rebuild image was made from (`rc281f.sif`,
 `huggingface_hub` 2.4.0), on ml003 and ml007, a kit's upload as the manifest gives it sent no

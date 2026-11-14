@@ -164,7 +164,8 @@ The node and the threads are fixed; the rest is filled in from the build's logs 
 each row's `.time` and `.out`) and from the archives, before the publish: the wall time and the
 peak memory of its row, the size and SHA-256 of the archive (equal to the Hub's once uploaded:
 `indexes/SHA256SUMS`), and, for a kit, its member list's own SHA-256 (`<ds>.members.md5`, the
-md5 of each file the kit holds, as the tarball itself is not byte-reproducible).
+md5 of each file the kit holds, which `scripts/kit_members.py` writes, as the tarball itself is not
+byte-reproducible; the list goes beside the kit, `build-inputs/<ds>.members.md5`).
 
 | Archive | Node | Threads | Wall time | Size | SHA-256 |
 |---|---|---|---|---|---|
