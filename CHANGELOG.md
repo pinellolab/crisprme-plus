@@ -167,10 +167,13 @@ major.minor version (Changed). The main changes, each told in its entry below:
     beside Dictionaries of 2.8.1 put back. complete-search refuses such a search before it writes
     anything, for each dataset of the search: it reads the variant index the search takes against
     the dataset's indel logs, chromosome by chromosome, by their fake-indel windows (25/27 for an
-    index of 2.8.1, of index format 1, 30/30 for 2.10.0's), and says in one line which build each
-    is and what to do: search the index of 2.10.0 that replaces it (named, with its download
-    command), and remove the old one (its `rm -rf`, quoted for bash and zsh), or keep each
-    build's indexes in a data folder of their own (`PostProcess/index_dictionaries.py`;
+    index of 2.8.1, of index format 1, 30/30 for 2.10.0's: those its INDELS index records, or,
+    for an index of 2.8.1 whose INDELS index is not there or was built since in format 2, its own
+    format, as the search script builds an INDELS index that is not there from the fake-indel
+    genome in place), and says in one line which build each is and what to do: search the index
+    of 2.10.0 that replaces it (named, with its download command), and remove the old one (its
+    `rm -rf`, quoted for bash and zsh), or keep each build's indexes in a data folder of their
+    own (`PostProcess/index_dictionaries.py`;
     `docs/TROUBLESHOOTING.md` section 16). The search script, which the web app launches, refuses
     it before it searches the dataset. Each release's own pair runs, as does an index of 2.10.0
     built from 2.8.1's enriched-genome kit beside that kit's Dictionaries. Up to now such a search
@@ -178,7 +181,8 @@ major.minor version (Changed). The main changes, each told in its entry below:
     search refused the INDELS index chromosome by chromosome, hours later. Covered by
     `PostProcess/test_index_dictionaries.py`: each case on fixtures, and the real complete-search
     and search script against `test_build_index_only_atomic`'s stub engine, on a dataset
-    `build-index-only` built, then with another build's indel logs.
+    `build-index-only` built, then with another build's indel logs, and with another build's kit
+    and logs beside the index with its INDELS index removed.
 - **An enriched-genome kit's member list** (`scripts/kit_members.py`): the md5 of each file a
   kit (`build-inputs/<dataset>.tar.gz`) holds, by its path in it, in `md5sum`'s format, from the
   folders the kit packs or from the tarball. The tarball is not byte-reproducible (tar records

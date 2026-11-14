@@ -8,9 +8,9 @@ Dictionaries. The download said so on stdout; complete-search, and the search th
 ran it on, its SNP rows read with the other build's carriers, until its indel search refused the
 INDELS index chromosome by chromosome, hours later. Each now refuses it before anything is
 written, in one line that says what to do: the index of 2.8.1 (index format 1, its enrichment's
-fake-indel windows 25/27) beside Dictionaries of 2.10.0 (30/30), and the other way. Each
-release's own pair runs, and so does an index of 2.10.0 built from 2.8.1's enriched-genome kit
-beside that kit's Dictionaries.
+fake-indel windows 25/27) beside Dictionaries of 2.10.0 (30/30), its INDELS index there or not,
+and the other way. Each release's own pair runs, and so does an index of 2.10.0 built from
+2.8.1's enriched-genome kit beside that kit's Dictionaries.
 
 TheRefusal and TheCommandLine read fixtures of each case. ASearchRefusesItFirst runs the real
 complete-search and the search script as the web launches it, with the stub engine of
@@ -157,17 +157,22 @@ class TheRefusal(_Folder):
     def test_each_release_with_its_own_dictionaries_runs(self):
         cases = (
             # the upgrade path of an index of 2.8.1: 2.10.0 reads format 1, with its own logs
-            ("NRG_3_hg38+" + DS, 1, None, (25, 27)),
+            ("NRG_3_hg38+" + DS, 1, None, (25, 27), True),
+            # and without its INDELS index (its own format tells its build: the same)
+            ("NRG_3_hg38+" + DS, 1, None, (25, 27), False),
             # 2.10.0's index with its own
-            ("20-NRR_3_hg38+" + DS, 2, (30, 30), (30, 30)),
+            ("20-NRR_3_hg38+" + DS, 2, (30, 30), (30, 30), True),
             # an index of 2.10.0 built from 2.8.1's enriched-genome kit, beside that kit's
-            ("20-NRR_3_hg38+" + DS, 2, (25, 27), (25, 27)),
+            ("20-NRR_3_hg38+" + DS, 2, (25, 27), (25, 27), True),
+            # an index of format 1 that this CRISPRme built on CRISPRitz 2.9.1 from 2.10.0's
+            # kit: its sub-indexes, of format 1, built with it, record the kit's windows
+            ("20-NRR_3_hg38+" + DS, 1, (30, 30), (30, 30), True),
         )
-        for name, fmt, subs, logged in cases:
-            with self.subTest(name=name, logged=logged):
+        for name, fmt, subs, logged, indels in cases:
+            with self.subTest(name=name, logged=logged, indels=indels):
                 shutil.rmtree(self.lib)
                 shutil.rmtree(os.path.join(self.work, "Dictionaries"), ignore_errors=True)
-                idx = make_index(self.lib, name, fmt, sub_windows=subs)
+                idx = make_index(self.lib, name, fmt, sub_windows=subs, indels=indels)
                 write_logs(self.work, logged)
                 with engine(2):
                     self.assertIsNone(index_dictionaries.refusal(idx, self.work, DS))
@@ -183,17 +188,70 @@ class TheRefusal(_Folder):
         write_logs(self.work, (25, 27))
         with engine(2):
             self.assertIsNone(index_dictionaries.refusal(idx, self.work, DS))
+        # one of format 1 without its INDELS index: beside logs of no row; and where the
+        # installed CRISPRitz writes format 1 itself (2.9.1's, which states no INDEX_FORMAT), so
+        # that format 1 tells no build, as indel_window.earlier_windows reads it
+        shutil.rmtree(self.lib)
+        idx = make_index(self.lib, f"NRG_3_hg38+{DS}", 1, indels=False)
+        write_logs(self.work, None)
+        with engine(2):
+            self.assertIsNone(index_dictionaries.refusal(idx, self.work, DS))
+        write_logs(self.work, (30, 30))
+        with engine(None):
+            self.assertIsNone(index_dictionaries.refusal(idx, self.work, DS))
+        # and one this CRISPRme built (its record's built_by), on CRISPRitz 2.9.1, from the
+        # enrichment in place, whose windows its INDELS index, not there, recorded
+        with engine(None):
+            self.assertIsNone(index_fit.write_index_meta(idx, built=True))
+        self.assertIn("built_by", index_fit.read_index_meta(idx))
+        with engine(2):
+            self.assertIsNone(index_dictionaries.refusal(idx, self.work, DS))
         self.assertIsNone(index_dictionaries.refusal("", self.work, DS))
         self.assertIsNone(index_dictionaries.refusal(os.path.join(self.lib, "none"), self.work, DS))
 
-    def test_an_index_without_its_indels_index_tells_nothing_here(self):
-        """Its windows are those of its INDELS index, built with it: without one, nothing here
-        tells them (the search script refuses such an index, or builds its INDELS index from
-        the enrichment in place, whose fake-indel genome it reads against the logs first)."""
+    def test_an_index_of_2_8_1_without_its_indels_index_is_refused_by_its_own_format(self):
+        """Its INDELS index removed, or never copied: the search script builds one from the
+        fake-indel genome in place, which it reads against the logs alone, so with a kit of
+        2.10.0 beside 2.10.0's Dictionaries it built one and searched the index of 2.8.1 with
+        them, and nothing was said (the PP-14 review, A1-PP14-1). A variant index of format 1,
+        where the installed CRISPRitz writes format 2, was built by CRISPRitz 2.9.1 or earlier,
+        from an enrichment of 25/27: its own format tells its build."""
         idx = make_index(self.lib, f"NRG_3_hg38+{DS}", 1, indels=False)
         write_logs(self.work, (30, 30))
+        for format_engine, record in ((2, False), ("none on PATH", False), (2, True)):
+            with self.subTest(engine=format_engine, record=record):
+                if record:
+                    # (the record build-index-only writes of an index it finds in place: what
+                    # the index holds, and no build of this CRISPRme, built_by)
+                    self.assertIsNone(index_fit.write_index_meta(idx))
+                    self.assertNotIn("built_by", index_fit.read_index_meta(idx))
+                if format_engine == 2:
+                    with engine(2):
+                        why = index_dictionaries.refusal(idx, self.work, DS)
+                else:  # (no crispritz.py to tell: 2.10.0's, which CRISPRme 2.10.0 installs)
+                    with mock.patch.dict(os.environ, PATH=os.path.join(self.work, "no-bin")):
+                        why = index_dictionaries.refusal(idx, self.work, DS)
+                self.assertIsNotNone(why)
+                self.assertEqual(len(why.splitlines()), 1)
+                self.assertIn(f"NRG_3_hg38+{DS} is an index of a build of {DS} whose enrichment "
+                              "wrote fake-indel windows of 25/27 (CRISPRme 2.8.1 or earlier)", why)
+                self.assertIn("whose indel logs record windows of 30/30 (CRISPRme 2.10.0)", why)
+                self.assertIn(f"Search 20-NRG_3_hg38+{DS}, the index of CRISPRme 2.10.0 that "
+                              "replaces it", why)
+
+    def test_or_beside_the_indels_index_a_search_built_since_from_another_build(self):
+        """The same index once the search script has built its INDELS index from the fake-indel
+        genome of 2.10.0's kit: sub-indexes of format 2 that record 30/30, as the logs do. They
+        agree; the variant index, of format 1, still tells its build, and is refused."""
+        idx = make_index(self.lib, f"NRG_3_hg38+{DS}", 1, sub_windows=(30, 30), sub_format=2,
+                         chroms=("chr1", "chr22"))
+        write_logs(self.work, (30, 30), chroms=("chr1", "chr22"))
         with engine(2):
-            self.assertIsNone(index_dictionaries.refusal(idx, self.work, DS))
+            why = index_dictionaries.refusal(idx, self.work, DS)
+        self.assertIsNotNone(why)
+        self.assertIn("whose enrichment wrote fake-indel windows of 25/27 (CRISPRme 2.8.1 or "
+                      "earlier)", why)
+        self.assertIn(f"rm -rf {idx} {idx}_INDELS", why)
 
     def test_each_chromosome_is_read_against_its_own_log(self):
         """As the indel search reads them (pool_search_indels' _window_mismatch): a sub-index of
@@ -318,7 +376,8 @@ class ASearchRefusesItFirst(atomic._Fixture):
     build-index-only built here with the stub engine (whose fake-indel windows are 25/34), then
     on the same with its Dictionaries' indel logs another build's (30/30): the search goes past
     its checks of the index on the first, and is refused on the second, before anything is
-    written or searched."""
+    written or searched; and refused too where the index's INDELS index is not there, beside
+    another build's kit and Dictionaries, which agree, before the search builds one from them."""
 
     def other_builds_logs(self):
         """The dataset's indel logs replaced by another build's, of windows of 30/30."""
@@ -332,6 +391,26 @@ class ASearchRefusesItFirst(atomic._Fixture):
 
     def searches(self):
         return [c for c in self.calls() if c.split()[:1] == ["search"]]
+
+    def another_builds_kit_and_no_indels_index(self):
+        """After a build here, the state of an upgraded data folder whose index of 2.8.1 lost
+        its INDELS index: the dataset's indel logs and its fake-indel genome another build's,
+        which agree (30/30: a kit of 2.10.0 and its Dictionaries), the INDELS index removed, and
+        the engine stating index format 2, as CRISPRitz 2.10.0's does; the variant index stays
+        of format 1, with no record of its build, as an index of 2.8.1 is (the PP-14 review,
+        A1-PP14-1)."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.other_builds_logs()
+        for chrom, seq in atomic.GENOME.items():
+            _write(self.path("Genomes", "hg38+ds_INDELS", f"fake_ds_{chrom}", f"fake{chrom}.fa"),
+                   f">fake{chrom}\n{seq[9:40]}T{seq[40:70]}\n")
+        shutil.rmtree(self.lib(atomic.INDELS))
+        # (CRISPRme 2.8.1, which built it, wrote no record of an index's build)
+        os.remove(os.path.join(self.lib(atomic.VAR), index_fit.INDEX_META))
+        with open(os.path.join(self.bin, "crispritz.py"), "a") as fh:
+            fh.write("\nINDEX_FORMAT = 2\n")
+        os.remove(self.log)
 
     def test_its_own_dictionaries_are_searched(self):
         rc, out, err = self.run_bio()
@@ -365,6 +444,29 @@ class ASearchRefusesItFirst(atomic._Fixture):
                                        f"enrichment wrote fake-indel windows of 25/34"), err)
         self.assertEqual(len(err.splitlines()), 1, err)
         self.assertEqual(self.searches(), [])
+
+    def test_an_index_without_its_indels_index_is_refused_before_one_is_built(self):
+        """The search script builds an INDELS index that is not there from the fake-indel
+        genome in place, which it reads against the logs alone: here they agree, so it built
+        one (30/30) and searched the variant index of format 1 with the other build's
+        Dictionaries, and complete-search launched the job. Both refuse it first now, by the
+        variant index's own format, and nothing is built or searched."""
+        self.another_builds_kit_and_no_indels_index()
+        said = (f"{atomic.VAR} is an index of a build of ds whose enrichment wrote fake-indel "
+                f"windows of 25/27 (CRISPRme 2.8.1 or earlier), and the Dictionaries of ds in "
+                f"{self.path('Dictionaries')} are of another build, whose indel logs record "
+                f"windows of 30/30 (CRISPRme 2.10.0)")
+        rc, out, err = self.run_search(environ={"STUB_FORMAT2": "fake"})
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("Error: " + said, err)
+        self.assertNotIn("Launching job ", out)
+        self.assertEqual(os.listdir(self.path("Results", "search")), [])
+        rc, out, err = self.run_web_search(STUB_FORMAT2="fake")
+        self.assertEqual(rc, 1, out + err)
+        self.assertTrue(err.startswith("ERROR: " + said), err)
+        self.assertEqual(len(err.splitlines()), 1, err)
+        self.assertEqual(self.searches(), [])
+        self.assertFalse(os.path.exists(self.lib(atomic.INDELS)))
 
 
 if __name__ == "__main__":
