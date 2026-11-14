@@ -2250,23 +2250,23 @@ major.minor version (Changed). The main changes, each told in its entry below:
   (`submit_job_automated_new_multiple_vcfs.sh`, as up to 2.8.1). The `pr` of uutils (rust-coreutils
   0.10.0), the default coreutils of Ubuntu 26.04 and of GitHub's ubuntu-latest from November 2026,
   joins the lines with no tab between two lists and pads the table with blank lines. A Bioconda or
-  source install on such a host stopped its searches at "Integrating results" (`Row begins with a
-  tab or space`, then an `IndexError` of `resultIntegrator.py`; the per-sample chr22 search below
-  had 3,278 rows of 70 columns where a row has 72, then 84 blank lines), after it had made its
-  summaries and plots of the broken table (docs/TROUBLESHOOTING.md section 17). The release image
-  runs Debian's GNU coreutils and was not affected. The lists are joined with `paste` now. On 29
-  cases (rows with tabs, empty lists, lists of unequal lengths, lines of 1 and 8 MiB, no final
-  newline, empty lines, 10,000 rows) `paste` gives the same bytes with GNU coreutils 8.32 and 9.7
-  and with uutils 0.10.0, and GNU `pr`'s on all but two, where GNU `pr` changed the row itself: a
-  run of two spaces or more that crosses a tab stop, which it turned into tabs (a column more), and
-  a form feed, which it took for a new page (that list a row behind from there). On real data, the
-  per-sample and the population-level chr22 searches of HPRC (the README guide, NRR, 4 mismatches +
-  1 DNA + 1 RNA bulge, CFD only) wrote the same bytes before and after the change in the release
-  image (the joined tables of 3,279 and 3,405 lines, the integrated results, the alternative
-  alignments, the database, the summaries and the plots), and the same bytes again from
-  `environment.yml`'s environment on Ubuntu 26.04, with its uutils coreutils and with conda-forge's
-  GNU coreutils 9.12 (the logs' times and the run's own paths aside). The two sorts of the search
-  that ran in the user's locale, `cluster.dict.py`'s of the indel targets and
+  source install on such a host stopped its searches at "Integrating results", where BEDOPS'
+  sort-bed reads the table (`Row begins with a tab or space`), after it had made its summaries and
+  plots of it: the per-sample chr22 search below, with this release's code before the change, wrote
+  3,278 rows of 70 columns where a row has 72, then 84 blank lines (docs/TROUBLESHOOTING.md section
+  17). The release image runs Debian's GNU coreutils and was not affected. The lists are joined
+  with `paste` now. On 29 cases (rows with tabs, empty lists, lists of unequal lengths, lines of 1
+  and 8 MiB, no final newline, empty lines, 10,000 rows) `paste` gives the same bytes with GNU
+  coreutils 8.32 and 9.7 and with uutils 0.10.0, and GNU `pr`'s on all but two, where GNU `pr`
+  changed the row itself: a run of two spaces or more that crosses a tab stop, which it turned into
+  tabs (a column more), and a form feed, which it took for a new page (that list a row behind from
+  there). On real data, the per-sample and the population-level chr22 searches of HPRC (the README
+  guide, NRR, 4 mismatches + 1 DNA + 1 RNA bulge, CFD only) wrote the same bytes before and after
+  the change in the release image (the joined tables of 3,279 and 3,405 lines, the integrated
+  results, the alternative alignments, the database, the summaries and the plots), and the same
+  bytes again from `environment.yml`'s environment on Ubuntu 26.04, with its uutils coreutils and
+  with conda-forge's GNU coreutils 9.12 (the logs' times and the run's own paths aside). The two
+  sorts of the search that ran in the user's locale, `cluster.dict.py`'s of the indel targets and
   `process_summaries.py`'s of the summary by guide, run with `LC_ALL=C`, as every other sort of its
   rows does: under en_US.UTF-8 the rows of an indel cluster that tie on its keys came in another
   order, which the sort by total keeps. And `environment.yml` and the Bioconda recipe install

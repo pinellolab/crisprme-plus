@@ -673,10 +673,10 @@ reads it, as above. Or install the indexes of 2.10.0 in a new data folder, which
 
 **Symptom.** A search of a Bioconda or source install of CRISPRme 2.8.1 or earlier, on Ubuntu
 26.04 or another host whose coreutils are uutils' (rust-coreutils), ends with `CRISPRme run
-failed. Failed during stage: Integrating results`, and its `log_error.txt` says `Row begins with
-a tab or space at line <N> in <output folder>/<job>.bestMerge.txt.bed.` and an `IndexError` of
-`resultIntegrator.py`. Its `<job>.bestMerge.txt` holds rows of 70 columns where a row has 72,
-and blank lines after them; the summaries and the plots the search made from it before that
+failed. Failed during stage: Integrating results`, and its `log_error.txt` opens with `Row begins
+with a tab or space at line <N> in <output folder>/<job>.bestMerge.txt.bed.` (BEDOPS' sort-bed,
+which reads the table there). Its `<job>.bestMerge.txt` holds rows of 70 columns where a row has
+72, and blank lines after them; the summaries and the plots the search made from it before that
 stage are wrong too.
 
 **Cause.** The search joins its three lists of each site's best alignment (by CFD, by fewest
