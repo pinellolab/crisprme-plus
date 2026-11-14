@@ -541,8 +541,9 @@ major.minor version (Changed). The main changes, each told in its entry below:
     (every SNV, MNV and indel of a slot), keeps its own map from haplotype bases to
     reference coordinates and aligns with its own exhaustive dynamic-programming aligner. A
     row's variants are read with REF and ALT in upper case, as every record, as VCF 4.x reads
-    them (HPRC chr22, normalised as CRISPRme builds it, holds 1,546 indel records in lower case,
-    which a release before this one names as written and this one in upper case: Fixed).
+    them (HPRC chr22, normalised as CRISPRme builds it, holds 1,546 indel records in lower case
+    in v2.0 of the HPRC graph, 2.8.1's input, and 956 in v2.1, 2.10.0's; a release before this
+    one names them as written and this one in upper case: Fixed).
   - **The truth is the VCF.** A slot holds a row's target when it reads the target's bases
     from the row's start through the row's record: each base the record puts in the target
     at its place, and the base after them, its SNP alts in the stretch read the row's named
@@ -1920,6 +1921,9 @@ major.minor version (Changed). The main changes, each told in its entry below:
     `download --what vcf --dataset hg38_HPRC` fetches 2.8.1's input of v2.0 from
     `lucapinello/crisprme-data`; the publish of the rebuild is to host the normalised VCFs of
     v2.1 that the index reads.
+  - Elsewhere in this release's notes, a figure of HPRC chr22 that names no version is v2.0's:
+    the development of 2.10.0 measured it on v2.0, before this change, as METHODS says of its
+    own figures.
 - **Code that did nothing is gone.** `PostProcess/pool_search_indels.py` drops `_index_pam`, a
   helper nothing called; the results page's sample tab no longer computes paths it never reads;
   and `remove_contiguous_samples.py` reads a variant token as an indel's in one place, for the
