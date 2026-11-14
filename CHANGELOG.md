@@ -225,7 +225,14 @@ major.minor version (Changed). The main changes, each told in its entry below:
   build half passes a kit whose `SHA256SUMS` holds and mega's build where every part its recipe
   makes is there: the recipe refuses a working directory that holds any part of the dataset, so a
   re-run stopped at its line, exit 1. The lines of the build half are the manifest's, as the
-  rebuild of 2.10.0's indexes ran them (md5 `7389f7e234d4e617860f8f9b34abdc49`). The check runs the
+  rebuild of 2.10.0's indexes ran them (md5 `7389f7e234d4e617860f8f9b34abdc49`). The publish half
+  uploads with the release image's own `hf` and a token given in the environment, `HF_TOKEN`: the
+  image sets `HF_HUB_DISABLE_IMPLICIT_TOKEN=1`, so the kits' uploads (`$RUN hf upload ...`) sent no
+  token and failed as documented, after the indexes had gone up (PP-1 of the release). It exports
+  `APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0` and `PYTHONNOUSERSITE=1`, and checks before its
+  first upload that the token is set, reaches the image and is sent there, that the `hf` it runs
+  is the image's own (beside its `crisprme.py`), that the token authenticates and that the repo is
+  there (`hf` creates a repo that is not), stopping with what to do where one fails. The check runs the
   two halves dry, then each again, every program they call stubbed, in temporary working
   directories that hold the genome folders and sources the rebuild takes, from a copy of the
   repository's root made of links: each runs to its end only where every script it calls is

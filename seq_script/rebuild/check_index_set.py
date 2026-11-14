@@ -604,6 +604,53 @@ def _done_checks(half):
     return lines
 
 
+# What a clean environment's PATH is: the publish half runs the image's own hf only with it (a login
+# shell's PATH puts the hf of ~/.local/bin ahead of the image's, which apptainer passes in)
+CLEAN_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+
+def _publish_checks():
+    """The publish half's preflight, before its first upload (README, "The publish"; PP-1 and
+    PP-2 of the release). The image sets HF_HUB_DISABLE_IMPLICIT_TOKEN=1, so a bare `hf upload`
+    in it sends no token, and from a login shell `$RUN hf` ran the host's ~/.local/bin/hf: the
+    kits' uploads failed as documented, after the indexes' had gone up (the D7 readiness audit,
+    R-PUB-1, G-P5). So: HF_TOKEN in the environment (never on a command line: no command of the
+    set passes one); its override for the image's hf, exported for apptainer
+    (APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0; Docker's RUN gives -e HF_TOKEN -e
+    HF_HUB_DISABLE_IMPLICIT_TOKEN=0), and PYTHONNOUSERSITE=1, so that the image's python reads
+    no package of ~/.local; then, in the image, the token there and not refused by that setting,
+    the hf it runs installed beside its crisprme.py (the image's own), the token authenticating
+    (hf auth whoami), and the repo of index format 2 there (hf datasets info): its owner creates
+    it, and `hf upload` would create one that is not there."""
+    repo = crisprme_hf.FORMAT2_HF_REPO
+    return [
+        "# the preflight (seq_script/rebuild/README.md, \"The publish\"): the token in the "
+        "environment, sent by the image's own hf, and the repo there",
+        "_stop() { echo \"publish: $*\" >&2; exit 2; }",
+        f': "${{HF_TOKEN:?the token that publishes, a write token of {repo}, exported in the '
+        f'environment: never on a command line, which ps shows}}"',
+        "export APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0 "
+        "SINGULARITYENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0 PYTHONNOUSERSITE=1",
+        "$RUN sh -c '[ -n \"${HF_TOKEN:-}\" ] && case $(printf %s "
+        "\"${HF_HUB_DISABLE_IMPLICIT_TOKEN:-}\" | tr a-z A-Z) in 1|ON|YES|TRUE) exit 1;; esac' "
+        "|| _stop \"the release image would upload with no token: HF_TOKEN does not reach it, or "
+        "its HF_HUB_DISABLE_IMPLICIT_TOKEN=1 holds there (apptainer takes this script's "
+        "APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0 unless run with --cleanenv; a RUN of Docker "
+        "gives docker run -e HF_TOKEN -e HF_HUB_DISABLE_IMPLICIT_TOKEN=0)\"",
+        "_hf=$($RUN sh -c 'command -v hf') && _me=$($RUN sh -c 'command -v crisprme.py') "
+        "|| _stop \"no hf, or no crisprme.py, where \\$RUN runs them\"",
+        "[ \"${_hf%/*}\" = \"${_me%/*}\" ] || _stop \"$_hf is the hf \\$RUN would run, not the "
+        "release image's own, installed beside its crisprme.py ($_me): run this script with a "
+        f"clean PATH, PATH={CLEAN_PATH} bash <this script> (a login shell's PATH puts the hf of "
+        "~/.local/bin first)\"",
+        "$RUN hf auth whoami > /dev/null || _stop \"HF_TOKEN does not authenticate on the Hub "
+        "(hf auth whoami)\"",
+        f"$RUN hf datasets info {repo} > /dev/null || _stop \"{repo} is not on the Hub, or "
+        f"HF_TOKEN cannot read it: its owner creates it, with its card, before the first publish "
+        f"(docs/hf/README.md), and gives the token write access to it\"",
+    ]
+
+
 def _row_lines(r, half):
     """Row ``r``'s command of ``half`` as the rebuild runs it: the line itself, unchanged (its
     command, then || exit with what failed, then its archive and note as a comment), run where
@@ -666,6 +713,8 @@ def commands_script(rows, manifest=MANIFEST, half="build"):
         lines.append(f': "${{{name}{"?" if name in MAY_BE_EMPTY else ":?"}{text}}}"')
     if half == "build":
         lines += _genome_checks(used)
+    else:
+        lines += _publish_checks()
     lines += _done_checks(half)
     lines.append(f"# {half}")
     for r in rows:
@@ -730,6 +779,10 @@ if name == "crisprme.py":
         log("publish-index", need(opt("--index"), "the index", os.path.isdir))
     else:
         fail("crisprme.py %s is not a command of the rebuild" % " ".join(args[:1]))
+elif name == "hf" and args[:2] == ["auth", "whoami"]:
+    log("whoami")
+elif name == "hf" and args[:2] == ["datasets", "info"] and len(args) > 2:
+    log("repo", args[2])
 elif name in ("hf", "huggingface-cli"):
     if args[:1] != ["upload"] or len(args) < 4:
         fail("not hf upload <repo> <file> <path in the repo>")
@@ -813,7 +866,7 @@ def dry_run(rows, root=ROOT, manifest=MANIFEST):
             os.symlink(stub, os.path.join(stubs, n))
         env = {"PATH": os.pathsep.join([stubs, "/usr/bin", "/bin", "/usr/sbin", "/sbin"]),
                "HOME": os.path.join(t, "home"), "LC_ALL": "C",
-               "RUN": "env CRISPRME_REBUILD_IMAGE=1",
+               "RUN": "env CRISPRME_REBUILD_IMAGE=1", "HF_TOKEN": "dry-run-not-a-token",
                "CRISPRME_DRY_RUN_TMP": t, "CRISPRME_DRY_RUN_REPO": os.path.realpath(root),
                "CRISPRME_DRY_RUN_LOG": os.path.join(t, "log"),
                "CRISPRME_DRY_RUN_PENDING": ":".join(
@@ -898,6 +951,12 @@ def dry_run(rows, root=ROOT, manifest=MANIFEST):
                             f"{', '.join(sorted(set(acts(log, 'publish'))))}")
         rc, log = run("publish", "")
         if rc == 0:
+            first = next((i for i, x in enumerate(log) if len(x) > 2
+                          and x[2] in ("publish-index", "upload")), None)
+            checked = {x[2] for x in log[:first] if len(x) > 2}
+            if first is not None and not {"whoami", "repo"} <= checked:
+                problems.append("the rebuild's publish half, run dry, publishes before it checks "
+                                "that the token authenticates and the repo is there")
             if acts(log, "build"):
                 problems.append(f"the rebuild's publish half, run dry, builds: "
                                 f"{', '.join(sorted(set(acts(log, 'build'))))}")

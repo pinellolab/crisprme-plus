@@ -15,9 +15,16 @@ push them to Hugging Face as part of the release:
 | `crisprme-data_README.md` | [`lucapinello/crisprme-data`](https://huggingface.co/datasets/lucapinello/crisprme-data): the reference data of every release, and the index archives of 2.8.1 (index format 1) |
 | `crisprme-data-general-index_README.md` | [`lucapinello/crisprme-data-general-index`](https://huggingface.co/datasets/lucapinello/crisprme-data-general-index): the general (8-nt flank) index archives of 2.8.1 |
 
-Push with `hf upload`, the command line of `huggingface_hub`, and a write token (`hf auth login`,
-or `HF_TOKEN`); its older `huggingface-cli` fails with the `huggingface_hub` of CRISPRme 2.8.1's
-image (2.4.0):
+Push with `hf upload`, the command line of `huggingface_hub` (these commands are `hf`'s in
+`huggingface_hub` 2.4.0, the release image's, and in the 1.x line), and a write token (`hf auth
+login`, or `HF_TOKEN`); its older `huggingface-cli` fails with the `huggingface_hub` of the release
+image (2.4.0). Push a repo's card once its owner has created the repo: `hf upload` creates a repo
+that is not there, under the token's account. Run in the release image (`$RUN hf upload ...`), `hf`
+sends no token unless told to: the image sets `HF_HUB_DISABLE_IMPLICIT_TOKEN=1`, so give
+`HF_TOKEN` in the environment with `APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0` (apptainer; a
+host variable of that name does not reach the image) or `-e HF_TOKEN -e
+HF_HUB_DISABLE_IMPLICIT_TOKEN=0` (Docker), as the rebuild's publish half does
+(`seq_script/rebuild/README.md`, "The publish"):
 
 ```bash
 hf upload lucapinello/crisprme-indexes-format2 \

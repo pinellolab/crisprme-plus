@@ -72,8 +72,8 @@ it serves for its own guide length (`index_fit.fits`).
    (`hprc_build.sh`), into the image: their working directories and inputs lie there, and `$RUN`
    binds the working directories and the repository's checkout (mega's recipe runs the
    repository's `PostProcess/` in the image).
-3. **Publish each panel as a unit** into `lucapinello/crisprme-indexes-format2`, which must exist
-   first: `publish-index` creates no repo, so its owner creates the dataset repo, and pushes its
+3. **Publish each panel as a unit** into `lucapinello/crisprme-indexes-format2` (the publish half,
+   once: The publish, below), which must exist first: `publish-index` creates no repo, so its owner creates the dataset repo, and pushes its
    card, `docs/hf/crisprme-indexes-format2_README.md` (`docs/hf/README.md`), before the first
    publish. Then write `indexes/SHA256SUMS` from the Hub's own
    checksums once its uploads are done, `python scripts/hf_sha256sums.py
@@ -143,6 +143,40 @@ again, which the tools keep where it is in place ("already present", a few secon
 passes the kits and mega. To build a row again, remove its mark and what it built. A mega build
 that stopped partway is refused by its recipe until its parts are gone: move `$MEGA` aside, put
 back its genome folder, and run the build half again.
+
+**The publish.** The publish half uploads with the release image's own `hf` and `crisprme.py`
+(`$RUN`), with a token given in the environment, `HF_TOKEN`, a write token of
+`lucapinello/crisprme-indexes-format2` (a fine-grained token lists the repo, which its owner adds
+once the repo exists), never on a command line, which `ps` shows. The image sets
+`HF_HUB_DISABLE_IMPLICIT_TOKEN=1`, so its `hf upload` sends no token unless that is overridden in
+it: under apptainer by `APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0`, which the script exports
+itself (a host variable `HF_HUB_DISABLE_IMPLICIT_TOKEN=0` does not reach the image), and with
+Docker by the `RUN` given (`docker run -e HF_TOKEN -e HF_HUB_DISABLE_IMPLICIT_TOKEN=0 ...`). It
+exports `PYTHONNOUSERSITE=1` too, so that the image's Python reads no package of `~/.local`,
+which apptainer's bind of `$HOME` puts on its path. Before its first upload it checks, and stops
+(exit 2) saying what to do, where: `HF_TOKEN` is not set; the token does not reach the image, or
+the image would not send it; the `hf` that `$RUN` runs is not the one installed beside its
+`crisprme.py` (the image's own: a login shell's `PATH` can put `~/.local/bin/hf` first, so run it
+with a clean `PATH`); the token does not authenticate (`hf auth whoami`); or the repo is not
+there (`hf datasets info`: its owner creates it, with its card, first; `hf upload` would create
+a repo that is not there, under the token's account). The kits go up as the manifest gives it,
+`$RUN hf upload lucapinello/crisprme-indexes-format2 <kit> build-inputs/<kit> --repo-type dataset`,
+the command of `hf` in `huggingface_hub` 2.4.0, the image's. On a node:
+
+```bash
+read -rs HF_TOKEN && export HF_TOKEN     # typed, not echoed; or read from a file only you can read
+python seq_script/rebuild/check_index_set.py --commands publish > publish.sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin REF=... HGDP=... HPRC=... MEGA=... \
+  RUN="apptainer exec --bind /srv/local $SIF /usr/local/bin/_entrypoint.sh" bash publish.sh
+unset HF_TOKEN
+```
+
+Run against a stand-in for the Hub on 127.0.0.1 (`HF_ENDPOINT`; it answers the token check and
+refuses every upload) in the image the rebuild image was made from (`rc281f.sif`,
+`huggingface_hub` 2.4.0), on ml003 and ml007, a kit's upload as the manifest gives it sent no
+token without the override and sent it with the script's exports, as `docs/hf/README.md`'s
+card upload did; the preflight passed with a token and stopped without one, and stopped where
+the token did not reach the image (`apptainer exec --cleanenv`).
 
 The check holds when: every PAM file exists and gives the row's PAM, side and spacer; N = max(bDNA,
 bRNA) + 1; every index's name is the one `build-index-only` gives its PAM file

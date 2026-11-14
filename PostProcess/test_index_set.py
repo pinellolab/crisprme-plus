@@ -690,5 +690,124 @@ class TheRebuildHasTwoHalves(unittest.TestCase):
         self.assertIn("rebuild: the build of 20-NRR_3_hg38+hg38_mega failed", err)
 
 
+class ThePublishChecksItsTokenFirst(unittest.TestCase):
+    """The kits' uploads, `$RUN hf upload ...`, failed as the README documented them, after the
+    indexes' had gone up: the image sets HF_HUB_DISABLE_IMPLICIT_TOKEN=1, so its hf sends no
+    token (only APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0 overrides it under apptainer, a host
+    variable of that name does not), and from a login shell `$RUN hf` ran the host's
+    ~/.local/bin/hf (the D7 readiness audit, R-PUB-1, G-P5; PP-1 of the release). The publish
+    half checks first, before any upload: HF_TOKEN in the environment, exported for the image's
+    hf with the override, not refused there, the hf it runs the one beside its crisprme.py, the
+    token authenticating and the repo there. Here hf and crisprme.py are stubs on PATH, $RUN
+    empty, so that this host stands for the image."""
+
+    def setUp(self):
+        self.rows = cis.read_manifest()
+
+    def run_publish(self, token=True, hf_apart=False, whoami=0, info=0, **env_extra):
+        """The publish half run from the repository's root: (exit status, stderr, the stubs'
+        log, one line a call: the program, then what the image's environment held, then its
+        arguments)."""
+        import shutil
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as t:
+            image = os.path.join(t, "image", "bin")
+            local = os.path.join(t, "home", ".local", "bin")
+            os.makedirs(image)
+            os.makedirs(local)
+            log = os.path.join(t, "log")
+            stub = ("#!/bin/sh\n"
+                    "echo \"${0##*/} implicit=${APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN:-} "
+                    "usersite=${PYTHONNOUSERSITE:-} $*\" >> %s\n"
+                    "case \"$1 $2\" in \"auth whoami\") exit %d;; \"datasets info\") exit %d;; "
+                    "esac\nexit 0\n" % (log, whoami, info))
+            for folder, name in ((local if hf_apart else image, "hf"), (image, "crisprme.py")):
+                with open(os.path.join(folder, name), "w") as fh:
+                    fh.write(stub)
+                os.chmod(os.path.join(folder, name), 0o755)
+            env = {"PATH": os.pathsep.join([local, image, "/usr/bin", "/bin"]),
+                   "HOME": os.path.join(t, "home"), "LC_ALL": "C", "RUN": ""}
+            for v in ("REF", "HGDP", "HPRC", "MEGA"):
+                env[v] = os.path.join(t, v)
+                os.makedirs(env[v])
+            if token:
+                env["HF_TOKEN"] = "test-not-a-token"
+            env.update(env_extra)
+            got = subprocess.run([shutil.which("bash"), "-c",
+                                  cis.commands_script(self.rows, half="publish")],
+                                 cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+            calls = []
+            if os.path.exists(log):
+                with open(log) as fh:
+                    calls = fh.read().splitlines()
+            return got.returncode, got.stderr, calls
+
+    def uploads(self, calls):
+        return [c for c in calls if " upload " in c or " publish-index " in c]
+
+    def test_with_its_token_and_the_image_s_hf_it_checks_then_publishes(self):
+        rc, err, calls = self.run_publish()
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual([c.split()[0] + " " + " ".join(c.split()[3:5]) for c in calls[:2]],
+                         ["hf auth whoami", "hf datasets info"])
+        self.assertIn("hf implicit=0 usersite=1 datasets info lucapinello/crisprme-indexes-format2",
+                      calls[1])
+        # every archive then, each command with the override exported for the image's hf
+        self.assertEqual(len(self.uploads(calls)),
+                         sum(r["kind"] in cis.INDEX_KINDS for r in self.rows) + 3 * 2)
+        for c in self.uploads(calls):
+            self.assertIn(" implicit=0 usersite=1 ", c)
+        kits = [c for c in calls if c.startswith("hf ") and " upload " in c]
+        self.assertTrue(kits)
+        for c in kits:
+            self.assertTrue(c.endswith(" --repo-type dataset"), c)
+
+    def test_no_token_in_the_environment_publishes_nothing(self):
+        rc, err, calls = self.run_publish(token=False)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("HF_TOKEN: the token that publishes, a write token of "
+                      "lucapinello/crisprme-indexes-format2, exported in the environment: never "
+                      "on a command line", err)
+        self.assertEqual(calls, [])
+
+    def test_an_image_that_would_send_no_token_publishes_nothing(self):
+        for value in ("1", "true", "YES", "on"):
+            with self.subTest(value=value):
+                rc, err, calls = self.run_publish(HF_HUB_DISABLE_IMPLICIT_TOKEN=value)
+                self.assertEqual(rc, 2, err)
+                self.assertIn("publish: the release image would upload with no token", err)
+                self.assertIn("docker run -e HF_TOKEN -e HF_HUB_DISABLE_IMPLICIT_TOKEN=0", err)
+                self.assertEqual(self.uploads(calls), [])
+        rc, err, calls = self.run_publish(HF_HUB_DISABLE_IMPLICIT_TOKEN="0")
+        self.assertEqual((rc, err), (0, ""))
+
+    def test_an_hf_that_is_not_the_image_s_own_publishes_nothing(self):
+        rc, err, calls = self.run_publish(hf_apart=True)
+        self.assertEqual(rc, 2, err)
+        self.assertIn("/home/.local/bin/hf is the hf $RUN would run, not the release image's own, "
+                      "installed beside its crisprme.py", err)
+        self.assertIn("PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin bash", err)
+        self.assertEqual(self.uploads(calls), [])
+
+    def test_a_token_that_does_not_authenticate_or_no_repo_publishes_nothing(self):
+        rc, err, calls = self.run_publish(whoami=1)
+        self.assertEqual(rc, 2, err)
+        self.assertIn("publish: HF_TOKEN does not authenticate on the Hub", err)
+        self.assertEqual(self.uploads(calls), [])
+        rc, err, calls = self.run_publish(info=1)
+        self.assertEqual(rc, 2, err)
+        self.assertIn("publish: lucapinello/crisprme-indexes-format2 is not on the Hub, or "
+                      "HF_TOKEN cannot read it: its owner creates it", err)
+        self.assertEqual(self.uploads(calls), [])
+
+    def test_a_publish_half_that_does_not_check_first_is_found(self):
+        from unittest import mock
+        with mock.patch.object(cis, "_publish_checks", lambda: []):
+            dry = cis.dry_run(self.rows)
+        self.assertIn("the rebuild's publish half, run dry, publishes before it checks that the "
+                      "token authenticates and the repo is there", dry)
+
+
 if __name__ == "__main__":
     unittest.main()
