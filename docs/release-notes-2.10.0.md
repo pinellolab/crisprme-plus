@@ -73,6 +73,13 @@ describes the methods.
   index of 2.8.1 beside them is refused before it writes anything, with what to do: search the
   index of 2.10.0 that replaces it, or keep the old one in a data folder of its own
   ([TROUBLESHOOTING §16](https://github.com/pinellolab/crisprme-plus/blob/v2.10.0/docs/TROUBLESHOOTING.md)).
+- **After installing an index of 2.10.0 of a panel that 2.8.1 built or installed in that data
+  folder**, remove the panel's `Dictionaries/dictionaries_<panel>` (2.8.1's `build-index-only`
+  wrote them; 2.10.0's Dictionaries bundle does not carry them, so they stay), and its
+  `Dictionaries/genotypes_<panel>` unless the download installed 2.10.0's genotype store: a search
+  reads both where they are, and nothing checks them
+  ([TROUBLESHOOTING §16](https://github.com/pinellolab/crisprme-plus/blob/v2.10.0/docs/TROUBLESHOOTING.md)).
+  A new data folder has neither.
 - Re-run any variant search made with 2.8.1 or earlier where its result matters: the coding of
   split sites, the indel windows, the index format, the default PAM and HPRC's data all change
   rows.

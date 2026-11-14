@@ -625,14 +625,17 @@ class _Fixture(unittest.TestCase):
         return self.finish(self.start(command=command, CRISPRME_SKIP_SCORER_ENV="1",
                                       **(environ or {})))
 
-    def run_web_search(self, **environ):
+    def run_web_search(self, datasets=("ds",), **environ):
         """The search the web UI launches (pages/main_page.py): the search script run
         straight, not complete-search, with the job directory, environment and
-        arguments it gives it (and environ), into a job directory of its own. Returns
-        its exit status, stdout and log_error.txt."""
+        arguments it gives it (and environ), into a job directory of its own, of the
+        datasets ``datasets`` (a line each of .list_vcfs.txt and .samplesID.txt, as the
+        web writes them). Returns its exit status, stdout and log_error.txt."""
         job = self.path("Results", "web")
         shutil.rmtree(job, ignore_errors=True)
-        for name, text in ((".list_vcfs.txt", "ds\n"), (".samplesID.txt", "hg38_ds.samplesID.txt\n"),
+        for name, text in ((".list_vcfs.txt", "".join(f"{d}\n" for d in datasets)),
+                           (".samplesID.txt",
+                            "".join(f"hg38_{d}.samplesID.txt\n" for d in datasets)),
                            (".guides.txt", GENOME["chr1"][:20] + "NNN\n"), ("vuoto.txt", "")):
             _write(os.path.join(job, name), text)
         empty = os.path.join(job, "vuoto.txt")

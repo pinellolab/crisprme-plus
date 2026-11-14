@@ -578,8 +578,8 @@ fake-indel windows of 25/27 (CRISPRme 2.8.1 or earlier), and the Dictionaries of
 <data folder>/Dictionaries are of another build, whose indel logs record windows of 30/30
 (CRISPRme 2.10.0): a search of it would read the alleles of one build with the carriers and
 frequencies of the other. ...`; a search the web app launched ends at once with the same line,
-`ERROR: ...`, in its `log_error.txt`. Or the other way: an index of 2.10.0 (windows of 30/30)
-beside Dictionaries of 25/27.
+`ERROR: ...`, in its `log_error.txt`, before it searches any of its datasets. Or the other way: an
+index of 2.10.0 (windows of 30/30) beside Dictionaries of 25/27.
 
 **Cause.** The data folder holds indexes of CRISPRme 2.8.1 and was upgraded: a download of an index
 of 2.10.0 (`20-NRR_3_hg38+hg38_HGDP1kGP`, say, from the command line or from the web Settings page)
@@ -611,3 +611,26 @@ Dictionaries:
   <new data folder>`, after `crisprme.py download --what all --path <new data folder>`.
 - **The other way**, an index of 2.10.0 beside Dictionaries of 2.8.1: download it again into a new
   data folder, which installs the Dictionaries it was built with, and search it there.
+
+**Not checked: 2.8.1's per-sample dictionaries and genotype store.** The check reads the
+Dictionaries by their indel logs alone, which a download of 2.10.0 replaces. It does not read two
+folders of 2.8.1 that a download of an index of 2.10.0 can leave beside them, and that a search of
+that index then reads:
+
+- `Dictionaries/dictionaries_<panel>`, the per-sample dictionaries that 2.8.1's `build-index-only`
+  writes. The Dictionaries bundle of 2.10.0 does not carry them, so its install leaves a panel's
+  built with 2.8.1 in place, and a search then takes each site's alleles, carriers and rsIDs from
+  them, and only the frequencies from 2.10.0's registry: at a split site, the last record's ALT
+  alone, as 2.8.1 coded it.
+- `Dictionaries/genotypes_<panel>`, the genotype store of 2.8.1, which its downloads of HGDP + 1000
+  Genomes and HPRC installed, and its `build-index-only` wrote given `--samplesID`. A download of
+  2.10.0 replaces it with its own store, but not with `--no-genotypes`, nor where the store's fetch
+  failed (`NOTE: could not fetch Tier-1 genotype store ...`), and a later download of that index
+  takes the old one for installed.
+
+So after installing an index of 2.10.0 of a panel that 2.8.1 built or installed in that data
+folder, remove the panel's `Dictionaries/dictionaries_<panel>`, and its
+`Dictionaries/genotypes_<panel>` unless the download said `Installed Tier-1 genotype store
+genotypes_<panel>/`; then download the index again, without `--no-genotypes`, where you want the
+store, which installs 2.10.0's. Or install the indexes of 2.10.0 in a new data folder, which holds
+none of 2.8.1's.

@@ -26,13 +26,17 @@ built since in format 2 (the search script builds an INDELS index that is not th
 fake-indel genome in place, which another build's kit may have put there). A search of an
 index whose windows are not those of its dataset's indel logs is refused before anything is
 written (refusal), by complete-search's pre-flight for each dataset it names, and by the search
-script, which the web launches, before it searches the dataset: the check the indel search makes
-of each chromosome (pool_search_indels' _window_mismatch), made first. Each release's own pair
-runs, as does an index of 2.10.0 built from the enriched-genome kit of 2.8.1 beside that kit's
-Dictionaries (25/27 on both sides). Where a side holds no window (indel logs without a row, as a
-dataset without indels has; an index of format 2 without its INDELS index, as a variant index
-of format 2 records no window of its own), nothing tells the builds apart, and nothing is
-refused.
+script, which the web launches, for each dataset of the search before it searches the first:
+the check the indel search makes of each chromosome (pool_search_indels' _window_mismatch), made
+first. Each release's own pair runs, as does an index of 2.10.0 built from the enriched-genome
+kit of 2.8.1 beside that kit's Dictionaries (25/27 on both sides). Where a side holds no window
+(indel logs without a row, as a dataset without indels has; an index of format 2 without its
+INDELS index, as a variant index of format 2 records no window of its own), nothing tells the
+builds apart, and nothing is refused. The Dictionaries are read by their indel logs alone: the
+per-sample dictionaries (dictionaries_<dataset>) and the genotype store (genotypes_<dataset>)
+of another build, which a download of an index of 2.10.0 can leave in place (its Dictionaries
+bundle carries no per-sample dictionaries, and its genotype store replaces the old one only
+where it is installed), are not read (docs/TROUBLESHOOTING.md section 16 says what to remove).
 
     python index_dictionaries.py <index folder> <working directory> <dataset>
 
@@ -101,20 +105,24 @@ def mismatch(index_dir, workdir, dataset):
     (indel_window.index_window), against the log's. A sub-index of format 1 was built with the
     variant index, by the same CRISPRitz, so the window it tells is the enrichment's.
 
-    Where none of format 1 tells one, the variant index itself is read against the windows of
-    every log: one of index format 1, where the installed CRISPRitz writes format 2, was built by
-    CRISPRitz 2.9.1 or earlier, from an enrichment of 25/27 (as indel_window.earlier_windows reads
-    it), unless its record says that this CRISPRme built it (index_fit's built_by, which CRISPRme
-    2.8.1 and earlier, the builders of every archive of 2.8.1, never wrote; a CRISPRitz that
-    writes format 1, run by this CRISPRme, built it from the enrichment in place, and its INDELS
-    index records the windows). Its INDELS index tells nothing of it where it is not there, or
-    where it was built since, in format 2: the search script builds an INDELS index that is not
-    there from the fake-indel genome in place, which it reads against the logs alone
-    (indel_window.fake_genome_refusal), so another build's kit beside that build's Dictionaries
-    passes, and the INDELS index it builds records that build's windows. A variant index of
-    format 2 records no window of its own: without its INDELS index, nothing tells its build."""
+    Where none of format 1 tells one against a log row of its chromosome, the variant index itself
+    is read against the windows of every log: one of index format 1, where the installed CRISPRitz
+    writes format 2, was built by CRISPRitz 2.9.1 or earlier, from an enrichment of 25/27 (as
+    indel_window.earlier_windows reads it), unless its record says that this CRISPRme built it
+    (index_fit's built_by, which CRISPRme 2.8.1 and earlier, the builders of every archive of 2.8.1,
+    never wrote; a CRISPRitz that writes format 1, run by this CRISPRme, built it from the
+    enrichment in place, and its INDELS index records the windows). Its INDELS index tells nothing
+    of it where it is not there, or where it was built since, in format 2: the search script builds
+    an INDELS index that is not there from the fake-indel genome in place, which it reads against
+    the logs alone (indel_window.fake_genome_refusal), so another build's kit beside that build's
+    Dictionaries passes, and the INDELS index it builds records that build's windows. A variant
+    index of format 2 records no window of its own: without its INDELS index, nothing tells its
+    build."""
     logs = os.path.join(workdir, "Dictionaries", "log_indels_%s" % dataset)
-    told = False  # (a sub-index of format 1, built with the variant index, told its window)
+    # (a sub-index of format 1, built with the variant index, told its window against a log of
+    # its chromosome: one whose chromosome has no log row tells nothing, as an INDELS index pruned
+    # by hand to chromosomes the logs have none of; the PP-14 review, round 2, A2-PP14-3)
+    told = False
     for chrom, sub in sub_indexes(index_dir):
         window = indel_window.index_window(sub)
         if window is None:
@@ -122,7 +130,7 @@ def mismatch(index_dir, workdir, dataset):
         logged = _log_windows(logs, chrom)
         if logged and logged != {tuple(window)}:
             return {tuple(window)}, logged
-        told = told or _formats(sub) == {1}
+        told = told or (bool(logged) and _formats(sub) == {1})
     index_fit = indel_window._index_fit()
     if not told and (index_fit.engine_index_format() or 2) >= 2 \
             and set(index_fit.bin_formats(index_dir)) == {1} \

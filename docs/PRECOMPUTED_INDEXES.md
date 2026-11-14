@@ -503,7 +503,10 @@ crisprme.py download --what index \
   name; where a site needs a SNP too, its row lists every carrier of the indel)
   until the store is present, and `--per-sample` falls back to it with a warning:
   a per-sample analysis without genotypes would lose the off-targets that need two
-  SNPs of one sample together.
+  SNPs of one sample together. In a data folder where 2.8.1 built or installed the panel, its
+  `Dictionaries/dictionaries_<panel>`, which no download of 2.10.0 replaces, and its
+  `Dictionaries/genotypes_<panel>`, where 2.10.0's store is not installed, stay there, and a
+  search reads them: remove them (`docs/TROUBLESHOOTING.md` §16).
 - The **CLI search-list files** `list_vcf.txt` (the dataset, `hg38_HGDP1kGP`)
   and `list_samplesID.txt` (its combined samplesID) are written at the install
   root, so a CLI search works out of the box — the same lists the web form builds

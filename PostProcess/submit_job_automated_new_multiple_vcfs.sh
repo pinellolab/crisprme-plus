@@ -697,6 +697,7 @@ trap '_lock_on_signal TERM' TERM
 # iterate over each variant dataset to compute the enriched genomes, index each
 # enriched genome, search off-targets, reconstruct haplotypes (if input VCFs are
 # phased), and score off-targets
+_builds_checked=  # (each dataset's variant index against its Dictionaries: once, with the first)
 while read vcf_f; do  
 	if [ -z "$vcf_f" ]; then
 		continue
@@ -1623,6 +1624,32 @@ while read vcf_f; do
 	fi
 	_prune_decided=1
 
+	# The variant index each dataset of this search takes and the dataset's Dictionaries here
+	# come from one build of it: an index of CRISPRme 2.8.1 beside the Dictionaries a download of
+	# 2.10.0 put in place of its own (or the other way) would have its alleles read with the
+	# carriers of the other build. Refused before the first dataset is searched, for every
+	# dataset of the search, as complete-search refuses it before anything is written
+	# (index_dictionaries.py; crisprme.py _refuse_mixed_builds); a web search comes here. Once,
+	# with the first dataset, after the pruning decision, which decides the index each takes:
+	# checked in its own turn, a later dataset was refused only after the searches of those
+	# before it, hours on hg38 (the PP-14 review, round 2: A2-PP14-1).
+	if [ -z "$_builds_checked" ]; then
+		_this_vcf=$vcf_name
+		while read -r _v; do
+			[ -n "$_v" ] && [ "$_v" != "_" ] || continue
+			vcf_name=$(basename "$_v")
+			_vi=$(_variant_index </dev/null)
+			[ -n "$_vi" ] || continue
+			_mixed=$(python "$starting_dir/index_dictionaries.py" "$_vi" "$current_working_directory" "$vcf_name" </dev/null)
+			if [ $? = 3 ]; then
+				printf "ERROR: %s\n" "$_mixed" >&2
+				exit 1
+			fi
+		done <"$vcf_list"
+		vcf_name=$_this_vcf
+		_builds_checked=1
+	fi
+
 	# ensure that fundamental folders are available (-p: a run that started
 	# together may make one between the test and the mkdir, and the "File exists"
 	# a plain mkdir writes to stderr then fails this run)
@@ -1666,19 +1693,8 @@ while read vcf_f; do
 				exit 1
 			fi
 		done
-		# The variant index this search takes and the dataset's Dictionaries here come from one
-		# build of it: an index of CRISPRme 2.8.1 beside the Dictionaries a download of 2.10.0
-		# put in place of its own (or the other way) would have its alleles read with the
-		# carriers of the other build. Refused before the dataset is searched, as complete-search
-		# refuses it before anything is written (index_dictionaries.py); a web search comes here.
-		_vi=$(_variant_index)
-		if [ -n "$_vi" ]; then
-			_mixed=$(python "$starting_dir/index_dictionaries.py" "$_vi" "$current_working_directory" "$vcf_name")
-			if [ $? = 3 ]; then
-				printf "ERROR: %s\n" "$_mixed" >&2
-				exit 1
-			fi
-		fi
+		# (the variant index this dataset takes and its Dictionaries here: checked with the first
+		# dataset, for every dataset of the search, above)
 	fi
 	# Detect a precomputed variant index shipped WITHOUT the raw VCFs (a batteries-
 	# included install: `download --what index` fetches genome_library/<name> +

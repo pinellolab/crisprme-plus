@@ -161,28 +161,38 @@ major.minor version (Changed). The main changes, each told in its entry below:
     installer tests of
     `test_defaults_and_index_flex`, `test_bulge_cap`, `test_index_resolution`,
     `test_generate_report` and `test_build_index_only_atomic`.
-  - **No index is searched with another build's Dictionaries.** A data folder upgraded from
-    2.8.1 can hold an index of 2.8.1 beside the Dictionaries a download of 2.10.0 installed in
-    place of its own (the download says so on stdout), or, the other way, an index of 2.10.0
-    beside Dictionaries of 2.8.1 put back. complete-search refuses such a search before it writes
-    anything, for each dataset of the search: it reads the variant index the search takes against
-    the dataset's indel logs, chromosome by chromosome, by their fake-indel windows (25/27 for an
-    index of 2.8.1, of index format 1, 30/30 for 2.10.0's: those its INDELS index records, or,
-    for an index of 2.8.1 whose INDELS index is not there or was built since in format 2, its own
-    format, as the search script builds an INDELS index that is not there from the fake-indel
-    genome in place), and says in one line which build each is and what to do: search the index
-    of 2.10.0 that replaces it (named, with its download command), and remove the old one (its
-    `rm -rf`, quoted for bash and zsh), or keep each build's indexes in a data folder of their
-    own (`PostProcess/index_dictionaries.py`;
+  - **A search refuses an index of one build beside another build's indel logs.** A data folder
+    upgraded from 2.8.1 can hold an index of 2.8.1 beside the Dictionaries a download of 2.10.0
+    installed in place of its own (the download says so on stdout), or, the other way, an index
+    of 2.10.0 beside Dictionaries of 2.8.1 put back. complete-search refuses such a search before
+    it writes anything, for each dataset of the search: it reads the variant index the search
+    takes against the dataset's indel logs, chromosome by chromosome, by their fake-indel windows
+    (25/27 for an index of 2.8.1, of index format 1, 30/30 for 2.10.0's: those its INDELS index
+    records, or, for an index of 2.8.1 whose INDELS index is not there or was built since in
+    format 2, its own format, as the search script builds an INDELS index that is not there from
+    the fake-indel genome in place), and says in one line which build each is and what to do:
+    search the index of 2.10.0 that replaces it (named, with its download command), and remove
+    the old one (its `rm -rf`, quoted for bash and zsh), or keep each build's indexes in a data
+    folder of their own (`PostProcess/index_dictionaries.py`;
     `docs/TROUBLESHOOTING.md` section 16). The search script, which the web app launches, refuses
-    it before it searches the dataset. Each release's own pair runs, as does an index of 2.10.0
-    built from 2.8.1's enriched-genome kit beside that kit's Dictionaries. Up to now such a search
-    ran on, its SNP rows read with the other build's carriers and frequencies, until its indel
-    search refused the INDELS index chromosome by chromosome, hours later. Covered by
-    `PostProcess/test_index_dictionaries.py`: each case on fixtures, and the real complete-search
-    and search script against `test_build_index_only_atomic`'s stub engine, on a dataset
-    `build-index-only` built, then with another build's indel logs, and with another build's kit
-    and logs beside the index with its INDELS index removed.
+    it for every dataset of the search before it searches the first. Each release's own pair
+    runs, as does an index of 2.10.0 built from 2.8.1's enriched-genome kit beside that kit's
+    Dictionaries. Up to now such a search ran on, its SNP rows read with the other build's
+    carriers and frequencies, until its indel search refused the INDELS index chromosome by
+    chromosome, hours later. The check reads the Dictionaries by their indel logs alone, which a
+    download of 2.10.0 replaces: not the per-sample dictionaries 2.8.1's `build-index-only` wrote
+    (`Dictionaries/dictionaries_<panel>`), which 2.10.0's Dictionaries bundle does not carry, so a
+    download leaves them in place, nor 2.8.1's genotype store (`Dictionaries/genotypes_<panel>`),
+    left where 2.10.0's is not installed (`--no-genotypes`, or a fetch that failed) and taken for
+    installed by a later download of that index. A search of an index of 2.10.0 reads both where
+    they are, so remove them after installing 2.10.0's index of a panel built or installed with
+    2.8.1 in that data folder (the genotype store unless the download installed 2.10.0's), or
+    install 2.10.0's indexes in a data folder of their own (`docs/TROUBLESHOOTING.md` section 16).
+    Covered by `PostProcess/test_index_dictionaries.py`: each case on fixtures, and the real
+    complete-search and search script against `test_build_index_only_atomic`'s stub engine, on a
+    dataset `build-index-only` built, then with another build's indel logs, with another build's kit
+    and logs beside the index with its INDELS index removed, and in a search of two datasets, the
+    second of another build's logs.
 - **An enriched-genome kit's member list** (`scripts/kit_members.py`): the md5 of each file a
   kit (`build-inputs/<dataset>.tar.gz`) holds, by its path in it, in `md5sum`'s format, from the
   folders the kit packs or from the tarball. The tarball is not byte-reproducible (tar records
