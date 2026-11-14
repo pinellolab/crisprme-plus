@@ -119,7 +119,13 @@ audit held both, every publish command straight after the builds, so a run publi
 gate, wherever a token or a node's cached login could upload (PP-2 of the release). `--panels`
 prints the rows of the working directories it names alone, by the variables that name them
 (`REF`, `HGDP`, `HPRC`, `MEGA`), in the manifest's order, and the script then asks only for the
-variables those rows read: a node runs its part of a half.
+variables those rows read: a node runs its part of a half. A part of the build half checks the
+genome folders of its working directories as the whole half does (rule 1), against `$REF`'s
+`Genomes/hg38`, so it asks for `$REF` too where it names `HGDP`, `HPRC` or `MEGA` and not `REF`:
+it reads that folder and writes nothing in it. On a node without the reference's working
+directory (ml007), `REF` is then a folder whose `Genomes/hg38` holds all of hg38, as
+`crisprme.py download --what genome` installs it (links to such FASTAs will do, as the D7 plan's
+stub was), and not `$HGDP` itself, whose folder is the one checked.
 
 ```bash
 python seq_script/rebuild/check_index_set.py                          # the check and its dry run (the D7 audit runs it): exit 1 on a problem
@@ -161,9 +167,10 @@ for f in "$LOGS"/*.done; do        # LOGS: the folder of rows.sh's logs
 done
 ```
 
-The build half then passes those rows; it runs a row with no mark again, an index row kept where
-it is in place by the tools ("already present", a few seconds each), and mega's line refused by
-its recipe. To build a row again, remove its mark and what it built. A mega build that stopped
+The build half, run on each node for its working directories (`--panels HGDP` on ml007,
+`--panels REF,HPRC,MEGA` on ml008, `$REF` set on both: Commands), then passes those rows; it runs a
+row with no mark again, an index row kept where it is in place by the tools ("already present", a
+few seconds each), and mega's line refused by its recipe. To build a row again, remove its mark and what it built. A mega build that stopped
 partway, at its checks too, is refused by its recipe until its parts are gone: move `$MEGA` aside,
 put back its genome folder, and run the build half again.
 
@@ -265,8 +272,9 @@ the check alone where
 the dry run cannot see it (an input left to a recipe's default, a variable the rebuild does not
 set, or one no command reads, another panel's working directory, a pending script the tree holds,
 an upload to another repo, a token, a variant index published with its per-sample dictionaries,
-and the set's own errors), and by both (a build command that publishes); it runs the build half on
-genome folders that are not as rule 1 says, which stops before its first command, and on a `$MEGA`
+and the set's own errors), and by both (a build command that publishes); it runs the build half,
+and each node's part of it (`--panels`), on genome folders that are not as rule 1 says, which stops
+before its first command, and a part without `$REF`, which asks for it; and on a `$MEGA`
 that holds every part mega's recipe makes, as a build that failed its checks leaves it, whose line
 runs the recipe, which refuses it, unless mega's mark is there (`PostProcess/test_mega_rebuild.py`
 runs the recipe with checks that fail, then that line); it runs the publish half without a token,

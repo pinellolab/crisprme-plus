@@ -163,19 +163,19 @@ with the panel's kit (`docs/RELEASE_CHECKLIST.md`, T-35).
 
 ### Each archive (after the build, and after the publish)
 
-The node and the threads are fixed. From the build's logs (`rows.status`, each row's `.time`
-and `.out`), once the build is done and before the publish: the wall time and the peak memory of
-each row; and each kit's size and SHA-256, from the `<dataset>.SHA256SUMS` its row writes beside
-the tarball, with its member list's own SHA-256 (`<dataset>.members.md5`, the md5 of each file
-the kit holds, which `scripts/kit_members.py` writes, as the tarball itself is not
-byte-reproducible; the list goes beside the kit, `build-inputs/<dataset>.members.md5`). The size
+The node and the threads are fixed. From the build's logs (`rows.status`, each row's `.time` and
+`.out`), once the build is done and before the publish: the wall time and the peak memory of each
+row; and each kit's SHA-256, from the `<dataset>.SHA256SUMS` its row writes beside the tarball, and
+its size, the tarball's (`stat -c %s`), with its member list's own SHA-256 (`<dataset>.members.md5`,
+the md5 of each file the kit holds, which `scripts/kit_members.py` writes, as the tarball itself is
+not byte-reproducible; the list goes beside the kit, `build-inputs/<dataset>.members.md5`). The size
 and SHA-256 of the 16 index archives and the 7 companions are known only once they are published:
 `publish-index` packs each archive at the publish, with a `manifest.json` that records when it was
 packed, uploads it and deletes it, so no build log holds them, and a tarball packed by hand would
 not be the Hub's (the manifest's time, and each file's time that tar records). They are filled in
 after the publish, from the Hub: each SHA-256 from `indexes/SHA256SUMS`, which
-`scripts/hf_sha256sums.py` writes from the Hub's own checksums (the release checklist, E, step
-5), and each size from the Hub's listing of `indexes/` (`list_repo_tree`).
+`scripts/hf_sha256sums.py` writes from the Hub's own checksums (the release checklist, E, step 5),
+and each size from the Hub's listing of `indexes/` (`list_repo_tree`).
 
 | Archive | Node | Threads | Wall time | Peak memory | Size | SHA-256 |
 |---|---|---|---|---|---|---|

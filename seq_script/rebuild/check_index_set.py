@@ -17,7 +17,8 @@ Its commands are what the rebuild runs, and ``--commands build`` and ``--command
 them as the two halves of the rebuild, a script each (HALVES): the build half publishes nothing,
 and the publish half, which builds nothing, is run once the indexes have passed the release's
 gates and the publish is approved, on each node for the working directories it holds
-(``--panels``: the rows of those alone). Each command a bash command (``bash -n``; a note has
+(``--panels``: the rows of those alone; a part of the build half checks their genome folders as
+the whole does, against $REF's, REF_READ). Each command a bash command (``bash -n``; a note has
 a column of its own) run from the repository's root on its own, so that none moves the next (a
 ``cd`` only inside ``( )``); a recipe called by its repository path, and given every input it
 would otherwise read from a path of the cluster it was written on; each build first copying its
@@ -109,6 +110,16 @@ VARIABLES = {
 }
 # The ones that may be set empty (RUN: the release installed where the script runs)
 MAY_BE_EMPTY = ("RUN",)
+# What $REF is to a part of the build half (--panels) that names the rows of HGDP + 1000
+# Genomes', HPRC's or mega's working directory and not the reference's: the genome folder theirs
+# are checked against (README, rule 1), read and not written; on a node without the reference
+# working directory, a folder that holds hg38 in Genomes/hg38 as it does, of links to its FASTAs.
+# A part that named HGDP + 1000 Genomes' alone checked only that its folder held a FASTA, and
+# one of HPRC's or mega's only their names (the PP review, round 2: A2-PP2-1, B2-1). A text of
+# VARIABLES' kind (_VARIABLE_TEXT).
+REF_READ = ("a folder whose Genomes/hg38 holds all of hg38, as the working directory of the "
+            "reference indexes does: that one, or one of links to its FASTAs. The genome folders "
+            "of the rows here are checked against it, and nothing is written there")
 # What each working directory's genome folder, Genomes/hg38, holds (README, rule 1), as 2.8.1's
 # default index of each panel was built (the contigs of the published archives): all of hg38
 # (455 contigs, as `download --what genome` installs it) for the reference indexes and for HGDP
@@ -374,10 +385,11 @@ def check(rows, root=ROOT):
     names = [r["archive"] for r in rows]
     for dup in sorted({n for n in names if names.count(n) > 1}):
         problems.append(f"{dup}: listed {names.count(dup)} times")
-    for name, text in VARIABLES.items():
+    texts = [(f"VARIABLES[{name!r}]", name, text) for name, text in VARIABLES.items()]
+    for what, name, text in texts + [("REF_READ", "REF", REF_READ)]:
         if _VARIABLE_TEXT.search(text):
-            problems.append(f"VARIABLES[{name!r}] holds one of }} $ ` \" ', which the rebuild's "
-                            f"script cannot hold in ${{{name}:?...}}")
+            problems.append(f"{what} holds one of }} $ ` \" ', which the rebuild's script cannot "
+                            f"hold in ${{{name}:?...}}")
     read = {name for r in rows for what in ("build", "publish") if r[what] != NO_COMMAND
             for name in variables(r[what])}
     for name in VARIABLES:
@@ -483,16 +495,17 @@ def pending(root=ROOT):
 
 def _genome_checks(used):
     """The lines of the rebuild's script that check, before its first command, the genome
-    folders of the working directories it uses (README, rule 1; GENOME_FOLDERS): HGDP + 1000
-    Genomes' Genomes/hg38 holds the FASTAs of $REF's (all of hg38); HPRC's and mega's those of
-    them that are chr1-22, X and Y, and no other; where the script does not use $REF, HPRC's
-    and mega's are FASTAs of chr1-22, X and Y alone, the same in both (on a test genome of chr22,
-    chr22); and a panel whose recipe builds every chromosome of its sources (SOURCE_CHROMOSOMES:
-    mega's), the chromosomes of those sources. Otherwise a panel's indexes would hold other
-    contigs than 2.8.1's of the panel, and mega's recipe stops on a FASTA it does not build,
-    after hours of the other panels' builds."""
+    folders of the working directories it uses (README, rule 1; GENOME_FOLDERS): $REF's holds a
+    FASTA of chr1-22, X or Y; HGDP + 1000 Genomes' Genomes/hg38 holds the FASTAs of $REF's (all
+    of hg38); HPRC's and mega's those of them that are chr1-22, X and Y, and no other (given no
+    $REF, FASTAs of chr1-22, X and Y alone, the same in both: commands_script gives it $REF
+    wherever it checks a panel's folder, a part of the build half too, REF_READ); and a panel
+    whose recipe builds every chromosome of its sources (SOURCE_CHROMOSOMES: mega's), the
+    chromosomes of those sources. Otherwise a panel's indexes would hold other contigs than
+    2.8.1's of the panel, and mega's recipe stops on a FASTA it does not build, after hours of
+    the other panels' builds."""
     panels = [v for v in GENOME_FOLDERS if v in used]
-    if not panels:
+    if not panels and "REF" not in used:
         return []
     lines = [
         "# the genome folders, before any command (seq_script/rebuild/README.md, rule 1)",
@@ -675,9 +688,10 @@ def commands_script(rows, manifest=MANIFEST, half="build", panels=None):
     one node, the others on another, so that no one run of the whole half reads them all). It
     stops before its first command where a variable its commands read is not set, or, the build
     half, where a working directory's genome folder is not what the rebuild builds on
-    (_genome_checks); it skips a row done before (_done_checks); and it stops at the first
-    command that fails: each ends in || exit, as set -e does not stop at a command of an && list
-    but its last."""
+    (_genome_checks), a part of the build half as the whole does: against $REF's, which it asks
+    for where it names no row of the reference's working directory (REF_READ); it skips a row
+    done before (_done_checks); and it stops at the first command that fails: each ends in ||
+    exit, as set -e does not stop at a command of an && list but its last."""
     if half not in HALVES:
         raise ValueError(f"no half {half!r} of the rebuild: {' or '.join(HALVES)}")
     rows = panel_rows(rows, panels)
@@ -685,6 +699,9 @@ def commands_script(rows, manifest=MANIFEST, half="build", panels=None):
     for r in rows:
         if r[half] != NO_COMMAND:
             used += [v for v in variables(r[half]) if v not in used]
+    ref_read = half == "build" and "REF" not in used and any(v in used for v in GENOME_FOLDERS)
+    if ref_read:
+        used.append("REF")
     lines = ["#!/usr/bin/env bash",
              f"# The rebuild of the index set of CRISPRme 2.10.0 ({os.path.basename(manifest)}), "
              f"its {half} half, as check_index_set.py --commands {half}"
@@ -702,13 +719,18 @@ def commands_script(rows, manifest=MANIFEST, half="build", panels=None):
     if panels is not None:
         lines.append(f"# The rows of {', '.join('$' + p for p in panels)} alone (--panels), "
                      f"for the node that holds them.")
+    if ref_read:
+        lines.append("# $REF is read, not written: the genome folders of these rows' working "
+                     "directories are checked against its Genomes/hg38, as the whole half checks "
+                     "them (seq_script/rebuild/README.md, rule 1).")
     lines += ["# Run it from the repository's root, with the variables below set. A re-run skips "
               "each row done before.",
               "set -euo pipefail",
               "[ -f seq_script/rebuild/check_index_set.py ] || { echo \"run it from the "
               "repository's root\" >&2; exit 2; }"]
     for name in sorted(used, key=lambda v: list(VARIABLES).index(v) if v in VARIABLES else 99):
-        text = VARIABLES.get(name, "a variable of the manifest")
+        text = REF_READ if ref_read and name == "REF" else \
+            VARIABLES.get(name, "a variable of the manifest")
         lines.append(f': "${{{name}{"?" if name in MAY_BE_EMPTY else ":?"}{text}}}"')
     if half == "build":
         lines += _genome_checks(used)
@@ -1000,7 +1022,9 @@ def main(argv=None):
                     help="with --commands: the rows of these working directories alone (the "
                          "variables that name them, comma-separated), in the manifest's order, "
                          "for the node that holds them: --panels REF,HPRC,MEGA on one node and "
-                         "--panels HGDP on the other (seq_script/rebuild/README.md, The publish)")
+                         "--panels HGDP on the other (seq_script/rebuild/README.md, The publish). "
+                         "A part of the build half asks for $REF too, whose genome folder theirs "
+                         "are checked against (README, Commands)")
     args = ap.parse_args(argv)
     if args.commands is not None and args.commands not in HALVES:
         ap.error("--commands takes the half of the rebuild to print: --commands build (every "

@@ -248,7 +248,10 @@ major.minor version (Changed). The main changes, each told in its entry below:
   failed them leaves them all, and its line, run again, runs the recipe, which refuses a working
   directory that holds any of them. `--panels` prints the rows of the working directories it names
   alone, for the node that holds them: the publish runs on each node, `--panels HGDP` on the one
-  of HGDP + 1000 Genomes and `--panels REF,HPRC,MEGA` on the other's. The lines of the build half
+  of HGDP + 1000 Genomes and `--panels REF,HPRC,MEGA` on the other's. A part of the build half
+  checks the genome folders of its working directories as the whole half does, against `$REF`'s,
+  which it asks for where it names no row of the reference's (it reads it, and writes nothing
+  there). The lines of the build half
   are the manifest's, as the rebuild of 2.10.0's indexes ran them (md5
   `7389f7e234d4e617860f8f9b34abdc49`). The publish half
   uploads with the release image's own `hf` and a token given in the environment, `HF_TOKEN`: the

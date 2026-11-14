@@ -11,7 +11,7 @@ push them to Hugging Face as part of the release:
 
 | File | Hugging Face dataset |
 |---|---|
-| `crisprme-indexes-format2_README.md` | [`lucapinello/crisprme-indexes-format2`](https://huggingface.co/datasets/lucapinello/crisprme-indexes-format2): the indexes of CRISPRme 2.10.0 and later (index format 2), each panel's Dictionaries bundle and genotype store once, and the enriched-genome kits (decision C2) |
+| `crisprme-indexes-format2_README.md` | [`lucapinello/crisprme-indexes-format2`](https://huggingface.co/datasets/lucapinello/crisprme-indexes-format2): the indexes of CRISPRme 2.10.0 and later (index format 2), each panel's Dictionaries bundle and genotype store once, the enriched-genome kits with their member lists, and HPRC's normalised VCFs (decision C2) |
 | `crisprme-data_README.md` | [`lucapinello/crisprme-data`](https://huggingface.co/datasets/lucapinello/crisprme-data): the reference data of every release, and the index archives of 2.8.1 (index format 1) |
 | `crisprme-data-general-index_README.md` | [`lucapinello/crisprme-data-general-index`](https://huggingface.co/datasets/lucapinello/crisprme-data-general-index): the general (8-nt flank) index archives of 2.8.1 |
 
@@ -42,10 +42,13 @@ inconsistency (`RELEASE_CHECKLIST.md` → "nothing on HF that is undocumented").
 ## The location of 2.10.0's indexes, and what it holds
 
 `lucapinello/crisprme-indexes-format2` holds the index set of 2.10.0,
-[`seq_script/rebuild/index_set_2.10.0.tsv`](../../seq_script/rebuild/index_set_2.10.0.tsv), every
-archive of it and nothing else (`seq_script/rebuild/check_index_set.py` checks the set against
-the code; `seq_script/rebuild/README.md` says how the rebuild follows it). `publish-index` routes an
-index of format 2, or one named for its guide length and side, there by itself, and refuses
+[`seq_script/rebuild/index_set_2.10.0.tsv`](../../seq_script/rebuild/index_set_2.10.0.tsv): every
+archive of it (a companion with its record, `indexes/<name>.json`), what the publish puts beside
+them (`indexes/SHA256SUMS`, each kit's `.SHA256SUMS` and member list,
+`build-inputs/<dataset>.members.md5`, and HPRC's normalised VCFs, `build-inputs/hg38_HPRC/`), and
+nothing else (`seq_script/rebuild/check_index_set.py` checks the set against the code;
+`seq_script/rebuild/README.md` says how the rebuild follows it). `publish-index` routes an index
+of format 2, or one named for its guide length and side, there by itself, and refuses
 to publish an index of format 2 in the two repos of 2.8.1, which 2.8.1 reads. 2.10.0's `download`
 and its Settings catalog read it by default; an archive of 2.8.1 is still fetched by its own
 name from the repos of 2.8.1.

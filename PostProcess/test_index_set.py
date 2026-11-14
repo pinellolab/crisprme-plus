@@ -461,16 +461,21 @@ class TheRebuildRuns(unittest.TestCase):
         self.assertIn(f"{script}: this tree holds it, so it is no longer pending: take it out "
                       f"of check_index_set.PENDING_SCRIPTS", problems)
 
-    def run_on_genomes(self, genomes=None, mega_src=None):
+    def run_on_genomes(self, genomes=None, mega_src=None, panels=None, unset=(), preamble=False):
         """The rebuild's script run from the repository's root on working directories whose
         Genomes/hg38 hold the FASTAs ``genomes`` names ({variable: [contig, ...]}; GENOMES's
         where it names none), mega's merged VCFs of ``mega_src`` (chr1-22, X and Y if None),
-        every other variable set, and no program of the image on PATH: (exit status, stderr,
-        whether a command ran: its first makes $REF/PAMs)."""
+        every other variable set but those ``unset`` names, and no program of the image on PATH:
+        the build half, or its part of the working directories ``panels`` names (--panels), or,
+        with ``preamble``, what of it comes before its first row: (exit status, stderr, whether a
+        command ran: each first makes the PAMs/ of its working directory)."""
         import shutil
         import subprocess
         import tempfile
         genomes = genomes or {}
+        script = cis.commands_script(self.rows, panels=panels)
+        if preamble:
+            script = script[:script.index("\n# build\n") + len("\n# build\n")]
         with tempfile.TemporaryDirectory() as t:
             env = {"PATH": "/usr/bin:/bin", "HOME": t, "LC_ALL": "C", "RUN": ""}
             for v in ("REF", "HGDP", "HPRC", "MEGA"):
@@ -483,9 +488,13 @@ class TheRebuildRuns(unittest.TestCase):
                 os.makedirs(env[v])
             for c in PRIMARY if mega_src is None else mega_src:
                 open(os.path.join(env["MEGA_SRC"], f"mega.{c}.afmax.vcf.gz"), "w").close()
-            got = subprocess.run([shutil.which("bash"), "-c", cis.commands_script(self.rows)],
+            folders = [env[v] for v in ("REF", "HGDP", "HPRC", "MEGA")]
+            for v in unset:
+                del env[v]
+            got = subprocess.run([shutil.which("bash"), "-c", script],
                                  cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
-            return got.returncode, got.stderr, os.path.exists(os.path.join(env["REF"], "PAMs"))
+            return got.returncode, got.stderr, any(os.path.exists(os.path.join(w, "PAMs"))
+                                                   for w in folders)
 
     def test_a_genome_folder_of_all_of_hg38_for_hprc_or_mega_stops_it_first(self):
         """The README said to put all of hg38 in every working directory, as download
@@ -536,6 +545,47 @@ class TheRebuildRuns(unittest.TestCase):
              "MEGA": ("chr22",)}, mega_src=("chr22",))
         self.assertTrue(ran, err)
         self.assertIn("rebuild: the build of 20-NRR_3_hg38 failed", err)
+
+    def test_a_node_s_part_of_the_build_half_checks_its_genome_folders_as_the_whole_does(self):
+        """A node runs its part of a half (--panels), but a part of the build half read only
+        the variables of its rows, and so no $REF where it named none of the reference's: a part
+        of HGDP + 1000 Genomes checked only that $HGDP's genome folder held a FASTA, and built on
+        one of chr22 alone, which the whole half refuses; a part of HPRC or mega checked only
+        that theirs held chr1-22, X or Y and no other; and a part of the reference's checked
+        nothing (the PP review, round 2: A2-PP2-1, B2-1). A part checks them as the whole half
+        does, against $REF's, which it asks for, and stops before its first command."""
+        chr22 = ("chr22",)
+        for panels, genomes, said in (
+                (["HGDP"], {"HGDP": chr22},
+                 "/HGDP/Genomes/hg38 ($HGDP) holds 1 FASTA(s), not the 27 of $REF's: the working "
+                 "directory of hg38_HGDP1kGP holds all of hg38, as the reference's does"),
+                (["HPRC"], {"HPRC": chr22},
+                 "/HPRC/Genomes/hg38 ($HPRC) holds chr22, not chr1 chr10"),
+                (["MEGA"], {"MEGA": chr22},
+                 "/MEGA/Genomes/hg38 ($MEGA) holds chr22, not chr1 chr10"),
+                (["HPRC", "MEGA"], {"HPRC": chr22, "MEGA": chr22},
+                 "/HPRC/Genomes/hg38 ($HPRC) holds chr22, not chr1 chr10"),
+                (["REF"], {"REF": ("chrM",)},
+                 "/REF/Genomes/hg38 ($REF) holds no FASTA of chr1-22, X or Y")):
+            with self.subTest(panels=panels):
+                # (mega's merged VCFs those of its genome folder, which its own check reads)
+                rc, err, ran = self.run_on_genomes(genomes, mega_src=genomes.get("MEGA"),
+                                                   panels=panels)
+                self.assertEqual(rc, 2, err)
+                self.assertFalse(ran, "a command ran")
+                self.assertIn(said, err)
+        # $REF is asked for, and read alone: a part of HGDP + 1000 Genomes without it stops first
+        rc, err, ran = self.run_on_genomes(panels=["HGDP"], unset=("REF",))
+        self.assertNotEqual(rc, 0)
+        self.assertFalse(ran, "a command ran")
+        self.assertIn("REF: " + cis.REF_READ, err)
+        self.assertIsNone(cis._VARIABLE_TEXT.search(cis.REF_READ))
+        script = cis.commands_script(self.rows, panels=["HGDP"])
+        self.assertNotIn("$REF", cis.half_lines(script))
+        # on genome folders as rule 1 says, each node's part goes past its checks
+        for panels in (["HGDP"], ["REF", "HPRC", "MEGA"], ["HPRC"], ["MEGA"], ["REF"]):
+            with self.subTest(panels=panels, folders="as rule 1 says"):
+                self.assertEqual(self.run_on_genomes(panels=panels, preamble=True), (0, "", False))
 
     def test_a_kit_packed_into_the_repository_s_root(self):
         # (the dry run found it before; nothing made it happen: D-R3-5)
@@ -869,13 +919,16 @@ class ThePublishChecksItsTokenFirst(unittest.TestCase):
         self.assertIn(": \"${HGDP:?", out)
         for other in ("REF", "HPRC", "MEGA"):
             self.assertNotIn(f"${other}", out)
+        # (and $REF, read for its genome folder alone, which HPRC's is checked against)
         build = cis.commands_script(self.rows, half="build", panels=["HPRC"])
         self.assertEqual(
             [line for line in build.splitlines() if line.startswith(": \"${")],
             [line for line in build.splitlines() if line.startswith((": \"${HPRC:?",
                                                                      ": \"${RUN?", ": \"${SIF:?",
                                                                      ": \"${HPRC_SRC:?",
-                                                                     ": \"${P1KG:?"))])
+                                                                     ": \"${P1KG:?",
+                                                                     f": \"${{REF:?{cis.REF_READ}"))])
+        self.assertIn(f": \"${{REF:?{cis.REF_READ}}}\"", build)
         for args in (["--panels", "HGDP"], ["--commands", "publish", "--panels", "HGDP,FOO"],
                      ["--commands", "publish", "--panels", ","]):
             with self.subTest(args=args):
@@ -939,7 +992,8 @@ class TheReleaseDocsOfTheSet(unittest.TestCase):
     the timing gate names HPRC's runs and their baseline (B-4); the equivalence gate the release
     order names is a gate of the checklist (B-5); the archive gate reads each sub-index's window
     where it is recorded (B-6); and the rebuild's README points to sections the checklist has
-    (B-7)."""
+    (B-7). And (round 2) the gates name what they compare with, and the release order fills in
+    the figures known after the publish (B2-2 to B2-5)."""
 
     def setUp(self):
         self.rows = cis.read_manifest()
@@ -1076,6 +1130,33 @@ class TheReleaseDocsOfTheSet(unittest.TestCase):
         self.assertIn('manifest["indel_window"] = list(_w)', hf)
         self.assertIn("indel_window=_log_window(chrom)",
                       _read("PostProcess", "pool_index_indels.py"))
+
+    def test_the_gates_name_what_they_compare_with_and_what_is_filled_in_after(self):
+        """The PP review B, round 2: G5 diffed "each" of its runs against gate38a's runs of
+        2.8.1, which hold none of NGG (B2-2); the 2.8.1 side of HPRC's timing run had no NRR PAM
+        file, which neither 2.8.1's tree nor the data repo's pams/ holds before the publish
+        (B2-3); no step of the release order filled in the provenance figures known only after
+        the publish (B2-4); and docs/hf/README.md said that the repo holds the set's archives
+        "and nothing else", not the files the publish puts beside them (B2-5)."""
+        g5 = self.gate("The equivalence gate (G5)")
+        self.assertNotIn("Then diff each against gate38a's runs", g5)
+        self.assertIn("Then diff the NRG and NRR runs against gate38a's runs of 2.8.1 of the same "
+                      "PAM", g5)
+        self.assertIn("gate38a has no run of NGG", g5)
+        self.assertIn("its search given 2.10.0's NRR PAM file, `PAMs/20bp-NRR-SpCas9.txt` "
+                      "(`NNNNNNNNNNNNNNNNNNNNNRR 3`)", self.gate("The timing gate"))
+        self.assertEqual(_read("PAMs", "20bp-NRR-SpCas9.txt").strip(),
+                         "NNNNNNNNNNNNNNNNNNNNNRR 3")
+        text = _flat(self.checklist)
+        step5 = text[text.index("5. **`indexes/SHA256SUMS`**"):
+                     text.index("6. **The archive gates, from the Hub**")]
+        self.assertIn("Then fill in `docs/INDEX_PROVENANCE.md`'s size and SHA-256 of the 16 "
+                      "indexes and 7 companions", step5)
+        self.assertIn("before the tags (Gate A)", step5)
+        self.assertIn("what the publish puts beside them (`indexes/SHA256SUMS`, each kit's "
+                      "`.SHA256SUMS` and member list, `build-inputs/<dataset>.members.md5`, and "
+                      "HPRC's normalised VCFs, `build-inputs/hg38_HPRC/`), and nothing else",
+                      _flat(_read("docs", "hf", "README.md")))
 
     def test_the_readme_points_to_sections_the_checklist_has(self):
         """B-7: the README sent the uploads it does not make to "Gate G", which the checklist
