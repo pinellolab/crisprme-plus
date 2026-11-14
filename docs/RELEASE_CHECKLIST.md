@@ -443,10 +443,14 @@ before go #2.
 4. **The publish**: the rebuild's publish half, run on each node for the working directories it
    holds, each row from its own (`seq_script/rebuild/README.md`, "The publish"):
    `check_index_set.py --commands publish --panels HGDP` on ml007, and `--panels REF,HPRC,MEGA` on
-   ml008; then, with its environment (`HF_TOKEN` exported,
-   `APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0`, `PYTHONNOUSERSITE=1`, a clean `PATH`), each kit's
-   member list, on the node of its working directory (HGDP + 1000 Genomes' on ml007, HPRC's and
-   mega's on ml008), and HPRC's normalised VCFs, on ml008:
+   ml008, printed from a checkout of `feat/2.10.0` (or the release's tag), whose index rows each
+   name the repo, `--hf-repo lucapinello/crisprme_plus_indices` (`grep -c` of it in the printed
+   script gives 7 on ml007 and 9 on ml008): the image the rebuild runs them in, of `db50986`,
+   routes an index of format 2 by its own code to the name the plan had given the repo, which is
+   no repo's, and a row that names none stops there; then, with its environment (`HF_TOKEN`
+   exported, `APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0`, `PYTHONNOUSERSITE=1`, a clean `PATH`),
+   each kit's member list, on the node of its working directory (HGDP + 1000 Genomes' on ml007,
+   HPRC's and mega's on ml008), and HPRC's normalised VCFs, on ml008:
    `$RUN hf upload lucapinello/crisprme_plus_indices $HGDP/hg38_HGDP1kGP.members.md5
    build-inputs/hg38_HGDP1kGP.members.md5 --repo-type dataset` (and HPRC's and mega's alike);
    `(cd $HPRC/VCFs/hg38_HPRC && sha256sum hprc.*.norm.vcf.gz hprc.*.norm.vcf.gz.tbi >

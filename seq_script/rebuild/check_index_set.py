@@ -7,7 +7,10 @@ The manifest, ``seq_script/rebuild/index_set_2.10.0.tsv``, lists every archive t
 build and publish commands. The rebuild follows it, and the D7 readiness audit runs this check
 before any build starts: every index's name must be the one ``build-index-only`` gives its PAM
 file (``index_fit.index_name``: guide length and side, E2), every archive must route to the
-format-2 repo (``crisprme_hf.resolve_index_repo``), every index must serve its own guide at the
+format-2 repo (``crisprme_hf.resolve_index_repo``), and every publish command must name it
+(``hf upload <repo>``, ``publish-index --hf-repo <repo>``: the image the rebuild publishes with,
+of CRISPRme db50986, routes an index of format 2 by its own code to the name the plan had given
+the repo, which is no repo's); every index must serve its own guide at the
 web's ceiling of 2 DNA + 2 RNA bulges (``index_fit.fits``), every variant panel must have its
 Dictionaries bundle (and, genotyped, its genotype stores) once, and every index archive of 2.8.1
 must be replaced by exactly one archive of the set (NNN_3, not built again, by the general
@@ -325,11 +328,31 @@ def check_commands(r, root=ROOT):
                                     f"not {crisprme_hf.FORMAT2_HF_REPO}: the set goes to the "
                                     f"repo of index format 2 alone (decision C2), and an "
                                     f"upload elsewhere replaces what 2.8.1 reads")
-            if "--hf-repo" in rest:
-                repo = (rest[rest.index("--hf-repo") + 1:][:1] or [""])[0]
+            # Each repo it names: crisprme.py publish-index takes the word after its first
+            # --hf-repo (a parser of argparse's kind, the last), so every one must be the
+            # format-2 repo; it reads no --hf-repo=<repo>; and a publish-index that names none
+            # goes where the code of the image it runs in routes it. The image the rebuild
+            # publishes with, of CRISPRme db50986 (README, rule 2), routes an index of format 2
+            # to the name the plan had given the repo, which is no repo's: the 16 rows named
+            # none, and each stopped there, exit 1, run so against a stand-in Hub (the HF repo
+            # review, round 1: hfA1-1, B1-1).
+            named = [(rest[i + 1:i + 2] or [""])[0] for i, word in enumerate(rest)
+                     if word == "--hf-repo"]
+            for repo in named:
                 if repo != crisprme_hf.FORMAT2_HF_REPO:
                     problems.append(f"{a}: its {what} command names the repo {repo or '(none)'}"
                                     f", not {crisprme_hf.FORMAT2_HF_REPO}")
+            for word in rest:
+                if word.startswith("--hf-repo="):
+                    problems.append(f"{a}: its {what} command gives {word}, which crisprme.py "
+                                    f"does not read: --hf-repo {crisprme_hf.FORMAT2_HF_REPO}, "
+                                    f"two words")
+            if program == "crisprme.py" and rest[:1] == ["publish-index"] and not named:
+                problems.append(f"{a}: its {what} command names no repo, so the index goes "
+                                f"where the code of the image it runs in routes it: the image "
+                                f"the rebuild publishes with (CRISPRme db50986) routes an index "
+                                f"of format 2 to the name the plan had given the repo, which is "
+                                f"no repo's. It gives --hf-repo {crisprme_hf.FORMAT2_HF_REPO}")
             if "--token" in rest:
                 problems.append(f"{a}: its {what} command passes --token: a token goes in "
                                 f"HF_TOKEN, never in the manifest")
@@ -831,7 +854,10 @@ if name == "crisprme.py":
         log("build-index-only", need(opt("--pam"), "the PAM file", os.path.isfile),
             need(opt("--path"), "the working directory", os.path.isdir))
     elif args[:1] == ["publish-index"]:
-        log("publish-index", need(opt("--index"), "the index", os.path.isdir))
+        # (with the repo it is given, as crisprme.py reads it: the word after its first
+        # --hf-repo; "" for none, where the image's own code routes the index)
+        log("publish-index", need(opt("--index"), "the index", os.path.isdir),
+            opt("--hf-repo") if "--hf-repo" in args else "")
     else:
         fail("crisprme.py %s is not a command of the rebuild" % " ".join(args[:1]))
 elif name == "hf" and args[:2] == ["auth", "whoami"]:
@@ -895,7 +921,9 @@ def dry_run(rows, root=ROOT, manifest=MANIFEST):
     taken as done), every PAM file a build reads is in place, every path a command hands a
     program or a recipe is there, crisprme.py, hf and pigz run in the release image, and every
     index of the set is published from its working directory, by the publish half alone (the
-    build half publishes nothing, the publish half builds nothing); neither writes into the
+    build half publishes nothing, the publish half builds nothing), each upload and publish-index
+    into the format-2 repo, which its command names (a publish-index that names none goes where
+    the image's own code routes it: check_commands); neither writes into the
     repository's root. Run again, each skips every row it ran (README, "A re-run"), and the build
     half skips a kit whose SHA256SUMS holds with no mark (as after a build run row by row)."""
     bash = shutil.which("bash")
@@ -1020,6 +1048,19 @@ def dry_run(rows, root=ROOT, manifest=MANIFEST):
                     if want not in published:
                         problems.append(f"{r['archive']}: the rebuild's publish half, run dry, "
                                         f"does not publish {want}")
+            # (each into the format-2 repo, which its command names: a publish-index given no
+            # --hf-repo goes where the code of the image routes it, and the image the rebuild
+            # publishes with, db50986's, routes an index of format 2 to no repo's name)
+            for x in log:
+                if len(x) > 3 and x[2] in ("publish-index", "upload"):
+                    what, repo = ((x[3], (x[4:5] or [""])[0]) if x[2] == "publish-index"
+                                  else ((x[4:5] or [""])[0], x[3]))
+                    if repo != crisprme_hf.FORMAT2_HF_REPO:
+                        problems.append(
+                            f"the rebuild's publish half, run dry, publishes {what} "
+                            + (f"to {repo}" if repo else "naming no repo, where the code of the "
+                               "image it runs in routes it")
+                            + f", not to {crisprme_hf.FORMAT2_HF_REPO}")
         if not problems:
             for half, kind in (("build", "build"), ("publish", "publish")):
                 rc, log = run(half, " again")

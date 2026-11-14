@@ -243,22 +243,83 @@ class TheCheckFindsWhatItIsFor(unittest.TestCase):
     # run took: each is found now.
 
     def test_a_kit_uploaded_to_a_repo_of_2_8_1(self):
-        # it would replace 2.8.1's kit in the repo 2.8.1 reads (decision C2)
+        # it would replace 2.8.1's kit in the repo 2.8.1 reads (decision C2); the dry run sees
+        # it too, as it sees each repo a publish is given (ThePublishNamesItsRepo)
         kit = _row(self.rows, "build-inputs/hg38_HGDP1kGP")
-        problems = self.mutated("build-inputs/hg38_HGDP1kGP", publish=kit["publish"].replace(
-            "upload lucapinello/crisprme_plus_indices", "upload lucapinello/crisprme-data", 1))
+        publish = kit["publish"].replace("upload lucapinello/crisprme_plus_indices",
+                                         "upload lucapinello/crisprme-data", 1)
+        problems = self.mutated("build-inputs/hg38_HGDP1kGP", publish=publish)
         self.assertIn("build-inputs/hg38_HGDP1kGP: its publish command uploads to "
                       "lucapinello/crisprme-data, not lucapinello/crisprme_plus_indices: the "
                       "set goes to the repo of index format 2 alone (decision C2), and an upload "
                       "elsewhere replaces what 2.8.1 reads", problems)
+        rows = copy.deepcopy(self.rows)
+        _row(rows, "build-inputs/hg38_HGDP1kGP")["publish"] = publish
+        dry = cis.dry_run(rows)
+        self.assertTrue([p for p in dry if p.startswith(
+            "the rebuild's publish half, run dry, publishes ") and p.endswith(
+            "/HGDP/hg38_HGDP1kGP.tar.gz to lucapinello/crisprme-data, not to "
+            "lucapinello/crisprme_plus_indices")], dry)
 
     def test_a_publish_that_names_another_repo(self):
+        """Each --hf-repo it names is read: crisprme.py takes the first, a parser of argparse's
+        kind the last. The rows name the format-2 repo themselves now (ThePublishNamesItsRepo),
+        so a check that read the first alone, as this one did, would take another named after it
+        (the HF repo review, round 1: hfA1-1, B1-1). The dry run sees one named first, which
+        crisprme.py reads, and not one named after, which the check alone finds."""
         r = _row(self.rows, "20-NGG_3_hg38")
-        problems = self.mutated("20-NGG_3_hg38",
-                                publish=r["publish"] + " --hf-repo lucapinello/crisprme-data")
-        self.assertIn("20-NGG_3_hg38: its publish command names the repo "
-                      "lucapinello/crisprme-data, not lucapinello/crisprme_plus_indices",
-                      problems)
+        for publish, first in ((r["publish"] + " --hf-repo lucapinello/crisprme-data", False),
+                               (r["publish"].replace("publish-index ", "publish-index --hf-repo "
+                                                     "lucapinello/crisprme-data ", 1), True)):
+            with self.subTest(publish=publish):
+                problems = self.mutated("20-NGG_3_hg38", publish=publish)
+                self.assertIn("20-NGG_3_hg38: its publish command names the repo "
+                              "lucapinello/crisprme-data, not lucapinello/crisprme_plus_indices",
+                              problems)
+                rows = copy.deepcopy(self.rows)
+                _row(rows, "20-NGG_3_hg38")["publish"] = publish
+                dry = cis.dry_run(rows)
+                self.assertEqual(bool([p for p in dry if p.endswith(
+                    "/REF/genome_library/20-NGG_3_hg38 to lucapinello/crisprme-data, not to "
+                    "lucapinello/crisprme_plus_indices")]), first, dry)
+                if not first:
+                    self.assertEqual(dry, [])
+
+    def test_a_publish_index_that_names_no_repo(self):
+        """crisprme.py publish-index then routes the index by the code of the image it runs in,
+        and the rebuild's image (CRISPRme db50986) routes an index of format 2 to the name the
+        plan had given the repo, which is no repo's: the 16 rows named none, and each stopped
+        there, run so against a stand-in Hub (the HF repo review, round 1: hfA1-1, B1-1). A
+        --hf-repo=<repo>, which crisprme.py does not read, names none either. The dry run sees
+        it too: its stub logs the repo each publish-index is given."""
+        repo = " --hf-repo lucapinello/crisprme_plus_indices"
+        for archive in ("20-NRR_3_hg38", "20-NRR_3_hg38+hg38_HGDP1kGP"):
+            r = _row(self.rows, archive)
+            self.assertTrue(r["publish"].endswith(repo), r["publish"])
+            for publish, also in ((r["publish"][:-len(repo)], None),
+                                  (r["publish"].replace("--hf-repo ", "--hf-repo="),
+                                   f"{archive}: its publish command gives "
+                                   f"--hf-repo=lucapinello/crisprme_plus_indices, which "
+                                   f"crisprme.py does not read: --hf-repo "
+                                   f"lucapinello/crisprme_plus_indices, two words")):
+                with self.subTest(publish=publish):
+                    problems = self.mutated(archive, publish=publish)
+                    self.assertIn(f"{archive}: its publish command names no repo, so the index "
+                                  f"goes where the code of the image it runs in routes it: the "
+                                  f"image the rebuild publishes with (CRISPRme db50986) routes "
+                                  f"an index of format 2 to the name the plan had given the "
+                                  f"repo, which is no repo's. It gives --hf-repo "
+                                  f"lucapinello/crisprme_plus_indices", problems)
+                    if also:
+                        self.assertIn(also, problems)
+        rows = copy.deepcopy(self.rows)
+        _row(rows, "20-NRR_3_hg38+hg38_HGDP1kGP")["publish"] = _row(
+            rows, "20-NRR_3_hg38+hg38_HGDP1kGP")["publish"][:-len(repo)]
+        dry = cis.dry_run(rows)
+        self.assertTrue([p for p in dry if p.startswith(
+            "the rebuild's publish half, run dry, publishes ") and p.endswith(
+            "/HGDP/genome_library/20-NRR_3_hg38+hg38_HGDP1kGP naming no repo, where the code of "
+            "the image it runs in routes it, not to lucapinello/crisprme_plus_indices")], dry)
 
     def test_a_token_in_a_command(self):
         r = _row(self.rows, "20-NGG_3_hg38")
@@ -965,6 +1026,8 @@ class ThePublishChecksItsTokenFirst(unittest.TestCase):
                          sum(r["kind"] in cis.INDEX_KINDS for r in self.rows) + 3 * 2)
         for c in self.uploads(calls):
             self.assertIn(" implicit=0 usersite=1 ", c)
+            if " publish-index " in c:  # (each naming the repo: ThePublishNamesItsRepo)
+                self.assertTrue(c.endswith(" --hf-repo lucapinello/crisprme_plus_indices"), c)
         kits = [c for c in calls if c.startswith("hf ") and " upload " in c]
         self.assertTrue(kits)
         for c in kits:
@@ -1084,6 +1147,138 @@ class ThePublishChecksItsTokenFirst(unittest.TestCase):
             dry = cis.dry_run(self.rows)
         self.assertIn("the rebuild's publish half, run dry, publishes before it checks that the "
                       "token authenticates and the repo is there", dry)
+
+
+class ThePublishNamesItsRepo(unittest.TestCase):
+    """The publish half's 16 publish-index rows named no repo. Run as the README documents it,
+    in the rebuild's image (CRISPRme db50986: $RUN, rule 2), crisprme.py routes an index of
+    format 2 by the FORMAT2_HF_REPO of that image's code, the name the plan had given the repo,
+    which is no repo's: run so against a stand-in Hub, each row stopped at its first call to it,
+    exit 1 (ml008's first after packing its archive), and nothing reached
+    lucapinello/crisprme_plus_indices (the HF repo review, round 1: hfA1-1, B1-1). Each row
+    names it now, --hf-repo, which wins over the routing of the image's code for the index, its
+    panel's companions and their records; the check reads every --hf-repo, and the dry run each
+    repo a publish is given (TheCheckFindsWhatItIsFor)."""
+
+    NEW = "lucapinello/crisprme_plus_indices"
+    # (db50986's FORMAT2_HF_REPO, in two parts, so that no file of the repository names it:
+    # test_index_repo_routing)
+    PLANNED = "lucapinello/crisprme-indexes-" + "format2"
+
+    def setUp(self):
+        self.rows = cis.read_manifest()
+        saved = os.environ.pop("CRISPRME_HF_REPO", None)  # (a repo named there would win)
+        if saved is not None:
+            self.addCleanup(os.environ.__setitem__, "CRISPRME_HF_REPO", saved)
+
+    def printed(self, panels=None):
+        """The publish-index commands of the publish half (of ``panels``' working directories
+        alone, where given), as it prints them: each line's command, before its || exit."""
+        script = cis.commands_script(self.rows, half="publish",
+                                     **({"panels": panels} if panels else {}))
+        return [line.split(" || ", 1)[0] for line in script.splitlines()
+                if " crisprme.py publish-index " in line]
+
+    @staticmethod
+    def read_as_crisprme_py(words):
+        """What crisprme.py publish-index reads of its arguments (publish_index_cmd, the same in
+        db50986, the rebuild's image, as in this tree: test_crisprme_py_reads_them_so): the word
+        after its first --index and after its first --hf-repo, and its flags."""
+        args = words[words.index("publish-index") + 1:]
+        return {"index_dir": args[args.index("--index") + 1],
+                "repo": args[args.index("--hf-repo") + 1] if "--hf-repo" in args else None,
+                "dictless": "--dictless" in args,
+                "replace_companions": "--replace-companions" in args}
+
+    def test_each_index_row_names_the_repo(self):
+        import shlex
+        rows = [r for r in self.rows if r["kind"] in cis.INDEX_KINDS]
+        self.assertEqual(len(rows), 16)
+        for r in rows:
+            words = shlex.split(r["publish"])
+            self.assertEqual(words.count("--hf-repo"), 1, r["archive"])
+            self.assertEqual(self.read_as_crisprme_py(words)["repo"], self.NEW, r["archive"])
+        self.assertEqual(len(self.printed()), 16)
+        # each node's part (the README: 7 rows on ml007, 9 on ml008), a line each
+        for panels, n in ((["HGDP"], 7), (["REF", "HPRC", "MEGA"], 9)):
+            with self.subTest(panels=panels):
+                lines = self.printed(panels)
+                self.assertEqual(len(lines), n)
+                for line in lines:
+                    self.assertEqual(self.read_as_crisprme_py(shlex.split(line))["repo"],
+                                     self.NEW, line)
+                script = cis.commands_script(self.rows, half="publish", panels=panels)
+                self.assertEqual(sum(f"--hf-repo {self.NEW}" in line
+                                     for line in script.splitlines()), n)
+
+    def test_the_rows_publish_there_with_the_routing_of_the_rebuild_s_image(self):
+        """The 16 rows as the publish half prints them, each read as crisprme.py reads it and
+        run through publish_index with the routing of the rebuild's image (FORMAT2_HF_REPO the
+        name the plan had given the repo, as db50986's crisprme_hf has it; its publish_index is
+        this tree's but for that name), against a hub with no repo of that name, as the Hub has
+        none: every index, every companion of a panel, once, and every record read go to
+        lucapinello/crisprme_plus_indices. With no --hf-repo, as 464df76 printed them, the
+        image's routing gave the name of no repo."""
+        import io
+        import shlex
+        import shutil
+        import tempfile
+        from unittest import mock
+        import test_panel_companions as tpc
+        hf = cis.crisprme_hf
+        tmp = tempfile.mkdtemp(prefix="publish_repo_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        hub = tpc.FakeHub(os.path.join(tmp, "hub"))
+        for repo in (self.NEW, hf.DEFAULT_HF_REPO, hf.GENERAL_INDEX_HF_REPO):
+            hub.make_repo(repo)
+        work = {}
+        for panel, var in cis.WORKDIR.items():
+            work[var] = os.path.join(tmp, var)
+            names = [r["archive"] for r in self.rows
+                     if r["panel"] == panel and r["kind"] in cis.INDEX_KINDS]
+            if panel == "-":
+                for a in names:
+                    tpc._tree_bin(os.path.join(work[var], "genome_library", a,
+                                               f"{hf.index_fit.index_pam(a)}_chr22_1.bin"), 2)
+            else:
+                tpc.make_panel(work[var], names, vcf=panel, genotypes=panel in cis.GENOTYPED)
+        published = []
+        with mock.patch.object(hf, "FORMAT2_HF_REPO", self.PLANNED):
+            for line in self.printed():
+                words = [re.sub(r"\$\{?(\w+)\}?", lambda m: work.get(m.group(1), ""), w)
+                         for w in shlex.split(line)]
+                got = self.read_as_crisprme_py([w for w in words if w])
+                name = os.path.basename(got["index_dir"])
+                self.assertEqual(hf.resolve_index_repo(name, None, 2), self.PLANNED, name)
+                with mock.patch.object(hf, "_require_hf", return_value=hub), \
+                        mock.patch("sys.stdout", io.StringIO()), \
+                        mock.patch("sys.stderr", io.StringIO()):
+                    published.append(hf.publish_index(
+                        got["index_dir"], repo=got["repo"], token="t", dictless=got["dictless"],
+                        replace_companions=got["replace_companions"]))
+        self.assertEqual(hub.repos_contacted(), {self.NEW})
+        self.assertEqual(sorted(published), sorted(f"indexes/{r['archive']}.tar.gz"
+                                                   for r in self.rows
+                                                   if r["kind"] in cis.INDEX_KINDS))
+        uploads = hub.uploads()
+        for r in self.rows:
+            if r["kind"] in cis.COMPANION_KINDS:
+                for ext in (".tar.gz", ".json"):
+                    self.assertEqual(uploads.count(f"indexes/{r['archive']}{ext}"), 1,
+                                     r["archive"] + ext)
+
+    def test_crisprme_py_reads_them_so(self):
+        """read_as_crisprme_py is how crisprme.py's publish-index reads its arguments, the same
+        in db50986, the rebuild's image, as here; a change here is no change to that image."""
+        src = _read("crisprme.py")
+        body = src[src.index("\ndef publish_index_cmd("):]
+        body = body[:body.index("\ndef ", 1)]
+        for line in ('index_dir = os.path.abspath(args[args.index("--index") + 1])',
+                     'repo = args[args.index("--hf-repo") + 1] if "--hf-repo" in args else None',
+                     'dictless = "--dictless" in args',
+                     'index_dir, repo=repo, token=token, display_name=name, dictless=dictless',
+                     'replace_companions="--replace-companions" in args'):
+            self.assertIn(line, body)
 
 
 
@@ -1269,6 +1464,46 @@ class TheReleaseDocsOfTheSet(unittest.TestCase):
                       "`.SHA256SUMS` and member list, `build-inputs/<dataset>.members.md5`, and "
                       "HPRC's normalised VCFs, `build-inputs/hg38_HPRC/`), and nothing else",
                       _flat(_read("docs", "hf", "README.md")))
+
+    def test_the_publish_names_the_repo_on_every_index_row(self):
+        """The HF repo review, round 1 (hfA1-1, B1-1): the README and the checklist ran the
+        publish half in the rebuild's image (db50986), whose code routes an index of format 2 to
+        the name the plan had given the repo, and its index rows named no repo; they name it now,
+        and the docs say why, and how a node tells a script that does from one of an older tree
+        (B1-2): the count of its rows that name it."""
+        readme = _flat(self.readme)
+        publish = readme[readme.index("**The publish.**"):]
+        publish = publish[:publish.index("Beside each kit goes its member list")]
+        self.assertIn("Each index goes up as `$RUN crisprme.py publish-index --index <its folder> "
+                      "[--dictless] --hf-repo lucapinello/crisprme_plus_indices`: the image's "
+                      "`crisprme.py`, of `db50986`, routes an index of format 2 by its own code to "
+                      "the name the plan had given the repo, which is no repo's", publish)
+        self.assertIn("the repo `--hf-repo` names wins over that code, for the index, its panel's "
+                      "companions and their records", publish)
+        self.assertIn("each index row of the printed script names the repo, 7 on ml007 and 9 on "
+                      "ml008, as `grep -c` counts below", publish)
+        want = {"ml007": sum(r["kind"] in cis.INDEX_KINDS and cis.WORKDIR[r["panel"]] == "HGDP"
+                             for r in self.rows)}
+        want["ml008"] = sum(r["kind"] in cis.INDEX_KINDS for r in self.rows) - want["ml007"]
+        self.assertEqual(want, {"ml007": 7, "ml008": 9})
+        block = self.readme[self.readme.index("**The publish.**"):]
+        block = block[block.index("```bash\n"):]
+        block = block[:block.index("\n```", 8)]
+        counts = [int(line.split("#", 1)[1].split()[0].rstrip(":")) for line in block.splitlines()
+                  if line.startswith("grep -c -- '--hf-repo lucapinello/crisprme_plus_indices' "
+                                     "publish.sh")]
+        self.assertEqual(counts, [want["ml007"], want["ml008"]])
+        self.assertIn("every upload goes to the format-2 repo, which every publish command names, "
+                      "each `--hf-repo` it gives included", readme)
+        text = _flat(self.checklist)
+        step4 = text[text.index("4. **The publish**"):text.index("5. **`indexes/SHA256SUMS`**")]
+        self.assertIn("whose index rows each name the repo, `--hf-repo "
+                      "lucapinello/crisprme_plus_indices` (`grep -c` of it in the printed script "
+                      "gives 7 on ml007 and 9 on ml008)", step4)
+        self.assertIn("printed from a checkout of `feat/2.10.0` (or the release's tag)", step4)
+        self.assertIn("in the index set's header, its `repo` column and every publish command: each "
+                      "kit's `hf upload` and each index's `publish-index --hf-repo`",
+                      _flat(_read("docs", "INDEX_PROVENANCE.md")))
 
     def test_the_readme_points_to_sections_the_checklist_has(self):
         """B-7: the README sent the uploads it does not make to "Gate G", which the checklist

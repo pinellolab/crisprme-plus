@@ -226,19 +226,49 @@ class TheRepoOfThisReleasesIndexesIsTheOneOnTheHub(unittest.TestCase):
         self.assertEqual(asked, [(self.NEW, "dataset", "indexes")])
 
     def test_no_file_of_the_repository_names_the_planned_repo(self):
+        """Every file of the repository, whatever its kind: the files `git ls-files` lists in a
+        checkout, every file under the root but .git/ and __pycache__/ where the root is no
+        checkout (a git archive, as the CI replay unpacks one). The scan read the docs and the
+        code alone, by folder and suffix, and so not test/, install/, .claude/, the conda recipe,
+        *.yaml, *.def or a Makefile (the HF repo review, round 1: hfA1-2). A binary file (a NUL
+        in its first 8 KB: an image, a tarball) holds no name to read, and is left out."""
         root = pathlib.Path(__file__).resolve().parent.parent
-        files = [root / n for n in ("README.md", "METHODS.md", "CHANGELOG.md", "crisprme.py",
-                                    "index.py", "Dockerfile", "environment.yml")]
-        for top in ("docs", "seq_script", "scripts", "PostProcess", "pages", ".github", "changelog"):
-            if (root / top).is_dir():
-                files += sorted(p for p in (root / top).rglob("*") if p.is_file() and p.suffix in (
-                    ".md", ".py", ".tsv", ".sh", ".html", ".yml", ".txt", ".json"))
-        files = [p for p in files if p.is_file() and p.resolve() != pathlib.Path(__file__).resolve()]
-        self.assertGreater(len(files), 300)  # (the scan reads the docs and the code)
-        named = [str(p.relative_to(root)) for p in files
-                 if self.PLANNED in p.read_text(encoding="utf-8", errors="replace")]
+        files = _repository_files(root)
+        self.assertGreater(len(files), 500)  # (every file of the repository, the code and docs too)
+        for must in ("README.md", "crisprme.py", "PostProcess/crisprme_hf.py",
+                     "seq_script/rebuild/index_set_2.10.0.tsv", ".github/workflows/unit-tests.yml"):
+            self.assertIn(root / must, files)
+        forms = [self.PLANNED.encode(), self.PLANNED.replace("-", "_").encode()]
+        named = []
+        for p in files:
+            with open(p, "rb") as fh:
+                data = fh.read(8192)
+                if b"\0" in data:
+                    continue
+                data += fh.read()
+            if any(form in data for form in forms):
+                named.append(str(p.relative_to(root)))
         self.assertEqual(named, [], f"files that name the planned repo, which is no repo: {named}")
         self.assertTrue((root / "docs" / "hf" / "crisprme_plus_indices_README.md").is_file())
+
+
+def _repository_files(root):
+    """The files of the repository at ``root``: those `git ls-files` lists where ``root`` is the
+    top of a git checkout; else every file under it but those of .git/ and __pycache__/."""
+    import subprocess
+    try:
+        top = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True, timeout=60)
+        if top.returncode == 0 and pathlib.Path(top.stdout.strip()).resolve() == root.resolve():
+            got = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True,
+                                 timeout=60)
+            if got.returncode == 0:
+                return sorted(p for p in (root / n for n in got.stdout.decode().split("\0") if n)
+                              if p.is_file())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return sorted(p for p in root.rglob("*") if p.is_file()
+                  and not {".git", "__pycache__"} & set(p.relative_to(root).parts))
 
 
 if __name__ == "__main__":

@@ -256,7 +256,10 @@ major.minor version (Changed). The main changes, each told in its entry below:
   it was written with (the cluster's, or its working directory's), each build first copying its PAM
   file from the repository's `PAMs/` into its working directory's, `crisprme.py`, `hf` and `pigz`
   run in the release image (`$RUN`), each command in its own panel's working directory, with the
-  variables the README lists, each read by a command; every upload to the format-2 repo, no token
+  variables the README lists, each read by a command; every upload to the format-2 repo, which
+  every publish command names (`hf upload <repo>`, `publish-index --hf-repo <repo>`: the image the
+  indexes were built with, of CRISPRme `db50986`, which the publish runs in too, routes an index of
+  format 2 by its own code to the name the plan had given the repo, which is no repo's), no token
   in a command, and every variant index published `--dictless`, so that a panel's indexes name one
   Dictionaries bundle. `--commands build` and `--commands publish` print the rebuild's two halves,
   a script each: the build half publishes nothing, and the publish half, which builds nothing, is

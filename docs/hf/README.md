@@ -49,7 +49,10 @@ them (`indexes/SHA256SUMS`, each kit's `.SHA256SUMS` and member list,
 nothing else (`seq_script/rebuild/check_index_set.py` checks the set against the code;
 `seq_script/rebuild/README.md` says how the rebuild follows it). `publish-index` routes an index
 of format 2, or one named for its guide length and side, there by itself, and refuses
-to publish an index of format 2 in the two repos of 2.8.1, which 2.8.1 reads. 2.10.0's `download`
+to publish an index of format 2 in the two repos of 2.8.1, which 2.8.1 reads; the rebuild's
+publish rows name it all the same (`--hf-repo`), as they run in the image of `db50986`, whose
+code gives that route the name the plan had given the repo, which is no repo's
+(`seq_script/rebuild/README.md`, "The publish"). 2.10.0's `download`
 and its Settings catalog read it by default; an archive of 2.8.1 is still fetched by its own
 name from the repos of 2.8.1.
 
