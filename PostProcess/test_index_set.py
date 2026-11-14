@@ -74,30 +74,33 @@ class TheSetHolds(unittest.TestCase):
     def test_the_commands_print(self):
         import contextlib
         import io
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            self.assertEqual(cis.main(["--commands"]), 0)
-        text = out.getvalue()
-        self.assertLess(text.index("# build"), text.index("# publish"))
+        out = {}
+        for half in ("build", "publish"):
+            out[half] = io.StringIO()
+            with contextlib.redirect_stdout(out[half]):
+                self.assertEqual(cis.main(["--commands", half]), 0)
+        self.assertIn("# build\n", out["build"].getvalue())
         self.assertIn("$RUN crisprme.py publish-index --index "
-                      "$HGDP/genome_library/20-NRR_3_hg38+hg38_HGDP1kGP", text)
+                      "$HGDP/genome_library/20-NRR_3_hg38+hg38_HGDP1kGP",
+                      out["publish"].getvalue())
 
     def test_what_commands_prints_is_a_script_bash_reads(self):
-        """--commands prints every build command, then every publish command, for the rebuild
-        to run. The build column of the kits and of mega's index ended in a note in brackets,
-        and the companions' columns held prose, so bash refused the script (the stage-2b
-        review of lane D, D-R1-8): a note now has its own column, and a companion, which its
-        panel's first build writes and first publish uploads, has no command ("-"). (Its
-        syntax alone: TheRebuildRuns runs it.)"""
+        """--commands prints the rebuild's build commands, or its publish commands, for the
+        rebuild to run. The build column of the kits and of mega's index ended in a note in
+        brackets, and the companions' columns held prose, so bash refused the script (the
+        stage-2b review of lane D, D-R1-8): a note now has its own column, and a companion,
+        which its panel's first build writes and first publish uploads, has no command ("-").
+        (Its syntax alone: TheRebuildRuns runs it.)"""
         import contextlib
         import io
         import subprocess
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            self.assertEqual(cis.main(["--commands"]), 0)
-        script = out.getvalue()
-        got = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True)
-        self.assertEqual((got.returncode, got.stderr), (0, ""))
+        for half in ("build", "publish"):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(cis.main(["--commands", half]), 0)
+            script = out.getvalue()
+            got = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True)
+            self.assertEqual((got.returncode, got.stderr), (0, ""), half)
         for r in self.rows:
             companion = r["kind"] in ("bundle", "genotypes", "indel-genotypes")
             for what in ("build", "publish"):
@@ -531,6 +534,161 @@ class TheRebuildRuns(unittest.TestCase):
                 "VARIABLES['META'] holds one of")])
             dry = cis.dry_run(self.rows)
         self.assertTrue([p for p in dry if "stops" in p], dry)
+
+class TheRebuildHasTwoHalves(unittest.TestCase):
+    """The script --commands printed ran every build command, then every publish command, as
+    the README ran it (bash rebuild.sh): about 47 hours of builds, then an upload of every
+    archive before any gate or the PI's go, where a token or the cached login of the node held
+    one; a re-run, the way back from a failed upload, stopped at mega's build, whose recipe
+    refuses a working directory that holds any part of the dataset (the D7 readiness audit,
+    R-PUB-2, CAP-2, CAP-5; PP-2 of the release). Its two halves are scripts of their own now:
+    --commands build, which publishes nothing, and --commands publish, run once after the gates
+    and the go; each skips a row it ran to its end before, and the build half passes a kit whose
+    SHA256SUMS holds and mega's build where every part its recipe makes is there. The lines of
+    the build half are the manifest's, as the rebuild ran them."""
+
+    def setUp(self):
+        self.rows = cis.read_manifest()
+
+    def printed(self, *args):
+        import contextlib
+        import io
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                rc = cis.main(list(args))
+            except SystemExit as stop:
+                rc = stop.code
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_a_half_is_asked_for_by_name(self):
+        for args in (["--commands"], ["--commands", "all"]):
+            with self.subTest(args=args):
+                rc, out, err = self.printed(*args)
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn("--commands build (every build command; it publishes nothing) or "
+                              "--commands publish", err)
+
+    def test_the_build_half_publishes_nothing_and_the_publish_half_builds_nothing(self):
+        rc, build, _ = self.printed("--commands", "build")
+        self.assertEqual(rc, 0)
+        rc, publish, _ = self.printed("--commands", "publish")
+        self.assertEqual(rc, 0)
+        for word in ("publish-index", "hf upload", "\n# publish\n"):
+            self.assertNotIn(word, build)
+        for word in ("build-index-only", "seq_script/merge_panels/", "tar -cf", "\n# build\n"):
+            self.assertNotIn(word, publish)
+        for r in self.rows:
+            for half, text in (("build", build), ("publish", publish)):
+                if r[half] != cis.NO_COMMAND:
+                    self.assertIn(f"\n{r[half]} || {{ echo \"rebuild: the {half} of {r['archive']} "
+                                  f"failed\"", text)
+
+    def test_its_build_lines_are_those_the_rebuild_ran(self):
+        """The lines of the build half, the if, else and mark around each left out, are the 19
+        the D7 readiness audit checked and the rebuild of 2.10.0's indexes ran (md5
+        7389f7e234d4e617860f8f9b34abdc49, as stage.sh cut them from the one script between its
+        "# build" and "# publish" lines): the split changes no build. A change to a build
+        command changes this md5, and is a change to the rebuild."""
+        import hashlib
+        lines = cis.half_lines(cis.commands_script(self.rows, half="build"))
+        self.assertEqual(len(lines.splitlines()), 19)
+        self.assertEqual(hashlib.md5(lines.encode()).hexdigest(),
+                         "7389f7e234d4e617860f8f9b34abdc49")
+
+    def test_a_build_command_that_publishes_is_found(self):
+        rows = copy.deepcopy(self.rows)
+        row = _row(rows, "20-NGG_3_hg38")
+        row["build"] += " && $RUN crisprme.py publish-index --index $REF/genome_library/20-NGG_3_hg38"
+        self.assertTrue([p for p in cis.check(rows) if p.startswith(
+            "20-NGG_3_hg38: its build command publishes (crisprme.py publish-index): the build "
+            "half of the rebuild publishes nothing")], cis.check(rows))
+        self.assertTrue([p for p in cis.dry_run(rows) if p.startswith(
+            "the rebuild's build half, run dry, publishes: publish-index")])
+
+    def test_a_re_run_that_does_again_what_it_did_is_found(self):
+        from unittest import mock
+        wrapped = cis._row_lines
+
+        def unwrapped(r, half):  # (each line alone, as the one script ran it)
+            return wrapped(r, half)[1:2]
+        with mock.patch.object(cis, "_row_lines", unwrapped):
+            dry = cis.dry_run(self.rows)
+        self.assertTrue([p for p in dry if p.startswith(
+            "the rebuild's build half, run dry again, does again what it did")], dry)
+
+    def test_a_re_run_that_runs_megas_recipe_on_its_whole_dataset_is_found(self):
+        from unittest import mock
+        with mock.patch.object(cis, "_whole_recipe", lambda r: None):
+            dry = cis.dry_run(self.rows)
+        self.assertTrue([p for p in dry if "runs mega's recipe on a working directory that "
+                         "holds every part it makes: recipe" in p], dry)
+
+    def run_build(self, done=(), mega_parts=None):
+        """The build half run from the repository's root with no program of the image on PATH
+        (RUN empty), every row's mark there but mega's build's, and ``mega_parts`` (all of the
+        parts mega's recipe makes, or the first few of them) in $MEGA: (exit status, stdout,
+        stderr)."""
+        import shutil
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as t:
+            env = {"PATH": "/usr/bin:/bin", "HOME": t, "LC_ALL": "C", "RUN": ""}
+            for v in ("REF", "HGDP", "HPRC", "MEGA"):
+                env[v] = os.path.join(t, v)
+                os.makedirs(os.path.join(env[v], "Genomes", "hg38"))
+                for c in GENOMES[v]:
+                    open(os.path.join(env[v], "Genomes", "hg38", c + ".fa"), "w").close()
+            for v in ("SIF", "RP", "META", "HPRC_SRC", "P1KG", "MEGA_SRC"):
+                env[v] = os.path.join(t, v)
+                os.makedirs(env[v])
+            for c in PRIMARY:
+                open(os.path.join(env["MEGA_SRC"], f"mega.{c}.afmax.vcf.gz"), "w").close()
+            mega = "20-NRR_3_hg38+hg38_mega"
+            for r in self.rows:
+                if r["build"] == cis.NO_COMMAND or r["archive"] == mega:
+                    continue
+                w = env[cis.WORKDIR[r["panel"]]]
+                os.makedirs(os.path.join(w, cis.MARKS), exist_ok=True)
+                open(os.path.join(w, cis.MARKS, cis._mark_name("build", r["archive"])),
+                     "w").close()
+                if r["kind"] in cis.INDEX_KINDS:
+                    os.makedirs(os.path.join(w, "genome_library", r["archive"]))
+            parts = cis.WHOLE_RECIPES["seq_script/merge_panels/mega_rebuild.sh"]
+            for part in parts[:len(parts) if mega_parts == "all" else 2] if mega_parts else ():
+                path = os.path.join(env["MEGA"], part.format(archive=mega, genome="hg38",
+                                                             dataset="hg38_mega"))
+                os.makedirs(os.path.dirname(path) if part.endswith(".txt") else path,
+                            exist_ok=True)
+                if part.endswith(".txt"):
+                    open(path, "w").close()
+            if mega_parts == "all":
+                for c in PRIMARY:
+                    path = os.path.join(env["MEGA"], "VCFs", "hg38_mega", f"mega.{c}.build.vcf.gz")
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    open(path, "w").close()
+            got = subprocess.run([shutil.which("bash"), "-c",
+                                  cis.commands_script(self.rows, half="build")],
+                                 cwd=ROOT, env=env, capture_output=True, text=True, timeout=300)
+            return got.returncode, got.stdout, got.stderr
+
+    def test_megas_build_passes_where_every_part_its_recipe_makes_is_there(self):
+        """mega's recipe refuses a working directory that holds any part of the dataset, so a
+        re-run stopped at its line with exit 1 once it had built them: the build half passes
+        that line where every part it makes is there, as after a build run row by row (no mark),
+        and ends with exit 0, every other row done before."""
+        rc, out, err = self.run_build(mega_parts="all")
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("rebuild: the build of 20-NRR_3_hg38+hg38_mega: done before, skipped", out)
+        self.assertEqual(out.count(": done before, skipped"), 19, out)
+
+    def test_but_runs_its_recipe_where_a_part_is_missing_which_refuses_it(self):
+        # (the recipe itself, which refuses the working directory before it makes anything)
+        rc, out, err = self.run_build(mega_parts="some")
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("part(s) of hg38_mega, and nothing was made there", err)
+        self.assertIn("rebuild: the build of 20-NRR_3_hg38+hg38_mega failed", err)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -97,17 +97,52 @@ it serves for its own guide length (`index_fit.fits`).
    `$MEGA_SRC` of mega), and stops, with a non-zero status, at a step that fails; each build
    first copies its PAM file from the repository's `PAMs/` into its working directory's `PAMs/`,
    which a working directory set up by `download` does not hold (rule 4), and reads it there; and
-   every file a publish uploads is named by its working directory. `--commands` prints them as one
-   script, which stops before its first command where one of these variables is not set or a
-   working directory's genome folder is not as rule 1 says, and at the first command that fails.
+   every file a publish uploads is named by its working directory. `--commands build` and
+   `--commands publish` print them as the two halves of the rebuild, a script each (Commands): each
+   stops before its first command where one of the variables its commands read is not set (the
+   build half also where a working directory's genome folder is not as rule 1 says), and at the
+   first command that fails.
 
 ## Commands
 
+The rebuild has two halves, a script each. The build half builds every archive of the set, and
+publishes nothing. The publish half publishes them, and builds nothing: it is run once, after the
+indexes have passed the release's gates (`docs/RELEASE_CHECKLIST.md`) and the PI has approved the
+publish. The script of 2.10.0's audit held both, every publish command straight after the builds,
+so a run published before any gate, wherever a token or a node's cached login could upload
+(PP-2 of the release).
+
 ```bash
-python seq_script/rebuild/check_index_set.py              # the check and its dry run (the D7 audit runs it): exit 1 on a problem
-python seq_script/rebuild/check_index_set.py --commands > rebuild.sh   # the rebuild: every build command, then every publish command, in order
+python seq_script/rebuild/check_index_set.py                          # the check and its dry run (the D7 audit runs it): exit 1 on a problem
+python seq_script/rebuild/check_index_set.py --commands build > rebuild.sh     # the build half: every build command, in order; it publishes nothing
 REF=... HGDP=... HPRC=... MEGA=... RUN=... SIF=... RP=... META=... HPRC_SRC=... P1KG=... MEGA_SRC=... bash rebuild.sh   # from the repository's root
+# once the indexes have passed the gates and the publish is approved:
+python seq_script/rebuild/check_index_set.py --commands publish > publish.sh   # the publish half: every publish command, in order
+REF=... HGDP=... HPRC=... MEGA=... RUN=... bash publish.sh            # from the repository's root
 ```
+
+Each line of a half is its row's command, as the manifest gives it, then `|| exit` with what
+failed and a comment of the row's archive and note; around it, an `if` and an `else` that skip a
+row done before, and a mark once it has run, each on lines of their own. The lines of the build
+half, the rows' lines alone, are those the D7 readiness audit checked and the rebuild of 2.10.0's
+indexes ran (md5 `7389f7e234d4e617860f8f9b34abdc49`, 19 lines; `check_index_set.half_lines` takes
+them out, as `PostProcess/test_index_set.py` does).
+
+**A re-run.** Each half skips a row it ran to its end before: once a row's command has run, the
+half leaves a mark in the row's working directory, `.rebuild-2.10.0/<half>.<archive>` (a `/` as
+`_`), and a re-run skips a row with its mark (an index's with the index still in `genome_library/`).
+The build half also passes a kit whose `SHA256SUMS` holds (`sha256sum -c` in its working directory:
+the list is written once the tarball is whole), and mega's build where every part its recipe makes
+is in `$MEGA`: its index and `_INDELS` index, its enriched and fake-indel genomes, its
+`log_indels_`, `registry_` and `indel_af_` Dictionaries, its samplesID, and the build VCF of each
+chromosome of `$MEGA_SRC`, with no staging folder left (`check_index_set.WHOLE_RECIPES`). The
+recipe refuses a working directory that holds any part of the dataset, so its line, run again once
+done, exited 1 and stopped the script there, before any later row. A build run row by row (as
+the D7 plan's `rows.sh` ran 2.10.0's) leaves no mark: there, the build half builds each index row
+again, which the tools keep where it is in place ("already present", a few seconds each), and
+passes the kits and mega. To build a row again, remove its mark and what it built. A mega build
+that stopped partway is refused by its recipe until its parts are gone: move `$MEGA` aside, put
+back its genome folder, and run the build half again.
 
 The check holds when: every PAM file exists and gives the row's PAM, side and spacer; N = max(bDNA,
 bRNA) + 1; every index's name is the one `build-index-only` gives its PAM file
@@ -123,31 +158,38 @@ working directory, with no `cd` outside `( )` and no repository path after one; 
 calls is the repository's, and given every input it would otherwise read from a path it was written
 with (one of the cluster's, or its working directory's: HGDP + 1000 Genomes' `RP=${RP:-$B}`); each
 build copies its PAM file and reads that one; `crisprme.py`, `hf` and `pigz` run through `$RUN`;
-every upload goes to the format-2 repo and no command passes a token (`HF_TOKEN` holds it); and
-every variant index is published `--dictless`, so that each of a panel's indexes names one
-Dictionaries bundle. Then the check runs `--commands`' script dry: every program it calls stubbed
+every upload goes to the format-2 repo and no command passes a token (`HF_TOKEN` holds it); no
+build command publishes, and no publish command builds; and every variant index is published
+`--dictless`, so that each of a panel's indexes names one Dictionaries bundle. Then the check runs
+the two halves dry, the build half, then the publish half: every program they call stubbed
 (`crisprme.py`, `hf`, `pigz`, `tar`, `sha256sum`, a recipe; `apptainer` called directly fails),
 from a copy of the repository's root made of links, in temporary working directories that hold
 `Genomes/hg38` as rule 1 says (all of hg38 for the reference and HGDP + 1000 Genomes, chr1-22, X
-and Y for HPRC and mega, and mega's merged VCFs of those) and what the builds leave. It must run to
-its end, which it does only where every script it calls is there, every PAM file a build reads is
-in place, every path a command hands a program or a recipe is there, and every index of the set is
-published from its working directory; and it must write nothing into the repository's root.
+and Y for HPRC and mega, and mega's merged VCFs of those) and what the builds leave. Each must run
+to its end, which it does only where every script it calls is there, every PAM file a build reads
+is in place, every path a command hands a program or a recipe is there, and every index of the set
+is published from its working directory, by the publish half alone; and neither may write into
+the repository's root. Run again, each must do nothing again; and the build half, with the marks
+of the kits and of mega's build gone and mega's parts all there, must build nothing (A re-run).
 `PostProcess/test_index_set.py` runs the check and the dry run in the unit tests, mutates the set
 and its commands, and checks that each mutation is found: by the check and by the dry run where
 both can see it (a recipe called after a `cd`, a PAM file not copied, a kit packed after a `cd`
 that moves the next commands, a program of the image run on the host, a script the repository does
 not have, a text the script cannot hold), by the dry run alone (a kit uploaded from the
-repository's root, or packed into it), and by the check alone where the dry run cannot see it (an
-input left to a recipe's default, a variable the rebuild does not set, or one no command reads,
-another panel's working directory, a pending script the tree holds, an upload to another repo, a
-token, a variant index published with its per-sample dictionaries, and the set's own errors); it
-runs the script on genome folders that are not as rule 1 says, which stops before its first
-command. `PostProcess/test_panel_recipes.py` runs the HGDP + 1000 Genomes and HPRC recipes on
-stubs: each stops, with a non-zero status, at a step that fails (the samples, a chromosome's VCF,
-the build), and a chromosome of the genome folder without its source stops it; on a test genome
-of chr22, or of chr21 and chr22, beside a source folder of every chromosome's source, each builds
-those chromosomes alone and reads no other's source.
+repository's root, or packed into it; a half that does again what it did on a re-run, or runs
+mega's recipe on a working directory that holds every part it makes), and by the check alone where
+the dry run cannot see it (an input left to a recipe's default, a variable the rebuild does not
+set, or one no command reads, another panel's working directory, a pending script the tree holds,
+an upload to another repo, a token, a variant index published with its per-sample dictionaries,
+and the set's own errors), and by both (a build command that publishes); it runs the build half on
+genome folders that are not as rule 1 says, which stops before its first command, and on a `$MEGA`
+that holds every part mega's recipe makes, whose line it passes (the recipe runs, and refuses it,
+where a part is missing); and it checks that the build half's lines are the 19 the rebuild ran.
+`PostProcess/test_panel_recipes.py` runs the HGDP + 1000 Genomes and HPRC recipes on stubs: each
+stops, with a non-zero status, at a step that fails (the samples, a chromosome's VCF, the build),
+and a chromosome of the genome folder without its source stops it; on a test genome of chr22, or
+of chr21 and chr22, beside a source folder of every chromosome's source, each builds those
+chromosomes alone and reads no other's source.
 
 The HPRC rows read `$HPRC_SRC`: HPRC Release 2's Minigraph-Cactus graph **v2.1** on GRCh38, the
 VCF HPRC decomposed with `vcfwave` (`hprc-v2.1-mc-grch38.wave.vcf.gz`, 2,291,014,302 bytes, md5

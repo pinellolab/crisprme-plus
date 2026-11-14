@@ -210,18 +210,27 @@ major.minor version (Changed). The main changes, each told in its entry below:
   run in the release image (`$RUN`), each command in its own panel's working directory, with the
   variables the README lists, each read by a command; every upload to the format-2 repo, no token
   in a command, and every variant index published `--dictless`, so that a panel's indexes name one
-  Dictionaries bundle. `--commands` prints the rebuild as one script, every build command, then
-  every publish command; it stops before its first command where one of those variables is not set
-  or a working directory's genome folder is not what the rebuild builds on (HGDP + 1000 Genomes'
-  not the reference's; HPRC's or mega's holding a FASTA but chr1-22, X and Y, or not those of the
-  reference's; mega's merged VCFs not of its genome folder's chromosomes; a test genome of chr22
-  runs), and at the first command that fails (each ends in `|| exit`: `set -e` does not stop at a
-  command of an `&&` list but its last; and the HGDP + 1000 Genomes and HPRC recipes now stop at a
-  step that fails, under Fixed). The check runs it dry, every program it calls stubbed, in
-  temporary working directories that hold the genome folders and sources the rebuild takes, from a
-  copy of the repository's root made of links: it runs to its end only where every script it calls
-  is there, every PAM file a build reads is in place and every file a publish uploads is where the
-  command says, and writes nothing into the repository's root. mega's build calls
+  Dictionaries bundle. `--commands build` and `--commands publish` print the rebuild's two halves,
+  a script each: the build half publishes nothing, and the publish half, which builds nothing, is
+  run once, after the gates and the PI's go (the one script of the audit published straight after
+  its builds, before any gate, wherever a token or a node's cached login could upload: PP-2 of the
+  release). Each stops before its first command where one of the variables its commands read is
+  not set or, the build half, a working directory's genome folder is not what the rebuild builds
+  on (HGDP + 1000 Genomes' not the reference's; HPRC's or mega's holding a FASTA but chr1-22, X
+  and Y, or not those of the reference's; mega's merged VCFs not of its genome folder's
+  chromosomes; a test genome of chr22 runs), and at the first command that fails (each ends in
+  `|| exit`: `set -e` does not stop at a command of an `&&` list but its last; and the HGDP + 1000
+  Genomes and HPRC recipes now stop at a step that fails, under Fixed). A re-run of a half skips
+  each row it ran to its end (a mark in the row's working directory, `.rebuild-2.10.0/`), and the
+  build half passes a kit whose `SHA256SUMS` holds and mega's build where every part its recipe
+  makes is there: the recipe refuses a working directory that holds any part of the dataset, so a
+  re-run stopped at its line, exit 1. The lines of the build half are the manifest's, as the
+  rebuild of 2.10.0's indexes ran them (md5 `7389f7e234d4e617860f8f9b34abdc49`). The check runs the
+  two halves dry, then each again, every program they call stubbed, in temporary working
+  directories that hold the genome folders and sources the rebuild takes, from a copy of the
+  repository's root made of links: each runs to its end only where every script it calls is
+  there, every PAM file a build reads is in place and every file a publish uploads is where the
+  command says, run again does nothing again, and writes nothing into the repository's root. mega's build calls
   `seq_script/merge_panels/mega_rebuild.sh`, the recipe of its full rebuild (below), from the
   merged VCFs `mega.<chr>.afmax.vcf.gz`. Covered by `PostProcess/test_index_set.py`, which mutates
   the set and its commands and checks that each mutation is found: by the check and the dry run
