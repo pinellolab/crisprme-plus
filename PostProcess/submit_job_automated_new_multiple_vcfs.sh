@@ -370,6 +370,25 @@ _lock_stale() {
 	return 0
 }
 
+# Set _quoted to paths "$@" as a message gives them to be pasted into bash or zsh: each
+# single-quoted, a quote in it written '\'' (as indel_window.quote writes it), each after a
+# space (" '<lock>' '<output>'"). A path that holds a quote, quoted by hand, cut the command
+# there (IR2A-R2-4). No command substitution: see the traps.
+_quote_paths() {
+	local _p _rest _head _q="'"
+	_quoted=
+	for _p in "$@"; do
+		_rest=$_p
+		_quoted+=" $_q"
+		while [[ $_rest == *"$_q"* ]]; do
+			_head=${_rest%%"$_q"*}
+			_quoted+="$_head$_q\\$_q$_q"
+			_rest=${_rest#*"$_q"}
+		done
+		_quoted+="$_rest$_q"
+	done
+}
+
 # What to do about a lock _lock_stale found held, into _lock_tip, for a run that is to
 # be $1 (e.g. "indexing <dir>") with what the lock guards $2 (" '<lock>' '<output>'...").
 # Clearing it is offered only when this run cannot check the owner: a run known to be
@@ -512,7 +531,8 @@ _lock_take() {
 	if [ "$1" = -bin ]; then _bin=1; shift; fi
 	_lock="$1" _what="$2" _out="$3"
 	shift 2
-	printf -v _clear " '%s'" "$_lock" "$@"
+	_quote_paths "$_lock" "$@"
+	_clear=$_quoted
 	while :; do
 		if mkdir "$_lock" 2>/dev/null; then
 			_lock_sign "$_lock"
@@ -1343,8 +1363,9 @@ while read vcf_f; do
 			# a name that says the side records it (since 2.10.0): the way to use one built
 			# for a 3' PAM, which build-index-only does not record over it (RV1-6)
 			_g=$(_index_guide_len "$1")
-			printf "       if it was built from a 3' PAM file, name it so: mv '%s' '%s', which records that%s\n" \
-				"$1" "$(dirname "$1")/${_g:-<guide length>}-$_ip_pam_and_rest" "${_g:+, for a guide of $_g nt}" >&2
+			_quote_paths "$1" "$(dirname "$1")/${_g:-<guide length>}-$_ip_pam_and_rest"
+			printf "       if it was built from a 3' PAM file, name it so: mv%s, which records that%s\n" \
+				"$_quoted" "${_g:+, for a guide of $_g nt}" >&2
 			return 0
 		fi
 		if [ -z "${_p//N/}" ]; then
@@ -1358,8 +1379,9 @@ while read vcf_f; do
 		# (taken for a 3' build, it is refused for a 5' PAM: a name that says the side
 		# records it, as for a 3' one above)
 		_g=$(_index_guide_len "$1")
-		printf "       if it was built from a 5' PAM file, name it so: mv '%s' '%s', which records that%s\n" \
-			"$1" "$(dirname "$1")/${_ip_pam}-${_g:-<guide length>}_${_ip_n}_${_ip_rest}" "${_g:+, for a guide of $_g nt}" >&2
+		_quote_paths "$1" "$(dirname "$1")/${_ip_pam}-${_g:-<guide length>}_${_ip_n}_${_ip_rest}"
+		printf "       if it was built from a 5' PAM file, name it so: mv%s, which records that%s\n" \
+			"$_quoted" "${_g:+, for a guide of $_g nt}" >&2
 	}
 
 	# Say on stderr why the PAM-less indexes of library $1 for $2 whose flank is wider than
@@ -1430,8 +1452,9 @@ while read vcf_f; do
 			_own="$(dirname "$1")/${_g}-${_ip_pam}_${_ip_n}_${_ip_rest}"
 		fi
 		if ! [ -e "$_own" ]; then
-			_rename="name it for the guide it was built for (mv '$1' '$_own'"
-			[ -z "$_also" ] || _rename="$_rename; mv '$2' '${_own}_INDELS'"
+			_quote_paths "$1" "$_own"
+			_rename="name it for the guide it was built for (mv$_quoted"
+			[ -z "$_also" ] || { _quote_paths "$2" "${_own}_INDELS"; _rename="$_rename; mv$_quoted"; }
 			_rename="$_rename), "
 		fi
 		printf "ERROR: " >&2
@@ -1863,7 +1886,8 @@ while read vcf_f; do
 					&& [ "${prune_pam:-0}" = "1" ] && [ "${pos:-1}" -gt 0 ]; } || continue
 			fi
 			if _lock_stale "$_l"; then
-				_dead_locks+=("ERROR: ${_l%.lock} is a partial index: the run that was building it (pid $_lock_pid on $_lock_host, started $_lock_started) $_lock_gone. Clear it, and its lock, with: rm -rf '$_l' '${_l%.lock}'")
+				_quote_paths "$_l" "${_l%.lock}"
+				_dead_locks+=("ERROR: ${_l%.lock} is a partial index: the run that was building it (pid $_lock_pid on $_lock_host, started $_lock_started) $_lock_gone. Clear it, and its lock, with: rm -rf$_quoted")
 			else
 				_held=$_l
 				break
@@ -1871,7 +1895,8 @@ while read vcf_f; do
 		done
 		[ -n "$_held" ] || break
 		echo "Another run is indexing ${_held%.lock} — waiting..."
-		_lock_wait "$_held" "indexing ${_held%.lock}" " '$_held' '${_held%.lock}'"
+		_quote_paths "$_held" "${_held%.lock}"
+		_lock_wait "$_held" "indexing ${_held%.lock}" "$_quoted"
 		idx_ref=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")
 	done
 
@@ -2144,9 +2169,11 @@ while read vcf_f; do
 			if ! [ -d "$_l" ]; then
 				printf "ERROR: INDELS index '%s' is missing and cannot be built (source genome '%s' is not installed). The precomputed index looks incomplete — re-download it: crisprme.py download --what index --index-name %s\n" "$(basename "$indels_index_dir")" "$(basename "$indels_out")" "$idx_var_base" >&2
 			elif _lock_stale "$_l"; then
-				printf "ERROR: INDELS index '%s' is a partial build: the run that was building it (pid %s on %s, started %s) %s, and it cannot be rebuilt here (source genome '%s' is not installed). Clear it, and its lock, with rm -rf '%s' '%s', then re-download it: crisprme.py download --what index --index-name %s\n" "$indels_index_dir" "$_lock_pid" "$_lock_host" "$_lock_started" "$_lock_gone" "$(basename "$indels_out")" "$_l" "$indels_index_dir" "$idx_var_base" >&2
+				_quote_paths "$_l" "$indels_index_dir"
+				printf "ERROR: INDELS index '%s' is a partial build: the run that was building it (pid %s on %s, started %s) %s, and it cannot be rebuilt here (source genome '%s' is not installed). Clear it, and its lock, with rm -rf%s, then re-download it: crisprme.py download --what index --index-name %s\n" "$indels_index_dir" "$_lock_pid" "$_lock_host" "$_lock_started" "$_lock_gone" "$(basename "$indels_out")" "$_quoted" "$idx_var_base" >&2
 			else
-				_lock_advice "indexing $indels_index_dir" " '$_l' '$indels_index_dir'"
+				_quote_paths "$_l" "$indels_index_dir"
+				_lock_advice "indexing $indels_index_dir" "$_quoted"
 				printf "ERROR: INDELS index '%s' is locked, and it cannot be built here (source genome '%s' is not installed): %s. %s\n" "$indels_index_dir" "$(basename "$indels_out")" "$_lock_why" "$_lock_tip" >&2
 			fi
 			exit 1

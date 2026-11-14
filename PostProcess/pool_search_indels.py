@@ -328,8 +328,10 @@ def _rebuild(raw_fakechrom, fasta, with_variant=False):
     # whose INDELS index is in place, and else swaps in both from one archive: a variant
     # index left there survives a download that fails, as for an index that is not on
     # the hub)
-    download = (f"rm -rf '{indels_index}' && crisprme.py download --what index --index-name "
-                f"{os.path.basename(indels_index)[: -len('_INDELS')]} --path '{cwd}'")
+    # (each path quoted as a shell reads it back, a quote in it too: indel_window.quote)
+    q = indel_window.quote
+    download = (f"rm -rf {q(indels_index)} && crisprme.py download --what index --index-name "
+                f"{os.path.basename(indels_index)[: -len('_INDELS')]} --path {q(cwd)}")
     # (where the search's --vcf list spells the dataset as VCFs/<name>, the search looks in
     # VCFs/VCFs/<name>, and takes the chromosomes from the indel logs)
     named = os.path.join(cwd, "VCFs", vcf_name)
@@ -342,12 +344,12 @@ def _rebuild(raw_fakechrom, fasta, with_variant=False):
                   if _in_chrom_view() else "this search again,")
         enriched = os.path.join(cwd, "Genomes", f"{ref_name}+{vcf_name}")
         if not also:
-            return (f": remove the INDELS index with rm -rf '{indels_index}' and run {search} "
+            return (f": remove the INDELS index with rm -rf {q(indels_index)} and run {search} "
                     f"which builds it anew from the fake-indel genome in "
                     f"{os.path.dirname(raw_fakechrom)}")
         if os.path.isdir(enriched):
             # (the search builds a missing variant index from the enriched genome in place)
-            return (f": remove both with rm -rf '{indels_index}' '{also[0]}' and run {search} "
+            return (f": remove both with rm -rf {q(indels_index)} {q(also[0])} and run {search} "
                     f"which builds them anew from the enrichment in place, {enriched} and the "
                     f"fake-indel genome in {os.path.dirname(raw_fakechrom)}")
         # (no enriched genome here to build the variant index from, nor the VCFs and the PAM
@@ -368,17 +370,17 @@ def _rebuild(raw_fakechrom, fasta, with_variant=False):
         again = f"; or, for an index you downloaded, download it again: {download}"
     # the bulges build-index-only builds the index's N from
     n = int(bMax) - 1 if bMax.isdigit() and int(bMax) > 0 else bMax
-    rest = f"--bDNA {n} --bRNA {n} --vcf '{vcfs}' --path '{cwd}'"
+    rest = f"--bDNA {n} --bRNA {n} --vcf {q(vcfs)} --path {q(cwd)}"
     if pam:
-        removed = " ".join("'%s'" % p for p in remove)
+        removed = " ".join(q(p) for p in remove)
         return (f": rm -rf {removed} && crisprme.py build-index-only --genome "
-                f"'{_outside_view(ref_folder)}' --pam '{pam}' {rest}{again}")
+                f"{q(_outside_view(ref_folder))} --pam {q(pam)} {rest}{again}")
     named = f"{own[1]}.txt, " if own[1] else ""
     return (f" with build-index-only and a PAM file of the PAM it was built with ({named}the "
             f"line '{own[0]}'), which is not in {' or '.join(_pam_dirs())}: remove "
-            + " and ".join("'%s'" % p for p in remove)
+            + " and ".join(q(p) for p in remove)
             + f", write that PAM file, and run crisprme.py build-index-only with it as --pam, "
-              f"and --genome '{_outside_view(ref_folder)}' {rest}{again}")
+              f"and --genome {q(_outside_view(ref_folder))} {rest}{again}")
 
 
 def _other_sub_indexes_format(sub):

@@ -501,6 +501,10 @@ def _functions(*names):
         text = fh.read()
     out = []
     for name in names:
+        if f"\n{name}() {{" in text:  # (one of the script's top level: _quote_paths)
+            start = text.index(f"\n{name}() {{") + 1
+            out.append(text[start:text.index("\n}\n", start) + len("\n}\n")])
+            continue
         start = text.index(f"\t{name}() {{")
         end = text.index("\n\t}\n", start) + len("\n\t}\n")
         out.append("\n".join(line[1:] if line.startswith("\t") else line
@@ -513,7 +517,7 @@ def _shell():
     return _functions("_engine_index_format", "_unreadable_bin", "_how_built_again",
                       "_check_index_format", "_index_guide_len", "_index_side", "_header_side",
                       "_index_fits_guide", "_resolve_index_dir", "_say_other_side",
-                      "_index_name_parts", "_pam_holds", "_pam_narrower")
+                      "_index_name_parts", "_pam_holds", "_pam_narrower", "_quote_paths")
 
 
 class _Index(_Engine):
@@ -997,6 +1001,23 @@ class TheSideOfAFormat2IndexIsItsHeaders(_Index):
                     f"       {os.path.basename(folder)} is a PAM-less index for a PAM on the 5' "
                     f"side of the guide (as {why} records), and 20bp-NNN-NO-PAM.txt puts the PAM "
                     "on the 3' side, so a search of it would find nothing\n")))
+
+    def test_the_mv_it_gives_names_the_index_pasted_into_bash_or_zsh(self):
+        """IR2A-R2-4, the review of wave 2a of 2.10.0: the rename the search gives for a
+        PAM-less index that records no side quoted its paths by hand, '<path>', and a library
+        whose path holds a quote ("Luca's data") cut the mv there, pasted. Each path is quoted
+        as a shell reads it back (_quote_paths)."""
+        from test_indel_window import paste_both
+        lib = os.path.join(self.tmp, "Luca's data", "lib")
+        folder = self.index("NNNN_3_hg38", fmt=1, lib=lib)
+        out = self.shell('pam_name=20bp-NGG-SpCas9.txt\ntrue_pam=NGG\n_say_other_side "$1"',
+                         folder)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        m = re.search(r"name it so: (mv .*), which records that, for a guide of 20 nt\n",
+                      out.stderr)
+        self.assertIsNotNone(m, out.stderr)
+        paste_both(self, m.group(1), self.tmp)
+        self.assertEqual(os.listdir(lib), ["20-NNNN_3_hg38"])
 
 
 def crisprme_version():

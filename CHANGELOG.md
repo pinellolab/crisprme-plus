@@ -2190,6 +2190,17 @@ major.minor version (Changed). The main changes, each told in its entry below:
   (about 4 s on chr22, 27 s on IGH).
 
 ### Fixed
+- **A command a search prints runs as printed where a path holds a quote.** The commands a
+  search's refusal gives, to remove an INDELS index and build or download it again
+  (`pool_search_indels.py`), to remove a part of a dataset `build-index-only` left unfinished
+  (`unfinished_marks.py`), to clear a build lock or to name an index for its guide or its side
+  (the search script), wrote each path in quotes by hand, `'<path>'`: in a working directory such
+  as `Luca's data` the quote in the path ended it, and the command, pasted, waited for a quote or
+  ran on other paths. Each path is now quoted as a shell reads it back (the quote in it written
+  `'\''`), the same text as before for any other path, and each command runs as printed in bash and
+  in zsh. Covered by `test_indel_empty_chromosome`, `test_index_resolution` and
+  `test_index_format2` (IR2A-R2-4 of 2.10.0's integration review; `build-index-only`'s own
+  messages are unchanged in this release).
 - **On a classic install a missing allele carries nothing** (`new_simple_analysis.py`, the
   per-sample dictionary path; since 2.8.1 at least). An
   index built without `--samplesID` (the classic per-sample dictionaries, no Tier-1 store) is read

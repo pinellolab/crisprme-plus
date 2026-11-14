@@ -2719,6 +2719,69 @@ sys.exit(rc if rc >= 0 else 128 - rc)
 """
 
 
+class APathThatHoldsAQuote(_Locks):
+    """IR2A-R2-4, the review of wave 2a of CRISPRme 2.10.0: the search script quoted the
+    paths of the commands it gives by hand, '<path>' (how to clear a lock, how to name an
+    index), and a path that holds a quote, a working directory "Luca's data", cut such a
+    command there, pasted: the shell waited for a quote to close the rest. _quote_paths
+    quotes each as a shell reads it back, in bash and in zsh."""
+
+    def setUp(self):
+        super().setUp()
+        self.top = self.dir
+        self.dir = self.top / "Luca's data"
+        self.dir.mkdir()
+        self.lock = self.dir / "NRG_2_hg38.lock"
+        self.out = self.dir / "NRG_2_hg38"
+
+    def test_each_path_reads_back_pasted_into_bash_or_zsh(self):
+        from test_indel_window import same_argv
+        paths = [str(self.lock), "it''s", "'", "", "a\\b $HOME `id` \"q\" * ~"]
+        script = (f"{_lock_helpers()}_quote_paths " + " ".join(_q(p) for p in paths)
+                  + '\nprintf "%s" "$_quoted"\n')
+        got = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        self.assertEqual((got.returncode, got.stderr), (0, ""))
+        self.assertTrue(got.stdout.startswith(" '%s/Luca'\\''s data/" % self.top), got.stdout)
+        self.assertEqual(same_argv(self, "rm" + got.stdout, str(self.top)), [["rm"] + paths])
+
+    def test_the_rm_a_wait_gives_clears_the_lock_pasted_into_bash_or_zsh(self):
+        from test_indel_window import paste_both
+        self.hold(None)  # (no owner record: waited for, and how to clear it said)
+        self.out.mkdir()
+        (self.out / "x.bin").write_text("")
+        rc, out, err = self.take(stop_after=2.5)
+        self.assertEqual(rc, -signal.SIGKILL, out + err)
+        notice = next(ln for ln in out.splitlines() if ln.startswith("Still waiting for "))
+        command = notice.split("clear the lock and what it left with: ", 1)[1]
+        paste_both(self, command, str(self.top))
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()),
+                         ["stderr1", "stdout1"])
+
+
+class AnUnfinishedPartWhosePathHoldsAQuote(unittest.TestCase):
+    """IR2A-R2-4: the same for how complete-search's refusal of a part of a dataset that
+    build-index-only marks unfinished says to remove it (unfinished_marks.dataset_parts)."""
+
+    def test_its_rm_removes_that_part_pasted_into_bash_or_zsh(self):
+        import unfinished_marks
+        from test_indel_window import paste_both
+        top = tempfile.mkdtemp(prefix="unfinished_quote_")
+        self.addCleanup(shutil.rmtree, top, True)
+        work = os.path.join(top, "Luca's data")
+        dicts = os.path.join(work, "Dictionaries")
+        for name in ("registry_ds", "genotypes_ds", "indel_genotypes_ds", "keep"):
+            os.makedirs(os.path.join(dicts, name, ".building"))
+        with mock.patch.dict(os.environ, {"CRISPRME_INDEL_SNP": "1"}):
+            parts = unfinished_marks.dataset_parts(work, "hg38", "ds", True)
+        removes = [re.search(r"\((rm -rf .*)\)$", rerun) for _, _, rerun in parts]
+        self.assertEqual([m is not None for m in removes], [True, True, False])
+        for m, gone in zip(removes, (["genotypes_ds", "registry_ds"], ["indel_genotypes_ds"])):
+            before = set(os.listdir(dicts))
+            paste_both(self, m.group(1), top)
+            self.assertEqual(sorted(before - set(os.listdir(dicts))), gone)
+        self.assertEqual(os.listdir(dicts), ["keep"])
+
+
 class BuildLocksInTheShippedScript(_ShippedScript):
     """The same locks, taken by whole runs of the shipped script. A reference-only
     search with no index installed builds 20-NRG_2_hg38 (since 2.10.0 a name that says the

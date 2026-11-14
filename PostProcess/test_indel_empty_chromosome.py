@@ -156,6 +156,7 @@ ROW_A = "X\tACGT\tACGT\tfakechrA\t10\t10\t+\t1\t0\t1"
 ROW = "X\tACGT\tACGT\tfake{}\t{}\t{}\t+\t1\t0\t1"
 # the two indels the tests' logs list, and the chromosomes of their dataset's VCFs
 LOGS_AB = {"chrA": ["chrA\t\trs1\t0.1\tA>AT\t5\tACGT"], "chrB": ["chrB\t\trs2\t0.2\tC>CG\t5\tACGT"]}
+ONLY_B = {"chrA": [], "chrB": LOGS_AB["chrB"]}  # (chrA has no indel: skipped, never searched)
 AB = ("chrA", "chrB")
 # contigs with an underscore in their name, which pool_index_indels.py does not index
 UNPLACED, RANDOM = "chrUn_KI270302v1", "chr1_KI270706v1_random"
@@ -1068,6 +1069,98 @@ class SearchSide(_Fixture):
         self.assertEqual(self.worker_lines(res.stdout, "Search"), sorted(
             [f"Searching for INDELs in {c}" for c in chroms]
             + [f"Search ended for INDELs in {c}" for c in chroms]))
+
+
+@unittest.skipUnless(_gnu_sed(), "pool_search_indels.py merges with GNU `sed -i`, as the pipeline image does")
+class ItsCommandsWhereAPathHoldsAQuote(_Fixture):
+    """IR2A-R2-4, the review of wave 2a of CRISPRme 2.10.0: the commands a refusal of
+    pool_search_indels.py gives (_rebuild) quoted each path by hand, '<path>', and a path that
+    holds a quote, a working directory "Luca's data", cut such a command there, pasted: the
+    shell waited for a quote to close the rest, or ran it on other paths. Each path is quoted
+    as a shell reads it back (indel_window.quote), and each command runs on those paths in
+    bash and in zsh. (SearchSide's fixture, under a folder of that name; chrA has no indel, so
+    that nothing is searched: the search's own commands take the paths unquoted.)"""
+
+    run_search, from_view, searched = SearchSide.run_search, SearchSide.from_view, SearchSide.searched
+
+    def setUp(self):
+        super().setUp()
+        self.top = self.tmp
+        self.tmp = os.path.join(self.top, "Luca's data")
+        os.makedirs(self.tmp)
+
+    def advice(self, res):
+        """What the refusal says to do: its ERROR, the one line on stderr, after "Rebuild it"
+        (or "them")."""
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertEqual(res.stderr.count("\n"), 1, res.stderr)
+        self.assertEqual(self.searched() + self.searched(index=False), [])
+        m = re.search(r"\. Rebuild (?:it|them)(.*)\n\Z", res.stderr, re.S)
+        self.assertIsNotNone(m, res.stderr)
+        return m.group(1)
+
+    def download(self):
+        return [["rm", "-rf", self.idx], ["crisprme.py", "download", "--what", "index",
+                                          "--index-name", "NRG_3_ref+ds", "--path", self.work]]
+
+    def test_the_rebuild_and_the_download_it_gives_run_on_those_paths(self):
+        res, _ = self.run_search(ONLY_B, {"chrA": False, "chrB": False}, vcfs=AB)
+        build, download = self.advice(res).split(
+            "; or, for an index you downloaded, download it again: ")
+        self.assertTrue(build.startswith(": rm -rf "), build)
+        self.assertEqual(same_argv(self, build[2:], self.top), [
+            ["rm", "-rf", self.idx, os.path.join(self.work, "Genomes", "ref+ds")],
+            ["crisprme.py", "build-index-only", "--genome",
+             os.path.join(self.work, "Genomes", "ref"), "--pam",
+             os.path.join(self.tmp, "pam.txt"), "--bDNA", "2", "--bRNA", "2", "--vcf",
+             self.vcf_dir, "--path", self.work]])
+        self.assertEqual(same_argv(self, download, self.top), self.download())
+
+    def test_the_rm_it_gives_removes_that_index_pasted_into_bash_or_zsh(self):
+        # (the fake-indel genome here, no VCFs: the search builds it anew once it is gone)
+        res, _ = self.run_search(ONLY_B, {"chrA": False}, fakes={"chrB": WITH_NRG})
+        m = re.fullmatch(r": remove the INDELS index with (rm -rf .*) and run this search "
+                         r"again, which builds it anew from the fake-indel genome in (.*)",
+                         self.advice(res))
+        self.assertIsNotNone(m, res.stderr)
+        self.assertEqual(m.group(2), os.path.join(self.work, "Genomes", "ref+ds_INDELS"))
+        paste_both(self, m.group(1), self.top)
+        self.assertFalse(os.path.exists(self.idx))
+        self.assertTrue(os.path.isdir(m.group(2)))
+
+    def test_the_rm_of_both_removes_the_variant_index_too(self):
+        # (an INDELS index of other windows than its log, the variant index of its name
+        # there, and the enrichment in place)
+        variant = os.path.join(self.tmp, "work", "genome_library", "NRG_3_ref+ds")
+        res, _ = self.run_search({"chrA": window_rows("chrA", 30, 30)}, {"chrA": True},
+                                 metas={"chrA": {"index_format": 2, "indel_window": [25, 27]}},
+                                 fakes={"chrA": window_fake("chrA", 30, 30)},
+                                 pam_build="pam.txt 23 3\n", enriched=True)
+        m = re.match(r": remove both with (rm -rf .*) and run this search again, which builds "
+                     r"them anew from the enrichment in place", self.advice(res))
+        self.assertIsNotNone(m, res.stderr)
+        paste_both(self, m.group(1), self.top)
+        self.assertFalse(os.path.exists(self.idx) or os.path.exists(variant))
+        self.assertTrue(os.path.isdir(os.path.join(self.work, "Genomes", "ref+ds")))
+
+    def test_the_steps_in_words_name_those_paths_as_a_shell_reads_them(self):
+        # (a PAM-less index standing in, with no PAM file of its PAM, and no fake-indel
+        # genome): the arguments it gives for build-index-only, and the download
+        res, _ = self.run_search(ONLY_B, {"chrA": False, "chrB": False}, true_pam="NNN",
+                                 vcfs=AB, pam_build="20bp-NNN-NO-PAM 23 3\n")
+        words, download = self.advice(res).split(
+            "; or, for an index you downloaded, download it again: ")
+        removed, args = re.fullmatch(r" with build-index-only and a PAM file of the PAM it was "
+                                     r"built with \(.*\), which is not in .*: remove (.*), write "
+                                     r"that PAM file, and run crisprme\.py build-index-only with "
+                                     r"it as --pam, and (--genome .*)", words).groups()
+        self.assertEqual(shlex.split(removed.replace(" and ", " ")),
+                         [self.idx, os.path.join(self.work, "Genomes", "ref+ds")])
+        self.assertEqual(shlex.split(args), [
+            "--genome", os.path.join(self.work, "Genomes", "ref"), "--bDNA", "2", "--bRNA", "2",
+            "--vcf", self.vcf_dir, "--path", self.work])
+        self.assertEqual(same_argv(self, download, self.top),
+                         [[w.replace("NRG_3", "NNN_3") for w in c] for c in self.download()])
 
 
 class IndexSide(_Fixture):

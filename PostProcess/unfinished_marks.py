@@ -16,6 +16,7 @@ submit_job_automated_new_multiple_vcfs.sh.)
 import os
 
 import index_fit
+from indel_window import quote
 
 
 def indel_snp_on() -> bool:
@@ -96,12 +97,12 @@ def dataset_parts(workdir: str, genome: str, vcf: str, indels_in_place: bool) ->
     rerun = f"Run build-index-only again with {vcf}"
     parts = [(reg, f"the dict-less tiers of {vcf}",
               f"{rerun} and its --samplesID, which finishes them, or remove them to "
-              f"search without them (rm -rf '{reg}' '{gt}')")]
+              f"search without them (rm -rf {quote(reg)} {quote(gt)})")]
     if indel_snp_on():
         igt = _real(os.path.join(dicts, f"indel_genotypes_{vcf}"))
         parts.append((igt, f"the phased indel genotype store of {vcf}",
                       f"{rerun}, which finishes it, or remove it to search without it "
-                      f"(rm -rf '{igt}')"))
+                      f"(rm -rf {quote(igt)})"))
     enriched = os.path.join(workdir, "Genomes", f"{genome}+{vcf}")
     parts.append((_real(enriched), f"the enrichment of {vcf}", f"{rerun}, which enriches it again"))
     if not indels_in_place:
