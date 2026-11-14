@@ -96,8 +96,9 @@ lift the first two.
 
 - **Searches above 1 DNA + 1 RNA bulge in dense regions** (the immunoglobulin loci, some tandem
   repeats) grow by orders of magnitude on an index that codes every allele: on IGL alone, 0.76
-  million raw targets at 4 + 1 + 1 and 33.7 million at 4 + 2 + 2, and IGH needed 225 GB at 4 + 2 +
-  1. Keep the default budget there, or `--max-total-edits` 3 or less.
+  million raw targets at 4 + 1 + 1 and 33.7 million at 4 + 2 + 2, and IGH needed 225 GB at
+  4 + 2 + 1 (measured during development, on fake-indel windows of 25/27). Keep the default budget
+  there, or `--max-total-edits` 3 or less.
 - **Two indels on one haplotype.** A fake-indel window holds one indel, so a carrier whose second
   indel moves a SNP the row names out of its target is listed all the same (one carrier in seven
   guides on 1000 Genomes chr22, at 2 + 2 bulges).

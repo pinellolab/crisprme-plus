@@ -156,7 +156,9 @@ indexes/
   SHA256SUMS                                     # one SHA-256 per .tar.gz: `sha256sum -c --ignore-missing SHA256SUMS`
 build-inputs/
   hg38_HGDP1kGP.tar.gz (+ .SHA256SUMS)           # the enriched-genome kits (below)
-  hg38_HPRC.tar.gz, hg38_mega.tar.gz (+ .SHA256SUMS)
+  hg38_HGDP1kGP.members.md5                      # the md5 of each file a kit holds: `md5sum -c` once unpacked
+  hg38_HPRC.tar.gz, hg38_mega.tar.gz (+ .SHA256SUMS, .members.md5)
+  hg38_HPRC/                                     # HPRC's normalised VCFs (v2.1), hprc.<chr>.norm.vcf.gz + .tbi, and their SHA256SUMS
 ```
 
 **Each panel's Dictionaries once.** A variant archive holds the index, its `_INDELS` index and
@@ -618,7 +620,10 @@ tar xzf build-inputs/hg38_HGDP1kGP.tar.gz
 ```
 
 Check the tarball against the `SHA256SUMS` shipped alongside it under `build-inputs/` (`download
---what build-inputs` does). (For **mega** or **HPRC**, substitute `hg38_mega` or `hg38_HPRC`.) The
+--what build-inputs` does), and what it unpacked against its member list,
+`build-inputs/<dataset>.members.md5`: `md5sum -c hg38_HGDP1kGP.members.md5` in the folder that
+holds its `Genomes/` (the tarball is not byte-reproducible; the list holds for any packing of the
+same files). (For **mega** or **HPRC**, substitute `hg38_mega` or `hg38_HPRC`.) The
 PAM-independent `Dictionaries/` + `samplesIDs/` you need at **search** time come from any index
 download of the panel, which installs its Dictionaries bundle (`download --what index
 --index-name 20-NRR_3_hg38+hg38_<ds>`).

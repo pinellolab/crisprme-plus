@@ -16,9 +16,10 @@ the index builder and a second, non-backward-compatible index family appeared.
 The rebuild for 2.10.0 began on 2026-11-14 (ml007 and ml008): the 26 archives of the index set,
 16 indexes, each panel's companions and its enriched-genome kit. Every row ran from one image and
 one commit, so an index's bytes depend on that image and on the thread count alone. What was
-fixed before the first row is recorded here; what each archive records once built is marked
-*after the build*, to be filled in from the build's logs before the publish (the release
-checklist, Gate D, "Provenance").
+fixed before the first row is recorded here; what each row records once built is marked *after
+the build*, to be filled in from the build's logs before the publish, and the size and SHA-256 of
+each index and companion archive, which exist only once it is published, *after the publish*,
+from the Hub (Each archive, below; the release checklist, Gate D, "Provenance").
 
 ### The build image: the image route, not the release image
 
@@ -51,10 +52,12 @@ At the release, check that the tagged sources that build indexes are those used:
 CRISPRitz prints nothing, and in CRISPRme `git diff db50986 v2.10.0 -- PAMs
 seq_script/merge_panels seq_script/rebuild/index_set_2.10.0.tsv` prints only comments of the
 recipes, which the docs wave after the build changes (the HPRC recipe's header says v2.1); the
-build half of `check_index_set.py --commands build` keeps its md5
-(`7389f7e234d4e617860f8f9b34abdc49`); and `git diff db50986 v2.10.0 -- crisprme.py PostProcess`
-changes nothing `build-index-only` runs (the changes after `db50986` are search, publish and
-checker code, each named in the release notes).
+19 row lines of the build half keep their md5 (`7389f7e234d4e617860f8f9b34abdc49`: those of
+`check_index_set.py --commands build` after its `# build` line, the `if`, `else` and mark lines
+around each left out, as `check_index_set.half_lines` takes them; the printed script, which holds
+its checks and those lines too, has an md5 of its own); and `git diff db50986 v2.10.0 --
+crisprme.py PostProcess` changes nothing `build-index-only` runs (the changes after `db50986` are
+search, publish and checker code, each named in the CHANGELOG).
 
 ### Threads
 
@@ -158,39 +161,52 @@ archives were built from v2.0 (the CHANGELOG, 2.10.0, Changed, gives what differ
 the recipe's normalised output of these files (`hprc.<chr>.norm.vcf.gz`), which the publish hosts
 with the panel's kit (`docs/RELEASE_CHECKLIST.md`, T-35).
 
-### Each archive (after the build)
+### Each archive (after the build, and after the publish)
 
-The node and the threads are fixed; the rest is filled in from the build's logs (`rows.status`,
-each row's `.time` and `.out`) and from the archives, before the publish: the wall time and the
-peak memory of its row, the size and SHA-256 of the archive (equal to the Hub's once uploaded:
-`indexes/SHA256SUMS`), and, for a kit, its member list's own SHA-256 (`<ds>.members.md5`, the
-md5 of each file the kit holds, which `scripts/kit_members.py` writes, as the tarball itself is not
-byte-reproducible; the list goes beside the kit, `build-inputs/<ds>.members.md5`).
+The node and the threads are fixed. From the build's logs (`rows.status`, each row's `.time`
+and `.out`), once the build is done and before the publish: the wall time and the peak memory of
+each row; and each kit's size and SHA-256, from the `<dataset>.SHA256SUMS` its row writes beside
+the tarball, with its member list's own SHA-256 (`<dataset>.members.md5`, the md5 of each file
+the kit holds, which `scripts/kit_members.py` writes, as the tarball itself is not
+byte-reproducible; the list goes beside the kit, `build-inputs/<dataset>.members.md5`). The size
+and SHA-256 of the 16 index archives and the 7 companions are known only once they are published:
+`publish-index` packs each archive at the publish, with a `manifest.json` that records when it was
+packed, uploads it and deletes it, so no build log holds them, and a tarball packed by hand would
+not be the Hub's (the manifest's time, and each file's time that tar records). They are filled in
+after the publish, from the Hub: each SHA-256 from `indexes/SHA256SUMS`, which
+`scripts/hf_sha256sums.py` writes from the Hub's own checksums (the release checklist, E, step
+5), and each size from the Hub's listing of `indexes/` (`list_repo_tree`).
 
-| Archive | Node | Threads | Wall time | Size | SHA-256 |
-|---|---|---|---|---|---|
-| `20-NRR_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the build* |
-| `20-NGG_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the build* |
-| `20-NRG_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the build* |
-| `20-NNNNNNNN_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the build* |
-| `22-NNGRRN_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the build* |
-| `TTTN-20_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the build* |
-| `TTTN-23_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the build* |
-| `20-NRR_3_hg38+hg38_HGDP1kGP` (the panel's first: its companions) | ml007 | 64 | *after the build* | *after the build* | *after the build* |
-| `20-NGG_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the build* |
-| `20-NRG_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the build* |
-| `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the build* |
-| `22-NNGRRN_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the build* |
-| `TTTN-20_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the build* |
-| `TTTN-23_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the build* |
-| `dictionaries-bundle_hg38_HGDP1kGP`, `genotypes_hg38_HGDP1kGP`, `indel_genotypes_hg38_HGDP1kGP` | ml007 | (its first build's) | — | *after the build* | *after the build* |
-| `build-inputs/hg38_HGDP1kGP` | ml007 | (pigz) | *after the build* | *after the build* | *after the build* |
-| `20-NRR_3_hg38+hg38_HPRC` (its companions) | ml008 | 32 | *after the build* (the pilot, with its kit: 03:49-06:39 UTC) | *after the build* | *after the build* |
-| `dictionaries-bundle_hg38_HPRC`, `genotypes_hg38_HPRC`, `indel_genotypes_hg38_HPRC` | ml008 | (its first build's) | — | *after the build* | *after the build* |
-| `build-inputs/hg38_HPRC` | ml008 | (pigz) | *after the build* | *after the build* | *after the build* |
-| `20-NRR_3_hg38+hg38_mega` (its bundle) | ml008 | 16 | *after the build* | *after the build* | *after the build* |
-| `dictionaries-bundle_hg38_mega` | ml008 | (its build's) | — | *after the build* | *after the build* |
-| `build-inputs/hg38_mega` | ml008 | (pigz) | *after the build* | *after the build* | *after the build* |
+| Archive | Node | Threads | Wall time | Peak memory | Size | SHA-256 |
+|---|---|---|---|---|---|---|
+| `20-NRR_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `20-NGG_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `20-NRG_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `20-NNNNNNNN_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `22-NNGRRN_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `TTTN-20_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `TTTN-23_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `20-NRR_3_hg38+hg38_HGDP1kGP` (the panel's first: its companions) | ml007 | 64 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `20-NGG_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `20-NRG_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `22-NNGRRN_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `TTTN-20_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `TTTN-23_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `dictionaries-bundle_hg38_HGDP1kGP`, `genotypes_hg38_HGDP1kGP`, `indel_genotypes_hg38_HGDP1kGP` | ml007 | (its first build's) | — | — | *after the publish* | *after the publish* |
+| `build-inputs/hg38_HGDP1kGP` | ml007 | (pigz) | *after the build* | *after the build* | *after the build* | *after the build* |
+| `20-NRR_3_hg38+hg38_HPRC` (its companions) | ml008 | 32 | *after the build* (the pilot, with its kit: 03:49-06:39 UTC) | *after the build* | *after the publish* | *after the publish* |
+| `dictionaries-bundle_hg38_HPRC`, `genotypes_hg38_HPRC`, `indel_genotypes_hg38_HPRC` | ml008 | (its first build's) | — | — | *after the publish* | *after the publish* |
+| `build-inputs/hg38_HPRC` | ml008 | (pigz) | *after the build* | *after the build* | *after the build* | *after the build* |
+| `20-NRR_3_hg38+hg38_mega` (its bundle) | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
+| `dictionaries-bundle_hg38_mega` | ml008 | (its build's) | — | — | *after the publish* | *after the publish* |
+| `build-inputs/hg38_mega` | ml008 | (pigz) | *after the build* | *after the build* | *after the build* | *after the build* |
+
+| Kit | Its member list | SHA-256 of the list |
+|---|---|---|
+| `build-inputs/hg38_HGDP1kGP` | `build-inputs/hg38_HGDP1kGP.members.md5` | *after the build* |
+| `build-inputs/hg38_HPRC` | `build-inputs/hg38_HPRC.members.md5` | *after the build* |
+| `build-inputs/hg38_mega` | `build-inputs/hg38_mega.members.md5` | *after the build* |
 
 ## The archives of CRISPRme 2.8.1 (index format 1)
 

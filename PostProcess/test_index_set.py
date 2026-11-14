@@ -16,6 +16,7 @@ directory (bash, and this Python for the stubs).
 import copy
 import importlib.util
 import os
+import re
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -919,6 +920,173 @@ class ThePublishChecksItsTokenFirst(unittest.TestCase):
         self.assertIn("the rebuild's publish half, run dry, publishes before it checks that the "
                       "token authenticates and the repo is there", dry)
 
+
+
+def _read(*parts):
+    with open(os.path.join(ROOT, *parts)) as fh:
+        return fh.read()
+
+
+def _flat(text):
+    return " ".join(text.split())
+
+
+class TheReleaseDocsOfTheSet(unittest.TestCase):
+    """What the docs say of the publish of the set, and of the gates on it, holds (the PP review
+    B, round 1): the publish runs on each node for the working directories it holds (B-1); the
+    format-2 repo's card lists every file the publish uploads (B-2); the size and SHA-256 of an
+    archive that publish-index packs at the publish are filled in after it, from the Hub (B-3);
+    the timing gate names HPRC's runs and their baseline (B-4); the equivalence gate the release
+    order names is a gate of the checklist (B-5); the archive gate reads each sub-index's window
+    where it is recorded (B-6); and the rebuild's README points to sections the checklist has
+    (B-7)."""
+
+    def setUp(self):
+        self.rows = cis.read_manifest()
+        self.readme = _read("seq_script", "rebuild", "README.md")
+        self.checklist = _read("docs", "RELEASE_CHECKLIST.md")
+
+    def gate(self, title):
+        """The checklist's item whose bold title starts with ``title``, flattened."""
+        text = _flat(self.checklist)
+        start = text.index("**" + title)
+        end = text.find("- [ ]", start)
+        return text[start:end if end > 0 else None]
+
+    def test_the_publish_half_runs_on_each_node_for_its_working_directories(self):
+        """B-1: the working directories are on two nodes, and the docs ran the whole publish
+        half once, which stopped at the first row of the other node's."""
+        for name, text in (("README", self.readme), ("RELEASE_CHECKLIST", self.checklist)):
+            calls = re.findall(r"check_index_set\.py --commands publish[^\n`]*", text)
+            self.assertTrue(calls, name)
+            for call in calls:
+                self.assertIn(" --panels ", call, f"{name}: {call}")
+        publish = self.readme[self.readme.index("**The publish.**"):]
+        block = publish[publish.index("```bash\n"):]
+        block = block[:block.index("\n```", 8)]
+        named = [p for line in block.splitlines() if "--commands publish --panels " in line
+                 for p in line.split("--panels ", 1)[1].split()[0].split(",")]
+        self.assertEqual(sorted(named), sorted(set(cis.WORKDIR.values())))
+        # the gates on ml008 read the indexes of HGDP + 1000 Genomes, built on ml007
+        gate = self.gate("The real-data checker on the rebuilt indexes")
+        self.assertIn("HGDP + 1000 Genomes' working directory, `$HGDP`, is on ml007", gate)
+        self.assertIn("copy to ml008, into a folder of its own, what the install links of it, "
+                      "from ml007 with `rsync -a`", gate)
+        self.assertIn("The runs of HGDP + 1000 Genomes are made on ml008 on the copy of its "
+                      "indexes the checker's gate makes", self.gate("The timing gate"))
+
+    def test_the_card_lists_every_file_the_publish_uploads(self):
+        """B-2: the publish uploads each kit's member list and HPRC's normalised VCFs (E, step
+        4), which the card's layout did not list: a file on the Hub the card does not document
+        fails the card's own gate."""
+        card = _read("docs", "hf", "crisprme-indexes-format2_README.md")
+        layout = card[card.index("## Layout"):]
+        layout = layout[layout.index("```"):layout.index("```", layout.index("```") + 3)]
+        for r in self.rows:
+            if r["kind"] != "build-inputs":
+                continue
+            ds = r["archive"].split("/", 1)[1]
+            line = next(ln for ln in layout.splitlines() if f"── {ds}.tar.gz" in ln)
+            self.assertIn(".SHA256SUMS", line)
+            self.assertTrue(".members.md5" in line or f"{ds}.members.md5" in layout, ds)
+        # (what the release order uploads: E, step 4)
+        self.assertIn("build-inputs/hg38_HGDP1kGP.members.md5 --repo-type dataset` (and HPRC's "
+                      "and mega's alike)", _flat(self.checklist))
+        hprc = layout[layout.index("hg38_HPRC/"):]
+        self.assertIn("hprc.chr1.norm.vcf.gz (+ .tbi)", hprc)
+        self.assertIn("SHA256SUMS", hprc)
+        self.assertIn("build-inputs/hg38_HPRC --repo-type dataset", _flat(self.checklist))
+        verifying = _flat(card[card.index("## Verifying"):])
+        self.assertIn("`md5sum -c <dataset>.members.md5`", verifying)
+        self.assertIn("`build-inputs/hg38_HPRC/`, `sha256sum -c --ignore-missing SHA256SUMS`",
+                      verifying)
+
+    def test_each_archive_s_size_and_sha256_are_filled_in_where_they_exist(self):
+        """B-3: publish-index packs each index and companion archive at the publish, its
+        manifest dated then, and deletes it once uploaded: their size and SHA-256 are the Hub's,
+        known after the publish; a kit's, which its build row writes, after the build."""
+        prov = _read("docs", "INDEX_PROVENANCE.md")
+        section = prov[prov.index("### Each archive"):
+                       prov.index("## The archives of CRISPRme 2.8.1")]
+        header = next(ln for ln in section.splitlines() if ln.startswith("| Archive |"))
+        cols = [c.strip() for c in header.strip().strip("|").split("|")]
+        size, sha = cols.index("Size"), cols.index("SHA-256")
+        seen = set()
+        for line in section.splitlines():
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if not line.startswith("| `") or len(cells) != len(cols):
+                continue  # (the kits' member lists have a table of their own)
+            names = re.findall(r"`([^`]+)`", cells[0])
+            want = "*after the build*" if names[0].startswith("build-inputs/") \
+                else "*after the publish*"
+            self.assertEqual((cells[size], cells[sha]), (want, want), line)
+            seen.update(names)
+        self.assertEqual(seen, {r["archive"] for r in self.rows})
+        self.assertIn("after the publish, the size and SHA-256 of each of the 23 index and "
+                      "companion archives, from the Hub",
+                      self.gate("Published-index provenance recorded"))
+        self.assertEqual(23, sum(r["kind"] != "build-inputs" for r in self.rows))
+
+    def test_the_timing_gate_names_hprc_s_runs_and_their_baseline(self):
+        """B-4: gate38a, the timing gate's baseline, has no run of HPRC."""
+        gate = self.gate("The timing gate")
+        self.assertIn("gate38a has no run of HPRC, so its configurations are timed now, both "
+                      "sides", gate)
+        self.assertIn("the README guide with NRR, per sample and population-level, on the "
+                      "rebuilt `20-NRR_3_hg38+hg38_HPRC`", gate)
+        self.assertIn("on 2.8.1's `NRR_3_hg38+hg38_HPRC` (format 1) with 2.8.1's image", gate)
+        self.assertIn("NRR_3_hg38+hg38_HPRC", cis.ARCHIVES_281)
+        self.assertIn("20-NRR_3_hg38+hg38_HPRC", {r["archive"] for r in self.rows})
+
+    def test_the_equivalence_gate_the_release_order_names_is_one_of_the_checklist(self):
+        """B-5: the release order's step 1 named "the G5 equivalence (D)", which no section of
+        the checklist defined (it was the readiness audit's section D)."""
+        text = _flat(self.checklist)
+        order = text[text.index("### E. The order of 2.10.0's release"):]
+        order = order[:order.index("2. **Luca's go #1**")]
+        self.assertIn("the equivalence gate, G5 (D)", order)
+        d = text[text.index("### D. Figures the release measures"):
+                 text.index("### E. The order of 2.10.0's release")]
+        self.assertIn("- [ ] **The equivalence gate (G5)**", d)
+        g5 = d[d.index("**The equivalence gate (G5)**"):]
+        g5 = g5[:g5.index("- [ ]")]
+        for same in ("`20-NRG_3_hg38+hg38_HGDP1kGP` = `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` pruned "
+                     "to NRG = `20-NRR_3_hg38+hg38_HGDP1kGP` pruned to NRG",
+                     "`20-NRR_3_hg38+hg38_HGDP1kGP` = `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` pruned "
+                     "to NRR",
+                     "`20-NGG_3_hg38+hg38_HGDP1kGP` = `20-NRR_3_hg38+hg38_HGDP1kGP` pruned to NGG"):
+            self.assertIn(same, g5)
+        archives = {r["archive"] for r in self.rows}
+        for name in re.findall(r"`(\d+-[A-Z]+_3_hg38\+hg38_HGDP1kGP)`", g5):
+            self.assertIn(name, archives)
+
+    def test_the_archive_gate_reads_each_sub_index_s_window_in_its_own_record(self):
+        """B-6: the manifest gives one indel_window, the panel's logs', and no sub-index's:
+        each sub-index records its own in its .index_meta.json, which the archive gate reads."""
+        gate = self.gate("Every published variant archive can find indels")
+        self.assertNotIn("`indel_window` [30, 30] for each sub-index", gate)
+        self.assertIn("`indel_window` [30, 30] (one value, the window of the panel's indel logs",
+                      gate)
+        self.assertIn("in `index_meta` (the variant index's own record, which holds no window), "
+                      "`built_by` {crispritz 2.10.0, crisprme 2.10.0}", gate)
+        self.assertIn("each sub-index's own record in the stream, "
+                      "`<index>_INDELS/<sub-index>/.index_meta.json`, says `indel_window` [30, 30]",
+                      gate)
+        hf = _read("PostProcess", "crisprme_hf.py")
+        self.assertIn('manifest["indel_window"] = list(_w)', hf)
+        self.assertIn("indel_window=_log_window(chrom)",
+                      _read("PostProcess", "pool_index_indels.py"))
+
+    def test_the_readme_points_to_sections_the_checklist_has(self):
+        """B-7: the README sent the uploads it does not make to "Gate G", which the checklist
+        does not have (the readiness audit's Hugging Face section was)."""
+        sections = re.findall(r"^#{2,3} ([A-Z0-9]+)\. ", self.checklist, re.M)
+        refs = re.findall(r"`docs/RELEASE_CHECKLIST\.md`,\s+(?:Gate\s+)?([A-Z0-9]+)\b",
+                          self.readme)
+        self.assertTrue(refs)
+        for ref in refs:
+            self.assertIn(ref, sections)
+        self.assertIn("(`docs/RELEASE_CHECKLIST.md`, E, step 4)", _flat(self.readme))
 
 
 if __name__ == "__main__":

@@ -110,10 +110,30 @@ crisprme-indexes-format2/
 │   └── SHA256SUMS                                     # one SHA-256 per .tar.gz
 ├── build-inputs/
 │   ├── hg38_HGDP1kGP.tar.gz (+ .SHA256SUMS)           # the enriched-genome kits these indexes were built from
-│   ├── hg38_HPRC.tar.gz (+ .SHA256SUMS)
-│   └── hg38_mega.tar.gz (+ .SHA256SUMS)
+│   ├── hg38_HGDP1kGP.members.md5                      # the md5 of each file the kit holds, by its path in it
+│   ├── hg38_HPRC.tar.gz (+ .SHA256SUMS, .members.md5)
+│   ├── hg38_mega.tar.gz (+ .SHA256SUMS, .members.md5)
+│   └── hg38_HPRC/                                     # HPRC's normalised VCFs, which its index was built from
+│       ├── hprc.chr1.norm.vcf.gz (+ .tbi)             # one a chromosome: chr1-22, X and Y
+│       ├── ...
+│       └── SHA256SUMS                                 # one SHA-256 per VCF and .tbi
 └── README.md
 ```
+
+**The kits and their inputs.** A kit (`build-inputs/<dataset>.tar.gz`) holds the enriched
+genome and the fake-indel genome of its panel, `Genomes/hg38+<dataset>/` and
+`Genomes/hg38+<dataset>_INDELS/`, from which `build-index-only` builds an index of any PAM of the
+panel without its VCFs (`crisprme.py download --what build-inputs --dataset <dataset>`). Its
+member list, `<dataset>.members.md5`, gives the md5 of each file the kit holds: the tarball is
+not byte-reproducible (tar records each file's time, owner and listing order), so its
+`SHA256SUMS` says that a download is the published file, and the list what the kit holds, the
+same for any packing of the same files. `build-inputs/hg38_HPRC/` holds the VCFs the HPRC index
+reads: HPRC Release 2's Minigraph-Cactus graph v2.1 on GRCh38 (`hprc-v2.1-mc-grch38`, the VCF
+decomposed with `vcfwave`), split per chromosome and normalised as the panel's recipe does it,
+`hprc.<chr>.norm.vcf.gz` and its `.tbi` (`lucapinello/crisprme-data`'s `vcfs/hg38_HPRC` holds
+the v2.0 files 2.8.1's HPRC archives were built from). HGDP + 1000 Genomes' VCFs are
+`lucapinello/crisprme-data`'s `vcfs/hg38_HGDP1kGP`, as they are, and mega's index is rebuilt
+from that repo's `vcfs/hg38_mega`.
 
 **Each panel's Dictionaries once.** A variant archive holds the index, its `_INDELS` index and a
 `manifest.json`, which names the panel's **Dictionaries bundle**
@@ -148,4 +168,10 @@ Dictionaries of another build where a bundle replaces them.
 
 ## Verifying
 
-From inside a downloaded `indexes/`: `sha256sum -c --ignore-missing SHA256SUMS`.
+- An index or a companion: from inside a downloaded `indexes/`, `sha256sum -c --ignore-missing
+  SHA256SUMS`.
+- A kit: beside the downloaded tarball, `sha256sum -c <dataset>.SHA256SUMS`; once unpacked,
+  `md5sum -c <dataset>.members.md5` in the folder it was unpacked in (the one that holds its
+  `Genomes/`).
+- HPRC's VCFs: from inside a downloaded `build-inputs/hg38_HPRC/`, `sha256sum -c --ignore-missing
+  SHA256SUMS`.
