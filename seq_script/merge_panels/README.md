@@ -15,15 +15,21 @@ sources are all genotyped and whether you need cross-variant cis:
 
 > **Retirement note (v2.7.x).** The original genotyped hybrid `NRG_3_hg38+hg38_1000G2021_HGDP`
 > (1000G-2021 + HGDP, mixed phased/unphased) has been **retired and removed from HF** — it was
-> superseded by the SHAPEIT5 re-phased **`NRG_3_hg38+hg38_HGDP1kGP`** (4,091 samples = 925 HGDP +
-> 3,166 1000 Genomes), which is the current **recommended variant default**. This Mode-1 recipe is
-> kept for reproducibility of the merge mechanism; it no longer names a published index.
+> superseded by the SHAPEIT5 re-phased HGDP + 1000 Genomes panel (4,091 samples = 925 HGDP +
+> 3,166 1000 Genomes), whose **`20-NRR_3_hg38+hg38_HGDP1kGP`** is the **recommended variant default**
+> since 2.10.0 (`NRG_3_hg38+hg38_HGDP1kGP` before). This Mode-1 recipe is kept for reproducibility
+> of the merge mechanism; it no longer names a published index.
 
-**Status:** the sites-only `NRG_3_hg38+hg38_mega` index is **built, published, and
-clean-room-validated** on HF `lucapinello/crisprme-data`: genome-wide 5-source merge
+**Status (2.8.1):** the sites-only `NRG_3_hg38+hg38_mega` index is **built, published, and
+clean-room-validated** on HF `lucapinello/crisprme-data` (2.10.0 rebuilds the mega with
+`mega_rebuild.sh`, below): genome-wide 5-source merge
 (66.9M sites, 51.2M SNPs) + INFO-AF registry + searchable indels. The genotyped production
-default is the re-phased `NRG_3_hg38+hg38_HGDP1kGP` (built by a separate re-phasing pipeline,
-not this Mode-1 2019/2021 recipe).
+default is the re-phased HGDP + 1000 Genomes panel, `20-NRR_3_hg38+hg38_HGDP1kGP` since 2.10.0
+(`NRG_3_hg38+hg38_HGDP1kGP` before; built by a separate re-phasing pipeline,
+`hgdp1kgp_build.sh`, not this Mode-1 2019/2021 recipe). The rebuild for 2.10.0 runs these
+recipes once per PAM of a panel, every one in the panel's one working directory, as the index set
+[`../rebuild/index_set_2.10.0.tsv`](../rebuild/index_set_2.10.0.tsv) lists them, and publishes
+them in `lucapinello/crisprme-indexes-format2` ([`../rebuild/README.md`](../rebuild/README.md)).
 
 > **Mode-1 SOURCES caveat.** The `merge_vcf_panels.sh` `SOURCES` + `build_combined_panel.sh`
 > defaults committed here target the **2019** 1000G Phase-3 callset (`hg38_1000G`, glob
@@ -31,10 +37,43 @@ not this Mode-1 2019/2021 recipe).
 > (now-retired) genotyped hybrid used the **2021** high-coverage callset (`hg38_1000G_2021`,
 > 3202 samples) → panel `hg38_1000G2021_HGDP`. To reproduce that historical hybrid, repoint
 > `SOURCES` at the 2021 genotyped VCFs and regenerate the 3202-sample samplesID before running.
-> The current shipped default (`NRG_3_hg38+hg38_HGDP1kGP`) is instead SHAPEIT5 re-phased and is
-> not produced by this recipe.
+> The current shipped default (`20-NRR_3_hg38+hg38_HGDP1kGP` since 2.10.0, `NRG_3_hg38+hg38_HGDP1kGP`
+> before) is instead SHAPEIT5 re-phased and is not produced by this recipe.
 
-**Whole-genome mega build scripts (as-run, in this folder):**
+**The mega for CRISPRme 2.10.0: `mega_rebuild.sh`.** It rebuilds the index from the same
+merged VCFs (`mega.<chr>.afmax.vcf.gz`) so that every part of it reads the records CRISPRitz
+2.10.0's enricher reads: the build input keeps the `PASS`/`.` records with `INFO/AF` = `AF_max`
+(on chrY, where the merge wrote no `AF_max`, the largest of the sources' frequencies), one record
+of each REF>ALT, the more frequent (`PostProcess/prepare_mega_build_vcf.py`: the
+enricher merges two SNP records of one allele but windows each indel record apart, and the
+as-run merge wrote 8 indels on two lines genome-wide); one `build-index-only` of its copy with
+the presence
+genotype `MEGA` (`synth_sites_gt.py`, every ALT carried) builds the enriched genome, the SNP
+index, the fake-indel genome, the `_INDELS` index and the indel log, from which `MEGA` is taken
+out; the registry and the indel frequencies are built from the build input as the enricher reads
+it (FILTER, every allele, an allele once; no indel within the window's left flank of the
+chromosome's start, read from the indel log), and
+`samplesIDs/hg38_mega.samplesID.txt` lists the five sources as pseudo-samples (the file a search
+names, as the shipped install has it); and `PostProcess/verify_mega_chrom.py` checks every store
+against the source VCF read on its own.
+Validated on chr22 and chr14 (METHODS section 2), and on chr21, chr18, chr10 and chr5, four of
+the seven chromosomes whose merged VCF holds a record written in lower case (chr3, chr4, chr5,
+chr10, chr12, chr18 and chr21), which the recipe reads in upper case as CRISPRitz 2.10.0 does;
+not run genome-wide before the release's readiness audit. Usage: `mega_rebuild.sh <install_dir>
+<merged_vcf_dir> [chrom ...]` (its header has the environment it reads), in a working directory
+that holds none of the dataset (it refuses one that holds its VCFs or a part it builds, before
+it makes anything there); to put the kit it built in a data folder in place of the dataset's,
+`docs/TROUBLESHOOTING.md` §12.
+
+Run on their own, `PostProcess/build_mega_indel_af.py` and `PostProcess/verify_mega_chrom.py`
+need the dataset's indel log to know the left flank of its fake-indel windows: give
+`build_mega_indel_af.py --log-dir <install>/Dictionaries/log_indels_hg38_mega` and
+`verify_mega_chrom.py --log <the same folder>`, as `mega_rebuild.sh` does. Without it each takes
+26 bases, the flank of CRISPRitz 2.9.1's windows of 25/27, where a build of 2.10.0 (30/30) has
+31, and so takes an indel at a POS of 26 to 30, which the enricher of 2.10.0 does not window, for
+one it did.
+
+**Whole-genome mega build scripts (as-run up to 2.8.1, in this folder):**
 `mega_gw_merge.sh` (the GW 24-contig 5-source merge driver around `merge_mega_sites.sh`)
 → `mega_build_indels.sh` (the fake-indel assembly: `synth_sites_gt.py` adds a synthetic
 `MEGA` pseudo-sample so the enricher materializes fake contigs, builds the `_INDELS` genome,
@@ -44,8 +83,10 @@ is the design rationale (its "REMAINING/pending" notes are historical — the wo
 
 ## HPRC pangenome index (single-source, phased) — `hprc_build.sh`
 
-A **third** production index, `NRG_3_hg38+hg38_HPRC`, is built by enriching hg38 with the
-**HPRC Minigraph-Cactus pangenome** — the **HPRC Release 2 graph `hprc-v2.0-mc-grch38`** (GRCh38)
+A **third** production index, `20-NRR_3_hg38+hg38_HPRC` (2.8.1's `NRG_3_hg38+hg38_HPRC` and
+`NRR_3_hg38+hg38_HPRC`), is built by enriching hg38 with the
+**HPRC Minigraph-Cactus pangenome** — the **HPRC Release 2 graph `hprc-v2.1-mc-grch38`** (GRCh38;
+2.8.1's archives were built from v2.0, `hprc-v2.0-mc-grch38`, and so was the validation below)
 — decomposed to a per-chromosome VCF (`vg deconstruct` → `vcfbub` → `vcfwave`; 232 samples =
 231 population individuals + CHM13, GRCh38, phased GTs with graph-coverage half-missingness
 like `1|.`). It is **not** a merge (single genotyped
@@ -54,14 +95,20 @@ per-chrom `bcftools norm -m -any` → `+fill-tags` AF/AC/AN (recomputed from GTs
 VCF ships no AF and AN must exclude the `.` alleles) → `bcftools sort` → build. Because the
 genotypes are **phased**, this index supports **CONFIRMED cis co-occurrence + per-sample
 carriers** (like Mode 1's 1000G-2021+HGDP), and it is RAW + SNP+indel-enabled like the others.
-See `hprc_build.sh` (as-run, env-overridable). It is **distinct from and orthogonal to** the
+See `hprc_build.sh` (as-run, env-overridable). Its input, `SRC`, is the graph's VCF split per
+chromosome, `ALL.<chr>.HPRC.vcfwave.vcf.gz` (+ `.tbi`), which `docs/PRECOMPUTED_INDEXES.md` makes
+from v2.1 (the rebuild passes it as `$HPRC_SRC`; the script's default `SRC` is the v2.0 split of
+2.8.1's builds). It is **distinct from and orthogonal to** the
 `assembly-search` feature (which searches per-individual assembly FASTAs and takes no VCF).
 
 **Validated (v2.5.4, ml007):** clean genome-wide build (24 contigs, RAW registry, `_INDELS`
 + phased indel-GT stores); a `--per-sample` search returned 68,057 CONFIRMED phased-cis
 off-targets, 855 SNP+indel and 140 SNP+SNP co-occurring rows, with named cis carriers
 ground-truth-verified against the source GTs (e.g. HG03579 carries chr10:12896898 `TG>T` +
-chr10:12896900 `T>A` in cis; joint AF 1/464). **Held from HF publish pending review.**
+chr10:12896900 `T>A` in cis; joint AF 1/464). Published since: `NRG_3_hg38+hg38_HPRC` and
+`NRR_3_hg38+hg38_HPRC` are 2.8.1's archives in `lucapinello/crisprme-data`, and
+`20-NRR_3_hg38+hg38_HPRC` is 2.10.0's, in `lucapinello/crisprme-indexes-format2`, built by this
+script for each PAM of the panel (`../rebuild/index_set_2.10.0.tsv`).
 
 ## Source provenance (versions + access)
 
@@ -78,7 +125,7 @@ aggregate sources contribute per-source AF only (no genotypes, no honest pooled 
 | **gnomAD** | v4.1 (exomes + genomes joint) | GRCh38 | aggregate sites-only (AF) | ~807k individuals (aggregate) | open (gnomAD) | Mode 2 only |
 | **TOPMed** | Bravo freeze (sites-only, `AN=0` shipped) | GRCh38 | aggregate sites-only (AF) | aggregate | controlled-access (dbGaP) | Mode 2 only |
 | **All of Us** | genomic sites release (single pseudo-sample) | GRCh38 | aggregate sites-only (AF) | aggregate | controlled-access (Researcher Workbench) | Mode 2 only |
-| **HPRC** | Release 2 graph `hprc-v2.0-mc-grch38` (Minigraph-Cactus) → `vg deconstruct`/`vcfbub`/`vcfwave`, **phased** | GRCh38 | sample-level genotypes (graph-derived) | 232 incl. CHM13 (AN ≤464, half-missing) | open (HPRC) | HPRC (single-source) |
+| **HPRC** | Release 2 graph `hprc-v2.1-mc-grch38` (Minigraph-Cactus v2.1; v2.0 for 2.8.1's archives) → `vg deconstruct`/`vcfbub`/`vcfwave`, **phased** | GRCh38 | sample-level genotypes (graph-derived) | 232 incl. CHM13 (AN ≤464, half-missing) | open (HPRC) | HPRC (single-source) |
 
 Notes: (1) the **shipped Mode-1 index** used the **2021** 1000G callset (`hg38_1000G2021_HGDP`,
 4,131 samples); the committed `merge_vcf_panels.sh` defaults still point at the older **2019**
@@ -100,7 +147,7 @@ frequency and which dataset a variant came from).
 ## What the merge produces (provenance, per variant)
 | INFO field | Meaning |
 |---|---|
-| `AF` | **Pooled** allele frequency, recomputed as AC/AN across ALL merged samples (`bcftools +fill-tags`). This is what CRISPRme's enricher reports, for a record whose `INFO` has `AF` where the VCF's first record has it: many of this merge's records do not (see the validation below). |
+| `AF` | **Pooled** allele frequency, recomputed as AC/AN across ALL merged samples (`bcftools +fill-tags`). This is what CRISPRme's enricher reports: CRISPRitz 2.10.0's for every record, up to 2.9.1's only for a record whose `INFO` has `AF` where the VCF's first record has it, and many of this merge's records do not (see the validation below). |
 | `AF_<SRC>` | Each source's **original** AF, verbatim; `.` where that source lacked the variant. |
 | `SRC` | Comma-list of sources containing the variant: `1000G,HGDP` (shared), `HGDP` (HGDP-unique), … Derived from which `AF_<SRC>` are present. |
 
@@ -144,13 +191,15 @@ resumable), assembles the panel `samplesID` (union), and calls
   `AF_1000G=0.02`, `AF_HGDP=0.030541` preserved.
 - **Enricher reads the pooled AF:** CRISPRitz #36's exact-key `AF` match selects
   `AF=0.024992`, correctly skipping the earlier `AF_1000G`/`AFR_AF` fields (the old
-  2-char-prefix match would have grabbed `AF_1000G`). But `add-variants` looks for the key in
-  the VCF's first record only and reads every record's `AF` at that place in `INFO`, and a
-  site of one source has fewer keys before `AF` than a site of two, so a record whose layout
-  differs from the first record's gets no `AF` in the index's indel log and dictionaries: the
-  retired `NRG_3_hg38+hg38_1000G2021_HGDP` index, built with this tooling, has none for
-  14,567,429 of its 15,583,931 indels (a known limit, METHODS section 8; its SNPs' frequencies
-  are the registry's AC/AN, from the genotypes).
+  2-char-prefix match would have grabbed `AF_1000G`). But `add-variants` up to CRISPRitz 2.9.1
+  looks for the key in the VCF's first record only and reads every record's `AF` at that place
+  in `INFO`, and a site of one source has fewer keys before `AF` than a site of two, so a record
+  whose layout differs from the first record's gets no `AF` in the index's indel log and
+  dictionaries: the retired `NRG_3_hg38+hg38_1000G2021_HGDP` index, built with this tooling, has
+  none for 14,567,429 of its 15,583,931 indels (a known limit, METHODS section 8; its SNPs'
+  frequencies are the registry's AC/AN, from the genotypes). CRISPRitz 2.10.0 finds each
+  record's `AF` by its key, so an index it builds from this merge has the pooled `AF` of every
+  record.
 - **End-to-end:** the panel enriches hg38_chr22 and builds the pamless `NNN_3` index
   (+ INDELS) without error. [`e2e_afmerge.sh`]
 
@@ -253,9 +302,14 @@ Then the hybrid index assembly (enrich via `build-index-only` **without**
 `--samplesID`, then drop `registry_hg38_mega/` in) — see `docs/DESIGN_mega_index.md`.
 
 ### Gaps / open items
-- **Indel per-dataset AF absent in v1** (SNP-only registry). Indel off-targets are
-  still discovered via fake-indel contigs, just un-annotated. Fast-follow: a
-  sites-only indel-AF store.
+- **Indel per-dataset AF absent in v1** (SNP-only registry): closed by the sites-only
+  indel-AF store (`build_mega_indel_af.py`), and, from the 2.10.0 rebuild, by the build
+  input's `INFO/AF` = `AF_max`, which the enricher writes into the indel log.
+- **FILTER (2.10.0).** The merge carries HGDP-2019's FILTER onto the merged record; up to 2.8.1
+  the registry and the indel frequencies read every record whatever it, while the enricher
+  skips a record outside `PASS`/`.`. `mega_rebuild.sh` builds every store from the `PASS`/`.`
+  records. Re-merging with each source's own `PASS` (decision C3) is left out: the records it
+  brings back are mostly TOPMed-only, pericentromeric and ExcHet (the D2 judges).
 - **Carrier/hom counts are not estimated**: the registry stores 0 for both (AF itself is
   exact), and its taxonomy sets `aggregate_af_only: True` (manifest `aggregation: "info_af"`),
   so the population-summary companion renders them NA.

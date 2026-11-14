@@ -25,7 +25,7 @@ import re
 import difflib
 
 
-version = "2.8.1"  # CRISPRme version
+version = "2.10.0"  # CRISPRme version
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))
@@ -59,17 +59,41 @@ current_working_directory = f"{os.getcwd()}/"
 
 input_args = sys.argv
 
+# Hugging Face Hub logs at error level only, as the Docker image sets it (Dockerfile):
+# on a source or Bioconda install every anonymous download of the public data said
+# "You are sending unauthenticated requests to the HF Hub" (install P10). Before any
+# module that imports huggingface_hub, which reads it then; a value set stays.
+os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+
+
+def _interrupted(exc_type, exc, tb, _default=sys.excepthook) -> None:
+    """Ends a command a Ctrl-C stopped with one line on stderr, not a KeyboardInterrupt
+    traceback (install P6), naming for complete-search the folder the run wrote into; the
+    run still ends by SIGINT, as Python ends one after this hook, so a shell sees 130.
+    Every other exception goes to Python's own hook."""
+    if not issubclass(exc_type, KeyboardInterrupt):
+        _default(exc_type, exc, tb)
+        return
+    command = input_args[1] if len(input_args) > 1 else "crisprme.py"
+    where = ""
+    if command == "complete-search" and "--output" in input_args[:-1]:
+        folder = os.path.join(current_working_directory, "Results",
+                              input_args[input_args.index("--output") + 1])
+        if os.path.isdir(folder):
+            where = f": what it wrote is in {folder}"
+    sys.stderr.write(f"\ncrisprme.py {command} interrupted (Ctrl-C){where}\n")
+
+
+if __name__ == "__main__":  # (run as the command, not loaded by a test)
+    sys.excepthook = _interrupted
+
 if "--debug" in input_args:
     print("DEBUG MODE")
-    # Switch to cwd-relative PostProcess ONLY when running from a source checkout
-    # (cwd actually has PostProcess/). Otherwise keep the __file__-based path
-    # resolved above, so --debug does not break the import when cwd is unrelated to
-    # the install -- e.g. the web assembly-search job runs with cwd set to the
-    # Results output dir, which has no PostProcess/ (ModuleNotFoundError otherwise).
-    _dbg_pp = current_working_directory + "PostProcess/"
-    if os.path.isdir(_dbg_pp):
-        script_path = _dbg_pp
-        corrected_web_path = current_working_directory
+    # --debug keeps the PostProcess/ resolved above, beside the crisprme.py that runs (a
+    # source checkout's own, run from it or not). Up to 2.10.0 it took the working
+    # directory's PostProcess/ whenever there was one, and loaded its memory_check.py at
+    # once (below): a folder another member of the data folder's group put there (a umask
+    # of 002 lets them) ran as the user (2.10.0, the review of lane S, round 4).
 
 # Load the non-fatal low-memory warning from the PostProcess directory by
 # explicit file path: crisprme.py is installed in bin/, so PostProcess is not
@@ -186,13 +210,16 @@ sys.path.insert(0, script_path)
 from validate_inputs import run_lightweight, run_full, resolve_vcf_dataset_dirs, _vcf_header_samples  # noqa: E402
 from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside)
     download_component,
+    download_genotype_oracle,
     publish_index,
     resolve_repo,
     synthesize_combined_samplesid,
     DEFAULT_HF_REPO,
+    FORMAT2_HF_REPO,
+    GENERAL_INDEX_HF_REPO,
 )
 from utils import download_reference_genome  # noqa: E402
-from assembly_reconcile import reconcile_haplotypes, check_liftover_available, check_impg_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, HAPLOTYPE_ALIGNMENTS_DIRNAME, write_combined_params_file, write_combined_guides_file, haplotype_genome_view, clear_stale_haplotype_indexes, stamp_built_haplotype_indexes, stamp_index_source, foreign_index_sources, haplotype_search_name, unrecorded_index_dirs  # noqa: E402
+from assembly_reconcile import reconcile_haplotypes, check_liftover_available, check_impg_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, HAPLOTYPE_ALIGNMENTS_DIRNAME, write_combined_params_file, write_combined_guides_file, haplotype_genome_view, clear_stale_haplotype_indexes, stamp_built_haplotype_indexes, stamp_index_source, foreign_index_sources, haplotype_search_name, unrecorded_index_dirs, haplotype_genome_source, record_haplotype_source, haplotype_source_matches  # noqa: E402
 from generate_report import build_combined_report  # noqa: E402
 from assembly_annotate import add_annotation_column, add_closest_gene_columns  # noqa: E402
 import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layout)
@@ -200,6 +227,7 @@ import index_fit  # noqa: E402  (which guide lengths an index can answer)
 import genome_in_use  # noqa: E402  (what is built on a genome's name)
 import index_coverage  # noqa: E402  (whether an index holds every chromosome)
 import prune_flank  # noqa: E402  (an all-N index built before the N-flank fix)
+import indel_window  # noqa: E402  (the fake-indel windows an enrichment wrote)
 
 cicd_test = False
 if "--ci-cd-test" in input_args:
@@ -318,21 +346,21 @@ def getGuides(extracted_seq, pam, len_guide, pam_begin):
     # dict
     len_guide = int(len_guide)
     pam_dict = {
-        "A": "ARWMDHV",
-        "C": "CYSMBHV",
-        "G": "GRSKBDV",
-        "T": "TYWKBDH",
-        "R": "ARWMDHVSKBG",
-        "Y": "CYSMBHVWKDT",
-        "S": "CYSMBHVKDRG",
-        "W": "ARWMDHVYKBT",
-        "K": "GRSKBDVYWHT",
-        "M": "ARWMDHVYSBC",
-        "B": "CYSMBHVRKDGWT",
-        "D": "ARWMDHVSKBGYT",
-        "H": "ARWMDHVYSBCKT",
-        "V": "ARWMDHVYSBCKG",
-        "N": "ACGTRYSWKMBDHV",
+        "A": "ARWMDHVQ",
+        "C": "CYSMBHVQ",
+        "G": "GRSKBDVQ",
+        "T": "TYWKBDHQ",
+        "R": "ARWMDHVSKBGQ",
+        "Y": "CYSMBHVWKDTQ",
+        "S": "CYSMBHVKDRGQ",
+        "W": "ARWMDHVYKBTQ",
+        "K": "GRSKBDVYWHTQ",
+        "M": "ARWMDHVYSBCQ",
+        "B": "CYSMBHVRKDGWTQ",
+        "D": "ARWMDHVSKBGYTQ",
+        "H": "ARWMDHVYSBCKTQ",
+        "V": "ARWMDHVYSBCKGQ",
+        "N": "ACGTRYSWKMBDHVQ",
     }
     list_prod = []
     for char in pam:
@@ -395,15 +423,15 @@ def getGuides(extracted_seq, pam, len_guide, pam_begin):
     # return guides for when adding to app.py
 
 
-def check_crisprme_dirtree(strict: bool = True) -> None:
+def check_crisprme_dirtree() -> None:
     """Ensures that the working directory contains the required CRISPRme folder 
     structure.
     
     Checks for the existence of each expected directory and creates any that are 
     missing. One that cannot be created (a read-only working folder, no write permission)
     stops the run with one line that says to run from a folder you can write to, rather
-    than a traceback; with ``strict`` False (crisprme.py with no arguments, which prints
-    the help) it is left as it is.
+    than a traceback. (crisprme.py with no arguments, which prints the help, makes no
+    folder: C14.)
     """
     # check that working folder respect crisprme's directory tree structure
     for directory in CRISPRMEDIRS:
@@ -414,8 +442,7 @@ def check_crisprme_dirtree(strict: bool = True) -> None:
             try:
                 os.makedirs(crisprmedir, exist_ok=True)
             except OSError as e:
-                if strict:
-                    _unwritable(crisprmedir, e)
+                _unwritable(crisprmedir, e)
 
 def _unwritable(path: str, exc: OSError) -> NoReturn:
     """Stops a run that cannot create ``path`` in the working directory, in one line."""
@@ -532,6 +559,52 @@ def _sites_only_vcfs(vdir: str) -> bool:
     return bool(vcfs) and not any(_vcf_header_samples(vf) for vf in vcfs)
 
 
+# The header line of a VCF whose one sample is the presence genotype
+# PostProcess/synth_sites_gt.py writes on a sites-only VCF (its SITES_ONLY_MARK), so that the
+# enricher windows its indels: no individual's genotypes.
+SITES_ONLY_VCF_MARK = "##CRISPRme_sites_only="
+
+
+def _sites_only_build(vdir: str):
+    """How the VCFs of the folder ``vdir`` are sites-only, for build-index-only: "no
+    samples" when none of them has sample columns, "presence" when every one either has
+    none or is synth_sites_gt.py's presence genotype (its SITES_ONLY_VCF_MARK header
+    line) and one is, else None (a genotyped dataset, or no VCF to read). A sites-only
+    dataset has no genotypes to count, phase or list: its registry and indel frequencies
+    come from its INFO AF fields (PostProcess/build_mega_registry.py and
+    build_mega_indel_af.py), not from --samplesID."""
+    import gzip as _gz
+
+    vcfs = [os.path.join(vdir, f) for f in sorted(_listdir(vdir))
+            if f.endswith((".vcf.gz", ".vcf"))]
+    if not vcfs:
+        return None
+    kinds = set()
+    for vf in vcfs:
+        marked, samples = False, None
+        try:
+            with (_gz.open(vf, "rt") if vf.endswith(".gz") else open(vf)) as fh:
+                for line in fh:
+                    if line.startswith(SITES_ONLY_VCF_MARK):
+                        marked = True
+                    if line.startswith("#CHROM"):
+                        samples = line.rstrip("\n").split("\t")[9:]
+                        break
+                    if not line.startswith("#"):
+                        break
+        except (OSError, EOFError, ValueError):
+            return None
+        if samples is None:
+            return None
+        if not samples:
+            kinds.add("no samples")
+        elif marked and len(samples) == 1:
+            kinds.add("presence")
+        else:
+            return None
+    return "presence" if "presence" in kinds else "no samples"
+
+
 def print_help_complete_search() -> None:
     """Prints detailed help information for the complete-search functionality.
 
@@ -581,12 +654,16 @@ def print_help_complete_search() -> None:
         "\t--gene_annotation, specify gene annotation (e.g., GENCODE) to find "
         "nearest gene for each target (plain or bgzip-compressed BED) [OPTIONAL]\n"
         "\t--mm, number of mismatches allowed in the search [REQUIRED]\n"
-        "\t--bDNA, number of DNA bulges allowed in the search [OPTIONAL]\n"
-        "\t--bRNA, number of RNA bulges allowed in the search [OPTIONAL]\n"
+        "\t--bDNA, number of DNA bulges allowed in the search [OPTIONAL; given neither "
+        "--bDNA nor --bRNA, 1 DNA + 1 RNA bulge, the default budget (as the web form's), "
+        "fewer where no index this search can use or build holds one, which it says; given "
+        "one of them, the other is 0. A budget above 4 mismatches + 1 + 1 needs "
+        "--max-total-edits raised to its sum]\n"
+        "\t--bRNA, number of RNA bulges allowed in the search [OPTIONAL; as --bDNA]\n"
         "\t--merge, window size (nucleotides) to merge candidate off-targets "
         "using the highest scoring as pivot [default: 3]\n"
         "\t--sorting-criteria-scoring, comma-separated list to sort targets by "
-        "scoring criteria: 'mm', 'bulges', or 'mm+bulges' [default: 'mm+bulges']\n"
+        "scoring criteria: 'mm', 'bulges', or 'mm+bulges' [default: 'mm+bulges,mm']\n"
         "\t--sorting-criteria, comma-separated list to sort targets by 'mm', "
         "'bulges', or 'mm+bulges' [default: 'mm+bulges,mm']\n"
         "\t--output, specify the output folder name; results will be saved in "
@@ -600,16 +677,20 @@ def print_help_complete_search() -> None:
         "working directory's genome_library; its dictionaries and sample lists stay "
         "in the working directory [OPTIONAL]\n"
         "\t--prune-pam, serve the search from a PAM-less all-N index (e.g. an "
-        "'NNNNNNNN' index) by filtering it at search time to the PAM given in "
-        "--pam, so one flexible index answers any 3' PAM up to its flank width. "
-        "A 5' PAM (Cas12a) needs an index built for a 5' PAM of its width, such "
-        "as a dedicated one: the published PAM-less indexes store the flank on "
-        "the 3' side. Requires --index-path. From a flank as wide as the PAM the "
+        "'NNNNNNNN' index), or a dedicated index of a PAM that holds the one given in "
+        "--pam (NRR for NGG, NAG, NRG or NGA; NRG for NGG or NAG), by filtering it at "
+        "search time to that PAM, so one flexible index answers any 3' PAM up to its "
+        "flank width. A 5' PAM (Cas12a) needs an index built for a 5' PAM of its width, "
+        "such as a dedicated one: the published PAM-less indexes store the flank on "
+        "the 3' side. A search prunes by itself when no installed index serves it "
+        "otherwise, and says so first: the flag is needed only to prune an all-N "
+        "index as wide as the PAM, which serves unpruned too. From a flank as wide as the PAM the "
         "result is identical to a dedicated index built for that PAM; from a "
-        "wider one, a + strand PAM with 1 to (flank - PAM) nt after it to the end "
-        "of a contig, and a - strand PAM in as many first nt of a contig, are not "
-        "indexed (the search says so), and the index must have been built by "
-        "CRISPRme 2.8.1 or later (METHODS.md section 9). It is searched more "
+        "wider one of index format 1 (built by CRISPRitz 2.9.1 or earlier), a + "
+        "strand PAM with 1 to (flank - PAM) nt after it to the end of a contig, "
+        "and a - strand PAM in as many first nt of a contig, are not indexed (the "
+        "search says so), and the index must have been built by CRISPRme 2.8.1 or "
+        "later (METHODS.md section 9). It is searched more "
         "slowly than a dedicated index, so a dedicated index for the PAM, when "
         "installed, is still the one searched. Off by default [OPTIONAL]\n"
         "\t--max-total-edits, cap the TOTAL edits (mismatches + bulges) per "
@@ -623,6 +704,41 @@ def print_help_complete_search() -> None:
         "matches the guide lowers the searched edit count, so a VARIANT off-target's "
         "REF-based mismatches+bulges reported in the results can exceed the cap "
         "(reference off-targets are always <= the cap) [OPTIONAL]\n"
+        "\t--max-degeneracy, the most ambiguous columns a reported SNP variant row may "
+        "rest on, unless its carriers hold its variants together on one phased haplotype: "
+        "columns of the variant genome where the reference base would be a mismatch, or "
+        "break the PAM, and the row's allele fits. A worst-case alignment (population-level, "
+        "or a dense window's) is cut back to the strongest within it; any other row resting "
+        "on more without such carriers is left out. Rows resting on 2 or more such columns "
+        "are rarely carried by anyone, but not never: in a population-level search, whose rows "
+        "no phased carrier confirms, a K below 4 leaves out off-targets real people carry "
+        "(per-sample rows of the IGH locus rest on up to 4 such columns), so use K >= 4 there. "
+        "A population-level search with it skips, before expanding them, the raw targets "
+        "every row of which would rest on more than K such columns (the K-skip: it reads "
+        "the ALTs listed at each variant column and writes what the cap leaves, faster). "
+        "Variant searches only; off by default "
+        "[OPTIONAL]\n"
+        "\t--no-haplotype-precheck, turn off the exact haplotype pre-check of a per-sample "
+        "search: before a raw target of the variant genome is expanded into the haplotypes "
+        "its carriers have, it is tested against the samples' genotypes, and skipped (its "
+        "reference row is still written) when no sample, free to take at each variant column "
+        "the reference base or any ALT it carries there, reaches the mismatch budget and the "
+        "PAM; the same carriers-first test skips an overlaid indel target no carrier of its "
+        "indel can have, in either analysis mode. It also turns off the K-skip of "
+        "--max-degeneracy; the log says per chromosome which of them is off. The results "
+        "are the same either way (none skips a target a row can come from); off, a dense "
+        "region's raw targets are each expanded, as up to 2.8.1 "
+        "(CRISPRME_HAPLOTYPE_PRECHECK=0 does the same) [OPTIONAL]\n"
+        "\t--sites-only-density-guard, the bits of the sites-only density guard (default 20): "
+        "of a sites-only dataset (e.g. the mega panel), whose rows no genotype checks, the "
+        "candidates whose window spells 2^bits sequences or more are withheld from its SNP "
+        "and indel post-analysis, and the regions they lie in are listed "
+        "(*.sites_only_density_guard.bed; the report says how many). Such windows, the "
+        "immunoglobulin loci above all, match nearly any guide, give combinations of 10 or "
+        "more variants nobody is known to carry, and cost most of a search's time. A "
+        "genotyped dataset's rows are untouched [OPTIONAL]\n"
+        "\t--no-sites-only-density-guard, turn the sites-only density guard off: every "
+        "candidate of a sites-only dataset is analysed [OPTIONAL]\n"
         "\t--full_input_validate, also run a full per-VCF-record scan (chromosome "
         "coverage, AF/FILTER consistency, POS bounds, multiallelic/breakend/"
         "duplicate/phasing survey) before launching the search; slower than the "
@@ -632,19 +748,44 @@ def print_help_complete_search() -> None:
         "cis phasing + named carrier samples + exact joint AF (the resolution the genotyped "
         "indexes are built for). Requires a genotyped index (no-op with a warning on "
         "sites-only panels); on one without the dict-less tiers (built without --samplesID) "
-        "it names the carrier samples only, and a dense window can still be reported by its "
-        "greedy worst-case alignment, whose listed carriers need not carry every variant in "
-        "it. Slower, and can be intractable on dense panels (measured 49h+ "
-        "without completing on a 4x-density panel) [OPTIONAL]\n"
-        "\t--population-level, force the fast population-level analysis: one worst-possible "
+        "it names the carrier samples only. Its post-analysis skips the raw targets no "
+        "sample's genotypes can produce (the haplotype pre-check: --no-haplotype-precheck) "
+        "and, as the population-level one, runs in pieces over the --thread workers; up to "
+        "2.8.1 it could be intractable on dense panels (measured 49h+ without completing on a "
+        "4x-density panel) [OPTIONAL]\n"
+        "\t--population-level, force the population-level analysis: one worst-possible "
         "PUTATIVE representative per variant window, exact worst-case CFD, dataset-level "
-        "allele frequencies -- lossless for detection, tractable on any panel. Use this to "
-        "opt OUT of per-sample on a phased index (e.g. a very dense / high-edit / "
-        "genome-wide search) [OPTIONAL]\n"
+        "allele frequencies -- lossless for detection. A genotype-resolution choice, not a "
+        "speed one: which mode is faster depends on the panel. On a dense panel of many "
+        "samples, such as the default HGDP + 1000 Genomes index, the per-sample analysis is "
+        "(its haplotype pre-check skips the dense windows' raw targets nobody carries); on a "
+        "small panel such as HPRC, or beside mega, the population-level one can be "
+        "(METHODS.md section 5). Use this to opt OUT of per-sample on a phased index "
+        "[OPTIONAL]\n"
         "\t(DEFAULT, no flag: CRISPRme+ auto-selects the mode by index type -- PER-SAMPLE on "
         "a genotyped + PHASED index [e.g. the HGDP+1000G default: CONFIRMED cis + named "
         "carriers], POPULATION-LEVEL otherwise [sites-only / unphased / hybrid / "
         "reference-only]. --per-sample / --population-level override it.)\n"
+        "\t--prioritize-observed, check the variant combinations of a sites-only dataset's "
+        "rows (e.g. the mega panel's) against the phased HGDP + 1000 Genomes genotypes (the "
+        "genotype oracle, which crisprme.py download installs: see its help), as the carrier "
+        "gate below does for a genotyped dataset. Without the oracle installed the rows are "
+        "reported unchecked, and the search says so [OPTIONAL]\n"
+        "\t--no-prioritize-observed, turn the carrier gate off. By default a population-level "
+        "search of a genotyped dataset checks each row's variant combination against the "
+        "dataset's own phased genotypes (and indel genotypes): a combination of two or more "
+        "variants that no haplotype carries and none of them reaches the row's CFD without "
+        "(an allele at a PAM base the search's PAM leaves free, or a mismatch for a mismatch "
+        "the CFD table scores alike, is not needed for the row's score), or variants (a "
+        "single one too) every "
+        "haplotype carrying which has an indel that changes the target, is ranked after every "
+        "other row of the report, in a table of its own after the top-1000, out of the "
+        "validation panel and the risk card; any other row keeps its place. The gate changes "
+        "no row of the results: it writes *_carrier_gate.tsv beside them [OPTIONAL]\n"
+        "\t--gate-min-expected, the number of panel haplotypes expected to carry a "
+        "combination if its variants were independent, below which the carrier gate calls a "
+        "combination none of them carries 'too rare to tell' (it is ranked after the others "
+        "all the same). Default 3; 0 turns the distinction off [OPTIONAL]\n"
         "\t--alt-alignments / --no-alt-alignments, emit (or skip) the exhaustive "
         "alternative-alignments file (*_all_results_with_alternative_alignments.tsv = the "
         "non-best alignments per locus). Default follows the mode: OFF for a "
@@ -668,7 +809,7 @@ def print_help_complete_search() -> None:
         "start while the cbulge scorer env or its weights are missing or broken: fix it "
         "with `crisprme.py scorer-env create` (diagnose with `crisprme.py scorer-env "
         "doctor`), or set CRISPRME_SKIP_SCORER_ENV=1 to run CFD-only (the CRISPR-Bulge "
-        "columns read -1) [OPTIONAL]\n"
+        "scores read -1, and its risk score 0) [OPTIONAL]\n"
         "\t--report-full, build the FULL (non-slim) shareable report: in addition to the "
         "human-facing layer, bundle the heavy redundant data (complete "
         "integrated_results.tsv.gz, raw snp_snp_cooc.tsv.gz, the variant_created per-tier "
@@ -760,11 +901,14 @@ _COMPLETE_SEARCH_FLAGS = frozenset(
         "--alt-alignments", "--annotation", "--bDNA", "--bRNA", "--be-base",
         "--be-window", "--compute-backend", "--full_input_validate",
         "--gene_annotation", "--genome", "--guide", "--index-path",
-        "--keep-intermediates", "--max-total-edits", "--merge", "--mm",
-        "--no-alt-alignments", "--output", "--pam", "--per-sample",
+        "--keep-intermediates", "--max-degeneracy", "--max-total-edits", "--merge",
+        "--mm", "--no-alt-alignments", "--no-haplotype-precheck", "--output", "--pam",
+        "--per-sample",
         "--personal_annotation", "--population-level", "--prune-pam",
         "--report-full", "--samplesID", "--sequence", "--sorting-criteria",
         "--sorting-criteria-scoring", "--thread", "--vcf",
+        "--prioritize-observed", "--no-prioritize-observed", "--gate-min-expected",
+        "--sites-only-density-guard", "--no-sites-only-density-guard",
         # accepted, deliberately not advertised in the help
         "--help",
         "--vcf-filter-pass-values",
@@ -775,6 +919,19 @@ _COMPLETE_SEARCH_FLAGS = frozenset(
         "--fast", "--full",
     }
 )
+
+
+def _check_gate_min_expected(args: List[str]) -> float:
+    """--gate-min-expected's value (default 3): a number >= 0."""
+    if "--gate-min-expected" not in args:
+        return 3.0
+    try:
+        value = float(args[args.index("--gate-min-expected") + 1])
+    except (IndexError, ValueError):
+        error("--gate-min-expected needs a number >= 0, e.g. --gate-min-expected 3")
+    if not value >= 0 or value == float("inf"):
+        error("--gate-min-expected needs a number >= 0, e.g. --gate-min-expected 3")
+    return value
 
 
 def _check_unknown_flags(args: List[str]) -> None:
@@ -806,7 +963,7 @@ def _check_mandatory_args(args: List[str]) -> None:
     if "--output" not in args:
         error("--output is required")
 
-def _check_genome(args: List[str]) -> str:
+def _check_genome(args: List[str], workdir: str = "", command: str = "complete-search") -> str:
     """Retrieves and validates the reference genome directory from command-line 
     arguments.
 
@@ -815,6 +972,9 @@ def _check_genome(args: List[str]) -> str:
 
     Args:
         args: List of command-line arguments.
+        workdir: The working directory of ``command`` (where genome_library/ is), checked
+            first: neither path may hold a space.
+        command: The command that checks it, for its messages.
 
     Returns:
         The absolute path to the reference genome directory.
@@ -823,12 +983,27 @@ def _check_genome(args: List[str]) -> str:
         SystemExit: If the --genome argument is missing or the specified directory 
             does not exist.
     """
+    # The search script, which build-index-only runs too, takes the paths of the working
+    # directory and of the genome folder into its shell commands unquoted, where a space
+    # splits them: it then failed with a path that is no folder's (IDX-19). The working
+    # directory first: a link made under it to the genome has its path.
+    workdir = os.path.abspath(workdir or os.getcwd())
+    if any(c.isspace() for c in workdir):
+        error(f"The working directory {workdir!r} has a space in its path, which {command} "
+              f"cannot take into its commands: run it from a folder whose whole path has no "
+              f"space"
+              + (" (or give a --path that has none)" if command == "build-index-only" else ""))
     try:  # read genome input genome folder path
         genomedir = os.path.abspath(args[args.index("--genome") + 1])
     except IndexError:  # no argument for --genome
         error("Missing input for --genome. Reference genome folder must be specified")
     if not os.path.isdir(genomedir):
         error("The folder specified for --genome does not exist")
+    if any(c.isspace() for c in genomedir):
+        error(f"The --genome folder {genomedir!r} has a space in its path, which {command} "
+              f"cannot take into its commands: its whole path must have none. Move it, or link "
+              f"it from the working directory under a name without one (ln -s '{genomedir}' "
+              f"{os.path.join(workdir, 'Genomes', '<a name without spaces>')})")
     return genomedir
 
 def _check_vcf(args: List[str], variant: bool) -> str:
@@ -969,19 +1144,27 @@ def _check_pam_file(pamfile: str) -> None:
             more = any(rest.strip() for rest in fh)
     except (OSError, UnicodeDecodeError) as e:
         error(f"cannot read the PAM file '{pamfile}': {e}")
+    # the motif and the PAM's length, one space apart, as the search reads them (the last
+    # field for the length, the first for the motif): a line of the length alone, or with a
+    # third field, passed a check of its last field, and a blank first line, with the motif
+    # on the next, was refused as a file of two motif lines (the focused review of f8dbe73)
+    fields = line.split(" ")
+    try:
+        int(fields[-1])
+        well_formed = len(fields) == 2 and bool(fields[0])
+    except ValueError:
+        well_formed = False
+    if not well_formed:
+        error(
+            f"The PAM file '{pamfile}' must hold the motif and the PAM's length on its first "
+            "line, as in 'NNNNNNNNNNNNNNNNNNNNNGG 3' (a negative length for a PAM at the 5' "
+            "end of the guide)."
+        )
     if more:
         error(
             f"Only one PAM motif per file is supported; the PAM file '{pamfile}' contains "
             "more than one non-empty line. Combine the motifs into a single IUPAC motif "
             "(e.g. NAG + NGG -> NRG)."
-        )
-    try:
-        int(line.split(" ")[-1])
-    except ValueError:
-        error(
-            f"The PAM file '{pamfile}' must hold the motif and the PAM's length on its first "
-            "line, as in 'NNNNNNNNNNNNNNNNNNNNNGG 3' (a negative length for a PAM at the 5' "
-            "end of the guide)."
         )
 
 def _check_index_path(args: List[str]) -> str:
@@ -1232,6 +1415,39 @@ def _rm_files(fnames: List[str]) -> None:
                 error("Failed removing file")
 
 
+def _refuse_no_temp_folder(candidates: "Optional[List[str]]" = None) -> None:
+    """Stops complete-search before anything is made when no temporary folder can be
+    written: the CRISPR-Bulge scorer and the report make theirs in $TMPDIR (which
+    $CRISPRME_TMPDIR sets: _configure_tmpdir), else /tmp, /var/tmp or /usr/tmp, from stages
+    whose own folder may be read-only. A search with none (docker run --read-only without
+    --tmpfs /tmp) ended with exit 0, CRISPR-Bulge scores of -1, no report zip, and a WARNING
+    in its error log alone (final confirmation of 2.8.1). ``candidates``: the folders to
+    try, those by default: tempfile's list ($TMPDIR, $TEMP and $TMP when set, then /tmp,
+    /var/tmp and /usr/tmp) but its last resort, the current folder, which is not the
+    folder of those stages. A folder set by hand is kept, the current one included: a
+    read-only container whose temporary folder is the data volume it works in (-w /DATA
+    -e CRISPRME_TMPDIR=/DATA) runs, as in 2.8.1."""
+    import tempfile
+
+    if candidates is None:
+        # (tempfile's last entry is always that last resort)
+        candidates = list(dict.fromkeys(tempfile._candidate_tempdir_list()[:-1]))
+    for folder in candidates:
+        try:
+            with tempfile.NamedTemporaryFile(dir=folder, prefix=".crisprme_tmpcheck_"):
+                return
+        except OSError:
+            continue
+    error(
+        f"No temporary folder can be written here ({', '.join(candidates)}): the "
+        f"CRISPR-Bulge scorer and the report write their temporary files there, and "
+        f"without one a search reports no CRISPR-Bulge score and writes no report. Set "
+        f"CRISPRME_TMPDIR to a writable folder (e.g. one on the data volume, -e "
+        f"CRISPRME_TMPDIR=/DATA/crisprme_tmp), or give the container a /tmp (docker run "
+        f"--tmpfs /tmp)"
+    )
+
+
 def _writable_tmp_base() -> "Optional[str]":
     """Pick a roomy, writable base dir for annotation intermediates so a small or
     full ``/tmp`` (common in HPC/containers) does not break annotation prep (#138).
@@ -1356,10 +1572,14 @@ def _apply_cosmic_license(args: List[str], annotationfile: str) -> str:
         except OSError:
             # annotation dir not writable (read-only / shared install): fall back to a
             # roomy writable base -- $CRISPRME_TMPDIR, else the cwd data disk, else the
-            # tempfile default -- rather than assuming /tmp has room.
+            # tempfile default -- rather than assuming /tmp has room. In a folder of this
+            # run's own there (mkdtemp: 0700, a new name), removed with the annotation
+            # temp folders: a fixed name in a shared /tmp is one any other user of the
+            # machine can make first, the run then writing through it and reading it back.
             import tempfile
-            base_dir = _writable_tmp_base() or tempfile.gettempdir()
-            stripped = os.path.join(base_dir, f".nocosmic.{base}")
+            tmpdir = tempfile.mkdtemp(prefix="crisprme_nocosmic_", dir=_writable_tmp_base())
+            _ANNOTATION_TMPDIRS.append(tmpdir)
+            stripped = os.path.join(tmpdir, f".nocosmic.{base}")
             _kept, dropped = _c.strip_cosmic(annotationfile, stripped)
         print(
             "[complete-search] COSMIC EXCLUDED from annotation (licence-safe default): "
@@ -1848,6 +2068,14 @@ def _check_mm(args: List[str]) -> int:
         error("Invalid number of mismatches specified")
     return mm
 
+# The default search budget (decision of 2026-11-08): given neither --bDNA nor --bRNA, a search
+# takes one DNA and one RNA bulge -- complete-search (bounded by the bulges an index it can use
+# or build holds), assembly-search, and the web form's simple and Advanced modes alike (the
+# Advanced panel offers up to 2 of each, MAX_BULGES - 1 in pages_utils). 4 mismatches + 1 + 1 is
+# the default --max-total-edits, 6.
+DEFAULT_BULGES = 1
+
+
 def _check_bdna(args: List[str], bdna: bool) -> int:
     """Retrieves and validates the number of DNA bulges from command-line arguments.
 
@@ -1948,7 +2176,9 @@ def _check_sorting_criteria_scoring(args: List[str], sorting_criteria: bool) -> 
             forbidden or repeated criteria, or exceeds the allowed number of criteria.
     """
     if not sorting_criteria:
-        return "mm+bulges"
+        # what the CFD and CRISPR-Bulge merges have used: --sorting-criteria's default (they
+        # took --sorting-criteria, whatever this flag said, until 2.10.0: wset N1)
+        return "mm+bulges,mm"
     try:
         sorting_criteria_scoring = args[args.index("--sorting-criteria-scoring") + 1]
     except IndexError:
@@ -2012,6 +2242,33 @@ def _check_sorting_criteria(args: List[str], sorting_criteria: bool) -> str:
     ):
         error("Forbidden sorting criteria selected\n")
     return sorting_criteria_fewest
+
+def _check_sites_only_guard(args: List[str]) -> int:
+    """The bits of the sites-only density guard (sites_only_guard.py): of a sites-only
+    dataset, the candidates whose window spells 2^bits sequences or more are withheld from
+    its SNP and indel post-analysis, their regions listed. On by default
+    (window_density.SITES_ONLY_GUARD_BITS, 20); --sites-only-density-guard N sets it,
+    --no-sites-only-density-guard turns it off (-1). Read before the output folder is
+    made, as the other input errors."""
+    import window_density as _wd
+
+    if "--sites-only-density-guard" in args and "--no-sites-only-density-guard" in args:
+        error("--sites-only-density-guard and --no-sites-only-density-guard are mutually "
+              "exclusive")
+    if "--no-sites-only-density-guard" in args:
+        return -1
+    if "--sites-only-density-guard" not in args:
+        return _wd.SITES_ONLY_GUARD_BITS
+    try:
+        bits = int(args[args.index("--sites-only-density-guard") + 1])
+    except (IndexError, ValueError):
+        error("Please provide a whole number of bits for --sites-only-density-guard "
+              "(e.g. 20: windows of 2^20 sequences or more)")
+    if not 1 <= bits <= 64:
+        error("--sites-only-density-guard takes 1 to 64 bits (20 by default); "
+              "--no-sites-only-density-guard turns it off")
+    return bits
+
 
 def _check_output(args: List[str]) -> str:
     """Retrieves and validates the output folder from command-line arguments.
@@ -2085,20 +2342,13 @@ def _check_threads(args: List[str], threads: bool) -> int:
 MAX_BULGES = 3
 
 
-def _built_three_prime(index_dir: str) -> bool:
-    """Whether index ``index_dir`` was built for a 3' PAM, as its .pam_build records
-    ("<name> <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM); one without it is taken for a
-    3' build, as the search shell's _index_side does."""
-    try:
-        with open(os.path.join(index_dir, ".pam_build")) as fh:
-            return not int(fh.readline().split()[-1]) < 0
-    except (OSError, ValueError, IndexError):
-        return True
-
-
 def _recorded_three_prime(index_dir: str) -> "Optional[bool]":
-    """Whether index ``index_dir`` was built for a 3' PAM, as its .pam_build records it
-    ("<name> <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM); None without a usable one."""
+    """Whether index ``index_dir`` was built for a 3' PAM, as the header of its .bin files
+    records it (index format 2), else as its .pam_build does ("<name> <seq_len> <pam_pos>",
+    pam_pos < 0 for a 5' PAM); None without a usable one."""
+    five_prime = index_fit.built_five_prime(index_dir)
+    if five_prime is not None:
+        return not five_prime
     try:
         with open(os.path.join(index_dir, ".pam_build")) as fh:
             pos = int(fh.readline().split()[-1])
@@ -2110,14 +2360,19 @@ def _recorded_three_prime(index_dir: str) -> "Optional[bool]":
 def _side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) -> bool:
     """Whether index ``index_dir``, of PAM ``pam``, was built for the side of the guide where
     a search for ``motif`` (a 3' PAM with ``three_prime``) puts its PAM, as the search
-    script's _resolve_index_dir takes it: as its .pam_build records; without one, any side
-    for a dedicated index, and 3' for an all-N one, at the published widths, 3 and 8, or
-    under the search PAM's own name only (a search before 2.8.1 built one of another width
-    from a 5' PAM file with no record)."""
+    script's _resolve_index_dir takes it: as its name says (since 2.10.0), else as the header
+    of its .bin files records (index format 2), else its .pam_build; without any, any side
+    for a dedicated index of the search's PAM, and 3' for an all-N one, or a dedicated one
+    of a PAM that holds the search's (index_fit.pam_holds), at the published widths, 3 and
+    8, or an all-N one under the search PAM's own name (a search before 2.8.1 built one of
+    another width from a 5' PAM file with no record)."""
+    parsed = index_fit.parse_index_name(index_dir)
+    if parsed and parsed[4]:  # a name that says its side (since 2.10.0)
+        return (parsed[4] == 3) == three_prime
     recorded = _recorded_three_prime(index_dir)
     if recorded is not None:
         return recorded == three_prime
-    if not pam or set(pam) != {"N"}:
+    if pam == motif and (not pam or set(pam) != {"N"}):
         return True
     return three_prime and (pam == motif or len(pam) in (3, 8))
 
@@ -2132,13 +2387,18 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
     Index folders are named ``<motif>_<N>_<genome>`` (reference) or
     ``<motif>_<N>_<genome>+<enriched>`` (variant); the usable bulge count is N-1 (the +1
     covers alignments that start with a gap). A pamless all-N index of the same length
-    serves any PAM on the side it was built for (its ``.pam_build``; 3' without one); a
+    serves any PAM on the side it was built for (_side_serves; 3' without a record); a
     wider one serves only under ``prune`` (--prune-pam) and only a 3' PAM
-    (``three_prime``), exactly as the search shell decides. ``guide_len`` is the search's
+    (``three_prime``), and so does a dedicated index of a PAM that holds the motif
+    (index_fit.pam_serves), exactly as the search shell decides. A search prunes by itself
+    when only such an index serves it (_prune_on_its_own), so complete-search passes
+    ``prune`` for the bulges it can reach. ``guide_len`` is the search's
     guide length: an index built for a shorter guide serves it with fewer bulges, or none
-    (index_fit). ``index_path`` is the search's --index-path, a library looked at beside
-    the working directory's; ``genomedir`` its --genome folder, wherever it is, whose FASTA
-    files make a reference index buildable (Genomes/<genome> without one).
+    (index_fit). ``index_path`` is the search's --index-path: the library a search reads its
+    reference index from in place of the working directory's, and a variant index from
+    beside it (the search script's ref_lib and _variant_index); ``genomedir`` its --genome
+    folder, wherever it is, whose FASTA files make a reference index buildable
+    (Genomes/<genome> without one).
 
     The REFERENCE and VARIANT terms are ASYMMETRIC:
       * REFERENCE: the larger of the installed reference index depth and -- when the raw
@@ -2148,6 +2408,10 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
         mkdir lock). This is the fix for the dict-less bug where a variant tarball ships no
         reference index, so a fresh-install variant complete-search silently derived 0
         bulges even though the raw genome IS shipped and a bmax=2 reference is buildable.
+        Not under --index-path, whose library alone a search reads the reference index
+        from, and never builds into: there it stops when the library holds none, so a
+        default of 1 bulge from an index it would not build stopped the search (plan 4.8
+        RV2-5).
       * VARIANT: STRICTLY the installed variant index (index_max_bulges(...,dataset)); a
         variant/indel index can NOT be built dict-less (its source VCFs are not shipped),
         so this term is never relaxed to a buildable ceiling.
@@ -2157,19 +2421,21 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
     error -> 0.
     """
     try:
-        libs = [os.path.join(current_working_directory, "genome_library")]
-        if index_path and index_path != "_":
-            libs.append(index_path)
+        given = bool(index_path) and index_path != "_"
+        ref_libs = ([index_path] if given
+                    else [os.path.join(current_working_directory, "genome_library")])
         if not motif or not genome:
             return 0
         # A directory is <PAM>_<N>_<genome>. It serves this search when its PAM is
-        # the requested motif, or is all-N of the same width, or -- under --prune-pam
-        # and for a 3' PAM only -- all-N and wider: a stored flank of width K serves a
-        # shorter 3' PAM by N-padding it, and the engine refuses a shorter 5' PAM.
-        # An index serves only a PAM on the side it was built for, which its .pam_build
-        # records ("<name> <seq_len> <pam_pos>", pam_pos < 0 for 5'); without one, a
-        # dedicated index any, and an all-N one a 3' PAM at widths 3 and 8 or of its own
-        # name (_side_serves).
+        # the requested motif, or is all-N of the same width, or -- under --prune-pam --
+        # a dedicated PAM that holds the motif, or, for a 3' PAM only, all-N and wider: a
+        # stored flank of width K serves a shorter 3' PAM by N-padding it, and the engine
+        # refuses a shorter 5' PAM (index_fit.pam_serves).
+        # An index serves only a PAM on the side it was built for, which its name says
+        # (since 2.10.0), else the header of its .bin files (index format 2), else its
+        # .pam_build ("<name> <seq_len> <pam_pos>", pam_pos < 0 for 5'); without any, a
+        # dedicated index of the motif any, and another a 3' PAM at widths 3 and 8, or an
+        # all-N one of its own name (_side_serves).
         # These are the search shell's rules (_resolve_index_dir in
         # PostProcess/submit_job_automated_new_multiple_vcfs.sh); the two must not
         # disagree about the same directory, or the derived default bulges come from
@@ -2177,41 +2443,37 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
         suffix = f"_{genome}"
 
         def _pam_serves(pam: str, index_dir: str) -> bool:
-            if not _side_serves(index_dir, pam, motif, three_prime):
-                return False
-            if pam == motif:
-                return True
-            if not pam or set(pam) != {"N"}:
-                return False
-            return len(pam) == len(motif) or (
-                prune and three_prime and len(pam) > len(motif))
+            return (index_fit.pam_serves(pam, motif, prune, three_prime) is not None
+                    and _side_serves(index_dir, pam, motif, three_prime))
 
         def _scan(want_plus: bool) -> int:
             best = 0
-            for lib in libs:
+            for lib in (_variant_libraries(index_path if given else "_") if want_plus
+                        else ref_libs):
                 for d in _listdir(lib):
                     if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
                         continue
-                    base, plus, _enriched = d.partition("+")
-                    if want_plus != bool(plus):
+                    # <PAM>_<N>_<genome>[+<dataset>], or the 2.10.0 form that carries the
+                    # guide length and the side (index_fit.parse_index_name)
+                    parsed = index_fit.parse_index_name(d)
+                    if not parsed or want_plus != ("+" in parsed[2]):
                         continue
-                    if not base.endswith(suffix):
+                    pam, n, rest = parsed[:3]
+                    if rest.partition("+")[0] != genome:
                         continue
-                    stem = base[: -len(suffix)]
-                    pam, _sep, n_str = stem.partition("_")
-                    if (not _sep or not n_str.isdigit()
-                            or not _pam_serves(pam, os.path.join(lib, d))):
+                    if not _pam_serves(pam, os.path.join(lib, d)):
                         continue
                     best = max(best, index_fit.bulge_cap(
-                        index_fit.built_guide_len(os.path.join(lib, d)), int(n_str), guide_len))
+                        index_fit.built_guide_len(os.path.join(lib, d)), n, guide_len))
             return best
 
-        # REFERENCE term: installed reference index OR buildable-from-raw-genome ceiling.
+        # REFERENCE term: installed reference index OR buildable-from-raw-genome ceiling
+        # (none under --index-path: a search builds no index into that library).
         ref_installed = _scan(want_plus=False)
         raw = genomedir or os.path.join(current_working_directory, "Genomes", genome)
         ref_buildable = 0
         try:
-            if os.path.isdir(raw) and any(
+            if not given and os.path.isdir(raw) and any(
                 f.endswith((".fa", ".fasta")) for f in os.listdir(raw)
             ):
                 ref_buildable = MAX_BULGES - 1
@@ -2238,16 +2500,72 @@ def _index_serves_search(index: str, genome: str, motif: str, want: int, prune: 
     """Whether the pipeline's _resolve_index_dir (submit_job_automated_new_multiple_vcfs.sh)
     could take the index folder named `index`, locked or not, for a search of `genome`
     with the PAM `motif` that needs `want` (its bulges + 1): `<PAM>_<N>_<genome>` with N
-    at least `want`, and a PAM that is the motif, or all-N of its width, or all-N and
-    wider under --prune-pam for a 3' PAM."""
-    pam, _, rest = index.partition("_")
-    n, _, name = rest.partition("_")
-    if name != genome or not n.isdigit() or int(n) < want:
+    at least `want`, and a PAM that is the motif, or all-N of its width, or under
+    --prune-pam a dedicated PAM that holds the motif, or all-N and wider for a 3' PAM
+    (index_fit.pam_serves)."""
+    parsed = index_fit.parse_index_name(index)  # either form of the name
+    if not parsed or parsed[2] != genome or parsed[1] < want:
         return False
-    if pam == motif:
-        return True
-    return bool(pam) and set(pam) == {"N"} and (
-        len(pam) == len(motif) or (prune and three_prime and len(pam) > len(motif)))
+    if parsed[4] and (parsed[4] == 3) != three_prime:  # a name that says its side
+        return False
+    return index_fit.pam_serves(parsed[0], motif, prune, three_prime) is not None
+
+
+def _variant_index_elsewhere(index_path: str, genome: str, datasets: List[str]) -> List[str]:
+    """Of ``datasets``, those whose variant index (<PAM>_<N>_<genome>+<dataset>, either form
+    of the name) the --index-path library ``index_path`` holds ("_": none)."""
+    if index_path == "_":
+        return []
+    held = set()
+    for d in _listdir(index_path):
+        parsed = index_fit.parse_index_name(d)
+        if parsed and not d.endswith("_INDELS") and "+" in parsed[2]:
+            ref, _plus, dataset = parsed[2].partition("+")
+            if ref == genome:
+                held.add(dataset)
+    return [d for d in datasets if d in held]
+
+
+def _refuse_no_reference_index(index_path: str, genome: str, motif: str, want: int, prune: bool,
+                               three_prime: bool, guide_len: int, bdna: int, brna: int,
+                               vcf_dirs: List[str]) -> None:
+    """Stops, before anything is done, a variant search with bulges under --index-path that
+    would enrich a dataset first and whose library holds no reference index that serves it
+    (_index_the_search_takes). The search script stops there ("no matching reference index
+    under --index-path", with what the library holds), but only after its STEP 1, the
+    enrichment: hours on hg38, for nothing (IDX-17 e). A reference search, or a variant one
+    with nothing to enrich, reaches that refusal at once, and says more: left to it; so is a
+    library where a run builds an index (its lock), which the search script waits for."""
+    def _enriched_first(vdir: str) -> bool:
+        dataset = f"{genome}+{os.path.basename(os.path.normpath(vdir))}"
+        return (not os.path.isdir(os.path.join(current_working_directory, "Genomes", dataset))
+                and any(f.endswith(".vcf.gz") for f in _listdir(vdir))
+                and not _index_the_search_takes(_variant_libraries(index_path), motif, dataset,
+                                                want, prune, three_prime, guide_len, bdna, brna,
+                                                True))
+
+    if not any(_enriched_first(vdir) for vdir in vcf_dirs):
+        return
+    if _index_the_search_takes([index_path], motif, genome, want, prune, three_prime,
+                               guide_len, bdna, brna, False):
+        return
+    if any(d.endswith(f"_{genome}.lock") for d in _listdir(index_path)):
+        return
+    # (the indexes published are of N = 3, as _refuse_no_variant_index says, and since
+    # 2.10.0 named for their guide length and side, as a build names them)
+    error(
+        f"No reference index under --index-path {index_path} serves this search (genome "
+        f"{genome}, PAM {motif}, {bdna} DNA and {brna} RNA bulge(s)), and a search builds "
+        f"none there: it would stop on that after enriching the genome with the dataset's "
+        f"variants (hours on a human genome). Install one in that library (crisprme.py "
+        f"download --what index --index-name "
+        f"{index_fit.index_name(motif, max(want, 3), genome, guide_len, three_prime)} if it is "
+        f"published, or crisprme.py build-index-only), or run "
+        f"without --index-path, where a search takes an index of the working directory's "
+        f"library, pruned to this PAM where only such a one serves it, and builds one from "
+        f"the genome where none does (a search of the "
+        f"reference genome alone, with --index-path, says what that library holds)"
+    )
 
 
 def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna: int, brna: int,
@@ -2276,13 +2594,13 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
 
         def _serves(index: str, wide: bool) -> bool:
             name = os.path.basename(index)
-            pam = name.split("_")[0]
             return (_index_serves_search(name, dataset, motif, want, wide, three_prime)
                     and not os.path.isdir(index + ".lock")
                     and any(f.endswith(".bin") for f in _listdir(index))
-                    and _side_serves(index, pam, motif, three_prime)
+                    and _side_serves(index, index_fit.index_pam(name), motif, three_prime)
                     and index_fit.fits(index_fit.built_guide_len(index),
-                                       int(name.split("_")[1]), guide_len, bdna, brna))
+                                       index_fit.parse_index_name(name)[1], guide_len, bdna,
+                                       brna))
 
         indexes = [os.path.join(lib, d) for lib in libs for d in sorted(_listdir(lib))
                    if d.endswith(f"_{dataset}") and os.path.isdir(os.path.join(lib, d))]
@@ -2290,31 +2608,106 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
             continue
         for index in indexes:
             name = os.path.basename(index)
-            pam, _, rest = name.partition("_")
-            n, _, held = rest.partition("_")
-            if not n.isdigit() or held != dataset:
+            parsed = index_fit.parse_index_name(name)
+            if not parsed or parsed[2] != dataset:
                 continue
+            pam, n = parsed[:2]
             built = index_fit.built_guide_len(index)
             have.append(f"{name} (up to {int(n) - 1} bulge(s) of each type"
                         + (f", built for a {built}-nt guide" if built else "") + ")")
             if pam == motif and 1 < int(n) < want:
                 fewer = (f"{name} holds this PAM with up to {int(n) - 1} bulge(s) of each type: "
                          f"search with no more. ")
+        # (a search prunes by itself where the engine can: _prune_on_its_own)
         served = [] if prune else [index for index in indexes if _serves(index, True)]
         if served:
-            at = os.path.dirname(served[0])
-            at = "genome_library" if at == libs[-1] else at
-            wider = (f"{os.path.basename(served[0])} can serve it from the command line: run "
-                     f"this search again with --prune-pam --index-path {at}. ")
+            wider = (f"{os.path.basename(served[0])} serves it pruned to this PAM at leaf time "
+                     f"(--prune-pam), which the installed CRISPRitz cannot do: install a "
+                     f"CRISPRitz build that supports --prune-pam (CRISPRme pins one). ")
+        # (the search script's _say_wider_flank: a 5' PAM is read off a flank of its width)
+        flank = ""
+        for index in ([] if three_prime else indexes):
+            parsed = index_fit.parse_index_name(os.path.basename(index))
+            if (parsed and parsed[2] == dataset and set(parsed[0]) == {"N"}
+                    and len(parsed[0]) > len(motif)):
+                flank += (f"{os.path.basename(index)} is a PAM-less index whose flank is "
+                          f"{len(parsed[0])} nt, and {motif} is a 5' PAM of {len(motif)} nt: a "
+                          f"5' PAM is read off a flank of its own width only, so this search "
+                          f"needs {'N' * len(motif)}_{want}_{dataset} or {motif}_{want}_{dataset}, "
+                          f"built for a 5' PAM. ")
         error(
             f"no variant index here serves this search (genome {genome}, dataset {vcf}, PAM "
             f"{motif}, {bdna} DNA and {brna} RNA bulge(s), a {guide_len}-nt guide), and none can "
             f"be built: neither its VCFs (VCFs/{vcf}) nor its enriched genome (Genomes/{dataset}) "
             f"is installed. Variant indexes installed for {vcf}: {', '.join(have) or 'none'}. "
-            f"{fewer}{wider}To install one: crisprme.py download --what index --index-name "
-            f"{motif}_{max(want, 3)}_{dataset} if it is published, or crisprme.py build-index-only with "
-            f"the dataset's VCFs (docs/PRECOMPUTED_INDEXES.md)."
+            f"{fewer}{wider}{flank}To install one: crisprme.py download --what index --index-name "
+            f"{index_fit.index_name(motif, max(want, 3), dataset, guide_len, three_prime)} if it "
+            f"is published, or crisprme.py build-index-only with the dataset's VCFs "
+            f"(docs/PRECOMPUTED_INDEXES.md)."
         )
+
+
+def _refuse_mixed_builds(vcf_dirs: List[str], genome: str, motif: str, bdna: int, brna: int,
+                         prune: bool, three_prime: bool, guide_len: int,
+                         index_path: str, genome_dir: "Optional[str]" = None) -> None:
+    """Stops a variant search, before anything is written, where the variant index it takes
+    for a dataset (_index_the_search_takes, as the search script takes it) was built from
+    another enrichment than the one its Dictionaries in the working directory come from: an
+    index of CRISPRme 2.8.1 beside the Dictionaries a download of 2.10.0 put in place of its
+    own, or the other way (index_dictionaries.refusal, which tells the two builds by their
+    fake-indel windows); and where the dataset's enrichment in place, which the search reads
+    (_enrichment_the_search_reads: a search with no bulges scans it in place of that index,
+    of the genome folder ``genome_dir``; a search builds an index it lacks from it), is of
+    another build than those Dictionaries (index_dictionaries.enrichment_refusal: 2.8.1's
+    enrichment of a panel, left beside an index of 2.10.0 and its Dictionaries in a data folder
+    upgraded from 2.8.1, the PP-14 review, round 3: A3-PP14-1). The search script refuses both
+    too, for a search the web launches."""
+    import index_dictionaries
+
+    want = max(bdna, brna) + 1
+    libs = _variant_libraries(index_path)
+    for vdir in vcf_dirs:
+        vcf = os.path.basename(os.path.normpath(vdir))
+        index = _index_the_search_takes(libs, motif, f"{genome}+{vcf}", want, prune,
+                                        three_prime, guide_len, bdna, brna, True)
+        why = index_dictionaries.refusal(index, current_working_directory, vcf) if index \
+            else None
+        reads = None if why else _enrichment_the_search_reads(genome_dir, genome, vcf, bdna,
+                                                               brna, index)
+        if reads:
+            why = index_dictionaries.enrichment_refusal(current_working_directory, genome, vcf,
+                                                        reads, index_dir=index, vcf_dir=vdir)
+        if why:
+            error(why)
+
+
+def _enrichment_the_search_reads(genome_dir: "Optional[str]", genome: str, vcf: str, bdna: int,
+                                 brna: int, index: "Optional[str]") -> "Optional[str]":
+    """What the search script reads of the enrichment of dataset ``vcf`` of genome ``genome`` in
+    the working directory (Genomes/<genome>+<vcf>, and its fake-indel genome), where there is
+    one: "scan" for a search with no bulges where it holds a FASTA of every chromosome of the
+    genome folder ``genome_dir`` (the search script's _enriched_genome_whole: every <chrom>.fa
+    there, as <chrom>.enriched.fa, .enriched.fasta or .fa), which it scans in place of the
+    variant index; "build" where no variant index serves the search (``index`` None), which it
+    builds from the enrichment, or where ``index``, in the working directory's library, lacks its
+    INDELS index, which it builds from the fake-indel genome (a search builds none in the
+    --index-path library); else None (index_dictionaries.enrichment_refusal reads it)."""
+    enriched = os.path.join(current_working_directory, "Genomes", f"{genome}+{vcf}")
+    if not bdna and not brna and genome_dir and os.path.isdir(enriched):
+        chroms = [f.rsplit(".", 1)[0] for f in _listdir(genome_dir)
+                  if f.endswith(".fa") and not f.startswith(".")]
+        if chroms and all(any(os.path.exists(os.path.join(enriched, c + end))
+                              for end in (".enriched.fa", ".enriched.fasta", ".fa"))
+                          for c in chroms):
+            return "scan"
+    if not index:
+        return "build"
+    library = os.path.join(current_working_directory, "genome_library")
+    try:
+        here = os.path.samefile(os.path.dirname(index), library)
+    except OSError:
+        here = False
+    return "build" if here and not os.path.isdir(index + "_INDELS") else None
 
 
 def _index_the_search_takes(libs: List[str], motif: str, suffix: str, want: int, prune: bool,
@@ -2322,37 +2715,40 @@ def _index_the_search_takes(libs: List[str], motif: str, suffix: str, want: int,
                             variant: bool) -> "Optional[str]":
     """The index the search script's _resolve_index_dir takes for this search from the first
     of ``libs`` that holds one (the variant index is read from two: _variant_libraries), or
-    None: of <PAM>_<N>_<suffix> with N >= ``want``, the search's PAM ahead of an all-N one,
-    then one built for this very guide, then the smallest N, then the narrowest flank; an
-    all-N one of the PAM's width, or wider under --prune-pam for a 3' PAM; of the search's
-    side (_side_serves); not locked, with a .bin; and fitting the guide (index_fit; any
-    fits a reference search with no bulges, which opens none). Best-effort: None on error."""
+    None: of <PAM>_<N>_<suffix> with N >= ``want``, one in an index format this install
+    searches ahead of one it stops on (index_fit.unreadable_bin), then the search's PAM ahead
+    of a dedicated one of a PAM that holds it, ahead of an all-N one (index_fit.pam_serves),
+    then one built for this very guide, then the smallest N, then the narrowest flank, then
+    the narrowest PAM, then the PAM that sorts first (index_fit.pam_breadth); the dedicated
+    one under --prune-pam, an all-N one of the PAM's width, or wider under --prune-pam for a
+    3' PAM; of the search's side (_side_serves); not locked, with a .bin; and fitting the
+    guide (index_fit; any fits a reference search with no bulges, which opens none).
+    Best-effort: None on error."""
     try:
         for lib in libs:
             best, best_key = None, None
             for d in _listdir(lib):
                 index = os.path.join(lib, d)
-                pam, _, rest = d.partition("_")
-                n, _, held = rest.partition("_")
-                if (held != suffix or not n.isdigit() or int(n) < want or d.endswith("_INDELS")
+                parsed = index_fit.parse_index_name(d)  # either form of the name
+                if (not parsed or parsed[2] != suffix or parsed[1] < want
+                        or d.endswith("_INDELS")
                         or not os.path.isdir(index) or os.path.isdir(index + ".lock")
                         or not any(f.endswith(".bin") for f in _listdir(index))):
                     continue
-                all_n = bool(pam) and set(pam) == {"N"}
-                if pam == motif:
-                    exact = 1
-                elif all_n and (len(pam) == len(motif)
-                                or (prune and three_prime and len(pam) > len(motif))):
-                    exact = 0
-                else:
+                pam, n = parsed[0], str(parsed[1])
+                exact = index_fit.pam_serves(pam, motif, prune, three_prime)
+                if exact is None:
                     continue
                 built = index_fit.built_guide_len(index)
                 if not _side_serves(index, pam, motif, three_prime) or (
                         (variant or bdna or brna)
                         and not index_fit.fits(built, int(n), guide_len, bdna, brna)):
                     continue
-                key = (exact, int(not built or built == guide_len), -int(n), -len(pam))
-                if best_key is None or key > best_key:
+                # ... and of the same index under both names, the newer one
+                key = (int(index_fit.unreadable_bin(index) is not None), -exact,
+                       -int(not built or built == guide_len), int(n), len(pam),
+                       index_fit.pam_breadth(pam), pam, -int(bool(parsed[4])))
+                if best_key is None or key < best_key:
                     best, best_key = index, key
             if best:
                 return best
@@ -2361,45 +2757,125 @@ def _index_the_search_takes(libs: List[str], motif: str, suffix: str, want: int,
     return None
 
 
-def _wider_flank_notes(indexes: List[str], motif: str, genomedir: str) -> List[str]:
-    """What a search under --prune-pam should say of the all-N indexes ``indexes`` it reads,
-    whose stored flank is wider than the PAM ``motif`` (the others: nothing), one line each:
-    the sites such a flank cannot index (METHODS section 9), and, for an index built before
-    the engine kept a target whose flank holds an N (prune_flank), the sites it misses."""
-    notes, seen = [], set()
-    for index in indexes:
-        pam = os.path.basename(index).split("_")[0]
-        if not index or not pam or set(pam) != {"N"} or len(pam) <= len(motif) or index in seen:
+def _nuclease_of(pamfile: str) -> str:
+    """The nuclease a PAM file names: all of its name after the motif, by the
+    <length>-<motif>-<CasName>.txt convention, as the web reads it (pages_utils
+    friendly_pam_label): the PAM-less 20bp-NNN-NO-PAM's is "NO-PAM", where complete-search
+    wrote "NO" (OF-13)."""
+    return "-".join(os.path.basename(pamfile).split(".")[0].split("-")[2:])
+
+
+def _engine_prunes() -> bool:
+    """Whether the installed CRISPRitz takes --prune-pam, as the search script tells it
+    (_engine_prunes there): crispritz.py drops a flag it does not know, so its source must
+    name it. True where no crispritz.py is on PATH: the search then says what is wrong."""
+    engine = shutil.which("crispritz.py")
+    if not engine:
+        return True
+    try:
+        with open(engine, errors="replace") as fh:
+            return "--prune-pam" in fh.read()
+    except OSError:
+        return True
+
+
+def _prune_on_its_own(index_path: str, genome: str, vcf_dirs: List[str], motif: str,
+                      want: int, three_prime: bool, guide_len: int, bdna: int,
+                      brna: int) -> "Optional[str]":
+    """The index for which a search prunes by itself, as if --prune-pam was given, or None:
+    the search script prunes when no installed index serves it without pruning and one
+    does pruned (a dedicated index of a PAM that holds the search's, or a wider all-N one;
+    index_fit.pam_serves), and says so in its log ("searching with --prune-pam, as if it
+    was given"), for a web search; complete-search decides the same for its own, says so on
+    its console (_prune_note), and tells the script that it took the flag ("auto"). A
+    variant index of each dataset first, which only the dataset's VCFs build; then the
+    reference index, which a search with bulges opens, from --index-path or else the
+    working directory's genome_library. Not where the engine cannot prune."""
+    if not _engine_prunes():
+        return None
+    takes = []
+    for vdir in vcf_dirs:
+        dataset = f"{genome}+{os.path.basename(os.path.normpath(vdir))}"
+        takes.append((_variant_libraries(index_path), dataset, True))
+    if bdna or brna:
+        ref_lib = (index_path if index_path != "_"
+                   else os.path.join(current_working_directory, "genome_library"))
+        takes.append(([ref_lib], genome, False))
+    for libs, suffix, variant in takes:
+        if _index_the_search_takes(libs, motif, suffix, want, False, three_prime, guide_len,
+                                   bdna, brna, variant):
             continue
-        seen.add(index)
-        if not notes:
-            d = len(pam) - len(motif)
-            notes.append(
-                f"NOTE [complete-search]: --prune-pam serves the {len(motif)}-nt PAM {motif} from "
-                f"{os.path.basename(index)}, whose stored flank is {len(pam)} nt: a + strand PAM "
-                f"with 1 to {d} nt after it to the end of a contig, and a - strand PAM in the first "
-                f"{d} nt of a contig, are not indexed, and one {d} nt from the start is reported on "
-                f"the + strand at another position (METHODS section 9). An index whose flank is "
-                f"the PAM's width, or a dedicated one, has no such limit.")
-        try:
-            if os.path.basename(index).count("+"):
-                before = prune_flank.indels_built_before_n_fix(index + "_INDELS") \
-                    if os.path.isdir(index + "_INDELS") else None
-                if before is None:
-                    before = prune_flank.built_before_n_fix(index, genomedir)
-            else:
-                before = prune_flank.built_before_n_fix(index, genomedir)
-        except OSError:
-            before = None
-        if before:
-            notes.append(
-                f"WARNING [complete-search]: {os.path.basename(index)} stores no N in the flank of "
-                f"any target where its genome has one: it was built before CRISPRitz 2.9.1 "
-                f"(CRISPRme 2.8.0 or earlier), which dropped such targets, and searched for the "
-                f"shorter PAM {motif} it misses the sites whose flank holds an N. Remove it and "
-                f"build it again with build-index-only (which keeps an index it finds in place), "
-                f"or search without --prune-pam and --index-path, which builds a dedicated index.")
-    return notes
+        pruned = _index_the_search_takes(libs, motif, suffix, want, True, three_prime,
+                                         guide_len, bdna, brna, variant)
+        if pruned:
+            return pruned
+    return None
+
+
+def _prune_note(index: str, motif: str) -> str:
+    """What complete-search says first of a search that prunes by itself for ``index``
+    (_prune_on_its_own): which index needs it, the variant one of a dataset or the reference
+    one (in a library of the PAM's own variant index and another PAM's reference index, the
+    reference one alone), as the search script says it for a web search."""
+    served = index_fit.parse_index_name(os.path.basename(index))[2]
+    which = "variant" if "+" in served else "reference"
+    return (f"NOTE [complete-search]: no installed {which} index of {served} serves PAM {motif} "
+            f"unpruned, and {os.path.basename(index)} ({os.path.dirname(index)}) serves it pruned "
+            f"to it at leaf time: searching with --prune-pam, as if it was given. A dedicated "
+            f"{motif} {which} index is searched faster: build one with build-index-only, or "
+            f"download one if it is published.")
+
+
+def _wider_flank_notes(indexes: List[str], motif: str, genomedir: str) -> List[str]:
+    """What a search under --prune-pam, given or taken by itself (_prune_on_its_own), should
+    say of the all-N indexes ``indexes`` it reads, whose stored flank is wider than the PAM
+    ``motif`` (the others: nothing), one line each: the sites such a flank cannot index
+    (METHODS section 9), and, for an index built before the engine kept a target whose flank
+    holds an N, the sites it misses and what serves the search whole: that index built
+    again, or a dedicated index of the PAM beside it, which the search takes first
+    (_index_the_search_takes). prune_flank.wider_flank_notes, which the search script runs
+    for a search it prunes by itself, one the web launched."""
+    return prune_flank.wider_flank_notes(indexes, motif, genomedir, "complete-search")
+
+
+def _every_allele_variant_index(vcf_dirs: List[str], genome: str, index_path: str) -> bool:
+    """True when a variant dataset of the search is searched on an index that codes every
+    allele of a split site (CRISPRitz 2.10.0's enrichment, whose indexes are in index format
+    2): one of its installed variant indexes (SNP or INDELS) is of format 2, or none is
+    installed and the installed CRISPRitz builds format 2 (it will build one)."""
+    libs = _variant_libraries(index_path)
+    for vdir in vcf_dirs:
+        dataset = f"{genome}+{os.path.basename(os.path.normpath(vdir))}"
+        found = False
+        for lib in libs:
+            for name in sorted(_listdir(lib)):
+                idx = os.path.join(lib, name)
+                if not (name.endswith(f"_{dataset}") or name.endswith(f"_{dataset}_INDELS")) \
+                        or not os.path.isdir(idx):
+                    continue
+                found = True
+                if index_fit.every_allele_index(idx):
+                    return True
+        if not found and index_fit.engine_index_format() == 2:
+            return True
+    return False
+
+
+def _warn_wide_bulge_budget(vcf_dirs: List[str], genome: str, index_path: str, mm: int,
+                            bdna: int, brna: int, max_total_edits: int = -1) -> "Optional[str]":
+    """A stdout warning (2.10.0) for a variant search allowing more than 1 DNA + 1 RNA bulge
+    in alignments of more edits than --max-total-edits 3 allows (index_fit.wide_bulge_budget)
+    on an index that codes every allele (_every_allele_variant_index): there the variant
+    search of the densest regions grows by orders of magnitude, a cost no step after the
+    search removes (the haplotype pre-check acts on the raw targets the search wrote).
+    Returns the warning's text, which .Params.txt keeps (Bulge_budget_note), or None. The
+    search script says it again in log_verbose.txt (index_fit.py wide-budget), a web
+    search's too."""
+    note = index_fit.wide_bulge_note(mm, bdna, brna, max_total_edits)
+    if note is None or not _every_allele_variant_index(vcf_dirs, genome, index_path):
+        return None
+    print(f"WARNING [complete-search]: {note}", flush=True)
+    return note
 
 
 def _variant_libraries(index_path: str) -> List[str]:
@@ -2463,9 +2939,7 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
     the installed indexes of the folder's name allow, or Genomes/<name>/ when it can
     build one from it (_installed_index_bulge_cap), so once such an index is removed, or
     the folder renamed, the same command may run with none. Under --index-path it says
-    to run without it: the pipeline builds no index there. Under --prune-pam it says to
-    run without that too: complete-search refuses --prune-pam without --index-path, and
-    the index the search then builds is for the PAM itself, which pruning leaves as it is.
+    to run without it: the pipeline builds no index there.
 
     Args:
         genomedir: The --genome folder, as an absolute path.
@@ -2474,8 +2948,7 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
             that takes no reference index.
         pam: The PAM motif; with `prune` (--prune-pam) and `three_prime` (a 3' PAM),
             which indexes of the genome's name the search could take
-            (_index_serves_search). With `prune` the messages also say to run the
-            search again without --prune-pam.
+            (_index_serves_search).
         bdna, brna: The search's DNA and RNA bulges, given or taken by default, for the
             messages; `bulges` each when not given.
         guide_len: The search's guide length: the search takes no index that does not fit
@@ -2500,7 +2973,7 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
     brna = bulges if brna is None else brna
     rerun = "run this search again"
     if index_path != "_":
-        rerun += " without --index-path" + (" and --prune-pam (which needs it)" if prune else "")
+        rerun += " without --index-path"
     note = ""
     if command:
         rerun = f"run {command} again"
@@ -2546,10 +3019,11 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
                                    guide_len, bdna, brna)
             ]
         assembly_search = (
+            "assembly-search, which searches each haplotype on an index of its own (given no "
+            f"--bDNA/--bRNA it takes {DEFAULT_BULGES} DNA + {DEFAULT_BULGES} RNA bulge, the "
+            "default budget)" if (bdna, brna) == (DEFAULT_BULGES, DEFAULT_BULGES) else
             f"assembly-search --bDNA {bdna} --bRNA {brna}, which searches each haplotype "
-            f"on an index of its own (given no --bDNA/--bRNA, assembly-search takes no "
-            f"bulges)" if bdna or brna else
-            "assembly-search, which searches each haplotype on an index of its own"
+            f"on an index of its own"
         )
         for index_dir, why in in_the_way:
             error(
@@ -2599,6 +3073,25 @@ def _record_built_index_source(outputfolder: str, genomedir: str, index_name: st
         )
 
 
+def _per_sample_post_analysis_note() -> str:
+    """What the per-sample banner says of its post-analysis (2.10.0), as the switches set it:
+    the haplotype pre-check (--no-haplotype-precheck sets CRISPRME_HAPLOTYPE_PRECHECK=0 before
+    the banner) and the pieces (CRISPRME_POSTPROC_PIECES=0), read as the post-analysis reads
+    them (haplotype_precheck.switch_on: 0, false, no or off, in any case)."""
+    import haplotype_precheck as _hpc  # PostProcess is on sys.path (script_path)
+    precheck = _hpc.switch_on(os.environ, "CRISPRME_HAPLOTYPE_PRECHECK")
+    pieces = _hpc.switch_on(os.environ, "CRISPRME_POSTPROC_PIECES")
+    return (
+        "Its post-analysis "
+        + ("skips the raw targets no sample can have (the haplotype pre-check)" if precheck
+           else "expands every raw target (the haplotype pre-check is off: "
+                "--no-haplotype-precheck or CRISPRME_HAPLOTYPE_PRECHECK=0)")
+        + (" and runs in pieces over the --thread workers" if pieces
+           else " and runs one process a chromosome (CRISPRME_POSTPROC_PIECES=0)")
+        + "; pass --population-level for each window's worst case instead."
+    )
+
+
 def complete_search() -> None:
     warn_low_memory()  # non-fatal low-memory warning (Docker Desktop, etc.)
     args = input_args[2:]  # retrieve complete-search input arguments
@@ -2607,7 +3100,7 @@ def complete_search() -> None:
     _check_unknown_flags(args)  # fail on a typo'd flag before doing any work
     check_crisprme_dirtree()  # check crisprme directory tree structure
     _check_mandatory_args(args)  # check mandatory arguments
-    genomedir = _check_genome(args)  # input genome folder
+    genomedir = _check_genome(args, current_working_directory)  # input genome folder
     variant = "--vcf" in args  # variant-aware search?
     vcfdir = _check_vcf(args, variant)  # input variants dataset
     guidefile = _check_guide(args, "--guide" in args)  # guide file
@@ -2632,6 +3125,8 @@ def complete_search() -> None:
     merge_t = _check_merge(args, "--merge" in args)  # merge threshold
     sorting_criteria_scoring = _check_sorting_criteria_scoring(args, "--sorting-criteria-scoring" in args)  # sorting criteria score columns
     sorting_criteria = _check_sorting_criteria(args, "--sorting-criteria" in args)  # sorting criteria (mm+bulges) columns
+    sites_only_guard = _check_sites_only_guard(args)  # the sites-only density guard's bits
+    _refuse_no_temp_folder()  # (before the output folder is made)
     outputfolder = _check_output(args)  # output folder
     # (given no --samplesID, the samples lists of its datasets: their listing goes in the
     # output folder only once the pre-flight has passed, as a refusal leaves it empty)
@@ -2658,10 +3153,11 @@ def complete_search() -> None:
     # Context-aware DEFAULT (2.8.0): on a genotyped + PHASED index the per-sample
     # resolution (CONFIRMED cis + named carriers + exact joint AF) is what the panel is
     # built for, so it is the DEFAULT; population-level otherwise (sites-only / unphased /
-    # hybrid / reference / unknown -- where per-sample buys little or nothing and the fast
+    # hybrid / reference / unknown -- where per-sample buys little or nothing and the
     # worst-case screen is the right call). Explicit flags always win and are mutually
-    # exclusive: --per-sample forces genotype resolution, --population-level forces the fast
-    # worst-case screen. (data_type is read from the Phase-2.1 registry manifest.)
+    # exclusive: --per-sample forces genotype resolution, --population-level forces the
+    # worst-case screen (a resolution choice: which mode is faster depends on the panel,
+    # METHODS.md section 5). (data_type is read from the Phase-2.1 registry manifest.)
     _force_ps = "--per-sample" in args
     _force_pop = "--population-level" in args
     if _force_ps and _force_pop:
@@ -2725,9 +3221,9 @@ def complete_search() -> None:
         print(
             "[complete-search] genotyped + PHASED index detected -> PER-SAMPLE analysis "
             "by DEFAULT: CONFIRMED cis phasing + named carrier samples + exact joint "
-            "allele frequency. Pass --population-level for the fast worst-case screen "
-            "(recommended on a very dense / high-edit / genome-wide search, where "
-            "per-sample resolution can be slow).",
+            "allele frequency. Pass --population-level for each window's worst case "
+            "instead (a resolution choice: which mode is faster depends on the panel, "
+            "METHODS.md section 5).",
             flush=True,
         )
     # The pre-2.5.4 --fast / --full flags were removed (no aliases). argparse-free parsing
@@ -2754,6 +3250,81 @@ def complete_search() -> None:
             f"rows of the other dataset(s).",
             flush=True,
         )
+
+    # The carrier gate (haplotype_prioritizer.py, which the search runs on its integrated
+    # results before the report): a population-level row of a genotyped dataset is checked
+    # against the dataset's phased genotypes by default, a sites-only dataset's rows against
+    # the phased HGDP + 1000 Genomes genotypes on request (--prioritize-observed), and the
+    # report ranks a combination no haplotype carries after every other row. It changes no
+    # row. Passed to the pipeline through the environment, as the mode is.
+    if "--prioritize-observed" in args and "--no-prioritize-observed" in args:
+        error("--prioritize-observed and --no-prioritize-observed are mutually exclusive")
+    gate_setting = ("on" if "--prioritize-observed" in args
+                    else "off" if "--no-prioritize-observed" in args else "auto")
+    os.environ["CRISPRME_PRIORITIZE_OBSERVED"] = gate_setting
+    os.environ["CRISPRME_GATE_MIN_EXPECTED"] = f"{_check_gate_min_expected(args):g}"
+    if variant:
+        import haplotype_prioritizer as _hp
+
+        _gate_status, _gate_panels = _hp.plan_panels(
+            os.path.join(current_working_directory, "Dictionaries"),
+            list(dict.fromkeys(_named)), "per-sample" if per_sample else "population-level",
+            gate_setting, os.environ.get("CRISPRME_GENOTYPE_TIER") or None)
+        _bound, _unlisted = _hp.gate_scope(
+            os.path.join(current_working_directory, "Dictionaries"),
+            list(dict.fromkeys(_named)), "per-sample" if per_sample else "population-level",
+            gate_setting)
+        _bound_text = (
+            "; a combination of a sites-only dataset that no panel can check, whose "
+            "variants' frequencies fail the bound (product >= 1e-06, rarest >= 0.001), "
+            "is ranked after the others too" if _bound else "")
+        _scope = (" (of the rows that name no carrier: the sites-only dataset's)"
+                  if _unlisted else "")
+        if _gate_status == "run":
+            print(
+                f"[complete-search] Carrier gate: each row's variant combination{_scope} "
+                f"is checked against the phased genotypes of "
+                f"{', '.join(_n for _n, _r, _role in _gate_panels)}; the report ranks a "
+                f"combination no haplotype carries after every other row (a table of its own "
+                f"after the top-1000){_bound_text}, and drops none. --no-prioritize-observed "
+                f"turns it off.",
+                flush=True,
+            )
+        elif _gate_status == "bound":
+            print(
+                f"[complete-search] Carrier gate: no phased panel to check the sites-only "
+                f"rows against (--prioritize-observed reads the phased {_hp.ORACLE_PANEL} "
+                f"genotypes, which crisprme.py download --what genotype-oracle installs): "
+                f"their combinations of two or more variants are checked against the "
+                f"frequency bound (product of the variants' frequencies >= 1e-06, rarest >= "
+                f"0.001), and the report ranks one below it after every other row, in a table "
+                f"of its own after the top-1000; it drops none. --no-prioritize-observed "
+                f"turns it off.",
+                flush=True,
+            )
+        elif _gate_status == "untiered":
+            print(
+                "[complete-search] Carrier gate: not run, as the genotyped datasets of this "
+                "search have the classic per-sample dictionaries alone, not the phased "
+                "genotype store the gate reads (Dictionaries/genotypes_<vcf>/, which "
+                "build-index-only --samplesID writes and a downloaded index has): the rows "
+                "are reported unchecked.",
+                flush=True,
+            )
+        if _hp.oracle_missing(os.path.join(current_working_directory, "Dictionaries"),
+                              list(dict.fromkeys(_named)), gate_setting,
+                              os.environ.get("CRISPRME_GENOTYPE_TIER") or None):
+            print(
+                f"WARNING [complete-search]: --prioritize-observed: the phased "
+                f"{_hp.ORACLE_PANEL} genotypes the sites-only rows are checked against are "
+                f"not installed (Dictionaries/genotypes_{_hp.ORACLE_PANEL}/, or the folder "
+                f"CRISPRME_GENOTYPE_TIER names), so they are checked against "
+                + (f"the phased genotypes of "
+                   f"{', '.join(_n for _n, _r, _role in _gate_panels)} and the frequency bound"
+                   if _gate_panels else "the frequency bound alone")
+                + ". Install them with: crisprme.py download --what genotype-oracle",
+                flush=True,
+            )
 
     # ALTERNATIVE-ALIGNMENT output (the altMerge / *_all_results_with_alternative_alignments.tsv
     # dump = the NON-best alignments per locus cluster). It grows combinatorially with the edit
@@ -2866,23 +3437,18 @@ def complete_search() -> None:
                 f"ships it pre-built). To intentionally run CFD-only anyway, set CRISPRME_SKIP_SCORER_ENV=1."
             )
 
-    # --prune-pam (opt-in): filter a PAM-less index (e.g. an all-N "NNN" index) down to
-    # the motif given with --pam, applied at CRISPRitz leaf-emit as a skip-before-write
-    # (one index serves many PAMs). It only *narrows* output -- it never changes a
-    # dedicated-index result -- so it is OFF by default and the normal search path is
-    # byte-identical without it. A dedicated index for --pam, when installed, is still
-    # the one searched, and pruning it is a no-op. Requires a prebuilt --index-path and
-    # a CRISPRitz build that supports --prune-pam. Against the stored flank width K, a
-    # PAM of length L > K is refused, a shorter 3' PAM is N-padded to K, and a shorter
-    # 5' PAM off a wider flank is refused.
+    # --prune-pam: filter a PAM-less index (e.g. an all-N "NNN" index), or a dedicated
+    # one of a PAM that holds the motif given with --pam (NRR for NGG), down to that motif,
+    # applied at CRISPRitz leaf-emit as a skip-before-write (one index serves many PAMs).
+    # It only *narrows* output -- it never changes a dedicated-index result. A dedicated
+    # index for --pam, when installed, is still the one searched, and pruning it is a
+    # no-op. Needs a CRISPRitz build that supports --prune-pam. Against the stored flank
+    # width K, a PAM of length L > K is refused, a shorter 3' PAM is N-padded to K, and a
+    # shorter 5' PAM off a wider flank is refused. A search prunes by itself when only
+    # such an index serves it (_prune_on_its_own, below), so the flag is needed only to
+    # prune where an index serves unpruned too (an all-N one of the PAM's width).
+    # (Before 2.10.0 it needed --index-path, and a search did not prune by itself.)
     prune_pam = "--prune-pam" in args
-    if prune_pam and index_path == "_":
-        error(
-            "--prune-pam requires --index-path (the prebuilt reference-index library). "
-            "Wherever a dedicated index for the --pam motif is installed it is used as-is "
-            "and pruning it is a no-op; otherwise a PAM-less (all-N) index is filtered "
-            "down to that motif."
-        )
 
     # cap on TOTAL edits per alignment (--max-total-edits, issue #107): prevents
     # combined-edit alignments (e.g. 6mm+2+2 bulges = 10) from bloating the
@@ -2901,6 +3467,35 @@ def complete_search() -> None:
             error("Please provide a non-negative integer for --max-total-edits")
         if max_total_edits < 0:
             error("--max-total-edits must be a non-negative integer")
+    # the most ambiguous columns a reported SNP variant row may rest on unless its carriers
+    # hold its variants together on one phased haplotype (--max-degeneracy; -1, the
+    # default, is no cap). new_simple_analysis.py reads it from
+    # CRISPRME_MAX_DEGENERACY, inherited by the post-analysis like CRISPRME_FAST_MODE.
+    max_degeneracy = -1
+    if "--max-degeneracy" in args:
+        try:
+            max_degeneracy = int(args[args.index("--max-degeneracy") + 1])
+        except (IndexError, ValueError):
+            error("Please provide a non-negative integer for --max-degeneracy")
+        if max_degeneracy < 0:
+            error("--max-degeneracy must be a non-negative integer")
+        if not variant:
+            print(
+                "WARNING [complete-search]: --max-degeneracy caps the ambiguous columns of "
+                "variant rows, and this search has no --vcf: it changes nothing.",
+                flush=True,
+            )
+    os.environ["CRISPRME_MAX_DEGENERACY"] = str(max_degeneracy)
+    # 2.10.0: the exact haplotype pre-check of a per-sample search, and its carriers-first
+    # twin on the indel side (new_simple_analysis.py, analisi_indels_NNN.py), are on unless
+    # --no-haplotype-precheck turns them off (as CRISPRME_HAPLOTYPE_PRECHECK=0 in the
+    # environment does); inherited by the post-analysis like CRISPRME_FAST_MODE
+    if "--no-haplotype-precheck" in args:
+        os.environ["CRISPRME_HAPLOTYPE_PRECHECK"] = "0"
+
+    # the sites-only density guard's bits (_check_sites_only_guard, read before the output
+    # folder is made), for the post-analysis: CRISPRME_SITES_ONLY_GUARD, -1 is off
+    os.environ["CRISPRME_SITES_ONLY_GUARD"] = str(sites_only_guard)
 
     # extract pam seq from file
     pam_len = 0
@@ -2924,13 +3519,13 @@ def complete_search() -> None:
 
     # Issue #105 (odd-length partially-degenerate PAM + bulges crashing the CRISPRitz
     # C++ engine with a heap-corruption abort) was fixed in CRISPRitz, and CRISPRme+
-    # hard-pins a CRISPRitz >= 2.9.1 on every install surface (Docker and
+    # hard-pins a later CRISPRitz on every install surface (Docker and
     # install_from_source.sh build the tag in crispritz_ref / CRISPRITZ_REF, and the
-    # 2.8.1 Bioconda recipe pins crispritz >=2.9.1,<2.9.2). The lower bound moves with each
-    # release, so this says ">=" and not an exact version.
+    # Bioconda recipe bounds its crispritz pin to it: docs/RELEASING.md). The pin moves with
+    # each release, so this names none.
     # No supported install can therefore run a vulnerable engine, so the old runtime
-    # warning here was removed: it fired on the DEFAULT PAM (NRG is odd-length and
-    # carries the partially-degenerate "R"), crying wolf on essentially every default
+    # warning here was removed: it fired on the DEFAULT PAM (then NRG, now NRR: odd-length,
+    # with the partially-degenerate "R"), crying wolf on essentially every default
     # search about a crash that cannot occur on the shipped stack.
 
     genome_ref = os.path.basename(genomedir)
@@ -2938,7 +3533,7 @@ def complete_search() -> None:
     # The nuclease name is parsed from the PAM filename, which follows the
     # <length>-<motif>-<CasName>.txt convention (e.g. 20bp-NGG-SpCas9.txt):
     # _check_pam_file refused any other name before anything was done.
-    nuclease = os.path.basename(pamfile).split(".")[0].split("-")[2]
+    nuclease = _nuclease_of(pamfile)
     # Treat --max-total-edits as the single "max edits" knob (mirroring the web slider):
     # when the user did NOT specify per-type bulges, default to ONE DNA + ONE RNA bulge
     # (bounded by the bulge depth a search can REACH here). We deliberately cap the derived
@@ -2950,11 +3545,12 @@ def complete_search() -> None:
     # as the search shell does), so a fresh/dict-less install still gets its 1 bulge; the
     # variant term stays strictly installed-index-based. If no index can supply bulges and no
     # raw genome exists the search stays bulge-free (fast, safe).
-    _SIMPLE_BULGE_CAP = 1
+    _SIMPLE_BULGE_CAP = DEFAULT_BULGES
     _no_bulges_reached = False
     if not _bdna_given and not _brna_given and max_total_edits > 0:
+        # (an index that serves only pruned counts: the search then prunes by itself)
         _idx_cap = _installed_index_bulge_cap(pam_char, genome_ref, variant,
-                                              prune=prune_pam, three_prime=not pam_begin,
+                                              prune=_engine_prunes(), three_prime=not pam_begin,
                                               guide_len=total_pam_len - pam_len,
                                               index_path=index_path, genomedir=genomedir)
         _derived = min(max_total_edits, _idx_cap, _SIMPLE_BULGE_CAP)
@@ -2968,19 +3564,53 @@ def complete_search() -> None:
             )
         else:
             _no_bulges_reached = True
+    # The search prunes by itself, as if --prune-pam was given, when only an index that
+    # needs it serves it (_prune_on_its_own; the search script decides the same, for a web
+    # search too): said here first, and recorded in the run's Params.txt.
+    prune_auto = None
+    wide_budget_note = None  # _warn_wide_bulge_budget's, for .Params.txt
+    if not prune_pam:
+        prune_auto = _prune_on_its_own(
+            index_path, genome_ref,
+            resolve_vcf_dataset_dirs(vcfdir, current_working_directory) if variant else [],
+            pam_char, max(bDNA, bRNA) + 1, not pam_begin, total_pam_len - pam_len, bDNA, bRNA)
+    if prune_auto:
+        prune_pam = True
+        print(_prune_note(prune_auto, pam_char), flush=True)
     if variant:
         _refuse_no_variant_index(
             resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref, pam_char,
             bDNA, bRNA, prune_pam, not pam_begin, total_pam_len - pam_len, index_path)
+        # (an index of one build of a dataset beside the Dictionaries of another, as a data
+        # folder upgraded from CRISPRme 2.8.1 can hold, or an enrichment in place of another
+        # build that the search reads: refused before anything is written)
+        _refuse_mixed_builds(
+            resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref, pam_char,
+            bDNA, bRNA, prune_pam, not pam_begin, total_pam_len - pam_len, index_path,
+            genome_dir=genomedir)
+        wide_budget_note = _warn_wide_bulge_budget(
+            resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref,
+            index_path, mm, bDNA, bRNA, max_total_edits)
+    if variant and index_path != "_" and (bDNA or bRNA):
+        _refuse_no_reference_index(index_path, genome_ref, pam_char, max(bDNA, bRNA) + 1,
+                                   prune_pam, not pam_begin, total_pam_len - pam_len, bDNA, bRNA,
+                                   resolve_vcf_dataset_dirs(vcfdir, current_working_directory))
     if _no_bulges_reached:
         # A 0-bulge search reports a site that needs a bulge at its next best alignment, or
-        # not at all, and the rest of the run reads as any other: never silently.
+        # not at all, and the rest of the run reads as any other: never silently. Under
+        # --index-path a search builds no reference index (its library alone serves one).
+        if index_path != "_":
+            advice = (f"Install an index of it in that library (crisprme.py download --what "
+                      f"index, or crisprme.py build-index-only), or run without --index-path, "
+                      f"where a search with --bDNA/--bRNA takes an index of the working "
+                      f"directory's library, or builds one from the genome")
+        else:
+            advice = "Pass --bDNA/--bRNA explicitly (a search builds an index it can build)"
         print(
             f"WARNING [complete-search]: no --bDNA/--bRNA given, and no index this search can "
-            f"use holds bulges for PAM {pam_char} on {genome_ref}: searching with NO bulges, so "
-            f"bulged off-targets are not reported. Pass --bDNA/--bRNA explicitly (a search builds "
-            f"an index it can build), or, for a wider PAM-less index, add --prune-pam "
-            f"--index-path.",
+            f"use holds bulges for PAM {pam_char} on {genome_ref}"
+            + (f" in --index-path {index_path}" if index_path != "_" else "")
+            + f": searching with NO bulges, so bulged off-targets are not reported. {advice}.",
             flush=True,
         )
     # [max-total-edits] Surface the silent combined-edit prune (issue #107): when the
@@ -2997,6 +3627,15 @@ def complete_search() -> None:
             f"--max-total-edits to {mm + bDNA + bRNA} to keep such deep off-targets.",
             flush=True,
         )
+    # [indel window] A target that holds an indel is searched in its fake-indel window, so
+    # one longer than the window holds (guide, PAM and DNA bulges counted) is in no index:
+    # said here for each variant dataset whose windows are too short for this search
+    # (_indel_window_notes), and into the run's Params.txt
+    window_notes = (_indel_window_notes(resolve_vcf_dataset_dirs(vcfdir, current_working_directory),
+                                        total_pam_len, bDNA, genome_ref, index_path)
+                    if variant else [])
+    for _note in window_notes:
+        print(_note, flush=True)
     if bMax != 0:
         search_index = True
     else:
@@ -3014,7 +3653,11 @@ def complete_search() -> None:
     if prune_pam:
         _three = not pam_begin
         _guide = total_pam_len - pam_len
-        _taken = [_index_the_search_takes([index_path], pam_char, genome_ref, bMax + 1, True,
+        # (the reference index from --index-path, or else from the working directory's
+        # library, as the search script takes it)
+        _ref_lib = (index_path if index_path != "_"
+                    else os.path.join(current_working_directory, "genome_library"))
+        _taken = [_index_the_search_takes([_ref_lib], pam_char, genome_ref, bMax + 1, True,
                                           _three, _guide, bDNA, bRNA, False)] if bMax else []
         if variant:
             for _vdir in resolve_vcf_dataset_dirs(vcfdir, current_working_directory):
@@ -3073,6 +3716,12 @@ def complete_search() -> None:
         # the binding total-edits cap the search actually used (the "Max edits" the
         # user set): the report + web read this; without it they showed "n/a".
         p.write("Max_total_edits\t" + str(max_total_edits) + "\n")
+        # the reports read it from here (written only when given, as it is off by default)
+        if max_degeneracy >= 0:
+            p.write("Max_degeneracy\t" + str(max_degeneracy) + "\n")
+        # the sites-only density guard's bits, -1 when off (the report reads it; the
+        # guard's own BEDs say what it withheld)
+        p.write("Sites_only_density_guard\t" + str(sites_only_guard) + "\n")
         # Persist the silent-prune WARN into the run sidecar so it reaches
         # .Params.txt -> report.zip. The parent-stdout WARN (printed earlier in
         # complete_search) is NOT captured: log_verbose.txt only redirects the child
@@ -3094,6 +3743,12 @@ def complete_search() -> None:
             )
         if prune_notes:  # (a single physical line, as Pruning_note)
             p.write("Prune_pam_note\t" + " ".join(prune_notes) + "\n")
+        if window_notes:  # (a single physical line, as Pruning_note)
+            p.write("Indel_window_note\t" + " ".join(window_notes) + "\n")
+        if wide_budget_note:  # the stdout WARNING above 1 DNA + 1 RNA bulge, kept with the run
+            p.write("Bulge_budget_note\t" + wide_budget_note + "\n")
+        if prune_pam:  # given, or taken by the search itself (the report says which)
+            p.write("Prune_pam\t" + ("auto" if prune_auto else "given") + "\n")
         p.write("Annotation\t" + str(annotation_name) + "\n")
         p.write("Nuclease\t" + str(nuclease) + "\n")
         # p.write('Gecko\t' + str(gecko_comp) + '\n')
@@ -3208,6 +3863,13 @@ def complete_search() -> None:
     if validation_report.has_errors() or (
         full_validation_report is not None and full_validation_report.has_errors()
     ):
+        # (what this run wrote into the output folder goes with it: the corrected command,
+        # with the same --output, runs instead of stopping on a folder 'not empty')
+        for name in (".command_line.txt", ".version.txt", "Params.txt", "guides.txt"):
+            try:
+                os.remove(os.path.join(outputfolder, name))
+            except FileNotFoundError:
+                pass
         sys.exit(1)
 
     # Pre-flight: a variant search needs a PREBUILT variant index. A fresh
@@ -3259,6 +3921,22 @@ def complete_search() -> None:
             _have_indel = os.path.isdir(os.path.join(_dict_root, f"log_indels_{_vn}"))
             if not (_have_snp and _have_indel):
                 _missing.append(_vn)
+        # (a dataset whose variant index the --index-path library holds: its dictionaries
+        # are not there for a search, which reads them from the working directory, as it
+        # reads the dataset's sample list and VCF folder; IDX-17 c)
+        _elsewhere = _variant_index_elsewhere(index_path, genome_ref, _missing)
+        if _elsewhere:
+            error(
+                f"The variant index of {', '.join(_elsewhere)} is in --index-path {index_path}, "
+                f"but a search reads a dataset's dictionaries (Dictionaries/registry_<dataset> "
+                f"or dictionaries_<dataset>, and log_indels_<dataset>), its sample list and its "
+                f"VCF folder from the working directory, {current_working_directory.rstrip('/')}"
+                f", which holds none of {', '.join(_elsewhere)}'s: run the search from the "
+                f"folder that holds them (the one the index was downloaded into, "
+                f"{os.path.dirname(os.path.normpath(index_path))}, for a download), or "
+                f"download them here (crisprme.py download --what index --index-name <the "
+                f"index>)"
+            )
         if _missing:
             error(
                 "No prebuilt variant index found for: %s.\n\n"
@@ -3268,7 +3946,7 @@ def complete_search() -> None:
                 "index. Build or download the index FIRST, then re-run complete-search:\n\n"
                 "  download a prebuilt index (recommended):\n"
                 "    crisprme.py download --what index --index-name "
-                "NRG_3_hg38+hg38_HGDP1kGP --path .\n"
+                "20-NRR_3_hg38+hg38_HGDP1kGP --path .\n"
                 "    (recommended default: phased HGDP + 1000 Genomes, 4,091 samples, "
                 "CONFIRMED carriers)\n\n"
                 "  or build it locally (source VCFs required):\n"
@@ -3338,11 +4016,12 @@ def complete_search() -> None:
     # either -- built without --samplesID, as the benchmark complete-test builds its own --
     # has only the classic per-sample dictionaries, which name the carriers, each SNP with
     # the AF that CRISPRitz add-variants copied into them from the VCF (in either mode; an
-    # indel has the AF it copied into the indel log, as on any index; none for a record
-    # whose INFO has AF at another place than the VCF's first record: METHODS section 8),
-    # and no more. Their per-sample post-analysis still reports a window denser than
-    # CRISPRME_IUPAC_CAP by its greedy worst-case alignment, listing the carriers of any of
-    # the variants it takes (new_simple_analysis.py). (each dataset once: a --vcf list may
+    # indel has the AF it copied into the indel log, as on any index; none, on an index
+    # CRISPRitz 2.9.1 or earlier built, for a record whose INFO has AF at another place
+    # than the VCF's first record: METHODS section 8),
+    # and no more. (Since 2.10.0 their per-sample post-analysis gives a window denser than
+    # CRISPRME_IUPAC_CAP as the haplotypes its carriers have, as on the tiers, no longer by
+    # a greedy alignment: new_simple_analysis.py.) (each dataset once: a --vcf list may
     # name one twice) A sites-only dataset without them (its VCFs have no sample columns)
     # is in neither list: its dictionaries name no carrier, and a search reports a
     # sites-only VCF's variants only with a registry's allele frequencies
@@ -3380,12 +4059,10 @@ def complete_search() -> None:
                f"and in either mode {'its' if _one else 'their'} variants' allele frequencies "
                f"are the AF of those dictionaries (an indel's, of the index's indel log), which "
                f"CRISPRitz add-variants copied from {'its VCF' if _one else 'their VCFs'} (a "
-               f"variant whose AF they give as 0, or not at all, has no frequency); "
-               f"where {'its' if _one else 'their'} variants are "
-               f"dense, it can still report a window by its greedy worst-case alignment, whose "
-               f"listed carriers need not carry every variant in it. To get the tiers, rebuild "
+               f"variant whose AF they give as 0, or not at all, has no frequency). "
+               f"To get the tiers, rebuild "
                f"the index with build-index-only --samplesID, or download a prebuilt one "
-               f"(crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP). "
+               f"(crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP). "
                if _untiered else "")
             + "SNP+indel co-occurrence is UNCHANGED "
             "(the indel cis-phasing pass is unaffected). See METHODS.md, 'Context-aware analysis mode'."
@@ -3404,22 +4081,17 @@ def complete_search() -> None:
                 f"those dictionaries (an indel's, of the index's indel log), which CRISPRitz "
                 f"add-variants copied from {'its VCF' if _one else 'their VCFs'}: a variant whose "
                 f"AF they give as 0, or not at all, has no frequency. "
-                f"Where {'its' if _one else 'their'} variants are dense, a "
-                f"window can still be reported by its greedy worst-case alignment, flagged in "
-                f"High_variant_density_region, whose listed carriers need not carry every "
-                f"variant in it. To get the tiers, rebuild the index with build-index-only "
+                f"To get the tiers, rebuild the index with build-index-only "
                 f"--samplesID, or download a prebuilt one (crisprme.py download --what index "
-                f"--index-name NRG_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
-                f"dense panels; pass --population-level for the fast worst-case screen."
+                f"--index-name 20-NRR_3_hg38+hg38_HGDP1kGP). {_per_sample_post_analysis_note()}"
             )
         else:
             print(
                 "[complete-search] PER-SAMPLE analysis (%s): resolving per-sample genotypes "
                 "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and exact "
                 "joint AF. Requires a genotyped index (sites-only panels have no genotypes to resolve "
-                "-- the population-level analysis runs instead). Slower, and can be intractable on "
-                "dense panels; pass --population-level for the fast worst-case screen."
-                % _why
+                "-- the population-level analysis runs instead). %s"
+                % (_why, _per_sample_post_analysis_note())
             )
     # the pre-flight has passed: the samples lists taken without --samplesID, for the pipeline
     if samples_taken:
@@ -3466,7 +4138,10 @@ def complete_search() -> None:
                 f"{gene_annotation} {void_mail} {base_start} {base_end} {base_set} "
                 f"{sorting_criteria_scoring} {sorting_criteria} {cicd_test} "
                 f"{vcf_filter_pass_values} {index_path} {max_total_edits} "
-                f"{1 if prune_pam else 0}"
+                # "auto" where this search took the flag by itself, so that the run's
+                # record of the indexes it searched says so, as it does for a web search,
+                # where the script decides it
+                f"{'auto' if prune_auto else 1 if prune_pam else 0}"
             )
             # The pipeline reads the annotation temp folders until it ends, so they are
             # not removed (_run_and_remove_annotation_tmpdirs) unless it is known to have
@@ -3484,8 +4159,11 @@ def complete_search() -> None:
             if 0 <= code <= 128:
                 _ANNOTATION_TMPDIRS.extend(handed_over)
                 if record_index_source:  # the index it built, if any, is whole
+                    # (under the name a search builds it: index_fit.index_name)
                     _record_built_index_source(
-                        outputfolder, genomedir, f"{pam_char}_{bMax + 1}_{genome_ref}"
+                        outputfolder, genomedir,
+                        index_fit.index_name(pam_char, bMax + 1, genome_ref,
+                                             total_pam_len - pam_len, not pam_begin)
                     )
             if code != 0:
                 # surface WHERE it failed + the actual error, not just "failed", and end
@@ -3524,14 +4202,21 @@ def print_help_build_index() -> None:
         "uses the same genome, PAM and bulge settings. Building the index once "
         "and reusing it avoids repeating the single most expensive step across "
         "many searches, and lets an index be staged (or downloaded) ahead of "
-        "time on a large machine.\n"
+        "time on a large machine. It is named <guide>-<PAM>_<bulges+1>_<genome> "
+        "(<PAM>-<guide>_... for a PAM on the 5' side of the guide; e.g. "
+        "20-NRR_3_hg38), as a search names one it builds: the indexes of one PAM for "
+        "the two sides of the guide, or for two guide lengths, live in one library. "
+        "An index in place under the older name, <PAM>_<bulges+1>_<genome>, that is "
+        "this one is kept.\n"
     )
     sys.stderr.write(
         "Options:\n"
         "\t--genome, specify the reference genome folder [REQUIRED]\n"
         "\t--pam, specify a file containing the PAM sequence [REQUIRED]\n"
         "\t--bDNA, number of DNA bulges the index must support [OPTIONAL, "
-        "default 0]\n"
+        "default 0; a search's default budget, 1 DNA + 1 RNA bulge, needs an index of at "
+        "least 1 + 1 (N = 2), and the web's ceiling of 2 + 2 one of N = 3, as the "
+        "published indexes are]\n"
         "\t--bRNA, number of RNA bulges the index must support [OPTIONAL, "
         "default 0]\n"
         "\t--thread, set number of threads to use [default: 8]\n"
@@ -3773,7 +4458,9 @@ def _write_pam_build(index_dir: str, pamfile: str) -> None:
     PAM. The sidecar lives inside the index dir, so it travels in the publish
     tarball and download automatically. Non-fatal on any error. An index in place that
     was built for another guide length keeps its record: this PAM file does not describe
-    it (a longer build, which serves a shorter guide: _refuse_short_build stops the rest).
+    it (a longer build, which serves a shorter guide: _refuse_short_build stops the rest);
+    nor is it recorded on one whose .bin headers record the other side of the guide (index
+    format 2: _refuse_other_side_build stops the run first).
     """
     if not os.path.isdir(index_dir):
         return
@@ -3784,6 +4471,9 @@ def _write_pam_build(index_dir: str, pamfile: str) -> None:
         built = index_fit.built_guide_len(index_dir)
         if built and built != len(seq) - abs(pos):
             return
+        five_prime = index_fit.built_five_prime(index_dir)
+        if five_prime is not None and five_prime != (pos < 0):
+            return
         name = os.path.splitext(os.path.basename(pamfile))[0]
         with open(os.path.join(index_dir, ".pam_build"), "w") as fd:
             fd.write(f"{name} {len(seq)} {pos}\n")
@@ -3791,61 +4481,324 @@ def _write_pam_build(index_dir: str, pamfile: str) -> None:
         sys.stderr.write(f"Warning: could not write index PAM provenance: {exc}\n")
 
 
+def _indel_log_window(log_dir: str, subdir: str):
+    """The fake-indel windows (left, right) the indel log of the chromosome of INDELS
+    sub-index ``subdir`` (<PAM>_<N>_fake<chrom>) records in ``log_dir``, the windows its
+    fake-indel genome holds (indel_window): None where the log is not there, holds no row,
+    or holds two widths."""
+    chrom = subdir.rsplit("_fake", 1)[-1]
+    path = indel_window.log_path(log_dir, chrom)
+    try:
+        found = indel_window.log_windows(path) if path else set()
+    except (OSError, ValueError, EOFError):
+        return None
+    return next(iter(found)) if len(found) == 1 else None
+
+
+def _indel_window_notes(dataset_dirs: List[str], target_len: int, bdna: int,
+                        genome_ref: "Optional[str]" = None, index_path: str = "_") -> List[str]:
+    """What complete-search says of each variant dataset of ``dataset_dirs`` whose
+    fake-indel windows hold no target of ``target_len`` bases (guide and PAM) with ``bdna``
+    DNA bulges that holds an indel (indel_window.target_note): the windows its indel logs
+    record (Dictionaries/log_indels_<dataset>), each width once; for a dataset with no logs
+    yet, which the search enriches itself, those the installed CRISPRitz writes. How a
+    sites-only dataset gets wider windows is not by enriching it again
+    (indel_window.sites_only, sites_only_way), and its kit in place goes first, each part
+    named by absolute path: of the working directory and genome ``genome_ref``, its indexes
+    in the --index-path library ``index_path`` too ("_": none) (indel_window.kit_removal;
+    the note named none of it up to the review of wave 1c-a, W1C-B1)."""
+    notes = []
+    for d in dataset_dirs:
+        name = os.path.basename(os.path.normpath(d))
+        logs = os.path.join(current_working_directory, "Dictionaries", f"log_indels_{name}")
+        if os.path.isdir(logs):
+            try:
+                widths = set().union(*indel_window.dataset_windows(logs).values())
+            except (OSError, ValueError, EOFError):
+                widths = set()
+        else:
+            widths = {indel_window.engine_window()}
+        sites = None  # (read once a note is due: indel_window.sites_only)
+        for w in sorted(widths):
+            if not indel_window.target_note(w, target_len, bdna, "complete-search", name):
+                continue
+            if sites is None:
+                sites = indel_window.sites_only(current_working_directory, name, d)
+            notes.append(indel_window.target_note(
+                w, target_len, bdna, "complete-search", name, sites,
+                os.path.normpath(current_working_directory), genome_ref,
+                [index_path] if index_path not in (None, "", "_") else []))
+    return notes
+
+
+def _enrichment_window_notes(enriched: str, indels_out: str, log_dir: str, genome_ref: str,
+                             vcf_name: str, reused: bool = True,
+                             building: Tuple[str, ...] = (),
+                             vcf_dir: "Optional[str]" = None) -> List[str]:
+    """What build-index-only says of the enrichment its index is built on: one in place
+    (``reused``: this run did not make it) whose fake-indel windows, which its indel logs
+    ``log_dir`` record (indel_window), are of another width than those the installed
+    CRISPRitz writes (indel_window.engine_window), a WARNING per width, naming the longest
+    target (guide, PAM and DNA bulges) its windows hold, and how to enrich the dataset
+    again: by removing all that comes from that enrichment (indel_window.enrichment_stores:
+    its genomes, dictionaries, indel logs and dict-less tiers, and every index of the dataset
+    in the working directory's genome_library, with ``building``, the indexes this run builds
+    from it next), by absolute path. An enrichment of another CRISPRitz differs in its SNPs
+    too, and a store of it left beside a new one -- its variant index, its tiers -- would be
+    searched with the new one: the advice removed only its genomes and INDELS indexes (the
+    latter by a path relative to the shell's directory, which may not be the working
+    directory, --path), and the dataset enriched anew kept the variant index and the tiers
+    of the earlier one. Either way, one WARNING for each INDELS index of the dataset in the
+    working directory's genome_library built from windows those logs do not record (an
+    index kept beside an enrichment made again), which every search refuses. Nothing for an
+    enrichment of the installed CRISPRitz's windows whose indexes agree with its logs. A
+    sites-only dataset (indel_window.sites_only: ``vcf_dir`` its VCFs, which name no sample;
+    the mega) is not enriched again that way, as no enrichment of its VCFs writes a window:
+    its windows come from its enriched-genome kit, and the WARNING says to install its
+    archive and kit of CRISPRme 2.10.0, or to build that kit again, in place of what it names
+    (indel_window.sites_only_way); its registry, built from its VCFs' INFO AF fields, is not
+    named (indel_window.enrichment_stores)."""
+    engine = indel_window.engine_window()
+    try:
+        widths = set().union(*indel_window.dataset_windows(log_dir).values()) if reused \
+            else set()
+    except (OSError, ValueError, EOFError):
+        widths = set()
+    notes = []
+    workdir = os.path.dirname(os.path.dirname(enriched))
+    library = os.path.join(workdir, "genome_library")
+    # (all that comes from the enrichment in place, there or to be built by this run: each
+    # once, by absolute path, for a shell in any directory)
+    _stores = indel_window.enrichment_stores(workdir, genome_ref, vcf_name, present=False)
+    _rm = " ".join(indel_window.quote(d) for d in dict.fromkeys(_stores + list(building)))
+    for idx, w, logged in indel_window.mismatched_indexes(library, vcf_name, log_dir):
+        # (with the variant index of its name, built with it from one enrichment, which no
+        # window tells: removed alone, the INDELS index was built anew and the variant index
+        # of the other enrichment searched with no word, W1C-B2R2-2 of the wave 1c-a review)
+        _pair = indel_window.with_its_variant_index(idx)
+        notes.append(
+            f"WARNING [build-index-only]: the INDELS index {idx} was built from fake-indel "
+            f"windows of {indel_window.describe(w)} reference bases, and the indel logs of "
+            f"{vcf_name} ({log_dir}) record windows of "
+            f"{' and '.join(indel_window.describe(x) for x in logged)}: they come from two "
+            f"enrichments, and every search of it refuses it. "
+            + (f"Remove it and the variant index of its name, {_pair[1]}, built with it from "
+               f"the same enrichment, which it holds no window to tell (rm -rf "
+               f"{' '.join(indel_window.quote(p) for p in _pair)}), and build them again with "
+               f"build-index-only." if len(_pair) > 1 else
+               f"Remove it (rm -rf {indel_window.quote(idx)}) and build it again with "
+               f"build-index-only."))
+    _sites = indel_window.sites_only(workdir, vcf_name, vcf_dir) if widths - {engine} else False
+    for w in sorted(widths - {engine}):
+        notes.append(
+            f"WARNING [build-index-only]: the enrichment of {vcf_name} in place ({enriched}) "
+            f"holds fake-indel windows of {w[0]} reference bases before an indel and {w[1]} "
+            f"after it (its indel logs, {log_dir}), and the installed CRISPRitz writes "
+            f"{engine[0]} and {engine[1]}: a target that holds an indel there holds up to "
+            f"{indel_window.reach(w)} bases, guide, PAM and DNA bulges counted"
+            + (f" ({indel_window.reach(w, mnv=True)} at a record whose REF and ALT differ at "
+               f"their first base)" if indel_window.reach(w, mnv=True) != indel_window.reach(w)
+               else "") +
+            f", against {indel_window.reach(engine)} on windows of "
+            f"{indel_window.describe(engine)}: the indel off-targets of a longer target are in no "
+            f"INDELS index built from it. Every search reads each window's width from its log, so "
+            f"its rows are right. "
+            + (f"For the installed CRISPRitz's windows: "
+               f"{indel_window.sites_only_way(vcf_name, workdir, genome_ref)}. "
+               + indel_window.kit_removal("that enrichment", vcf_name,
+                                          stores=list(dict.fromkeys(_stores + list(building))))
+               if _sites else
+               f"To enrich {vcf_name} with the installed CRISPRitz's windows, "
+               f"remove that enrichment and all that was built from it, as an enrichment of another "
+               f"CRISPRitz differs in its SNPs too (2.9.1 enriched only the last ALT of a site "
+               f"written on several records) and a search would read stores of the two together: "
+               f"its genomes, dictionaries, indel logs and dict-less tiers, and every index of the "
+               f"dataset (rm -rf {_rm}; and any copy of those indexes in a library you search with "
+               f"--index-path), then run build-index-only again, which enriches the dataset anew "
+               f"and builds its index, and its tiers with --samplesID, from that enrichment (a "
+               f"build or a search builds each other index of it again where it needs it; of a "
+               f"published dataset, its archive and enriched-genome kit of CRISPRme 2.10.0 may be "
+               f"installed instead: docs/PRECOMPUTED_INDEXES.md)."))
+    return notes
+
+
+def _write_index_meta(index_dir: str, pamfile: str) -> None:
+    """Records what index ``index_dir`` holds (index_fit.write_index_meta) where it has no
+    record yet: an index found in place, built before CRISPRme recorded it, or by
+    crispritz.py itself, or downloaded. A build records it as it builds (_build_index_dir);
+    of one found in place only what it holds itself is recorded. A record that cannot be
+    written is said on stdout, and the run goes on."""
+    if os.path.isdir(index_dir):
+        why = index_fit.write_index_meta(index_dir, pamfile)
+        if why:
+            print(f"Note: {why}", flush=True)
+
+
+def _index_to_build(library: str, pam: str, n: int, rest: str, pamfile: str,
+                    three_prime: bool) -> str:
+    """The index folder of ``library`` that build-index-only builds, or keeps when it is in
+    place, for PAM file ``pamfile`` (of PAM ``pam``, on the 3' side of the guide with
+    ``three_prime``) with -bMax ``n``, for ``rest`` (the genome, and +<dataset> for a
+    variant index).
+
+    Since 2.10.0 an index is built under the name that says its guide length and its side
+    (index_fit.index_name: 20-NRR_3_hg38, TTTV-23_3_hg38), as a search builds one: under
+    the older name, <PAM>_<N>_<genome>, the indexes of one PAM for the two sides of the
+    guide, or for two guide lengths, took one name, and the build of one stopped on the
+    other in place. An index of the older name in place -- an earlier release's, or a
+    download -- is still kept when nothing it records says it is another index
+    (_older_index_differs): its side is then _refuse_other_side_build's to check, as
+    before. One that is another is left as it is, saying so, and this one is built beside
+    it.
+    """
+    guide = index_fit.pam_file_spacer(pamfile) or 0
+    named = os.path.join(library, index_fit.index_name(pam, n, rest, guide, three_prime))
+    older = os.path.join(library, f"{pam}_{n}_{rest}")
+    if named == older or os.path.isdir(named) or not os.path.isdir(older):
+        return named
+    differs = _older_index_differs(older, guide, three_prime)
+    if not differs:
+        return older
+    print(f"{older} is {differs}: it is left as it is, and this index is built beside it, "
+          f"as {os.path.basename(named)}.", flush=True)
+    return named
+
+
+def _older_index_differs(index_dir: str, guide: int, three_prime: bool) -> "Optional[str]":
+    """What makes ``index_dir``, an index in place under the older name <PAM>_<N>_<genome>,
+    another index than the one build-index-only builds for a guide of ``guide`` nt with its
+    PAM on the 3' side of the guide (``three_prime``) or the 5' side: it holds no .bin (no
+    index), it is in an index format this install does not search (index_fit.
+    unreadable_format_error), its .bin files were built for another guide length, or the
+    header of its .bin files (index format 2), else its .pam_build, records the other side.
+    None when nothing it records says so."""
+    try:
+        if not any(f.endswith(".bin") for f in os.listdir(index_dir)):
+            return "no index (it holds no .bin file)"
+    except OSError:
+        return None
+    if index_fit.unreadable_format_error(index_dir):
+        return "an index a newer CRISPRitz built, in an index format this install does not search"
+    built = index_fit.built_guide_len(index_dir)
+    if built and guide and built != guide:
+        return f"an index built for a {built}-nt guide (as its .bin files record)"
+    recorded = _recorded_three_prime(index_dir)
+    if recorded is not None and recorded != three_prime:
+        where = ("the header of its .bin files" if index_fit.built_five_prime(index_dir)
+                 is not None else "its .pam_build")
+        return (f"an index for a PAM on the {3 if recorded else 5}' side of the guide (as "
+                f"{where} records)")
+    return None
+
+
+def _own_index_name(index_dir: str, three_prime: bool, guide: int = 0) -> str:
+    """The folder beside it that index ``index_dir`` takes under the name of 2.10.0
+    (index_fit.index_name), which records what it is: the guide length its .bin files were
+    built for (``guide`` where they record none), and the side of the guide its PAM is on,
+    3' with ``three_prime``. ``index_dir`` itself where neither length is known."""
+    parsed = index_fit.parse_index_name(index_dir)
+    built = index_fit.built_guide_len(index_dir) or guide
+    return os.path.join(os.path.dirname(index_dir), index_fit.index_name(
+        parsed[0], parsed[1], parsed[2], built, three_prime))
+
+
+def _rename_advice(index_dir: str, three_prime: bool, guide: int = 0) -> str:
+    """``mv '<index_dir>' '<its name of 2.10.0>'`` (_own_index_name) for a message, or "" where
+    that name says no more than its own, or another folder has it."""
+    own = _own_index_name(index_dir, three_prime, guide)
+    if own == index_dir or os.path.lexists(own):
+        return ""
+    return f"mv '{index_dir}' '{own}'"
+
+
 def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
-    """Stops build-index-only when ``index_dir``, an index already in place, was built for
-    the other side of the guide from ``pamfile``, as its ``.pam_build`` records it.
+    """Stops build-index-only when ``index_dir``, the index in place it keeps
+    (_index_to_build), records the other side of the guide from ``pamfile`` -- in the header
+    of its .bin files (index format 2: CRISPRitz 2.10.0 and later), else in its
+    ``.pam_build`` -- or no side that tells.
 
     An index stores its targets on the side where the PAM file it was built from puts the
-    PAM, and its name does not say which: of an all-N index, nor of a dedicated one, which
-    PAM files of both sides name alike. build-index-only keeps an index it finds in place
-    and records ``pamfile`` on it (_write_pam_build), so recording a 5' file on a 3' build,
-    or the reverse, would make a search on its real side refuse it and one on the other
-    side search it wrong. The index ``pamfile`` asks for has the same name, so it needs
-    another working directory. An index with no usable ``.pam_build`` records no side to
+    PAM. build-index-only keeps an index it finds in place and records ``pamfile`` on it
+    (_write_pam_build), so recording a 5' file on a 3' build, or the reverse, would make a
+    search on its real side refuse it and one on the other side search it wrong. A name of
+    2.10.0 says the side (index_fit.parse_index_name), and a search reads it ahead of the
+    header and the .pam_build: one whose header or .pam_build records the other side was
+    named (or recorded, by its .pam_build) for the wrong one. Under the older name, which
+    says none, an index of format 1 with no usable .pam_build records no side to
     contradict, and is recorded as before -- but for an all-N one of a width but 3 and 8
     (the published ones, 3' builds), which a search before 2.8.1 built from a 5' PAM file
-    as well as from a 3' one: a 3' file is not recorded on it (a 5' one is, which is what
-    a search tells its user to run).
+    as well as from a 3' one: a 3' file is not recorded on it (a 5' one is, as 2.8.1 says
+    to do). One of the older name that records the other side is kept only when
+    ``pamfile`` says no guide length, as its own index then takes that name
+    (_index_to_build builds one beside it otherwise). Each refusal says how to name the
+    index in place for what it is (_rename_advice): its side, and the guide length its
+    .bin files record, which records it and takes it out of the way.
     """
-    motif = os.path.basename(index_dir).split("_")[0]
-    if not motif or not os.path.isdir(index_dir):
+    parsed = index_fit.parse_index_name(index_dir)
+    if not parsed or not os.path.isdir(index_dir):
         return
     try:
         with open(pamfile) as fh:
             wanted = int(fh.readline().split()[-1])
     except (OSError, ValueError, IndexError):
         return
-    try:
-        with open(os.path.join(index_dir, ".pam_build")) as fh:
-            built = int(fh.readline().split()[-1])
-    except (OSError, ValueError, IndexError):
-        built = 0
-    all_n = set(motif) == {"N"}
-    if not built:
-        if all_n and len(motif) not in (3, 8) and wanted > 0:
+    if not wanted:
+        return
+    guide = index_fit.pam_file_spacer(pamfile) or 0
+    side = {True: "3'", False: "5'"}
+    recorded = _recorded_three_prime(index_dir)
+    # where that is recorded: the header of its .bin files (index format 2), else .pam_build
+    where = ("the header of its .bin files" if index_fit.built_five_prime(index_dir) is not None
+             else "its .pam_build")
+    named = {3: True, 5: False}.get(parsed[4])  # the side its name says (since 2.10.0)
+    what = "a PAM-less index" if set(parsed[0]) == {"N"} else "an index"
+    if named is not None:  # (of this side: _index_to_build names it so)
+        if recorded is not None and recorded != named:
+            mv = _rename_advice(index_dir, recorded, guide)
+            error(
+                f"{index_dir} is already there, and {where} records a PAM on the "
+                f"{side[recorded]} side of the guide, which its name does not: it was named"
+                + (", or recorded," if where == "its .pam_build" else "")
+                + f" for the wrong side. If it was built for the {side[recorded]} "
+                f"side, name it so" + (f" ({mv})" if mv else "")
+                + (f"; if not, remove its record (rm '{index_dir}/.pam_build')"
+                   if where == "its .pam_build" else "")
+                + ". Then run this again."
+            )
+        return
+    if recorded is None:
+        if set(parsed[0]) == {"N"} and len(parsed[0]) not in (3, 8) and wanted > 0:
+            mv3, mv5 = (_rename_advice(index_dir, True, guide),
+                        _rename_advice(index_dir, False, guide))
             error(
                 f"{index_dir} is already there, a PAM-less index that records no side of the "
                 f"guide (.pam_build): a search before 2.8.1 built one of that width from a 5' "
                 f"PAM file as well as from a 3' one, so {pamfile}, a 3' PAM file, is not "
-                f"recorded on it. If it was built from a 5' PAM file, run this with that file; "
-                f"otherwise build this index in another working directory (--path)."
+                f"recorded on it. Name it for the side of the PAM file it was built from, "
+                f"which records it: for a 3' one" + (f" ({mv3})" if mv3 else "") + ", this run "
+                f"then keeps it; for a 5' one" + (f" ({mv5}, or run this with that file)" if mv5
+                                                 else " (run this with that file)")
+                + ", this run then builds its own beside it."
             )
         return
-    if wanted and (built < 0) != (wanted < 0):
-        side = {True: "5'", False: "3'"}
+    if recorded != (wanted > 0):
+        mv = _rename_advice(index_dir, recorded, guide)
         error(
-            f"{index_dir} is already there, {'a PAM-less index' if all_n else 'an index'} for "
-            f"a PAM on the {side[built < 0]} side of the guide (as its .pam_build records), and "
-            f"{pamfile} puts the PAM on the {side[wanted < 0]} side. The index for that "
-            f"PAM file has the same name: build it in another working directory (--path)."
+            f"{index_dir} is already there, {what} for a PAM on the {side[recorded]} side of "
+            f"the guide (as {where} records), and {pamfile} puts the PAM on the "
+            f"{side[wanted > 0]} side. {os.path.basename(pamfile)} says no guide length, so "
+            f"the index for it takes the same name: "
+            + (f"name this one for what it is ({mv}), which records it, or " if mv else "")
+            + "build it in another working directory (--path)."
         )
 
 
-def _refuse_newer_build(index_dir: str) -> None:
-    """Stops build-index-only when ``index_dir`` is an index in place that a newer CRISPRitz
-    built (index_fit.newer_format_error): this CRISPRme does not read it, and every search
-    refuses it, so it is not kept as "already present". Never removed here."""
-    newer = index_fit.newer_format_error(index_dir) if os.path.isdir(index_dir) else None
+def _refuse_unreadable_build(index_dir: str) -> None:
+    """Stops build-index-only when ``index_dir`` is an index in place in an index format this
+    install does not search (index_fit.unreadable_format_error: built by a newer CRISPRitz
+    than this CRISPRme, or than the installed CRISPRitz, reads): every search refuses it, so
+    it is not kept as "already present". Never removed here."""
+    newer = index_fit.unreadable_format_error(index_dir) if os.path.isdir(index_dir) else None
     if newer:
         error(newer + ".")
 
@@ -3856,22 +4809,34 @@ def _refuse_short_build(index_dir: str, pamfile: str, bdna: int, brna: int) -> N
     the length). build-index-only keeps an index it finds in place and, before this check,
     said "already present" and recorded ``pamfile`` on it (_write_pam_build), which left a
     record that contradicts the index and a search of it that reports wrong alignments.
-    The index ``pamfile`` asks for has the same name, so it needs another working
-    directory, or this one moved out of the way: never removed here. Nor is one a newer
-    CRISPRitz built kept (_refuse_newer_build): this CRISPRme does not read it.
+    Since 2.10.0 it builds under a name that says the guide length (_index_to_build), and
+    keeps one of the older name built for another length beside it, so the one in the
+    way is under that name, built for another guide than its name says: named for that
+    one (_rename_advice), it is out of the way. Never removed here. Nor is one in an index
+    format this install does not search kept (_refuse_unreadable_build).
     """
-    _refuse_newer_build(index_dir)
+    _refuse_unreadable_build(index_dir)
     built = index_fit.built_guide_len(index_dir)
     guide = index_fit.pam_file_spacer(pamfile)
     n = int(os.path.basename(index_dir).split("_")[1])
     if not index_fit.fits(built, n, guide, bdna, brna):
+        parsed = index_fit.parse_index_name(index_dir)
+        # (its side as its name says it, or its .pam_build; 3' as a search takes it, else)
+        three_prime = (parsed[4] == 3) if parsed[4] else (_recorded_three_prime(index_dir)
+                                                          is not False)
+        mv = _rename_advice(index_dir, three_prime)
         error(
             f"{index_dir} is already there, built for a {built}-nt guide (as its .bin files "
             f"record), and {pamfile} asks for a {guide}-nt guide with {bdna} DNA and {brna} "
             f"RNA bulge(s): it stores too few bases per site, so a search of it would report "
-            f"wrong alignments and lose off-targets. The index for that PAM file has the same "
-            f"name: build it in another working directory (--path), or move this one out of "
-            f"{os.path.dirname(index_dir)}."
+            f"wrong alignments and lose off-targets. "
+            + (f"Its name says a {parsed[3]}-nt guide: " if parsed[3] else
+               "The index for that PAM file has the same name: ")
+            + (f"name it for the guide it was built for ({mv}), and run this again, which "
+               f"builds this one under its own name; or move it out of "
+               f"{os.path.dirname(index_dir)}." if mv else
+               f"build it in another working directory (--path), or move this one out of "
+               f"{os.path.dirname(index_dir)}.")
         )
 
 
@@ -3960,6 +4925,35 @@ def _check_genome_layout(genomedir: str) -> None:
         )
 
 
+def _refuse_vcf_of_no_fasta(vcfdir: str, genomedir: str) -> None:
+    """Stops a build whose enrichment would fail on a VCF file of a chromosome the genome
+    has no FASTA file of. crispritz add-variants takes each file's chromosome from the last
+    part of its name that holds 'chr' (walk.chr1.vcf.gz: chr1) and reads
+    <genome>/<chromosome>.fa: a file named otherwise (nochr.vcf.gz), or a dataset of
+    another genome, ended in 'ERROR: cannot open <genome>/<name>.fa' and 'Genome
+    enrichment (add-variants) failed' (wset N2; FV :328 from the web)."""
+    if not os.path.isdir(vcfdir):
+        return
+    for name in sorted(os.listdir(vcfdir)):
+        if not name.endswith(".vcf.gz"):
+            continue
+        chrom = ([tok for tok in name.split(".") if "chr" in tok] or [""])[-1]
+        if chrom and not os.path.isfile(os.path.join(genomedir, f"{chrom}.fa")):
+            error(
+                f"The VCF dataset cannot be enriched: the name of {name} makes it a VCF of "
+                f"chromosome {chrom} (the enrichment, crispritz add-variants, takes the last "
+                f"part of a VCF's file name that holds 'chr' for its chromosome), and the "
+                f"genome {genomedir} has no {chrom}.fa. Name each VCF after the chromosome "
+                f"it holds (<name>.chr<N>.vcf.gz), as the genome's FASTA file of it is "
+                f"named, or build the index with the genome the dataset is of"
+            )
+
+
+class _NoChrInName(Exception):
+    """A VCF to split holds a chromosome whose name the enrichment cannot read
+    (_ensure_per_chromosome_vcfs)."""
+
+
 def _ensure_per_chromosome_vcfs(vcfdir: str) -> None:
     """Make a variant dataset usable by ``crispritz add-variants``, which requires
     the VCF folder to hold **per-chromosome** files and derives each chromosome from
@@ -4034,10 +5028,28 @@ def _ensure_per_chromosome_vcfs(vcfdir: str) -> None:
                 _run([tabix, "-p", "vcf", indexed])
                 src = indexed
             chroms = _run([tabix, "-l", src]).split()
+            # The enrichment takes each file's chromosome from the token of its name that
+            # holds 'chr' and reads Genomes/<genome>/<that token>.fa: a chromosome named
+            # without it (1, Contig1, NC_000913.3) was split under its own name, and the
+            # build failed on 'cannot open .../.fa' (wset N2)
+            unnamed = [chrom for chrom in chroms if "chr" not in chrom]
+            if unnamed:
+                raise _NoChrInName(
+                    f"{f} holds the chromosome(s) {', '.join(unnamed[:5])}"
+                    f"{' ...' if len(unnamed) > 5 else ''}, whose names do not hold 'chr': "
+                    f"the enrichment (crispritz add-variants) takes a VCF's chromosome from "
+                    f"the part of its file name that holds 'chr' (<name>.chr<N>.vcf.gz) and "
+                    f"reads the genome's FASTA file of that name. Rename them in the VCF to "
+                    f"the names of the genome's sequences (bcftools annotate --rename-chrs "
+                    f"<old new file>, e.g. 1 to chr1), sequences named with 'chr' too, then "
+                    f"add it again")
             for chrom in chroms:
                 dst = os.path.join(tmp, f"{base}.{chrom}.vcf.gz")
                 _run([bcftools, "view", "-r", chrom, src, "-Oz", "-o", dst])
                 _run([tabix, "-p", "vcf", dst])
+    except _NoChrInName as exc:
+        shutil.rmtree(tmp, ignore_errors=True)
+        error(f"The VCF dataset cannot be enriched: {exc}")
     except Exception as exc:  # noqa: BLE001
         shutil.rmtree(tmp, ignore_errors=True)
         hint = (". Sort it by position (bcftools sort -Oz -o <sorted>.vcf.gz <file>), "
@@ -4402,7 +5414,8 @@ def _end_cleanly(cleanup, handlers: dict) -> None:
 
 def _with_cleanup(run, cleanup):
     """Returns ``run()``, and calls ``cleanup()`` on every way out but SIGKILL:
-    success, failure, an exception, Ctrl-C, SIGTERM (scancel, docker stop) and
+    success, failure, an exception, Ctrl-C (and docker stop: the image's STOPSIGNAL), SIGTERM
+    (scancel, a container run with another stop signal) and
     SIGHUP. Those two are handled for that while ``run`` runs only, and the run
     still ends by the signal; one this run ignores (nohup) stays ignored. A signal
     that comes during the cleanup waits for its end, then ends the run
@@ -4519,10 +5532,12 @@ def _in_build_dir(parent: str, prefix: str, build, stage=None):
 
 
 def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
-                     need_bin=False, **kwargs) -> bool:
-    """Runs index command ``cmd``, which writes ``./genome_library/<name>`` under its
-    working directory, and puts that in ``<workdir>/genome_library/<name>`` only
-    once the command has succeeded.
+                     need_bin=False, engine_name=None, indel_logs=None, **kwargs) -> bool:
+    """Runs index command ``cmd``, which writes ``./genome_library/<engine_name>`` under
+    its working directory (``name`` by default), and puts that in
+    ``<workdir>/genome_library/<name>`` only once the command has succeeded. The engine
+    names an index <PAM>_<N>_<name>, and an index is named since 2.10.0 in the form that
+    says the guide length and the side too (_index_to_build): it is renamed into place.
 
     Every later run takes an index directory that is there for a finished one, so
     a build that ends early -- Ctrl-C, an OOM kill, a container stop, an engine
@@ -4533,23 +5548,29 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
     takes genome_library's setgid group and default ACL, as one built in place
     does. Every path ``cmd`` names is absolute, so it resolves from there.
     ``failure`` is the error for a command that fails, or that exits 0 but leaves a
-    .bin that is not whole (crispritz_bins: buildTST does not check its writes, so a
-    full disk leaves one empty or cut short), or one in an index format this CRISPRme
-    does not read (index_fit.newer_bin: a CRISPRitz newer than 2.9.1 wrote it). buildTST does not check that a .bin
-    opened either: with the disk's inode table or a file-count quota full, it
-    writes none for the contigs left, or for the parts left of a contig it writes
-    in several, and still exits 0. So the run fails the same way when a contig that
-    holds a target has no .bin, or lacks a part (crispritz_bins.missing_bins), and,
+    .bin that is not whole (crispritz_bins: buildTST up to CRISPRitz 2.9.1 does not
+    check its writes, so a full disk leaves one empty or cut short), or one in an index
+    format this install does not search (index_fit.unreadable_bin). buildTST does not
+    check that a .bin opened either: with the disk's inode table or a file-count quota
+    full, it writes none for the contigs left, or for the parts left of a contig it
+    writes in several, and still exits 0. So the run fails the same way when a contig
+    that holds a target has no .bin, or lacks a part (crispritz_bins.missing_bins, by the
+    rule of the index format the engine wrote: a folder with no .bin, by that of the
+    format the installed engine writes), and,
     where such a contig is one missing_bins cannot read as buildTST does, when a
     directory of the index cannot take a file more once the command has ended:
     ``indexed`` is ``(pam_file, max_bulges, [(genome_dir, subdir)...])``, what ``cmd``
-    indexes, each genome into ``subdir`` of the index (None: no contig read). If a
-    search holds the index's build lock by then, the run stops
+    indexes, each genome into ``subdir`` of the index (None: no contig read). Each of
+    those directories gets the record of what it holds (index_fit.write_index_meta)
+    before the index goes into place. If a search holds the index's build lock by then,
+    the run stops
     (_refuse_locked_build); if another run has put the index in place meanwhile,
     that one is kept and this build discarded. With ``need_bin`` (the index of a
     genome, not of the fake-indel contigs, which may hold no site), it fails too
     when the command has written no .bin at all: every search refuses such an index.
-    Returns True when this build went into place.
+    ``indel_logs``, for an INDELS index: the dataset's indel logs, whose windows each
+    sub-index records it was built from (indel_window; _indel_log_window). Returns True
+    when this build went into place.
     """
     import errno
     import crispritz_bins
@@ -4562,18 +5583,26 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
         _unwritable(lib, e)
 
     def build(tmp):
-        built = os.path.join(tmp, "genome_library", name)
+        built = os.path.join(tmp, "genome_library", engine_name or name)
         code = subprocess.call(cmd, cwd=tmp, **kwargs)
         if code != 0 or not os.path.isdir(built):
             error(f"{failure} (expected {final})")
-        newer = index_fit.newer_bin(built)
-        if newer:
+        unread = index_fit.unreadable_bin(built, every=True)
+        if unread:
+            wrote = (f"{failure}: the installed CRISPRitz wrote "
+                     f"{os.path.relpath(unread[0], built)} in index format {unread[1]}")
+            if unread[1] not in index_fit.READ_FORMATS:
+                error(
+                    f"{wrote}, which this CRISPRme does not read (it reads index formats 1 "
+                    f"and 2). Install the CRISPRitz this CRISPRme installs with, or use a "
+                    f"CRISPRme that reads index format {unread[1]}: nothing was put in place "
+                    f"(expected {final})"
+                )
             error(
-                f"{failure}: the installed CRISPRitz wrote {os.path.relpath(newer[0], built)} "
-                f"in index format {newer[1]}, which CRISPRitz 2.9.2 and later write: this "
-                f"CRISPRme reads index format 1 only (CRISPRitz up to 2.9.1). Install "
-                f"CRISPRitz 2.9.1, or use a CRISPRme that reads index format {newer[1]}: "
-                f"nothing was put in place (expected {final})"
+                f"{wrote}, and its crispritz.py says it reads index format "
+                f"{index_fit.engine_index_format()} only (its INDEX_FORMAT): its programs and "
+                f"its crispritz.py come from two releases. Install CRISPRitz again: nothing "
+                f"was put in place (expected {final})"
             )
         cut = crispritz_bins.incomplete_bins(built)
         if cut:
@@ -4585,7 +5614,8 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
         unread = indexed is None
         for genome_dir, subdir in indexed[2] if indexed else []:
             missing, cannot = crispritz_bins.missing_bins(
-                os.path.join(built, subdir), genome_dir, indexed[0], indexed[1])
+                os.path.join(built, subdir), genome_dir, indexed[0], indexed[1],
+                index_fit.engine_index_format())
             if missing:
                 fasta, contig, written, wanted = missing[0]
                 fasta = os.path.join(genome_dir, fasta)
@@ -4618,6 +5648,16 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
                     )
                 continue
             os.remove(probe)
+        # what each index holds, recorded in it before it goes into place: of an INDELS
+        # index, in each chromosome's sub-index, those with no .bin among them, whose
+        # record is the only one of the format they were built in
+        for _genome_dir, subdir in indexed[2] if indexed else []:
+            if os.path.isdir(os.path.join(built, subdir)):
+                why = index_fit.write_index_meta(
+                    os.path.join(built, subdir), indexed[0], built=True,
+                    indel_window=_indel_log_window(indel_logs, subdir) if indel_logs else None)
+                if why:
+                    print(f"Note: {why}", flush=True)
         _refuse_locked_build(final)
         if not os.path.isdir(final):
             try:
@@ -4642,14 +5682,22 @@ def build_index_only() -> None:
     Exposes the index-build step that ``complete-search`` otherwise performs
     implicitly, so an index can be constructed once (e.g. on a large machine)
     and reused across many searches. The produced directory
-    (``genome_library/<PAM>_<bMax+1>_<genome>``) is byte-for-byte the same one
-    ``complete-search`` looks for, so no extra bookkeeping is required: a later
-    search with matching --genome/--pam/--bDNA/--bRNA finds and reuses it.
+    (``genome_library/<guide>-<PAM>_<bMax+1>_<genome>``, ``<PAM>-<guide>_...`` for a 5'
+    PAM: _index_to_build) is byte-for-byte the same one ``complete-search`` builds, so no
+    extra bookkeeping is required: a later search with matching
+    --genome/--pam/--bDNA/--bRNA finds and reuses it.
     """
     args = input_args[2:]  # retrieve build-index-only input arguments
     if "--help" in args:
         print_help_build_index()
-    genomedir = _check_genome(args)  # reference genome folder
+    # working directory under which genome_library/ is created (mirrors the
+    # current_working_directory complete-search uses to locate genome_library/)
+    workdir = os.getcwd()
+    if "--path" in args:
+        workdir = os.path.abspath(args[args.index("--path") + 1])
+        if not os.path.isdir(workdir):
+            error(f"The working directory {workdir} does not exist")
+    genomedir = _check_genome(args, workdir, "build-index-only")  # reference genome folder
     pamfile = _check_pam(args)  # PAM file
     thread = _check_threads(args, "--thread" in args)  # number of threads
     bDNA = _check_bdna(args, "--bDNA" in args)  # DNA bulges
@@ -4670,13 +5718,6 @@ def build_index_only() -> None:
         )
         sys.exit(0)
     _check_genome_layout(genomedir)  # before anything is built from it
-    # working directory under which genome_library/ is created (mirrors the
-    # current_working_directory complete-search uses to locate genome_library/)
-    workdir = os.getcwd()
-    if "--path" in args:
-        workdir = os.path.abspath(args[args.index("--path") + 1])
-        if not os.path.isdir(workdir):
-            error(f"The working directory {workdir} does not exist")
     # an index built before the headers were written as >id would be taken as present
     from genome_layout import describe_index_problems
 
@@ -4695,9 +5736,12 @@ def build_index_only() -> None:
         else:  # 3' PAM (e.g. SpCas9)
             pam_char = pam_char.split(" ")[0][end_idx * (-1):]
     genome_ref = os.path.basename(genomedir)
-    # complete-search indexes with bMax+1 ("for alignments starting with gaps")
-    index_name = f"{pam_char}_{bMax + 1}_{genome_ref}"
-    idx_folder = os.path.join(workdir, "genome_library", index_name)
+    library = os.path.join(workdir, "genome_library")
+    # complete-search indexes with bMax+1 ("for alignments starting with gaps"), since 2.10.0
+    # under the name that says the guide length and the side; one of the older name in
+    # place that is this index is kept (_index_to_build)
+    idx_folder = _index_to_build(library, pam_char, bMax + 1, genome_ref, pamfile, idx_val > 0)
+    index_name = os.path.basename(idx_folder)
     vcf_given = "--vcf" in args
     # Every output this run uses or builds, each with what its build lock guards
     # besides it. While a search holds one of those locks, the run stops before it
@@ -4711,15 +5755,18 @@ def build_index_only() -> None:
         indels_out = os.path.join(workdir, "Genomes", f"{genome_ref}+{vcf_name}_INDELS")
         dict_folder = os.path.join(workdir, "Dictionaries", f"dictionaries_{vcf_name}")
         indel_dict = os.path.join(workdir, "Dictionaries", f"log_indels_{vcf_name}")
-        snp_idx = os.path.join(
-            workdir, "genome_library", f"{pam_char}_{bMax + 1}_{genome_ref}+{vcf_name}"
-        )
+        snp_idx = _index_to_build(library, pam_char, bMax + 1, f"{genome_ref}+{vcf_name}",
+                                  pamfile, idx_val > 0)
         indels_idx = snp_idx + "_INDELS"
         _outputs += [(enriched, indels_out), (snp_idx,), (indels_idx,)]
+        # a sites-only dataset (the mega): no genotypes for the tiers or the phased indel
+        # store, which it does not get (STEP 1b, 1c); what does build its registry is said
+        _sites_only = _sites_only_build(vcfdir)
     for _out in _outputs:
         _refuse_locked_build(*_out)
-    # An all-N index already in place is kept, and pamfile recorded on it: not over a
-    # record of the other side of the guide.
+    # An index already in place is kept, and pamfile recorded on it: not over a record of
+    # the other side of the guide, or one that does not tell (an index of the older name in
+    # place that is another is left beside this one's: _index_to_build).
     _refuse_other_side_build(idx_folder, pamfile)
     if vcf_given:
         _refuse_other_side_build(snp_idx, pamfile)
@@ -4727,6 +5774,25 @@ def build_index_only() -> None:
     _refuse_short_build(idx_folder, pamfile, bDNA, bRNA)
     if vcf_given:
         _refuse_short_build(snp_idx, pamfile, bDNA, bRNA)
+    # A dataset whose finished enrichment is not in place is enriched anew (STEP 1): not
+    # beside what an earlier enrichment of another CRISPRitz left -- its dict-less tiers and
+    # its indexes, kept (the tiers taken as emitted, an index in place as built) -- which a
+    # search would read with the new one, disagreeing with it in its SNPs, nor, for a
+    # sites-only dataset, beside the windows of its kit, which no enrichment of its VCFs
+    # writes (indel_window.reenrichment_refusal). Refused before anything is built. One in
+    # place whose fake-indel genome its indel logs do not describe (two enrichments) is
+    # refused before anything is built too, not after the reference index, which takes
+    # hours on a whole genome (indel_window.fake_genome_refusal; checked again below, as the
+    # enrichment is taken).
+    if vcf_given and not (os.path.isdir(enriched)
+                          and not os.path.isdir(os.path.join(enriched, ".building"))):
+        _why = indel_window.reenrichment_refusal(workdir, genome_ref, vcf_name, vcf_dir=vcfdir)
+        if _why:
+            error(_why[0].upper() + _why[1:])
+    elif vcf_given:
+        _why = indel_window.fake_genome_refusal(workdir, genome_ref, vcf_name, vcf_dir=vcfdir)
+        if _why:
+            error(_why[0].upper() + _why[1:])
     # A search takes the index and the variant genomes of a genome by the folder's name
     # alone: not those of another folder of the name, which this run would say are
     # "already present", and of a folder outside Genomes/ an index recorded from it before
@@ -4789,12 +5855,14 @@ def build_index_only() -> None:
         )
         if _build_index_dir(
             index_cmd, workdir, index_name, "Reference genome indexing failed",
-            indexed=(pamfile, bMax + 1, [(genomedir, "")]), need_bin=True, shell=True,
+            indexed=(pamfile, bMax + 1, [(genomedir, "")]), need_bin=True,
+            engine_name=f"{pam_char}_{bMax + 1}_{genome_ref}", shell=True,
         ):
             print(f"Index built: {idx_folder}", flush=True)
             if record_source:  # the folder it holds, as complete-search records it
                 stamp_index_source(workdir, genomedir, idx_folder)
     _write_pam_build(idx_folder, pamfile)
+    _write_index_meta(idx_folder, pamfile)
     if not vcf_given:
         _write_display_label(idx_folder, display_name)
         print(
@@ -4817,6 +5885,7 @@ def build_index_only() -> None:
     # single multi-chromosome VCF so a user-provided dataset "just works" (no-op when
     # the folder is already per-chromosome, e.g. the shipped datasets).
     _ensure_per_chromosome_vcfs(vcfdir)
+    _refuse_vcf_of_no_fasta(vcfdir, genomedir)
     # OPTIONAL --samplesID: a listing file (one samplesID filename per line under
     # samplesIDs/, the same format complete-search uses; combined panels list both
     # 1000G and HGDP). When given, the build ALSO emits the ADDITIVE dictless tiers
@@ -4849,6 +5918,34 @@ def build_index_only() -> None:
             except OSError:
                 pass
         return _bases
+
+    def _indels_subindexes():
+        # each chromosome's fake-indel genome, and the directory of the INDELS index it is
+        # indexed into, as pool_index_indels.py indexes them (it indexes no contig with an
+        # underscore in its name, and says which, nor a genome of headers alone: no indel)
+        _subs = []
+        try:
+            _fakes = sorted(os.listdir(indels_out))
+        except OSError:
+            _fakes = []
+        for _fk in _fakes:
+            if ("chr" in _fk and os.path.isdir(os.path.join(indels_out, _fk))
+                    and "_" not in _fk[len(f"fake_{vcf_name}_"):]):
+                _subs.append((os.path.join(indels_out, _fk),
+                              f"{pam_char}_{bMax + 1}_fake{_fk.split('_')[-1]}"))
+        return _subs
+
+    def _holds_indels(fake_dir):
+        # whether a chromosome's fake-indel genome holds the window of an indel
+        try:
+            for _fa in os.listdir(fake_dir):
+                if _fa.endswith((".fa", ".fasta")):
+                    with open(os.path.join(fake_dir, _fa)) as _fh:
+                        if any(_ln.strip() and not _ln.startswith(">") for _ln in _fh):
+                            return True
+        except (OSError, UnicodeDecodeError):
+            pass
+        return False
 
     # STEP 1: enrich the genome with the VCF (crispritz add-variants). add-variants
     # writes a fixed-name variants_genome/ in its cwd, so run it in a hidden build
@@ -4960,7 +6057,8 @@ def build_index_only() -> None:
         # below), and a run stopped before that ended
         return os.path.isdir(enriched) and not os.path.isdir(os.path.join(enriched, ".building"))
 
-    if not _enriched_already():
+    _reused = _enriched_already()  # (an enrichment in place: _enrichment_window_notes)
+    if not _reused:
         print(f"Enriching {genome_ref} with {vcf_name} (add-variants)...", flush=True)
         # Ensure workdir/Genomes exists: the enriched genome lands here, but --genome
         # may point at a reference staged ELSEWHERE (not under workdir), so this dir
@@ -5110,7 +6208,7 @@ def build_index_only() -> None:
             if samples_listing:
                 _mark_unfinished(_reg_dir)
                 _tiers_marked.append(1)
-            if _snp_overlay:
+            if _snp_overlay and not _sites_only:
                 _mark_unfinished(_igt_dir)
             _end_cleanly(_place, {})
             if _said is not None:
@@ -5120,6 +6218,14 @@ def build_index_only() -> None:
                       stage=(os.path.join(workdir, "Dictionaries"), ".build-index-only-dicts-"))
     else:
         print(f"Enriched genome already present: {enriched}", flush=True)
+        # Not one whose fake-indel genome holds other windows than the dataset's indel logs
+        # record: the two come from two enrichments (a download installs an index's logs,
+        # dictionaries and tiers, not the enrichment they come from, beside one made here by
+        # another CRISPRitz), and an index built from it would be read with the other's
+        # (indel_window.fake_genome_refusal): its overlay too would misplace every code.
+        _why = indel_window.fake_genome_refusal(workdir, genome_ref, vcf_name, vcf_dir=vcfdir)
+        if _why:
+            error(_why[0].upper() + _why[1:])
         # One that came another way may lack the SNP codes. Overlaid only at STEP 3,
         # after the hours of the steps between, it stayed without them after a run
         # stopped in between, and a complete-search then built the INDELS index from it,
@@ -5130,6 +6236,15 @@ def build_index_only() -> None:
         if (_snp_overlay and not os.path.isdir(indels_idx + ".lock")
                 and _indel_bases(indels_out)):
             _overlay_in_place()
+    # The fake-indel windows of the enrichment the INDELS index is built on, which its indel
+    # logs record (indel_window). One that came another way (an earlier release, a kit, a
+    # search's own enrichment) may hold windows of another width than the installed
+    # CRISPRitz writes (25/27 up to 2.9.1, 30/30 since 2.10.0): every reader takes each
+    # window's width from its log row, so its rows are right, but a target that needs more
+    # bases than a window holds is in no index. Said, with how to enrich it again.
+    for _note in _enrichment_window_notes(enriched, indels_out, indel_dict, genome_ref,
+                                          vcf_name, _reused, (snp_idx, indels_idx), vcfdir):
+        print(_note, flush=True)
     # STEP 1b (ADDITIVE): emit the dictless tiers (Tier-0 registry + Tier-1 genotype
     # store) per chromosome, FROM the per-sample dicts just produced -- WITHOUT
     # touching the dicts. The search side (new_simple_analysis.py) already CONSUMES
@@ -5145,7 +6260,56 @@ def build_index_only() -> None:
     # script build_combined_panel.sh writes filtered per-db lists + a listing) or the
     # panel would over-count phantom hom-ref individuals and inflate AN.
     db_to_samplesid = _build_db_to_samplesid(samples_listing, workdir)
-    if not db_to_samplesid:
+    if not db_to_samplesid and not samples_listing and not _tiers_marked and any(
+            f.startswith("reg_") for f in _listdir(_reg_dir)) and not os.path.isdir(
+            os.path.join(_reg_dir, ".building")):
+        # The tiers of an earlier build are in place, whole (no _mark_unfinished), and this
+        # run, with no --samplesID (as a search's ERROR tells a user to run it, to rebuild
+        # an INDELS index), leaves them as they are: it said, loud on stderr, that the index
+        # was MISSING them (emptyidx F6).
+        _gt_kept = os.path.isdir(os.path.join(workdir, "Dictionaries", f"genotypes_{vcf_name}"))
+        if _sites_only or _registry_data_type(_reg_dir) == "sites-only":
+            # a finished sites-only install (the mega) built for another PAM: its registry
+            # and indel frequencies come from its INFO AF fields, which no --samplesID gives
+            print(f"NOTE [build-index-only]: {vcf_name} is a sites-only dataset: its registry "
+                  f"({_reg_dir}) and indel frequencies in place are kept as they are. They "
+                  f"come from its VCFs' INFO AF fields, not from --samplesID: "
+                  f"PostProcess/build_mega_registry.py and PostProcess/build_mega_indel_af.py "
+                  f"(seq_script/merge_panels/mega_rebuild.sh runs the whole recipe).",
+                  flush=True)
+        else:
+            print(f"NOTE [build-index-only]: no --samplesID given: the dict-less tiers in place "
+                  f"({_reg_dir}{' and its genotype store' if _gt_kept else ''}) are kept as "
+                  f"they are, not rebuilt. To rebuild them, run this again with --samplesID.",
+                  flush=True)
+    elif not db_to_samplesid and _sites_only and not samples_listing:
+        # A sites-only dataset (the mega) has no genotypes: no --samplesID would give its
+        # tiers, and the WARNING below told the user to run with one (stderr, which fails
+        # a CRISPRme stage that reads it). Its registry and indel frequencies come from its
+        # VCF's INFO AF fields, built beside this run (seq_script/merge_panels/mega_rebuild.sh).
+        print(
+            f"NOTE [build-index-only]: {vcf_name} is a sites-only dataset ("
+            + ("its VCFs have no sample columns"
+               if _sites_only == "no samples" else
+               "its one sample is the presence genotype PostProcess/synth_sites_gt.py writes")
+            + "): it has no genotypes, so no genotype-counted registry, genotype store or "
+            f"phased indel store is built for it here. Its registry and indel frequencies come "
+            f"from its INFO AF fields: PostProcess/build_mega_registry.py and "
+            f"PostProcess/build_mega_indel_af.py write Dictionaries/registry_{vcf_name}/ and "
+            f"Dictionaries/indel_af_{vcf_name}/ (seq_script/merge_panels/mega_rebuild.sh runs "
+            f"the whole recipe). "
+            + ("Its indels are searchable only from a VCF carrying the presence genotype of "
+               "PostProcess/synth_sites_gt.py: the enricher windows an indel a sample carries, "
+               "so this build's fake-indel genome holds none."
+               if _sites_only == "no samples" else
+               f"Strip the presence sample from Dictionaries/log_indels_{vcf_name}/ (its "
+               f"SAMPLES column) and remove Dictionaries/dictionaries_{vcf_name}/, which list "
+               f"it as a carrier, before the index is used (mega_rebuild.sh does)."),
+            flush=True,
+        )
+        if _tiers_marked:  # (as the enrichment went into place: no tiers come)
+            _unmark_unfinished(_reg_dir, _reg_made)
+    elif not db_to_samplesid:
         _why = ("no usable samplesID entries (check the --samplesID listing)"
                 if samples_listing else "no --samplesID was given")
         loud_warn([
@@ -5399,7 +6563,11 @@ def build_index_only() -> None:
     # or no memory left aborts); absent -> the post-
     # analysis degrades to PUTATIVE via the log's unphased carriers. Enabled by
     # default (opt-out): set CRISPRME_INDEL_SNP=0 to disable.
-    if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
+    # A sites-only dataset has no phase to store: the presence genotype that makes its
+    # indels searchable is no individual's, and a store of it would name that pseudo-sample
+    # as every indel's carrier (STEP 1b says so).
+    if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes") \
+            and not _sites_only:
         _big, _ig_left = None, None  # (_ig_left: the chromosomes whose store is not built)
         try:
             import build_indel_genotypes as _big
@@ -5414,11 +6582,13 @@ def build_index_only() -> None:
             _n_ig = 0
 
             def _ig_written(_igt_out):
-                return os.path.isfile(_igt_out) and _big.store_is_complete(_igt_out)
+                return os.path.isfile(_igt_out) and _big.store_is_current(_igt_out)
 
             # Build (vcf, out, keep) jobs; detect chrom from the first data line (the
             # filename may not carry it). Skip chromosomes already built so a restart
-            # resumes instead of re-streaming 20GB VCFs.
+            # resumes instead of re-streaming 20GB VCFs -- but not a store written before
+            # 2.10.0, which holds the indels whose FILTER the search skips too
+            # (build_indel_genotypes.store_is_current): it is written again.
             _ig_jobs = []
             for _vf in sorted(_glob(os.path.join(vcfdir, "*.vcf.gz"))
                               + _glob(os.path.join(vcfdir, "*.vcf"))):
@@ -5521,7 +6691,10 @@ def build_index_only() -> None:
             _unmark_unfinished(_igt_dir)
     # STEP 2: index the enriched (SNP) genome
     _refuse_locked_build(snp_idx)
-    if not os.path.isdir(snp_idx):
+    # (one in place before this run, whose enrichment nothing tells: it holds no window. Its
+    # INDELS index, built with it, may tell another enrichment than the logs', below)
+    _snp_kept = os.path.isdir(snp_idx)
+    if not _snp_kept:
         print(f"Building variant index {os.path.basename(snp_idx)}...", flush=True)
         _build_index_dir(
             f"crispritz.py index-genome {genome_ref}+{vcf_name} {enriched}/ "
@@ -5531,6 +6704,7 @@ def build_index_only() -> None:
             "Variant genome indexing failed",
             indexed=(pamfile, bMax + 1, [(enriched, "")]),
             need_bin=True,
+            engine_name=f"{pam_char}_{bMax + 1}_{genome_ref}+{vcf_name}",
             shell=True,
         )
     else:
@@ -5611,24 +6785,69 @@ def build_index_only() -> None:
                 workdir,
                 os.path.basename(indels_idx),
                 "Indels indexing failed",
-                # each chromosome's fake-indel genome, into its directory of the index,
-                # as pool_index_indels.py indexes them (it indexes no contig with an
-                # underscore in its name, and says which)
-                indexed=(pamfile, bMax + 1, [
-                    (os.path.join(indels_out, _fk),
-                     f"{pam_char}_{bMax + 1}_fake{_fk.split('_')[-1]}")
-                    for _fk in sorted(os.listdir(indels_out)) if "chr" in _fk
-                    and os.path.isdir(os.path.join(indels_out, _fk))
-                    and "_" not in _fk[len(f"fake_{vcf_name}_"):]]),
+                engine_name=f"{pam_char}_{bMax + 1}_{genome_ref}+{vcf_name}_INDELS",
+                # each chromosome's fake-indel genome, into its directory of the index
+                indexed=(pamfile, bMax + 1, _indels_subindexes()),
+                # (whose windows each sub-index records, from the dataset's indel logs)
+                indel_logs=indel_dict,
             )
     else:
-        # nor one a newer CRISPRitz built, as the reference and variant indexes are not
-        # (_refuse_short_build): a search that builds the INDELS index with one refuses it
-        # and leaves it, beside indexes of format 1. It is looked at here, where it is
-        # kept: one built while the SNP codes went on was removed above, to be built again.
-        _refuse_newer_build(indels_idx)
+        # nor one in an index format this install does not search, as the reference and
+        # variant indexes are not (_refuse_short_build): a search that builds the INDELS
+        # index with a newer CRISPRitz refuses it and leaves it, beside indexes of an older
+        # format. It is looked at here, where it is kept: one built while the SNP codes went
+        # on was removed above, to be built again.
+        _refuse_unreadable_build(indels_idx)
+        # nor one without the sub-index of a chromosome whose fake-indel genome holds
+        # indels, which every search with bulges refuses (pool_search_indels'
+        # _missing_index): one copied in part, or one where a search before 2.8.1 put the
+        # sub-indexes of a PAM-less index it served (NNN_<N>_fake<chr>), under the name of
+        # the PAM it searched. This run said it was present, and the variant index ready.
+        _lacking = [(_fk.split("_")[-1], _sub) for _fk, _sub in _indels_subindexes()
+                    if not os.path.isdir(os.path.join(indels_idx, _sub)) and _holds_indels(_fk)]
+        if _lacking:
+            _held = sorted(_d for _d in os.listdir(indels_idx)
+                           if os.path.isdir(os.path.join(indels_idx, _d))
+                           and not _d.startswith((".", f"{pam_char}_{bMax + 1}_fake")))
+            error(
+                f"The INDELS index {indels_idx} has no sub-index for "
+                f"{', '.join(_c for _c, _ in _lacking)} "
+                f"({', '.join(_sub for _, _sub in _lacking)}): "
+                + (f"it holds {', '.join(_held)}, which no search of it reads (as a search "
+                   f"before 2.8.1 could leave those of a PAM-less index it served)"
+                   if _held else "it is a partial copy, or a build stopped partway")
+                + f", and a search with bulges refuses it. Remove it (rm -rf '{indels_idx}') "
+                f"and run build-index-only again."
+            )
+        # nor one built from fake-indel windows other than those the dataset's indel logs
+        # record, which every search refuses (pool_search_indels' _window_mismatch): the
+        # index and the logs come from two enrichments, and the logs would place every
+        # indel row wrong. The variant index of its name, found in place by this run, was
+        # built with it, from that enrichment, and goes with it: removed alone, the INDELS
+        # index was built anew and that variant index kept, which every search then read
+        # with the dataset's dictionaries (W1C-B2R2-2 of the review of wave 1c-a)
+        for _fk, _sub in _indels_subindexes():
+            _rec = (indel_window.index_window(os.path.join(indels_idx, _sub))
+                    if os.path.isdir(os.path.join(indels_idx, _sub)) else None)
+            _log = _indel_log_window(indel_dict, _sub)
+            if _rec is not None and _log is not None and _rec != _log:
+                error(
+                    f"The INDELS index {indels_idx} was built from fake-indel windows of "
+                    f"{indel_window.describe(_rec)} reference bases (before an indel's REF and "
+                    f"after it; {_sub}), while the indel logs {indel_dict} record windows of "
+                    f"{indel_window.describe(_log)}: the index and the logs come from two "
+                    f"enrichments, and every search refuses them. "
+                    + (f"Remove it and the variant index of its name, {snp_idx}, which this "
+                       f"run found in place, built with it from the same enrichment, which it "
+                       f"holds no window to tell (rm -rf '{indels_idx}' '{snp_idx}'), and run "
+                       f"build-index-only again, which builds both from the enrichment in "
+                       f"place." if _snp_kept else
+                       f"Remove the index (rm -rf '{indels_idx}') and run build-index-only "
+                       f"again, which builds it from the enrichment in place.")
+                )
         print(f"Indels index already present: {indels_idx}", flush=True)
     _write_pam_build(snp_idx, pamfile)
+    _write_index_meta(snp_idx, pamfile)
     _write_display_label(snp_idx, display_name)
     # ADDITIVE: emit the combined samplesIDs/<vcf_name>.samplesID.txt for a MERGED
     # panel so a user who BUILDS + PUBLISHES their own merged index is self-complete
@@ -5656,7 +6875,7 @@ def build_index_only() -> None:
     # could clear it. The SNP codes of the fake-indel genome are refused either way, and
     # only a run with the overlay on finishes them; a search reads that genome only to
     # build an INDELS index it does not have yet.
-    if _snp_overlay:
+    if _snp_overlay and not _sites_only:
         _parts.append(
             (_igt_dir, f"{_redo}, or remove the phased indel genotype store to search without "
                        f"it (rm -rf '{_igt_dir}')"))
@@ -5695,9 +6914,12 @@ def print_help_download() -> None:
     sys.stderr.write(
         "Options:\n"
         "\t--what, component to fetch: genome | annotations | pams | samples | "
-        "vcf | build-inputs | index | assembly | all (all = genome+annotations+pams+samples, "
-        "plus the default hg38 reference index so a reference scan works out of the box) "
-        "[REQUIRED]\n"
+        "vcf | build-inputs | index | assembly | genotype-oracle | all (all = "
+        "genome+annotations+pams+samples, plus the default hg38 reference index so a "
+        "reference scan works out of the box; genotype-oracle = the phased genotypes and "
+        "indel genotypes of a panel, by default HGDP + 1000 Genomes, into Dictionaries/, "
+        "which complete-search --prioritize-observed checks a sites-only dataset's rows "
+        "against; an installed index of the panel already brings them) [REQUIRED]\n"
         "\t--ref, reference genome name for --what genome/index [default: hg38]\n"
         "\t--dataset, variant dataset name for --what vcf / build-inputs (the SOURCE VCFs "
         "that built a shipped index, e.g. hg38_HGDP1kGP, hg38_HPRC, "
@@ -5707,10 +6929,21 @@ def print_help_download() -> None:
         "enrichment and only indexes (fast / new-PAM path; kits exist for a subset of datasets) "
         "[REQUIRED for --what vcf/build-inputs]\n"
         "\t--index-name, precomputed index directory name for --what index "
-        "(e.g. the reference index NRG_3_hg38, the recommended variant-aware default "
-        "NRG_3_hg38+hg38_HGDP1kGP (phased HGDP + 1000 Genomes, 4,091 samples), or "
-        "NRG_3_hg38+hg38_HPRC / NRG_3_hg38+hg38_mega) "
+        "(e.g. the reference index 20-NRR_3_hg38, the recommended variant-aware default "
+        "20-NRR_3_hg38+hg38_HGDP1kGP (SpCas9 NRR, the default PAM; phased HGDP + 1000 "
+        "Genomes, 4,091 samples), or 20-NRR_3_hg38+hg38_HPRC / 20-NRR_3_hg38+hg38_mega; "
+        "on the reference and HGDP + 1000 Genomes also 20-NGG_3, 20-NRG_3, the general "
+        "index 20-NNNNNNNN_3 (any 3' PAM of up to 8 nt, pruned), SaCas9 22-NNGRRN_3 and "
+        "Cas12a TTTN-20_3 and TTTN-23_3, e.g. 20-NGG_3_hg38+hg38_HGDP1kGP; the list is "
+        "docs/PRECOMPUTED_INDEXES.md's). Since 2.10.0 a name of this form (guide length and "
+        f"side) is fetched from {FORMAT2_HF_REPO}, with its panel's Dictionaries bundle "
+        "and genotype store, each fetched once per panel; an index of CRISPRme 2.8.1 "
+        "(index format 1: NRR_3_hg38+hg38_HGDP1kGP, NNN_3_hg38, ...) is still fetched by "
+        "its own name, from the repos of 2.8.1, and the download names the index of this "
+        "release that replaces it "
         "[REQUIRED for --what index]\n"
+        "\t--panel, for --what genotype-oracle: the phased panel [default: HGDP1kGP, "
+        "i.e. hg38_HGDP1kGP] [OPTIONAL]\n"
         "\t--sample, HPRC individual id for --what assembly (e.g. HG01255) -- fetches "
         "both haplotypes' genome + chain + chromAlias into Assemblies/<sample>/, the "
         "CLI equivalent of the web Data Manager's 'Fetch from HPRC' "
@@ -5732,9 +6965,12 @@ def print_help_download() -> None:
     sys.exit(1)
 
 
-# Default REFERENCE index published on HF for hg38 (the default NRG PAM, bMax 3);
-# fetched by ``download --what all`` so a simple reference scan works out of the box.
-DEFAULT_REFERENCE_INDEX_HG38 = "NRG_3_hg38"
+# Default REFERENCE index published on HF for hg38 (the default NRR PAM, a 20-nt guide,
+# bMax 3: CRISPRme 2.10.0's, in FORMAT2_HF_REPO); fetched by ``download --what all`` so a
+# simple reference scan works out of the box. Where it cannot be fetched, 2.8.1's
+# (index format 1, the older name) is fetched in its place.
+DEFAULT_REFERENCE_INDEX_HG38 = "20-NRR_3_hg38"
+_FALLBACK_REFERENCE_INDEX_HG38 = "NRR_3_hg38"
 
 
 def download_data() -> None:
@@ -5793,6 +7029,21 @@ def download_data() -> None:
     # specific, so they are requested explicitly). On hg38 it ALSO fetches the
     # default-PAM REFERENCE index (below) so a simple reference-genome scan works
     # out of the box.
+    # The genotype oracle: the phased HGDP + 1000 Genomes genotypes (and indel genotypes)
+    # the carrier gate checks a sites-only dataset's rows against (complete-search
+    # --prioritize-observed), without the panel's index. (Not one archive, so handled
+    # before the component loop.)
+    if what == "genotype-oracle":
+        panel = args[args.index("--panel") + 1] if "--panel" in args else "HGDP1kGP"
+        if not panel.startswith(f"{ref}_"):
+            panel = f"{ref}_{panel}"
+        try:
+            dests = download_genotype_oracle(workdir, repo=repo, panel=panel)
+        except (ValueError, ImportError, RuntimeError) as e:
+            error(str(e))
+        for dest in dests:
+            print(f"Genotype oracle: {dest}", flush=True)
+        return
     if what == "all":
         components = ["genome", "annotations", "pams", "samples"]
     else:
@@ -5832,14 +7083,33 @@ def download_data() -> None:
     # (correct, but slow). Non-fatal: on any hiccup the genome is still present
     # and the index is built on demand at search time.
     if what == "all" and ref == "hg38":
-        ref_index = index_name or DEFAULT_REFERENCE_INDEX_HG38
+        _download_default_reference_index(workdir, repo, ref, index_name)
+
+
+def _download_default_reference_index(workdir: str, repo, ref: str,
+                                      index_name: "Optional[str]" = None) -> None:
+    """download --what all on hg38: the default-PAM reference index (``index_name`` if
+    given), 2.10.0's 20-NRR_3_hg38, else 2.8.1's NRR_3_hg38 where it cannot be fetched (before
+    the rebuild is published, or from a repo of 2.8.1's archives alone). The fallback's
+    download names no index of 2.10.0 that replaces it (crisprme_hf.successor_index): that is
+    the one that just failed, and the note here says why 2.8.1's is fetched. Non-fatal: the
+    genome is present, and a search builds the index it needs."""
+    candidates = ([index_name] if index_name else
+                  [DEFAULT_REFERENCE_INDEX_HG38, _FALLBACK_REFERENCE_INDEX_HG38])
+    for k, ref_index in enumerate(candidates):
         try:
             dest = download_component(
                 "index", workdir, repo=repo, ref=ref,
-                index_name=ref_index, genotypes=False,
+                index_name=ref_index, genotypes=False, _note_successor=k == 0,
             )
             print(f"Downloaded reference index {ref_index} -> {dest}", flush=True)
+            break
         except (ValueError, ImportError, RuntimeError) as e:
+            if k + 1 < len(candidates):
+                print(f"NOTE: could not fetch the default reference index {ref_index} "
+                      f"({e}); fetching {candidates[k + 1]}, CRISPRme 2.8.1's, in its "
+                      f"place.", flush=True)
+                continue
             sys.stderr.write(
                 f"WARNING: could not fetch the default reference index "
                 f"{ref_index} ({e}). The reference genome is present; a reference "
@@ -5872,6 +7142,21 @@ def print_help_publish_index() -> None:
         "[OPTIONAL, default: off]. In BOTH modes the small registry_<vcf>/ is "
         "added when present, and a separate genotypes_<vcf>.tar.gz companion is "
         "uploaded when a genotype store exists.\n"
+        "\t--replace-companions, for an index of format 2: replace a panel companion "
+        "(its Dictionaries bundle or genotype store) the repo holds in another build "
+        "[OPTIONAL, default: refused]\n"
+    )
+    sys.stderr.write(
+        "Where it goes (since 2.10.0): an index of index format 2 (CRISPRitz 2.10.0), or "
+        "one named for its guide length and side (20-NRR_3_hg38), to "
+        f"{FORMAT2_HF_REPO}, never to the repos CRISPRme 2.8.1 reads ({DEFAULT_HF_REPO}, "
+        f"{GENERAL_INDEX_HF_REPO}); an index of format 1 as before. A variant index of "
+        "format 2 is published without its panel's Dictionaries, which go once per panel "
+        "into the Dictionaries bundle dictionaries-bundle_<vcf>.tar.gz, as its genotype "
+        "store goes into genotypes_<vcf>.tar.gz: each is uploaded only where the repo does "
+        "not hold it already, the same (its record, <name>.json, gives a fingerprint of what "
+        "it holds), and the index's manifest names both, so that a download fetches each "
+        "once per panel.\n"
     )
     sys.exit(1)
 
@@ -5890,12 +7175,13 @@ def publish_index_cmd() -> None:
     # tarball (tiers replace them); default off => byte-for-byte-unchanged publish.
     dictless = "--dictless" in args
     try:
-        remote_path = publish_index(
-            index_dir, repo=repo, token=token, display_name=name, dictless=dictless
+        # (it says where each archive went, the repo it was routed to included)
+        publish_index(
+            index_dir, repo=repo, token=token, display_name=name, dictless=dictless,
+            replace_companions="--replace-companions" in args,
         )
     except (ValueError, ImportError) as e:
         error(str(e))
-    print(f"Published index to {resolve_repo(repo)}:{remote_path}", flush=True)
 
 
 def print_help_assembly_search() -> None:
@@ -5933,8 +7219,10 @@ def print_help_assembly_search() -> None:
         "\t--guide, specify a file containing guide RNAs [REQUIRED]\n"
         "\t--pam, specify a file containing the PAM sequence [REQUIRED]\n"
         "\t--mm, number of mismatches allowed in the search [REQUIRED]\n"
-        "\t--bDNA, number of DNA bulges allowed in the search [OPTIONAL]\n"
-        "\t--bRNA, number of RNA bulges allowed in the search [OPTIONAL]\n"
+        "\t--bDNA, number of DNA bulges allowed in the search [OPTIONAL; given neither "
+        "--bDNA nor --bRNA, 1 DNA + 1 RNA bulge, the default budget, as complete-search's; "
+        "given one of them, the other is 0]\n"
+        "\t--bRNA, number of RNA bulges allowed in the search [OPTIONAL; as --bDNA]\n"
         "\t--merge, window size (nucleotides) to merge candidate off-targets "
         "using the highest scoring as pivot [default: 3] -- also used as the "
         "locus-clustering threshold when reconciling the two haplotypes, so it "
@@ -6068,6 +7356,13 @@ def _run_haplotype_search(
             f"An index of {os.path.basename(genomedir)} under genome_library/ holds "
             f"another genome and could not be removed ({e}). Remove it and run again."
         )
+    # Which genome the search reads, as it begins: its result records it once it ends,
+    # and a later run reuses the result only while the genome is still that one
+    # (haplotype_source_matches; none recorded, it searches again)
+    try:
+        source = haplotype_genome_source(current_working_directory, genomedir)
+    except OSError:
+        source = None
     try:
         code = subprocess.call(cmd, shell=True, cwd=current_working_directory)
     finally:
@@ -6079,7 +7374,14 @@ def _run_haplotype_search(
             f"Haplotype search failed for --output {output_name}! See "
             f"{os.path.join(output_folder, 'log_error.txt')} for details"
         )
+    record_haplotype_source(output_folder, source)
     return output_folder
+
+
+# Why a finished haplotype result of the same search parameters is searched again
+# (haplotype_source_matches)
+_CHANGED_HAPLOTYPE = ("results of the haplotype's FASTA files before they changed, or of a "
+                      "search that recorded no genome (CRISPRme 2.8.1 or earlier)")
 
 
 def assembly_search() -> None:
@@ -6150,6 +7452,13 @@ def assembly_search() -> None:
     mm = _check_mm(args)
     bDNA = _check_bdna(args, "--bDNA" in args)
     bRNA = _check_brna(args, "--bRNA" in args)
+    # The default budget, as complete-search's and the web's (its Personal assembly tab takes
+    # the form's 1 + 1): given neither --bDNA nor --bRNA, one bulge of each type, which each
+    # haplotype's search builds its index for (up to 2.8.1 assembly-search took none)
+    if "--bDNA" not in args and "--bRNA" not in args:
+        bDNA = bRNA = DEFAULT_BULGES
+        print(f"[assembly-search] no --bDNA/--bRNA given: {DEFAULT_BULGES} bulge(s) of each type, "
+              f"the default budget (--bDNA 0 --bRNA 0 for none).", flush=True)
     merge_t = _check_merge(args, "--merge" in args)
     thread = _check_threads(args, "--thread" in args)
     debug = "--debug" in args
@@ -6222,17 +7531,21 @@ def assembly_search() -> None:
     # successfully -- e.g. a retry after a failure that only affected
     # reconciliation (a chromAlias/liftOver issue, say), not the searches
     paternal_complete = haplotype_search_complete(paternal_output_dir)
-    paternal_reusable = paternal_complete and haplotype_params_match(
+    paternal_same_search = paternal_complete and haplotype_params_match(
         paternal_output_dir, paternal_search_genome, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
         max_total_edits,
     )
+    paternal_reusable = paternal_same_search and haplotype_source_matches(
+        current_working_directory, paternal_output_dir, paternal_search_genome)
     if paternal_reusable:
         print(f"Found existing completed paternal search results at Results/{paternal_output_name}, reusing (not re-running)")
         paternal_results = paternal_output_dir
     else:
         if paternal_complete:
             clean_incomplete_haplotype_output(
-                paternal_output_dir, reason="results built with different search parameters"
+                paternal_output_dir,
+                reason=(_CHANGED_HAPLOTYPE if paternal_same_search
+                        else "results built with different search parameters"),
             )
         else:
             clean_incomplete_haplotype_output(paternal_output_dir)
@@ -6243,17 +7556,21 @@ def assembly_search() -> None:
         )
 
     maternal_complete = haplotype_search_complete(maternal_output_dir)
-    maternal_reusable = maternal_complete and haplotype_params_match(
+    maternal_same_search = maternal_complete and haplotype_params_match(
         maternal_output_dir, maternal_search_genome, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
         max_total_edits,
     )
+    maternal_reusable = maternal_same_search and haplotype_source_matches(
+        current_working_directory, maternal_output_dir, maternal_search_genome)
     if maternal_reusable:
         print(f"Found existing completed maternal search results at Results/{maternal_output_name}, reusing (not re-running)")
         maternal_results = maternal_output_dir
     else:
         if maternal_complete:
             clean_incomplete_haplotype_output(
-                maternal_output_dir, reason="results built with different search parameters"
+                maternal_output_dir,
+                reason=(_CHANGED_HAPLOTYPE if maternal_same_search
+                        else "results built with different search parameters"),
             )
         else:
             clean_incomplete_haplotype_output(maternal_output_dir)
@@ -6492,9 +7809,13 @@ def print_help_gnomad_converter():
         "\t--keep, optional flag to retain all variants, regardless of their "
         "filter flag. By default, variants with a filter flag different from "
         "PASS are discarded\n"
-        "\t--multiallelic, optional flag to merge variants mapped to the "
-        "same position, creating multiallelic sites in the output VCFs. By "
-        "default, each site remains biallelic\n"
+        "\t--multiallelic, optional flag to join the SNP records of one position "
+        "into one line listing their ALTs, and its indel records into another "
+        "(bcftools norm -m+). The converter writes unphased genotypes, so a "
+        "population with two joined ALTs gets one such as 1/2. CRISPRme reads each "
+        "ALT of such a line with its own carriers, without phase, and gives each "
+        "ALT the line's first ID (rs1 of rs1;rs2). By default each record keeps one "
+        "ALT and its own ID, as the published panels are built\n"
         "\t--threads, used to set the number of threads used in the conversion "
         "process [default 8]\n"
     )
@@ -6655,11 +7976,13 @@ def print_help_web_interface():
     # functionality description
     sys.stderr.write(
         "This function starts a local server to use the web interface.\n"
-        "Open your browser at http://127.0.0.1:8080\n"
+        "Open your browser at http://127.0.0.1:8080 (or at the port --port gives)\n"
     )
     # options
     sys.stderr.write(
         "Options:\n"
+        "\t--port, the port the server listens on [default: 8080]: another, where 8080 is "
+        "taken (a shared node, a second server)\n"
         "\t--debug, debug mode\n"
     )
     sys.exit(1)
@@ -6672,6 +7995,15 @@ def web_interface():
     # resolve index.py relative to this script's location
     # regardless of conda/source install layout
     index_script = os.path.join(corrected_web_path, "index.py")
+    # --port: the server listened on 8080 alone, so where another holds it (a shared node)
+    # an Apptainer or source install could not start it; Docker remaps it with -p (C19)
+    port = "8080"
+    if "--port" in args:
+        at = args.index("--port") + 1
+        port = args[at] if at < len(args) else ""
+        if not (port.isdigit() and 1 <= int(port) <= 65535):
+            error("--port takes the number of a port, from 1 to 65535, as in --port 8090")
+        os.environ["CRISPRME_PORT"] = port  # (the server's app reads it: app.PORTLOCAL)
     if not os.path.isfile(index_script):
         sys.stderr.write(
             f"Error: Cannot find index.py at {index_script}\n"
@@ -6686,7 +8018,7 @@ def web_interface():
             "Check above for traceback. Common causes:\n"
             "  - Missing dependencies: pip install dash flask flask-caching "
             "dash-bootstrap-components\n"
-            "  - Port 8080 already in use: lsof -i :8080\n"
+            f"  - Port {port} already in use: lsof -i :{port} (or --port <another>)\n"
         )
         sys.exit(e.returncode)
     except FileNotFoundError:
@@ -6793,6 +8125,23 @@ def generate_report() -> None:
     sys.path.insert(0, os.path.join(script_path, "PostProcess"))
     import generate_report as _report_module
 
+    # A folder with no integrated results ended on a FileNotFoundError traceback: a search
+    # that found no off-target writes none, and an assembly-search's combined folder holds
+    # the combined report it wrote, not results of its own (OF-12)
+    if result_dir and not integrated_results and _report_module.resolve_integrated_tsv(
+            result_dir) is None:
+        if os.path.basename(os.path.normpath(result_dir)).endswith("_combined"):
+            error(
+                f"{result_dir} is an assembly-search's combined folder: assembly-search writes "
+                f"its report there itself (<output>_combined_report.zip). Run generate-report "
+                f"on a haplotype's folder (<output>_paternal or <output>_maternal) for one of "
+                f"theirs."
+            )
+        error(
+            f"{result_dir} holds no integrated results (*integrated_results.tsv), so there is "
+            f"nothing to report: a search that found no off-target writes none (its log.txt "
+            f"says 'No off-targets found'), and one that failed or is running has none yet."
+        )
     out = _report_module.build_report(
         result_dir=result_dir,
         integrated_tsv=integrated_results,
@@ -6826,7 +8175,7 @@ def print_help_complete_test():
         "prebuilt-index smoke searches only that chromosome of the index's genome, and "
         "refuses one the genome or the index lacks, naming those it has; with all it "
         "searches every chromosome, which with a variant index such as "
-        "NRG_3_hg38+hg38_HGDP1kGP is a genome-wide variant search needing 64 GB+ of "
+        "20-NRR_3_hg38+hg38_HGDP1kGP is a genome-wide variant search needing 64 GB+ of "
         "RAM. The benchmark mode downloads and tests that chromosome\n"
         "\t--vcf_dataset, variant dataset for the LEGACY build-from-source test "
         "(the benchmark mode: it builds small test indexes from raw VCFs for "
@@ -6836,7 +8185,7 @@ def print_help_complete_test():
         "shipped re-phased HGDP1kGP default and NOT the retired "
         "NRG_3_hg38+hg38_1000G2021_HGDP index [default: 1000G]. Without "
         "CRISPRME_ALLOW_ONDEMAND_BUILD, complete-test instead runs the example guide against "
-        "whichever index you downloaded (recommended: NRG_3_hg38+hg38_HGDP1kGP) -- "
+        "whichever index you downloaded (recommended: 20-NRR_3_hg38+hg38_HGDP1kGP) -- "
         "the prebuilt-index smoke test. The self-test, as CI runs it: "
         "CRISPRME_ALLOW_ONDEMAND_BUILD=1 crisprme.py complete-test "
         "--chrom chr22 --vcf_dataset 1000G, then crisprme.py validate-test --chrom chr22.\n"
@@ -6999,8 +8348,9 @@ def validate_test():
             sys.exit(1)
     # begin crisprme test
     script_validation = os.path.join(script_path, "validate.py")
+    # (and this release's version: validate.py downloads the references of its own tag)
     code = subprocess.call(
-        f"{sys.executable} {script_validation} {chrom}", shell=True
+        f"{sys.executable} {script_validation} {chrom} {__version__}", shell=True
     )
     if code != 0:
         # validate.py has already said why on stderr (a mismatch, or no complete-test
@@ -7018,7 +8368,7 @@ def print_help_setup_database_test() -> None:
         "NOTE: for most users the FASTER modern path is\n"
         "  crisprme.py download --what all\n"
         "(fetches the reference genome + annotations over HuggingFace's CDN), then\n"
-        "  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP\n"
+        "  crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP\n"
         "for the recommended default variant index. 'setup' is the legacy "
         "from-scratch download (hundreds of GB) retained for advanced / offline "
         "builds. It takes only two files from the HuggingFace data repo "
@@ -7083,13 +8433,16 @@ def setup_database():
     # begin crisprme test
     script_setup = os.path.join(script_path, "setup_legacy_database.py")
     try:
+        # (-u: its progress lines reach a pipe or a log as they are printed, not at its end)
         subprocess.run(
-            [sys.executable, script_setup, chrom, working_dir, str(force)], check=True
+            [sys.executable, "-u", script_setup, chrom, working_dir, str(force)], check=True
         )
     except subprocess.CalledProcessError as e:
+        # (its own message is above it; the command fails with its status: it ended 0)
         sys.stderr.write(
-                f"Legacy database setup exited with error code {e.returncode}"
+                f"Legacy database setup exited with error code {e.returncode}\n"
             )
+        sys.exit(e.returncode)
 
 
 # HELP FUNCTION
@@ -7280,8 +8633,9 @@ def targets_scoring_cmd():
 
 
 if len(sys.argv) < 2:
-    check_crisprme_dirtree(strict=False)  # check crisprme directory tree structure
-    crisprme_help()  # no arg? print help
+    # no arg? print help, and make no data folder: it made the seven of a data folder
+    # (Genomes/, Results/, ...) wherever one ran it to read the help (C14)
+    crisprme_help()
 elif sys.argv[1] == "complete-search":  # run complete search
     _run_and_remove_annotation_tmpdirs(complete_search)
 elif sys.argv[1] == "complete-test":  # run complete test

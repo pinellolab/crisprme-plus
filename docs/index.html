@@ -18,7 +18,7 @@
       <img src="crisprme-logo.svg" alt="CRISPRme" class="logo">
     </h1>
     <p class="tagline">Variant-aware CRISPR off-target nomination</p>
-    <p class="tagline" style="font-size:0.9em;color:#2b6cb0">Latest: <strong>v2.8.1</strong> &mdash; indel off-targets built from each carrier&rsquo;s own alleles, one flexible PAM-less index for any shorter 3&prime; PAM (<code>--prune-pam</code>), and many correctness and web-security fixes. <a href="example-report.html">See an example report &rarr;</a></p>
+    <p class="tagline" style="font-size:0.9em;color:#2b6cb0">Latest: <strong>v2.10.0</strong> &mdash; rebuilt indexes that code every allele of a multi-allelic site, SpCas9 <code>NRR</code> as the default PAM, an exact haplotype pre-check and a parallel post-analysis that keep variant searches of the new indexes tractable, and many correctness and web-security fixes. <a href="example-report.html">See an example report &rarr;</a></p>
   </header>
 
   <main>
@@ -36,8 +36,8 @@
         database for a genome + PAM (the short motif a nuclease needs next to its target,
         e.g. <code>NGG</code> for SpCas9; no building required). Use the <strong>reference</strong>
         index for a basic scan, and a <strong>variant-aware</strong> index (the recommended
-        default is the phased HGDP&nbsp;+&nbsp;1000&nbsp;Genomes panel,
-        <code>NRG_3_hg38+hg38_HGDP1kGP</code>, 4,091&nbsp;samples) to catch off-targets created by
+        default is the phased HGDP&nbsp;+&nbsp;1000&nbsp;Genomes panel of the default SpCas9
+        <code>NRR</code> PAM, <code>20-NRR_3_hg38+hg38_HGDP1kGP</code>, 4,091&nbsp;samples) to catch off-targets created by
         human genetic variants &mdash; CRISPRme's main feature. The quickstart below downloads one
         for you.
       </p>
@@ -92,15 +92,16 @@
       <p>
         It needs <a href="https://www.docker.com/products/docker-desktop/">Docker Desktop</a>
         (the installer guides you if it is missing) and downloads the reference + default
-        variant data (~45&nbsp;GB download &rarr; ~98&nbsp;GB on disk; keep &asymp;&nbsp;150&nbsp;GB free for the full
-        variant-aware setup, far less &mdash; ~25&nbsp;GB &mdash; for reference-only) on first launch. Prefer the terminal, or want to script /
+        variant data (~70&nbsp;GB download &rarr; ~150&nbsp;GB on disk; keep &asymp;&nbsp;200&nbsp;GB free for the full
+        variant-aware setup, far less &mdash; ~44&nbsp;GB &mdash; for reference-only) on first launch. Prefer the terminal, or want to script /
         batch analyses? The <strong>Docker quickstart below</strong> and the command line both
         work too.
       </p>
       <p>
         <strong>Hardware:</strong> variant-aware whole-genome search needs
-        <strong>~64&nbsp;GB RAM</strong>; reference-only and single-chromosome runs fit
-        <strong>~16&nbsp;GB</strong> and run on any laptop.
+        <strong>~64&nbsp;GB RAM</strong>; smaller searches need less (the README's
+        <a href="https://github.com/pinellolab/crisprme-plus#0-system-requirements">System
+        Requirements</a> give what each took).
       </p>
       <p class="cta-row">
         <a class="button" href="#run-heading">Get started &darr;</a>
@@ -135,12 +136,13 @@
           <a href="https://docs.docker.com/desktop/install/mac-install/">macOS</a>,
           <a href="https://docs.docker.com/desktop/install/windows-install/">Windows</a>,
           or <a href="https://docs.docker.com/engine/install/">Linux</a>. CRISPRme needs
-          <strong>16&nbsp;GB</strong> of memory for a first / reference-only run, but
-          <strong>64&nbsp;GB</strong> for a genome-wide variant-aware search (16&nbsp;GB or
-          32&nbsp;GB will run out of memory on that workload). You also need
-          <strong>&asymp;&nbsp;150&nbsp;GB free disk</strong> for the variant-aware setup, which
-          takes ~98&nbsp;GB once installed
-          (far less &mdash; ~25&nbsp;GB &mdash; for a reference-only setup). You cannot give
+          <strong>64&nbsp;GB</strong> of memory for a genome-wide variant-aware search (16&nbsp;GB or
+          32&nbsp;GB will run out of memory on that workload); smaller searches need less (the
+          README's <a href="https://github.com/pinellolab/crisprme-plus#0-system-requirements">System
+          Requirements</a> give what each took). You also need
+          <strong>&asymp;&nbsp;200&nbsp;GB free disk</strong> for the variant-aware setup, which
+          takes ~150&nbsp;GB once installed
+          (far less &mdash; ~44&nbsp;GB &mdash; for a reference-only setup). You cannot give
           Docker more memory than the machine physically has: under 64&nbsp;GB total, run
           genome-wide variant-aware searches on a workstation or cluster instead.
         </p>
@@ -192,14 +194,14 @@ docker pull pinellolab/crisprme:latest</code></pre>
 mkdir -p ~/crisprme &amp;&amp; cd ~/crisprme
 
 # reference genome, annotations, PAMs, sample lists, AND the default hg38
-# reference index (NRG_3_hg38 = SpCas9 NRG, NGG+NAG) -- so a reference-only
+# reference index (20-NRR_3_hg38 = SpCas9 NRR: NGG, NAG, NGA, NAA) -- so a reference-only
 # search works immediately with no further downloads
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what all --path /DATA
 
 # the recommended default variant-aware index (phased HGDP + 1000 Genomes, 4,091 samples)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA</code></pre>
+  crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA</code></pre>
 
         <h3>3 &mdash; Launch the web interface</h3>
         <pre><code>docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
@@ -215,9 +217,9 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
           to a <code>.sif</code> file (no admin rights needed):
         </p>
         <p class="note">
-          Pick a working folder with room for the <strong>~98&nbsp;GB of data</strong>, the
+          Pick a working folder with room for the <strong>~150&nbsp;GB of data</strong>, the
           <strong>~4&ndash;5&nbsp;GB <code>.sif</code></strong> and your results &mdash; so
-          &asymp;&nbsp;150&nbsp;GB free. Any location works as long as it has
+          &asymp;&nbsp;200&nbsp;GB free. Any location works as long as it has
           that much space &mdash; worth checking before you start, since home directories are
           often quota-limited.
         </p>
@@ -229,22 +231,24 @@ apptainer pull crisprme.sif docker://pinellolab/crisprme:latest</code></pre>
 
         <h3>2 &mdash; Download the data and a ready-made index (minutes, not hours)</h3>
         <pre><code># reference genome, annotations, PAMs, sample lists, AND the default hg38
-# reference index (NRG_3_hg38 = SpCas9 NRG, NGG+NAG) -- so a reference-only
+# reference index (20-NRR_3_hg38 = SpCas9 NRR: NGG, NAG, NGA, NAA) -- so a reference-only
 # search works immediately with no further downloads
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what all --path /DATA
 
 # the recommended default variant-aware index (phased HGDP + 1000 Genomes, 4,091 samples)
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA</code></pre>
+  crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA</code></pre>
 
         <h3>3 &mdash; Launch the web interface</h3>
         <pre><code>apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py web-interface</code></pre>
         <p>
           The server listens on port <strong>8080 of the machine that runs it</strong>, which
-          must be free there. Apptainer shares the host network, so unlike Docker there is no
-          <code>-p</code> mapping to set. Working directly on that machine, open
+          must be free there: where it is not, add <code>--port 8090</code> (any free port)
+          to <code>crisprme.py web-interface</code>, and use that port below. Apptainer shares
+          the host network, so unlike Docker there is no <code>-p</code> mapping to set.
+          Working directly on that machine, open
           <strong>http://127.0.0.1:8080</strong> in a browser tab.
         </p>
         <p>
@@ -283,7 +287,7 @@ ssh -N -L 8080:&lt;compute-node&gt;:8080 &lt;user&gt;@&lt;cluster-login&gt;</cod
 
       <p class="note" style="margin-top:1rem">
         Want variant-aware searches (CRISPRme's speciality)? The prebuilt variant index
-        downloaded in step&nbsp;2 (<code>NRG_3_hg38+hg38_HGDP1kGP</code>) already enables them —
+        downloaded in step&nbsp;2 (<code>20-NRR_3_hg38+hg38_HGDP1kGP</code>) already enables them —
         including sample-level named carriers, via the genotype store it bundles. No raw VCFs
         needed. You can skip the variant index for a reference-only first run.
       </p>
@@ -300,7 +304,8 @@ ssh -N -L 8080:&lt;compute-node&gt;:8080 &lt;user&gt;@&lt;cluster-login&gt;</cod
         <code>download</code> commands first.
         <strong>Need a different nuclease or PAM?</strong> Install its index the same way,
         using a published name from the <code>indexes/</code> folder of the
-        <code>lucapinello/crisprme-data</code> repo. If an index isn't published, build it
+        <code>lucapinello/crisprme-indexes-format2</code> repo (the indexes of 2.10.0). If an
+        index isn't published, build it
         once in the app's Settings page or with <code>crisprme.py build-index-only</code>:
         a search builds a missing reference index itself, but offers a variant panel only
         the bulges its installed index supports.
@@ -317,14 +322,19 @@ ssh -N -L 8080:&lt;compute-node&gt;:8080 &lt;user&gt;@&lt;cluster-login&gt;</cod
         <h3>Install with Conda / Mamba</h3>
         <p>Bioconda's <code>crisprme</code> package is CRISPRme+ (Python 3.11, Linux); a release
         reaches Bioconda shortly after it is tagged. Always name the version: given a bare
-        <code>crisprme</code>, the solver can silently fall back to a years-old release.</p>
+        <code>crisprme</code>, the solver can silently fall back to a years-old release.
+        From 2.10.0, CRISPRme+ and its search engine CRISPRitz share their major.minor version,
+        and every install route brings the matching CRISPRitz: CRISPRme+ 2.10.z runs on
+        CRISPRitz 2.10.z (the package pins <code>crispritz &gt;=2.10.0,&lt;2.11</code>; the
+        Docker image, the exact CRISPRitz it was tested with). <code>crisprme.py --version</code>
+        and <code>crispritz.py version</code> print the two.</p>
         <pre><code># Configure Bioconda channels (one-time; conda config even with Mamba 2)
 conda config --add channels bioconda
 conda config --add channels conda-forge
 conda config --set channel_priority strict
 
 # Create and activate the environment, set up the CRISPR-Bulge scorer, then verify
-conda create -n crisprme crisprme=2.8.1 python=3.11 -y
+conda create -n crisprme crisprme=2.10.0 python=3.11 -y
 conda activate crisprme
 crisprme.py scorer-env create
 crisprme.py scorer-env doctor

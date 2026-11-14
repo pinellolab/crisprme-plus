@@ -126,8 +126,8 @@ class DispatchContract(unittest.TestCase):
 
     def test_a_heavy_benchmark_runs_unless_the_opt_out_is_set(self):
         """A "heavy" (bulge-2) benchmark is part of the self-test: the whole set fits a
-        16 GiB, 4-CPU runner. CRISPRME_SKIP_HEAVY=1 leaves it out on a very small machine,
-        and only it."""
+        16 GiB, 4-CPU runner. CRISPRME_SKIP_HEAVY=1 leaves it out, to save time on a slow
+        machine, and only it."""
         registry = dict(_REGISTRY, benchmarks=[
             _REGISTRY["benchmarks"][0], dict(_REGISTRY["benchmarks"][1], heavy=True)])
         heavy_dir = f"{ct.COMPLETETESTRESDIR}_{registry['benchmarks'][1]['name']}"
@@ -197,8 +197,9 @@ class AnEarlierRunInTheWayIsNamedWhole(unittest.TestCase):
     def run_test(self, folders, ondemand, skip_heavy=None):
         """run_crisprme_test with ``folders`` in Results/, the benchmark mode for
         ``ondemand``: its exit status, its stderr, and the mode it ran (none if refused)."""
-        for name in folders:
+        for name in folders:  # (each with an earlier run's results in it)
             os.makedirs(os.path.join(self.results, name), exist_ok=True)
+            open(os.path.join(self.results, name, "log.txt"), "w").close()
         ran, err = [], io.StringIO()
         with mock.patch.dict(os.environ, self.env(ondemand, skip_heavy), clear=True), \
              mock.patch.object(ct, "_run_benchmarks_ondemand", lambda *a: ran.append("bench")), \
@@ -241,8 +242,25 @@ class AnEarlierRunInTheWayIsNamedWhole(unittest.TestCase):
         code, err, ran = self.run_test([ct.COMPLETETESTRESDIR], True)
         self.assertEqual((code, err, ran), (0, "", ["bench"]))
 
+    def test_an_empty_folder_a_refused_search_left_is_in_no_ones_way(self):
+        # complete-search makes its output folder, then a refusal of its pre-flight leaves it
+        # empty: every complete-test after it stopped, until the user removed it (R2-F2)
+        for mode, folder in ((False, ct.COMPLETETESTRESDIR), (True, self.benchmarks[0])):
+            with self.subTest(benchmarks=mode):
+                os.makedirs(os.path.join(self.results, folder))
+                ran, err = [], io.StringIO()
+                with mock.patch.dict(os.environ, self.env(mode), clear=True), \
+                     mock.patch.object(ct, "_run_benchmarks_ondemand",
+                                       lambda *a: ran.append("bench")), \
+                     mock.patch.object(ct, "_run_prebuilt_index_smoke",
+                                       lambda *a: ran.append("smoke")), \
+                     contextlib.redirect_stderr(err):
+                    ct.run_crisprme_test("chr22", "1000G", 4, False)
+                self.assertEqual((err.getvalue(), ran), ("", ["bench" if mode else "smoke"]))
+
     def test_the_script_exits_2_having_downloaded_nothing(self):
         os.makedirs(os.path.join(self.results, self.benchmarks[0]))
+        open(os.path.join(self.results, self.benchmarks[0], "log.txt"), "w").close()
         res = subprocess.run([sys.executable, self.SCRIPT, "chr22", "1000G", "4", "False"],
                              env=self.env(True), capture_output=True, text=True, timeout=120)
         self.assertEqual((res.returncode, res.stdout, res.stderr),
@@ -409,6 +427,40 @@ class WhatTheDataRepoDoesNotHostIsNoFailure(unittest.TestCase):
                               "downloading it from UCSC\n")
         self.assertEqual(err, "Downloading fasta file for chromosome(s) chr21\n")
         self.assertEqual(fetched, [f"{ct.HG38URL}/chromosomes/chr21.fa.gz"])
+
+    def test_another_chromosome_comes_gzipped_from_the_hub(self):
+        # the repo holds every chromosome as genomes/hg38/<chrom>.fa.gz, and chr22 unpacked
+        # too: a chromosome but chr22 came from UCSC (FR :725)
+        os.makedirs("Genomes")
+        asked, written = [], {}
+
+        def hf_fetch(name, dest):
+            asked.append(name)
+            if not name.endswith(".gz"):
+                raise self.missing
+            with open(dest, "w") as fh:
+                fh.write("gz")
+
+        def gunzip(gz, out):  # (utils.gunzip's: it removes the .gz)
+            with open(gz) as fh:
+                written[out] = fh.read()
+            os.remove(gz)
+            open(out, "w").close()
+            return out
+
+        fetched, out, err = [], io.StringIO(), io.StringIO()
+        with mock.patch.object(ct, "hf_fetch", hf_fetch), \
+             mock.patch.object(ct, "gunzip", gunzip), \
+             mock.patch.object(ct, "download", lambda *a, **k: fetched.append(k)), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            folder = ct.download_genome_data("chr21", "Genomes")
+        self.assertEqual(asked, ["genomes/hg38/chr21.fa", "genomes/hg38/chr21.fa.gz"])
+        self.assertEqual((fetched, out.getvalue()), ([], ""))
+        self.assertEqual(err.getvalue(), "Downloading fasta file for chromosome(s) chr21\n"
+                                         f"Fetched chr21.fa.gz from HuggingFace "
+                                         f"({ct.HF_DATA_REPO})\n")
+        self.assertEqual(os.listdir(folder), ["chr21.fa"])
+        self.assertEqual(written, {os.path.join("Genomes", "hg38_chr21", "chr21.fa"): "gz"})
 
     def test_a_failure_to_fetch_is_still_said(self):
         os.makedirs("VCFs")
@@ -632,13 +684,14 @@ class WhatTheSmokeSearchesWith(_SmokeDir):
         shipped = os.listdir(os.path.join(os.path.dirname(HERE), "PAMs"))
         self.assertEqual(sorted(os.listdir(os.path.join(self.wd, "PAMs"))), sorted(shipped))
 
-    def test_the_published_wider_pam_less_index_is_searched_for_nrg_with_prune(self):
-        # it has no .pam_build, as the published archives have none
+    def test_the_published_wider_pam_less_index_is_searched_for_nrr_with_prune(self):
+        # it has no .pam_build, as the published archives have none; NRR is the default
+        # PAM (it was NRG before 2.10.0)
         line, seq, search, prune, five, pam = self.inputs("NNNNNNNN_3_hg38")
-        self.assertEqual(line, "N" * 20 + "NRG 3")
+        self.assertEqual(line, "N" * 20 + "NRR 3")
         self.assertEqual(seq, "CTAACAGTTGCTTTTATCACNNN")
-        self.assertEqual((search, prune, five), ("NRG", " --prune-pam", False))
-        self.assertEqual(pam, os.path.join(self.wd, "PAMs", "20bp-NRG-SpCas9.txt"))
+        self.assertEqual((search, prune, five), ("NRR", " --prune-pam", False))
+        self.assertEqual(pam, os.path.join(self.wd, "PAMs", "20bp-NRR-SpCas9.txt"))
         self.assertNoPamWritten()
 
     def test_a_3_nt_index_keeps_the_shipped_file_and_the_guide(self):
@@ -708,9 +761,10 @@ class WhatTheSmokeSearchesWith(_SmokeDir):
         self.assertEqual(len(stderr.getvalue().splitlines()), 1)
 
     def test_a_shorter_3_nt_index_with_no_record_is_taken_for_3_prime(self):
-        # NRR_3_hg38 has none, and the shipped PAM files hold no NRR
-        line, _, _, _, five, _ = self.inputs("NRR_3_hg38")
-        self.assertEqual((line, five), ("N" * 20 + "NRR 3", False))
+        # NAA_3_hg38 has none, and no shipped PAM file holds NAA (NRR stood in here until
+        # its file shipped, with 2.10.0)
+        line, _, _, _, five, _ = self.inputs("NAA_3_hg38")
+        self.assertEqual((line, five), ("N" * 20 + "NAA 3", False))
         self.assertNoPamWritten()
 
     def test_an_index_built_for_a_shorter_guide_gets_the_guide_it_fits(self):

@@ -4,6 +4,7 @@
 Run: python PostProcess/test_indel_genotypes.py   (or via pytest)
 """
 
+import unittest
 import os
 import gzip
 import tempfile
@@ -98,6 +99,74 @@ def test_compile_and_reader_roundtrip():
         os.remove(store)
 
 
+def test_an_indel_written_on_two_lines_is_one_allele():
+    """R3B-N1: two VCF lines of one indel REF>ALT (HPRC chr22 writes 39 indels so) are one
+    allele (decision B2): the store keeps a line per record, and its reader merges them,
+    every carrier of either kept, a carrier of both with its two calls merged as CRISPRitz
+    2.10.0's enricher merges two listings of one SNV (site_alleles.merge_gt). The reader
+    kept the later line alone: HG2 and HG3, on the earlier only, lost their phased
+    genotype, and HG1 its slot 0 (the review's world WD: S02 and S03 on no row)."""
+    vcf_text = (
+        "##fileformat=VCFv4.2\n##contig=<ID=chr22>\n"
+        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG1\tHG2\tHG3\tHG4\n"
+        "chr22\t100\t.\tAT\tA\t.\tPASS\t.\tGT\t1|0\t0|1\t1/0\t0/1\n"
+        "chr22\t100\t.\tAT\tA\t.\tPASS\t.\tGT\t0|1\t0|0\t0|0\t1|0\n")
+    fd, vcf = tempfile.mkstemp(suffix=".vcf.gz")
+    os.close(fd)
+    with gzip.open(vcf, "wt") as fh:
+        fh.write(vcf_text)
+    fd, store = tempfile.mkstemp(suffix=".tsv.gz")
+    os.close(fd)
+    try:
+        assert big.compile_indel_genotypes(vcf, store) == 2   # one line per record
+        r = big.IndelGenotypeReader(store)
+        # HG4: 0/1 then 1|0, not phased alike, one copy each: the earlier, as it is
+        assert r.carriers_dict(100, "AT", "A") == {"HG1": "1|1", "HG2": "0|1", "HG3": "1/0",
+                                                   "HG4": "0/1"}
+        assert r.indels() == [(100, "AT", "A")]
+    finally:
+        os.remove(vcf)
+        _cleanup(store)
+    assert big.merge_store_carriers("A:1|0,B:0|1", "A:0|1,C:1") == "A:1|1,B:0|1,C:1"
+    assert big.merge_store_carriers("A:1|0", "A:0/1") == "A:1|0"
+    assert big.merge_store_carriers("", "A:0|1") == "A:0|1"
+    assert big.merge_store_carriers("A:0|1", "") == "A:0|1"
+
+
+def test_an_indel_written_in_two_cases_is_one_allele():
+    """C-R1-1: VCF 4.x reads REF and ALT whatever their case, and so does the fake-indel
+    window; HPRC's vcfwave writes 140 indels of chr22 on two lines in two cases
+    (chr22:23541792 TG>T beside tg>t). The store keeps each line as the VCF writes it,
+    and its reader keyed it so: the two lines were two indels, and the lower-case one was
+    found by no upper-case lookup. Now one allele, keyed in upper case, its carriers
+    merged as for two lines written alike: HG1 holds the deletion on both slots, HG2 (the
+    lower-case line's alone) keeps its call."""
+    vcf_text = (
+        "##fileformat=VCFv4.2\n##contig=<ID=chr22>\n"
+        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG1\tHG2\tHG3\n"
+        "chr22\t100\t.\tTG\tT\t.\tPASS\t.\tGT\t1|0\t0|0\t0|1\n"
+        "chr22\t100\t.\ttg\tt\t.\tPASS\t.\tGT\t0|1\t1|0\t0|0\n"
+        "chr22\t300\t.\tAc\ta\t.\tPASS\t.\tGT\t0|0\t0|1\t0|0\n")
+    fd, vcf = tempfile.mkstemp(suffix=".vcf.gz")
+    os.close(fd)
+    with gzip.open(vcf, "wt") as fh:
+        fh.write(vcf_text)
+    fd, store = tempfile.mkstemp(suffix=".tsv.gz")
+    os.close(fd)
+    try:
+        assert big.compile_indel_genotypes(vcf, store) == 3   # one line per record
+        r = big.IndelGenotypeReader(store)
+        want = {"HG1": "1|1", "HG3": "0|1", "HG2": "1|0"}
+        assert r.carriers_dict(100, "TG", "T") == want
+        assert r.carriers_dict(100, "tg", "t") == want
+        assert r.carriers_dict(300, "AC", "A") == {"HG2": "0|1"}
+        assert r.indels() == [(100, "TG", "T"), (300, "AC", "A")]
+    finally:
+        os.remove(vcf)
+        _cleanup(store)
+    assert big.store_key(100, "tg", "t") == "100_TG_T"
+
+
 def test_keep_samples_panel_filter():
     vcf = _write_vcf(gz=True)
     try:
@@ -137,9 +206,10 @@ def test_compile_is_atomic_and_marks_done():
         assert not os.path.exists(store + ".tmp")           # atomic: no temp residue
         marker = big._done_marker(store)
         assert os.path.isfile(marker)
-        with open(marker) as m:
-            assert m.read().strip() == "3"                  # marker carries the count
+        with open(marker) as m:                             # the count, then the FILTER rule
+            assert m.read().splitlines() == ["3", big.FILTER_MARK]
         assert big.store_is_complete(store) is True
+        assert big.store_is_current(store) is True
     finally:
         _cleanup(store)
         os.remove(vcf)
@@ -188,6 +258,70 @@ def test_store_is_complete_rejects_absent_and_empty():
         _cleanup(store)
 
 
+_VCF_FILTER = """\
+##fileformat=VCFv4.2
+##contig=<ID=chr22>
+##FILTER=<ID=LowQual,Description="Low quality">
+#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG1\tHG2\tHG3
+chr22\t100\trs1\tAT\tA\t.\tPASS\t.\tGT\t1|0\t0|1\t0|0
+chr22\t150\trs4\tCAG\tC\t.\tLowQual\t.\tGT\t1|0\t0|0\t0|1
+chr22\t200\trs2\tG\tGATAA\t.\t.\t.\tGT\t0|1\t1|1\t0|0
+chr22\t250\trs5\tT\tTA,TAA\t.\tLowQual;ExcHet\t.\tGT\t1|2\t0|0\t2|0
+chr22\t260\trs6\tGC\tG\t.\tpass\t.\tGT\t1|1\t0|0\t0|0
+"""
+
+
+def test_a_record_whose_filter_is_not_pass_or_dot_is_not_stored():
+    # CRISPRitz's enricher skips a line whose FILTER is neither 'PASS' nor '.' (exact
+    # strings): no fake-indel window holds its indel, so the store must not hold it either,
+    # or a carrier is taken off a row for an indel no window holds (2.10.0)
+    fd, vcf = tempfile.mkstemp(suffix=".vcf.gz")
+    os.close(fd)
+    with gzip.open(vcf, "wt") as fh:
+        fh.write(_VCF_FILTER)
+    store = _mkstore()
+    try:
+        keys = {(p, r, a) for p, r, a, _car in big.iter_indel_genotypes(vcf)}
+        assert keys == {(100, "AT", "A"), (200, "G", "GATAA")}, keys
+        assert big.compile_indel_genotypes(vcf, store) == 2
+        r = big.IndelGenotypeReader(store)
+        assert r.indels() == [(100, "AT", "A"), (200, "G", "GATAA")]
+        assert r.carriers(150, "CAG", "C") == ""            # LowQual
+        assert r.carriers(250, "T", "TAA") == ""            # LowQual;ExcHet, a multi-ALT line
+        assert r.carriers(260, "GC", "G") == ""             # 'pass' is not 'PASS'
+        assert r.reads_filter is True
+    finally:
+        _cleanup(store)
+        os.remove(vcf)
+
+
+def test_a_store_written_before_the_filter_rule_is_complete_but_not_current():
+    # a store of 2.8.x: its .done marker holds the record count alone, and it may hold the
+    # indels of records of any FILTER; a build writes it again (store_is_current), and a
+    # reader says which it read (reads_filter)
+    vcf = _write_vcf(gz=True)
+    store = _mkstore()
+    try:
+        big.compile_indel_genotypes(vcf, store)
+        with open(big._done_marker(store), "w") as m:
+            m.write("3\n")
+        assert big.store_is_complete(store) is True
+        assert big.store_reads_filter(store) is False
+        assert big.store_is_current(store) is False
+        assert big.IndelGenotypeReader(store).reads_filter is False
+        os.remove(big._done_marker(store))                  # adopted without a marker
+        assert big.store_is_complete(store) is True
+        assert big.store_is_current(store) is False
+        big.compile_indel_genotypes(vcf, store)             # written again: current
+        assert big.store_is_current(store) is True
+        # a marker older than its store marks no rule (as it marks no completeness)
+        os.utime(big._done_marker(store), (1, 1))
+        assert big.store_reads_filter(store) is False
+    finally:
+        _cleanup(store)
+        os.remove(vcf)
+
+
 def test_compile_leaves_no_partial_final_on_kill(monkeypatch=None):
     # Simulate an OOM/SIGKILL mid-write: the row generator dies after one record.
     # compile must NOT leave a partial FINAL file (only a temp, which it cleans up),
@@ -216,6 +350,14 @@ def test_compile_leaves_no_partial_final_on_kill(monkeypatch=None):
         _cleanup(store)
         os.remove(vcf)
 
+
+
+def load_tests(loader, tests, pattern):
+    """Under ``python -m unittest`` too, each test_ function above, which it found none of,
+    and said OK (suite P4)."""
+    return unittest.TestSuite(unittest.FunctionTestCase(fn) for name, fn in
+                              sorted(globals().items()) if name.startswith("test_")
+                              and callable(fn))
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

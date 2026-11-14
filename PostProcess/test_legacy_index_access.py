@@ -4,9 +4,12 @@
 2.8.1 sends PAM-less indexes with a flank wider than 3 nt to a second dataset repo.
 The dedicated-PAM indexes (NRG_3 / NGG_3 / NRR_3 and their variant panels) and the
 3-nt PAM-less NNN_3 search several times faster than a wide PAM-less index pruned at
-search time, so they must keep being listed from, and downloaded from, the default
-repo: the archive, its genotype companion and the shared reference index alike, with
-no lookup in the second repo, even when that repo holds an archive of the same name.
+search time, so they must keep being downloaded from the default repo: the archive,
+its genotype companion and the shared reference index alike, with no lookup in the
+second repo, even when that repo holds an archive of the same name. Since 2.10.0 the
+catalog offers the indexes of 2.10.0 (crisprme_hf.FORMAT2_HF_REPO) instead of these, and a
+download of one of these names the index of 2.10.0 that replaces it, from the index set,
+offline.
 
 test_index_repo_routing.py pins the name -> repo function. This file pins what the
 download and the catalog actually DO with it, by recording every hub call.
@@ -32,6 +35,7 @@ import crisprme_hf as hf
 
 DEFAULT = hf.DEFAULT_HF_REPO
 GENERAL = hf.GENERAL_INDEX_HF_REPO
+FORMAT2 = getattr(hf, "FORMAT2_HF_REPO", "lucapinello/crisprme-indexes-format2")
 
 # The index archives in lucapinello/crisprme-data/indexes/ as listed by
 # `scripts/hf_sha256sums.py lucapinello/crisprme-data` on 2026-10-30.
@@ -396,45 +400,52 @@ class TheGenotypesStageBarKnowsItsSize(_Fixture):
         self.assertFalse([n for n in asked if n.startswith("genotypes_")], asked)
 
 
-class CatalogKeepsEveryLegacyIndex(_Fixture):
-    """list_available_downloads('index') is what the web Settings dropdown shows."""
+class TheCatalogOffersThisReleasesIndexes(_Fixture):
+    """list_available_downloads('index') is what the web Settings dropdown shows.
+
+    Since 2.10.0 it offers the indexes of this release, those of crisprme_hf.FORMAT2_HF_REPO
+    (index format 2, names with the guide length and side), and not the archives of 2.8.1
+    beside them (index format 1, built from data 2.10.0 builds otherwise), which a download
+    still fetches by their own names (the tests above) and which a repo named explicitly still
+    lists. Up to 2.8.1 the catalog merged the two repos of 2.8.1."""
+
+    NEW = ("20-NRR_3_hg38", "20-NRR_3_hg38+hg38_HGDP1kGP", "TTTN-23_3_hg38+hg38_HGDP1kGP",
+           "20-NNNNNNNN_3_hg38+hg38_HGDP1kGP")
 
     def _list(self, hub, repo=None):
         with mock.patch.object(hf, "_require_hf", return_value=hub):
             return hf.list_available_downloads("index", repo)
 
-    def setUp(self):
-        super().setUp()
-        self.default_files = self._repo(DEFAULT, LEGACY, GENOTYPED_PANELS)
+    def _hub(self, with_format2=True):
+        repos = {
+            DEFAULT: self._repo(DEFAULT, LEGACY, GENOTYPED_PANELS),
+            GENERAL: self._repo(GENERAL, WIDE, ("hg38_HGDP1kGP",)),
+        }
+        if with_format2:
+            files = self._repo(FORMAT2, self.NEW, ("hg38_HGDP1kGP",))
+            for comp in ("dictionaries-bundle_hg38_HGDP1kGP", "indel_genotypes_hg38_HGDP1kGP"):
+                files[f"indexes/{comp}.tar.gz"] = self._genotypes(FORMAT2, comp)
+            repos[FORMAT2] = files
+        return _FakeHub(repos)
 
-    def _default_only(self):
-        return _FakeHub({DEFAULT: self.default_files})
-
-    def test_both_repos_listed_and_every_legacy_row_kept_verbatim(self):
-        expected = {r["name"]: r for r in self._list(self._default_only(), DEFAULT)}
-        self.assertEqual(sorted(expected), sorted(LEGACY))
-        hub = _FakeHub({
-            DEFAULT: self.default_files,
-            GENERAL: self._repo(GENERAL, LEGACY + WIDE, GENOTYPED_PANELS, pad=4096),
-        })
-        rows = {r["name"]: r for r in self._list(hub)}
-        self.assertEqual({c[1] for c in hub.calls}, {DEFAULT, GENERAL})
-        self.assertEqual(sorted(rows), sorted(LEGACY + WIDE))
-        for name in LEGACY:  # a same-named general-index row never shadows the default's
-            self.assertEqual(rows[name], expected[name], name)
+    def test_only_this_release_s_repo_is_listed(self):
+        hub = self._hub()
+        rows = self._list(hub)
+        self.assertEqual(sorted(r["name"] for r in rows), sorted(self.NEW))
+        self.assertEqual(hub.repos_contacted(), {FORMAT2})
 
     def test_companions_are_not_offered_as_indexes(self):
-        rows = self._list(self._default_only())
-        self.assertFalse([r for r in rows if r["name"].startswith("genotypes_")])
-        flags = {r["name"]: r["has_genotypes"] for r in rows}
-        self.assertTrue(flags["NRG_3_hg38+hg38_HGDP1kGP"])
-        self.assertTrue(flags["NRR_3_hg38+hg38_HPRC"])
-        self.assertFalse(flags["NRG_3_hg38+hg38_mega"])
-        self.assertFalse(flags["NRG_3_hg38"])
+        rows = {r["name"]: r for r in self._list(self._hub())}
+        self.assertFalse([n for n in rows if hf._companion_kind(n)])
+        self.assertTrue(rows["20-NRR_3_hg38+hg38_HGDP1kGP"]["has_genotypes"])
+        self.assertTrue(rows["20-NRR_3_hg38+hg38_HGDP1kGP"]["has_bundle"])
+        self.assertFalse(rows["20-NRR_3_hg38"]["has_genotypes"])
 
-    def test_an_unreachable_general_index_repo_drops_no_legacy_row(self):
-        alone = self._list(self._default_only(), DEFAULT)
-        self.assertEqual(self._list(self._default_only()), alone)
+    def test_an_unreadable_format_2_repo_offers_nothing(self):
+        # the offline signal, not a catalog of 2.8.1's archives
+        hub = self._hub(with_format2=False)
+        self.assertEqual(self._list(hub), [])
+        self.assertEqual(hub.repos_contacted(), {FORMAT2})
 
     def test_an_explicit_repo_lists_only_that_repo(self):
         hub = _FakeHub({"me/mirror": self._repo("me/mirror", LEGACY, GENOTYPED_PANELS)})
@@ -442,43 +453,12 @@ class CatalogKeepsEveryLegacyIndex(_Fixture):
         self.assertEqual(hub.repos_contacted(), {"me/mirror"})
         self.assertEqual(sorted(r["name"] for r in rows), sorted(LEGACY))
 
-
-class CatalogRowsComeFromTheCopyDownloadFetches(CatalogKeepsEveryLegacyIndex):
-    """Each row describes the archive `download` would fetch for that name, so the
-    size the disk preflight uses and has_genotypes are that copy's."""
-
-    def _rows(self, repos):
-        return {r["name"]: r for r in self._list(_FakeHub(repos))}
-
-    def test_a_wide_flank_row_comes_from_the_general_index_repo(self):
-        general_files = self._repo(GENERAL, WIDE, ("hg38_HGDP1kGP",), pad=4096)
-        own = {r["name"]: r for r in self._list(_FakeHub({GENERAL: general_files}), GENERAL)}
-        stale = self._repo(DEFAULT, LEGACY + WIDE, GENOTYPED_PANELS)
-        stale_rows = {r["name"]: r for r in self._list(_FakeHub({DEFAULT: stale}), DEFAULT)}
-        for name in WIDE:  # precondition: the two copies are distinguishable
-            self.assertNotEqual(own[name]["size"], stale_rows[name]["size"], name)
-        rows = self._rows({DEFAULT: stale, GENERAL: general_files})
-        for name in WIDE:
-            self.assertEqual(rows[name], own[name], name)
-
-    def test_a_wide_flank_row_only_in_the_default_repo_is_offered(self):
-        # download falls back to the default repo, so the catalog does too
-        rows = self._rows({DEFAULT: self._repo(DEFAULT, LEGACY + WIDE, GENOTYPED_PANELS)})
-        self.assertEqual(sorted(rows), sorted(LEGACY + WIDE))
-
-    def test_a_legacy_name_only_in_the_general_index_repo_is_not_offered(self):
-        # download looks for a legacy name in the default repo only
-        rows = self._rows({
-            DEFAULT: self._repo(DEFAULT, ("NRG_3_hg38",), ()),
-            GENERAL: self._repo(GENERAL, ("NGG_3_hg38",) + WIDE, ()),
-        })
-        self.assertEqual(sorted(rows), sorted(("NRG_3_hg38",) + WIDE))
-
-    def test_an_unreadable_default_repo_offers_nothing(self):
-        # the offline signal 2.8.0 gave, not a catalog of only the slower indexes
-        hub = _FakeHub({GENERAL: self._repo(GENERAL, WIDE, ("hg38_HGDP1kGP",))})
-        self.assertEqual(self._list(hub), [])
-        self.assertIn(DEFAULT, hub.repos_contacted())
+    def test_the_repo_of_2_8_1_named_lists_its_archives(self):
+        hub = self._hub()
+        rows = {r["name"]: r for r in self._list(hub, DEFAULT)}
+        self.assertEqual(sorted(rows), sorted(LEGACY))
+        self.assertTrue(rows["NRG_3_hg38+hg38_HGDP1kGP"]["has_genotypes"])
+        self.assertFalse(rows["NRG_3_hg38+hg38_mega"]["has_genotypes"])
 
 
 class WebSettingsOffersAndRoutesLegacyIndexes(unittest.TestCase):
@@ -490,7 +470,7 @@ class WebSettingsOffersAndRoutesLegacyIndexes(unittest.TestCase):
 
     PAGE = pathlib.Path(__file__).resolve().parent.parent / "pages" / "settings_page.py"
     WANT = ("_fmt_size", "_catalog_size", "_hf_options", "add_index_hf",
-            "launch_settings_job", "_shlex_quote")
+            "launch_settings_job")
 
     def setUp(self):
         self.src = self.PAGE.read_text()
@@ -512,7 +492,7 @@ class WebSettingsOffersAndRoutesLegacyIndexes(unittest.TestCase):
             "current_working_directory": workdir,
             "_hf_catalog": lambda component: catalog if component == "index" else [],
             "_preflight_disk": lambda need: None,
-            "_launch_job_cmd": lambda cmd, stage: launched.append(cmd) or "job",
+            "_launch_job_cmd": lambda argv, stage: launched.append(argv) or "job",
             "_start": lambda job: ("started", job),
         }
         exec(compile(ast.Module(body=nodes, type_ignores=[]), str(self.PAGE), "exec"), env)
@@ -532,12 +512,13 @@ class WebSettingsOffersAndRoutesLegacyIndexes(unittest.TestCase):
             launched.clear()
             env["add_index_hf"](1, name)
             self.assertEqual(len(launched), 1, name)
-            self.assertIn(f"download --what index --index-name {env['_shlex_quote'](name)}",
-                          launched[0])
+            self.assertEqual(launched[0], ["crisprme.py", "download", "--what", "index",
+                                           "--index-name", name, "--path", workdir])
             self.assertNotIn("--hf-repo", launched[0])
 
-    def test_the_catalog_is_the_merged_one(self):
-        """_hf_catalog must ask for list_available_downloads(component) with no repo."""
+    def test_the_catalog_is_the_default_one(self):
+        """_hf_catalog must ask for list_available_downloads(component) with no repo: the
+        catalog of this release's indexes (TheCatalogOffersThisReleasesIndexes)."""
         calls = [n for n in ast.walk(self.defs["_hf_catalog"])
                  if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "list_available_downloads"]
         self.assertEqual(len(calls), 1)

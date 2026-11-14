@@ -64,28 +64,31 @@ version is here.
 ### 2a. Get the data (one time)
 
 Make a folder for your data and results, then fast-download the reference data and
-a prebuilt SpCas9 NRG (NGG+NAG) index from the CRISPRme mirror (minutes, not the multi-hour
-legacy setup):
+a prebuilt SpCas9 NRR (NGG, NAG, NGA, NAA; the default PAM since 2.10.0) index from the
+CRISPRme mirror (minutes, not the multi-hour legacy setup):
 
 ```bash
 mkdir -p ~/crisprme && cd ~/crisprme
 
 # reference genome, annotations, PAMs and sample lists
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what all --path /DATA
 
-# a ready-made SpCas9 NRG (NGG+NAG) reference index (skips a long index build)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
-  crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
+# a ready-made SpCas9 NRR reference index (skips a long index build)
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
+  crisprme.py download --what index --index-name 20-NRR_3_hg38 --path /DATA
 
 # the recommended default variant-aware index (HGDP + 1000 Genomes, 4,091 samples, re-phased)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
+  crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA
 ```
+
+(`:latest` is the newest release, whose index names these are; to pin a release instead, see
+the [Docker Quickstart](DOCKER_QUICKSTART.md)'s note on reproducibility.)
 
 This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,
 `VCFs/`, `samplesIDs/`, `genome_library/`, `Results/`) inside `~/crisprme`. The
-pre-downloaded `NRG_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
+pre-downloaded `20-NRR_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
 4,091 samples — the recommended default) already makes the default web
 search variant-aware. Sample-level analyses / named carriers / personal risk cards
 come from the **genotype store bundled with that index** (fetched by `download --what
@@ -101,7 +104,7 @@ computer:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.8.1 crisprme.py web-interface
+  pinellolab/crisprme:latest crisprme.py web-interface
 ```
 
 Keep this terminal open for the session; press **Ctrl+C** to stop the server.
@@ -280,7 +283,7 @@ columns, such as the hosted `hg38_mega` VCFs) is listed too, but **Submit** refu
 search of it, built here or not, and the note under the bulge options says why: a search
 reports its variants only through a per-dataset allele-frequency registry, which a build
 here does not make. To search the mega variants, download the published
-`NRG_3_hg38+hg38_mega` index instead, which ships one. **Submit** refuses a search of a
+`20-NRR_3_hg38+hg38_mega` index instead, which ships one. **Submit** refuses a search of a
 dataset whose sample list is missing too, and the note says so, with how to get one:
 removing a VCF dataset in Settings takes the list it wrote for it and leaves the variant
 index built from it, and the dataset stays listed here only if its name begins with the
@@ -295,11 +298,14 @@ same name, to search that index again.
 
 By default the form exposes a single **Maximum edits** slider — the total number
 of differences (mismatches + DNA/RNA bulges) allowed between a guide and an
-off-target (default **6**, which resolves to 4 mismatches + 1 DNA + 1 RNA bulge;
-raise it for a deeper, slower search). This is all you
-need for a quick search.
+off-target (default **6**, which resolves to 4 mismatches + 1 DNA + 1 RNA bulge, the
+default budget, as on the command line). Lower it for a faster, narrower search; the
+slider caps the total of the per-type caps below, so a deeper search (more mismatches,
+or 2 bulges of a type) is set in **Advanced options**. This is all you need for a quick
+search.
 
-Open **Advanced options** to set the per-type caps individually instead:
+Open **Advanced options** to set the per-type caps individually instead (defaults: 4
+mismatches, 1 DNA bulge, 1 RNA bulge):
 
 - **Mismatches** — the maximum number of base mismatches between the spacer and
   the protospacer. The web interface supports up to **6 mismatches**.
@@ -310,14 +316,22 @@ Open **Advanced options** to set the per-type caps individually instead:
 
 In Advanced mode a candidate must satisfy **each** per-type cap **and** the overall
 max-total-edits budget. Bulges can be consecutive (e.g., `NN--NN`) or interleaved
-(e.g., `NN-N-NN`).
+(e.g., `NN-N-NN`). On the indexes CRISPRitz 2.10.0 builds, which code every allele, 2 DNA or
+2 RNA bulges make the variant search of the dense loci (the immunoglobulin loci) explode, to
+many hours or out of memory, unless the total budget is 3 or less: the job's
+`log_verbose.txt` says so before its variant search. (The **Maximum edits** slider alone never
+asks for more than 1 bulge of each type.) CRISPRme 2.10.1 is planned to search, in those loci,
+the samples' own haplotypes in place of the variant genome's combinations (the haplotype scan),
+with the same indexes ([Troubleshooting](TROUBLESHOOTING.md) §14).
 
 Bulge searches need a genome index. If no installed **reference** index supports the
 bulges you ask for, the search first builds one from the installed genome (once: about
 20 to 35 minutes for hg38), and later searches reuse it. A **variant** panel offers only
 the bulges its installed variant index supports: with no variant index yet, only a
-0-bulge search, and the first one prepares the variant genome and a 0-bulge index of it
-(this can take hours on a full genome), if the panel's VCF files, one per chromosome, or its
+0-bulge search, and the first one prepares the variant genome and the index of its indels
+(this can take hours on a full genome; a search with no bulges scans the variant genome
+itself, and since 2.10.0 builds no index of it, nor of the reference genome), if the panel's
+VCF files, one per chromosome, or its
 enriched genome are installed; without them the search stops and says what to do. A panel
 added as a single multi-chromosome VCF file is split per chromosome only when its index is
 built, so build that one first: until then **Submit** refuses its search. To search a panel with bulges, build its index
@@ -349,13 +363,18 @@ set automatically from the index you picked:
   "Population-level" opt-out)** — reports each off-target once, using a worst-possible
   representative of the variants in its window. It never misses a candidate off-target and works
   on any index, so it is the default on the sites-only *mega* index; on a genotyped+phased panel
-  pick it (or pass `--population-level`) to opt out of per-sample for a fast worst-case screen
-  (e.g. a very dense / high-edit / genome-wide search). It does **not** tell you which
-  individuals carry a site.
+  pick it (or pass `--population-level`) to opt out of per-sample for each window's worst case
+  (on the indexes CRISPRitz 2.10.0 builds it is slower than per-sample on a dense panel of many
+  samples such as the default HGDP + 1000 Genomes one, and can be faster on a small one such as
+  HPRC). It does **not** tell you which individuals carry a site.
 
-Per-sample is a **genotype-resolution** dial, **not** a speed dial: for a single guide the
-runtimes are comparable. It **requires a genotyped index** (HGDP + 1000 Genomes [the default],
-or HPRC); on the sites-only *mega* index there are no genotypes to resolve, so the option is
+Per-sample is a **genotype-resolution** dial, **not** a speed dial: which of the two is faster
+depends on the panel. On the indexes CRISPRitz 2.10.0 builds, which code every allele,
+per-sample is the faster on a dense panel of many samples such as the default HGDP + 1000
+Genomes one (its haplotype pre-check skips the dense windows' raw targets nobody carries);
+population-level can be the faster on a small panel such as HPRC. It **requires a genotyped
+index** (HGDP +
+1000 Genomes [the default], or HPRC); on the sites-only *mega* index there are no genotypes to resolve, so the option is
 greyed out and the search automatically uses population-level. (See "Understanding CONFIRMED vs
 PUTATIVE and carriers" in the results section for how these labels appear in the report.)
 
@@ -437,7 +456,8 @@ making it easier to locate a specific search in the Results listing.
 Once all required fields in Steps 1 and 2 are complete, click the **Submit** button
 at the bottom of the form. The interface validates the inputs and highlights any
 missing required fields in red. A genome or PAM selected that is not installed (a fresh
-data folder has none, though **Load Example** selects `hg38` and `20bp-NRG-SpCas9`), or a
+data folder has none, though **Load Example** then selects `hg38` and `20bp-NRR-SpCas9`; with
+them installed it selects those, or the genome and SpCas9 PAM that are), or a
 variant dataset that is not installed for the genome, is listed too, with where to add one
 in **Settings**. If validation passes, the job is
 queued and the interface navigates automatically to the Job Status page.
@@ -454,7 +474,7 @@ queued and the interface navigates automatically to the Job Status page.
 > tmux new -s crisprme
 > cd ~/crisprme      # your data folder
 > docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
->   pinellolab/crisprme:v2.8.1 crisprme.py web-interface
+>   pinellolab/crisprme:latest crisprme.py web-interface
 > # Detach with Ctrl+B then D — the server continues running.
 > # (Conda users: mamba activate crisprme && crisprme.py web-interface)
 > ```
@@ -813,7 +833,9 @@ A quick reference for the terms and columns in the **Custom Ranking** tab and th
   **NA** on the sites-only *mega* index.
 
 **Key columns**
-- **REF/ALT_origin** — REF = present on the reference genome; ALT = created by a variant allele.
+- **REF/ALT_origin** — REF = the alignment reported is the reference genome's; ALT = it is a
+  variant one: a variant either creates the site (`Not_found_in_REF` `y`) or changes a
+  reference site, for example to fewer mismatches.
 - **Variant** — the variant(s) as `chrom;pos;ref;alt`.
 - **Observed (≥1 carrier)** — the haplotype is seen in ≥1 genotyped sample (vs a worst-case
   reconstruction).
@@ -877,7 +899,7 @@ variants.
 2. **Reference-only selected** — keep the pre-selected **variant** index (not **Reference
    only**) to get variant off-targets.
 3. **Variant index not installed** — re-run
-   `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA`
+   `crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA`
    (the recommended default panel).
 4. **Confirm success** — `Results/<name>/log_error_no_check.txt` is empty and
    `*.integrated_results.tsv` is non-empty. (A job that runs to the end renames its
@@ -892,7 +914,11 @@ variants.
 
 **Cause:** Docker ran out of memory (OOM). Signs: the job stops advancing,
 `log_error.txt` is empty, and the terminal returns to the prompt (or exits with
-code 137). A genome-wide 1000G+HGDP search is the heaviest case; give it enough RAM.
+code 137). Where the kernel killed the index search alone, the container keeps running and
+`log_error.txt` holds `ERROR: searchTST (index search) failed (signal SIGKILL)`
+([TROUBLESHOOTING §14](TROUBLESHOOTING.md#14-a-search-above-1-dna--1-rna-bulge-warns-then-runs-for-hours-or-runs-out-of-memory));
+the steps below apply to both. A genome-wide 1000G+HGDP search is the heaviest case; give it
+enough RAM.
 
 **Steps to resolve:**
 
@@ -919,7 +945,9 @@ code 137). A genome-wide 1000G+HGDP search is the heaviest case; give it enough 
    (macOS/Linux: `docker info --format '{{.MemTotal}}' | awk '{printf "%.1f GB\n", $1/1073741824}'`)
 2. Delete the incomplete `Results/<name>/` folder and resubmit.
 3. Or reduce the cost of the search: select **Reference only** or lower
-   **Maximum edits**.
+   **Maximum edits**. A search of a variant index of 2.10.0 with 2 DNA or 2 RNA bulges in
+   **Advanced options** can need more memory than any laptop has, in the immunoglobulin loci
+   (see Step 2, Search thresholds): set the bulges back to 1 and raise the mismatches instead.
 
 ---
 

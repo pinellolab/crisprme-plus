@@ -326,11 +326,19 @@ class PerHaplotypeCases(unittest.TestCase):
         self.assertEqual(got, [("A", 0, ("S1",)), ("c", 1, ("S3",)), ("t", 1, ("S1", "S2"))])
 
     def test_two_alts_on_one_slot_is_not_a_haplotype(self):
+        """Two ALTs of one position on the indel's slot: PUTATIVE, among those ALTs -- its
+        two ALT copies fill a diploid's slots, so the reference is no option (METHODS
+        section 4); the indel on the other slot, which holds the reference, is exact."""
         guide = GUIDE + "NNN"
         target = GUIDE[:5] + "y" + GUIDE[6:] + "TGG"
         cols = [_col(5, "C", {"A": {"S1": "1|0"}, "T": {"S1": "1|0"}}, "Y")]
         rows = _resolve(guide, target, cols, {"S1": "1|0"})
         self.assertEqual([r["phase"] for r in rows], [isc.PUTATIVE])
+        cols = [_col(5, "C", {"A": {"S1": "1|0", "S2": "1|0"},
+                              "T": {"S1": "1|0", "S2": "1|0"}}, "Y")]
+        exact, putative = isc.resolve_carriers(cols, {"S1": "1|0", "S2": "0|1"})
+        self.assertEqual(putative, {(frozenset("AT"),): {"S1"}})
+        self.assertEqual(exact, {("C",): [{"S2"}, 1]})
 
     def test_changes_span(self):
         cs = isc.changes_span
@@ -360,8 +368,8 @@ class PerHaplotypeCases(unittest.TestCase):
         A>ACTT at 148517302, whose only carrier HG00344 also holds T>TC at 148517301
         on the same slot (a C inserted next to the anchor, inside the target)."""
         dna = "AgTaAGAAgMaGTAAG-AGGCTRG"
-        real_of = isc.build_offset_to_real(dna, 48764595, "-", 48764590, 148517276,
-                                           "A", "ACTT")
+        real_of = isc.build_offset_to_real(dna, 48764595, "-", 48764590, 148517302,
+                                           148517276, "A", "ACTT")
         reals = [r for r in real_of if r is not None]
         self.assertEqual((min(reals), max(reals)), (148517281, 148517300))
         self.assertFalse(isc.changes_span(148517301, "T", "TC", 148517281, 148517300))
@@ -946,7 +954,13 @@ class TheAnalyzerUsesIt(unittest.TestCase):
                       self._src("analisi_indels_NNN.py"))
         self.assertIn('max_total_edits=${13:--1}', self._src("analisi_indels_NNN.sh"))
         self.assertIn('max_total_edits=${14:--1}', self._src("post_analisi_indel.sh"))
-        self.assertIn("{chrom} {max_total_edits}", self._src("pool_post_analisi_indel.py"))
+        # (since 2.10.0 an argument list, the cap after the chromosome, then the stage)
+        self.assertIn("annotation_file, pam_file, dict_folder, final_res, final_res_alt, chrom,\n"
+                      "            str(max_total_edits), stage]",
+                      self._src("pool_post_analisi_indel.py"))
+        self.assertIn('max_total_edits=${14:--1}\n# 2.10.0, option P: all (default), cluster or '
+                      'finish (analisi_indels_NNN.sh)\nstage=${15:-all}',
+                      self._src("post_analisi_indel.sh"))
         sub = self._src("submit_job_automated_new_multiple_vcfs.sh")
         self.assertIn('$final_res $final_res_alt $ncpus "$max_total_edits"', sub)
 

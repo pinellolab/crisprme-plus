@@ -64,16 +64,72 @@ def function_based_modules():
     return found
 
 
+def uncommented(text):
+    """``text`` without its comment lines: what a comment names, no job runs (unit-tests.yml's
+    paths comment names a dozen test modules)."""
+    return "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+
+
+def skipped_tests(case):
+    """The names of the tests of TestCase ``case`` that skip, run here, and how many it has:
+    a skip of the class, of a method, or one a test asks for as it runs."""
+    result = unittest.TestResult()
+    unittest.defaultTestLoader.loadTestsFromTestCase(case).run(result)
+    return [test.id().rsplit(".", 1)[-1] for test, _why in result.skipped], result.testsRun
+
+
+@unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+class APullRequestBuildsOneEngine(unittest.TestCase):
+    """Before CRISPRitz's tag exists, the image builds of a pull request's CI pass the commit of
+    the CRISPRitz branch the release is tested with (docs/RELEASE_CHECKLIST.md, "The engine pin
+    of a pull request's CI goes"): docker-multiarch.yml and web-e2e.yml each pass
+    `crispritz_ref=<commit>`, under a comment `(remove at release)`, and the CHANGELOG's pin
+    entry names that commit. Re-pinned in one workflow and not in the other, the two jobs would
+    test two engines; once the tag is pushed both lines go, and every build reads the
+    Dockerfile's `ARG crispritz_ref`."""
+
+    PIN = re.compile(r"crispritz_ref=([0-9a-f]+)\b")
+
+    def pins(self):
+        return {name: self.PIN.findall(uncommented(workflow(name)))
+                for name in ("docker-multiarch.yml", "web-e2e.yml")}
+
+    def test_the_two_workflows_pass_one_commit_or_none(self):
+        pins = self.pins()
+        found = {sha for shas in pins.values() for sha in shas}
+        if not found:
+            return   # released: every build reads the Dockerfile's tag
+        self.assertEqual(len(found), 1, pins)
+        sha = found.pop()
+        self.assertRegex(sha, r"^[0-9a-f]{40}$")
+        for name, shas in pins.items():
+            self.assertEqual(shas, [sha], name)
+            lines = workflow(name).splitlines()
+            at = next(i for i, ln in enumerate(lines) if "crispritz_ref=" + sha in ln)
+            self.assertIn("(remove at release)", lines[at - 1], name)
+
+    def test_the_changelog_names_the_commit(self):
+        # by the CRISPRitz branch and the commit: a pull request's head moves with the branch's
+        # later commits (CRISPRitz's docs-only commits after 4ded5e6), the pin does not
+        found = {sha for shas in self.pins().values() for sha in shas}
+        changelog = read(REPO / "CHANGELOG.md")
+        for sha in found:
+            self.assertRegex(changelog, r"CRISPRitz feat/\d+\.\d+\.\d+ commit %s\b" % sha[:7])
+
+
 @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
 class TheUnitTestsJobHasTheTimeToFinish(unittest.TestCase):
     """Its limit was 10 minutes. The hosted job took 523 s of those 600 at aa9c54b, and
     side by side under one load the steps of the trial integration of the fixes after it
     took 413 s against 334 s, which predicts about 640 s: the job would be cancelled, and
-    a tag needs it green."""
+    a tag needs it green. Raised to 20 minutes then, it was cancelled at those 20 minutes on
+    2.10.0's ca74f63 (pull request #110, run 43439883388), in its second-last step, with no
+    step failed: its steps take more than 20 minutes on the hosted runner now, and the limit
+    is 45."""
 
-    def test_its_limit_is_at_least_twenty_minutes(self):
+    def test_its_limit_is_at_least_forty_five_minutes(self):
         limit = re.search(r"^\s*timeout-minutes:\s*(\d+)\s*$", workflow("unit-tests.yml"), re.M)
-        self.assertGreaterEqual(int(limit.group(1)), 20)
+        self.assertGreaterEqual(int(limit.group(1)), 45)
 
 
 @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
@@ -156,13 +212,32 @@ class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
         # through these scans. A change to one does not start web-e2e, so unit-tests, which
         # lists them, must run the scans, not skip them, or no job would check the change
         import test_complete_search_flags as flag_gate
-        steps = "\n".join(ln for ln in workflow("unit-tests.yml").splitlines()
-                          if not ln.lstrip().startswith("#"))
+        steps = uncommented(workflow("unit-tests.yml"))
         self.assertRegex(steps, r"python -m unittest (?:[\w.]+\s+)*?test_complete_search_flags(?![\w.])")
+        # each scan run here: a skip of one of its methods went unseen, as only a skip of
+        # the class was looked at (R6B cigate F1)
         for scan in ("TestCallersUseAcceptedFlags", "TestDocumentedCommandsPassTheFlagChecks",
                      "TestNoDocumentedCommandIsABareCrisprme"):
             with self.subTest(scan=scan):
-                self.assertFalse(getattr(getattr(flag_gate, scan), "__unittest_skip__", False))
+                skipped, tests = skipped_tests(getattr(flag_gate, scan))
+                self.assertGreater(tests, 0)
+                self.assertEqual(skipped, [])
+
+    def test_a_skip_of_one_method_is_seen(self):
+        class Scan(unittest.TestCase):
+            def test_runs(self):
+                pass
+
+            @unittest.skipUnless(False, "a dependency missing")
+            def test_skipped(self):
+                pass
+
+            def test_skips_as_it_runs(self):
+                self.skipTest("nothing to scan")
+
+        self.assertEqual(skipped_tests(Scan), (["test_skipped", "test_skips_as_it_runs"], 3))
+        self.assertEqual(skipped_tests(unittest.skip("all")(Scan))[0],
+                         ["test_runs", "test_skipped", "test_skips_as_it_runs"])
 
     def test_web_e2e_runs_on_every_repository_module_the_pages_import(self):
         # the web unit tests and the browser tests load the pages, and so all they import
@@ -189,11 +264,13 @@ class TheTestsThatSkipInTheLightJobRunInCI(unittest.TestCase):
     post_process.sh ran one test and skipped it, the impg truth tests, the flag-gate behaviour
     tests and test_app_settings' start of the web app skipped too, and test_assembly_annotate
     was in no workflow. All pass in the image, where no job ran them. test_web_shell_safety's
-    checks of the web pages, which need Dash and bedtools, skip there too."""
+    checks of the web pages, which need Dash and bedtools, skip there too, and so does
+    test_no_code_from_files' run of crisprme.py --debug, which needs Biopython (2.10.0), and
+    test_web_no_links, the pages through the real Dash server (2.10.0)."""
 
     MODULES = ("test_assembly_annotate", "test_assembly_reconcile", "test_complete_search_flags",
                "test_post_process_tempdir", "test_index_resolution", "test_app_settings",
-               "test_web_shell_safety")
+               "test_web_shell_safety", "test_no_code_from_files", "test_web_no_links")
 
     def in_image_step(self):
         text = workflow("web-e2e.yml")
@@ -236,14 +313,24 @@ class TheTestsThatSkipInTheLightJobRunInCI(unittest.TestCase):
         self.assertEqual(self.guard(log), 0)
 
     def test_every_test_module_is_named_in_a_workflow(self):
-        text = "\n".join(read(p) for p in WORKFLOWS.glob("*.yml"))
+        # not in a comment, which runs nothing: a module whose run line went, and which the
+        # paths comment of unit-tests.yml names, passed (R6B cigate F2)
+        text = "\n".join(uncommented(read(p)) for p in WORKFLOWS.glob("*.yml"))
         unnamed = [p.stem for p in sorted((REPO / "PostProcess").glob("test_*.py"))
                    if not re.search(rf"\b{p.stem}\b", text)]
         self.assertEqual(unnamed, [])
 
+    def test_a_module_a_comment_names_is_not_taken_for_one_a_job_runs(self):
+        text = uncommented("    paths:\n"
+                           "      # test_listed reads assets/ (a comment of its paths)\n"
+                           "      - \"assets/**\"\n"
+                           "        run: python -m unittest test_run -v\n")
+        self.assertIn("test_run", text)
+        self.assertNotIn("test_listed", text)
+
     def test_a_function_based_module_runs_as_a_script(self):
         # `python -m unittest` finds no test in these, and says OK: 0 tests, a false pass
-        text = "\n".join(read(p) for p in WORKFLOWS.glob("*.yml"))
+        text = "\n".join(uncommented(read(p)) for p in WORKFLOWS.glob("*.yml"))
         modules = function_based_modules()
         self.assertTrue(modules)
         for name in modules:
@@ -264,7 +351,8 @@ class TheDocumentedSelfTestRunsEveryBenchmark(unittest.TestCase):
     """Every documented self-test and the CI job set CRISPRME_SKIP_HEAVY=1, on the claim
     that the bulge-2 index builds need more than 16 GB, so each left out what it could have
     checked. Measured: 3.66 GB peak RSS, and a pass in 16 GiB, 4 CPUs, no swap. The variable
-    stays as an opt-out for very small machines, so it may be named, not put in a command."""
+    stays as an opt-out that saves time on a slow machine, so it may be named, not put in a
+    command."""
 
     SURFACES = ("README.md", "docs/DOCKER_QUICKSTART.md", "crisprme.py", "install_from_source.sh",
                 "PostProcess/validate.py", "test/benchmark/README.md")
@@ -303,6 +391,32 @@ class TheDocumentedSelfTestRunsEveryBenchmark(unittest.TestCase):
                 got = subprocess.run(["bash", "-e", "-c", check], cwd=d, capture_output=True, text=True)
                 self.assertEqual(got.returncode, status, got.stdout)
 
+    def test_the_opt_out_is_said_to_save_time_not_memory(self):
+        # the run's peak is the variant enrichment, which every benchmark needs, and the
+        # bulge-2 builds and searches stay under it: "an opt-out for very small machines"
+        # read as one for a machine short of memory, which it does not help (R6B cigate F4)
+        for name in ("README.md", "test/benchmark/README.md", "test/benchmark/benchmarks.json",
+                     "PostProcess/complete_test.py", "PostProcess/validate.py"):
+            with self.subTest(surface=name):
+                text = " ".join(self.text(name).replace("#", " ").replace(">", " ").split())
+                self.assertNotIn("small machine", text)
+                self.assertRegex(text, r"CRISPRME_SKIP_HEAVY=1[^.]*save[^.]*time on a slow machine")
+        for name in ("README.md", "test/benchmark/README.md", "test/benchmark/benchmarks.json"):
+            with self.subTest(surface=name):
+                self.assertRegex(" ".join(self.text(name).replace(">", " ").split()),
+                                 r"slow machine, not memory")
+
+    @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+    def test_a_job_its_time_limit_ends_uploads_its_logs(self):
+        # each try of complete-test runs every benchmark, and up to three tries can reach the
+        # job's time limit, which cancels it: the upload ran on failure() alone, so such a
+        # job kept no log of what failed (R6B cigate F3)
+        text = workflow("validate-benchmarks.yml")
+        start = text.index("- name: Upload logs on failure")
+        end = text.find("- name:", start + 1)
+        step = text[start:end if end > 0 else len(text)]
+        self.assertRegex(step, r"\n\s+if: failure\(\) \|\| cancelled\(\)\n")
+
     def test_the_expected_output_is_every_benchmark_passed(self):
         expected = f"{len(self.benchmarks())} passed, 0 failed, 0 skipped"
         for name in ("README.md", "docs/DOCKER_QUICKSTART.md"):
@@ -318,6 +432,72 @@ class TheDocumentedSelfTestRunsEveryBenchmark(unittest.TestCase):
         for name in names:
             with self.subTest(surface=name):
                 self.assertIsNone(self.OLD_CLAIM.search(self.text(name)))
+
+
+class TheRealDataIndelCheckRunsOnTheSelfTest(unittest.TestCase):
+    """validate-benchmarks.yml runs scripts/check_indel_rows.py on the chr22 self-test output
+    complete-test just wrote: soundness of every benchmark with its own budget, then
+    completeness of cas9_sg1617, and a gating finding (exit 1) fails the job."""
+
+    NAME = '- name: "Independent real-data indel check on the chr22 self-test output'
+    SPEC = re.compile(r"(\w+):([\w.-]+\.txt):(\d+):(\d+):(\d+):(\d+):([\w.-]+\.txt)")
+
+    def step(self):
+        text = workflow("validate-benchmarks.yml")
+        start = text.index(self.NAME)
+        return text, text[start:text.index("- name:", start + 1)]
+
+    @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+    def test_it_runs_after_validate_test(self):
+        text, _step = self.step()
+        self.assertLess(text.index("- name: validate-test (chr22)"), text.index(self.NAME))
+
+    @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+    def test_it_checks_every_benchmark_with_its_own_budget(self):
+        _text, step = self.step()
+        specs = {m[0]: m[1:] for m in self.SPEC.findall(step)}
+        data = json.loads(read(REPO / "test/benchmark/benchmarks.json"))
+        self.assertEqual(set(specs), {b["name"] for b in data["benchmarks"]})
+        for b in data["benchmarks"]:
+            with self.subTest(benchmark=b["name"]):
+                t = dict(data["thresholds"], **b.get("thresholds", {}))
+                self.assertEqual(specs[b["name"]], (
+                    b["pam_name"], str(t["mm"]), str(t["bDNA"]), str(t["bRNA"]),
+                    str(t.get("max_total_edits", 6)), b["guide_file"]))
+
+    @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+    def test_soundness_then_completeness_and_a_gating_finding_fails(self):
+        _text, step = self.step()
+        self.assertIn("set -euo pipefail", step)
+        self.assertNotIn("|| true", step)
+        self.assertNotIn("continue-on-error", step)
+        self.assertEqual(step.count("python3 scripts/check_indel_rows.py"), 2)
+        sound = step[:step.index("completeness (cas9_sg1617")]
+        comp = step[step.index("completeness (cas9_sg1617"):]
+        self.assertIn("--mode soundness", sound)
+        self.assertIn("--mode completeness", comp)
+        self.assertIn("crisprme-test-out_cas9_sg1617", comp)
+        self.assertIn("--max-total-edits 6", comp)
+
+    @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+    def test_every_benchmark_is_checked_before_the_step_fails(self):
+        """A gating finding of one benchmark is recorded (fail=1) and the step fails once
+        all are checked, so the uploaded findings hold every benchmark's (set -e stopped
+        at the first, and the artifact lacked the others')."""
+        _text, step = self.step()
+        self.assertIn("fail=0", step)
+        self.assertEqual(step.count("|| fail=1"), 2)
+        self.assertEqual(step.count("python3 scripts/check_indel_rows.py"), 2)
+        for call in step.split("python3 scripts/check_indel_rows.py")[1:]:
+            self.assertIn("|| fail=1", call.split("\n          [a-z]")[0])
+        tail = step[step.rindex("|| fail=1"):]
+        self.assertIn('if [ "$fail" -ne 0 ]', tail)
+        self.assertIn("exit 1", tail)
+
+    @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+    def test_a_change_to_the_checker_starts_the_job(self):
+        self.assertTrue(listed("scripts/check_indel_rows.py",
+                               pull_request_paths("validate-benchmarks.yml")))
 
 
 class TheReleaseGateLeavesNothingSkipped(unittest.TestCase):
@@ -430,16 +610,17 @@ class TheReleaseGateLeavesNothingSkipped(unittest.TestCase):
                         self.assertIn('echo "ORACLE PASS"', oracle)
 
     def test_its_index_flex_grep_fails_an_engine_without_prune_pam(self):
-        # that engine's run passes every cell, the two K=8 ones by refusing, saying so
+        # that engine's run passes every cell, the three K=8 ones by refusing, saying so (a
+        # search with no --prune-pam prunes by itself where the engine can, since 2.10.0)
         flex = read(REPO / "test/index_flex/check_index_flex.py")
         refused = re.findall(r'say\(\s*"((?:K=8|complete-test on K=8)[^"]*engine without[^"]*)"',
                              flex)
-        self.assertEqual(len(refused), 2, refused)
+        self.assertEqual(len(refused), 3, refused)
         line = next(ln for ln in self.gate_blocks()[0].splitlines()
                     if ln.startswith('grep -q "^INDEX FLEX PASS"'))
         log_old = "".join(f"PASS  {cell}\n" for cell in refused) + "INDEX FLEX PASS\n"
         log_new = ("PASS  K=8 with --prune-pam: same results as a dedicated index\n"
-                   "PASS  complete-test on K=8: same results as on NRG, and no PAM file left\n"
+                   "PASS  complete-test on K=8: same results as on NRR, and no PAM file left\n"
                    "INDEX FLEX PASS\n")
         for log, said in ((log_old, "GATE_FAILED"), (log_new, ""),
                           (log_new.replace("INDEX FLEX PASS", "1 cell(s) failed"), "GATE_FAILED")):

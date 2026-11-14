@@ -11,7 +11,7 @@ up, move, or share any part of it with your normal file manager.
 | **CLI** | `--path <DIR>` on every command (defaults to the current directory). All data + results land under `<DIR>`. |
 | **Docker** | `docker run -v "$PWD:/DATA" -w /DATA …` — your host `$PWD` is mounted as `/DATA` in the container. |
 | **Apptainer / Singularity** | `apptainer run --bind "$PWD:/DATA" --pwd /DATA …` — same idea. |
-| **One-click app / web** | asks *where to store the data* on first launch (a ~45 GB download → ~98 GB on disk; keep ~150 GB free — a reference-only setup is far smaller, ~25 GB) and **remembers** it. |
+| **One-click app / web** | asks *where to store the data* on first launch (a ~70 GB download → ~150 GB on disk; keep ~200 GB free — a reference-only setup is far smaller, ~44 GB) and **remembers** it. |
 
 Because it is a normal host directory, you have full read/write access to it at all times.
 
@@ -27,7 +27,7 @@ Because it is a normal host directory, you have full read/write access to it at 
 │  ├─ Dictionaries/     variant registry + per-sample genotype tiers      (companions to the variant indexes)
 │  ├─ samplesIDs/       sample-ID lists for the variant panels
 │  ├─ Annotations/      functional + cancer annotations (DHS, ENCODE SCREEN, GENCODE, IntOGen, COSMIC)
-│  ├─ PAMs/             nuclease PAM definitions (NGG, NRG, NNGRRT, …)
+│  ├─ PAMs/             nuclease PAM definitions (NRR, the default; NGG, NRG, NNGRRT, …)
 │  ├─ Assemblies/       personal / HPRC diploid assemblies, one folder per individual   download --what assembly
 │  ├─ LiftoverFiles/    chain + chromAlias files used to reconcile a personal assembly to GRCh38
 │  ├─ haplotype_genomes/     one link per personal-assembly haplotype, named after it      made by assembly-search
@@ -49,10 +49,12 @@ dictionaries (`Dictionaries/`) come with its index download (`download --what in
 with its enriched genome (`Genomes/<genome>+<dataset>/`) and its index by `build-index-only --vcf`;
 `complete-search --vcf` refuses a dataset that has none yet and says how to get them. From the web,
 a search without bulges of a dataset that has only its VCFs (the form then offers no bulges)
-enriches the genome and builds the dictionaries and index itself. A personal-assembly
+enriches the genome and builds the dictionaries and the index of its indels itself (a search
+without bulges scans the variant genome, and builds no index of it). A personal-assembly
 search (`assembly-search`) builds an index for each haplotype, named after the individual and the
-haplotype plus a hash of the haplotype's folder (e.g. `genome_library/NRG_2_HG01255_paternal_5aeb0fc6`
-and `NRG_2_HG01255_maternal_067bdb25`, each the size of a reference index), searches each haplotype
+haplotype plus a hash of the haplotype's folder (e.g. `genome_library/20-NRR_2_HG01255_paternal_5aeb0fc6`
+and `20-NRR_2_HG01255_maternal_067bdb25`, each the size of a reference index; before 2.10.0 named
+without the guide length, `NRG_2_HG01255_paternal_5aeb0fc6`), searches each haplotype
 through a link of that name in `haplotype_genomes/`, and keeps the alignments of the two haplotypes
 in `haplotype_alignments/`. Deleting an individual (Settings → Data Manager → Delete → *Personal
 assembly*) also removes its haplotype indexes and links; the alignments stay, and

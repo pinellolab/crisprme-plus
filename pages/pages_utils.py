@@ -10,6 +10,7 @@ from glob import glob
 from dash import html
 import pandas as pd
 
+import contextlib
 import subprocess
 import base64
 import sys
@@ -29,6 +30,7 @@ if _POSTPROCESS_PATH not in sys.path:
     sys.path.insert(0, _POSTPROCESS_PATH)
 import personal_assembly  # noqa: E402
 import index_fit  # noqa: E402
+import safe_files  # noqa: E402  (no link another user put in the data folder is followed)
 
 
 # Define DNA alphabet
@@ -417,16 +419,33 @@ _JOB_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 def results_job_dir(job_id) -> Optional[str]:
     """``<cwd>/Results/<job_id>`` when that is a job folder and ``job_id`` has the form of
     the search form's ids, else None: refuses a traversal (``../x``), an absolute path, a
-    name with any other character (a shell reads some), a non-string, and a folder whose
-    real path leaves Results/ (a link)."""
+    name with any other character (a shell reads some), a non-string, and a job folder that
+    is a link, wherever it leads (safe_files: Results/ itself may be a link the user made
+    onto a volume). The files in it are read through safe_files, which follows no link
+    there either."""
     if not isinstance(job_id, str) or not _JOB_ID_RE.fullmatch(job_id):
         return None
-    root = os.path.realpath(os.path.join(current_working_directory, RESULTS_DIR))
     jobdir = os.path.join(current_working_directory, RESULTS_DIR, job_id)
-    real = os.path.realpath(jobdir)
-    if not os.path.isdir(jobdir) or real == root or os.path.commonpath([root, real]) != root:
+    if not safe_files.is_dir(jobdir, current_working_directory):
         return None
     return jobdir
+
+
+def _first_line(path: str, root: Optional[str] = None) -> str:
+    """The first line of the file ``path`` of the data folder (``root``, by default the web
+    app's), read with no link another user put followed (safe_files)."""
+    with safe_files.open_read(path, root or current_working_directory) as fh:
+        return fh.readline()
+
+
+def _open_gz_text(path: str):
+    """The gzipped file ``path`` of the data folder opened as text (errors replaced), read with
+    no link another user put followed (safe_files)."""
+    fd = safe_files.open_fd(path, current_working_directory)
+    try:  # (gzip leaves a file object it is given open: it opens its own, of this very file)
+        return gzip.open(safe_files.fd_path(fd), "rt", errors="replace")
+    finally:
+        os.close(fd)
 
 
 def write_json(dropdown_value: str, job_id: str) -> None:
@@ -453,13 +472,9 @@ def write_json(dropdown_value: str, job_id: str) -> None:
     if job_directory is None:
         raise FileNotFoundError(f"No job folder Results/{job_id}")
     dropdown_json_file = os.path.join(job_directory, ".dropdown.json")
-    try:
-        handle = open(dropdown_json_file, mode="w")
-        handle.write(f"{dropdown_value}")
-    except OSError as e:
-        raise e
-    finally:
-        handle.close()
+    # a link another user put at its name is replaced, never written through (safe_files)
+    safe_files.write_text(dropdown_json_file, safe_files.job_root(job_directory),
+                          f"{dropdown_value}")
 
 
 def read_json(job_id: str) -> str:
@@ -482,19 +497,14 @@ def read_json(job_id: str) -> str:
     if job_directory is None:
         raise FileNotFoundError(f"No job folder Results/{job_id}")
     dropdown_json_file = os.path.join(job_directory, ".dropdown.json")
-    if not os.path.isfile(dropdown_json_file):
-        raise FileNotFoundError(f"Unable to locate {dropdown_json_file}")
-    try:
-        handle = open(dropdown_json_file, mode="r")
-        while True:
-            line = handle.readline().strip()
-            if not line:
-                break
-            filter_criterion = line
-    except OSError as e:
-        raise e
-    finally:
-        handle.close()
+    # (no link followed: safe_files)
+    text = safe_files.read_text(dropdown_json_file, safe_files.job_root(job_directory))
+    filter_criterion = None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            break
+        filter_criterion = line
     assert filter_criterion in FILTERING_CRITERIA
     return filter_criterion
 
@@ -1213,9 +1223,8 @@ def vcf_reference_genome(dataset: str) -> Optional[str]:
     # behind by a failed/aborted download (before the VCFs/<dataset>/ dir was
     # created) must not pair a stale genome with a later dataset of the same name.
     if os.path.isfile(marker) and os.path.exists(os.path.join(cwd, VCFS_DIR, dataset)):
-        try:
-            with open(marker) as fh:
-                g = fh.read().strip()
+        try:  # (no link another user put followed: safe_files)
+            g = safe_files.read_text(marker, cwd).strip()
             if g:
                 return g
         except OSError:
@@ -1370,9 +1379,8 @@ def assembly_individual(root_dir: str, artifact_name: str) -> Optional[Tuple[str
     marker = os.path.join(
         current_working_directory, root_dir, f".{artifact_name}.assembly_individual"
     )
-    try:
-        with open(marker) as fh:
-            line = fh.read().strip()
+    try:  # (no link another user put followed: safe_files)
+        line = safe_files.read_text(marker, current_working_directory).strip()
     except OSError:
         return None
     individual, _sep, haplotype = line.partition("\t")
@@ -1509,11 +1517,10 @@ def get_available_indexes() -> List:
         # .display_label sidecar), else the parsed convention label
         custom = ""
         lf = os.path.join(p, ".display_label")
-        if os.path.isfile(lf):
-            try:
-                custom = open(lf).read().strip()
-            except OSError:
-                custom = ""
+        try:  # (shown as the index's label: no link another user put followed, safe_files)
+            custom = safe_files.read_text(lf, current_working_directory).strip()
+        except OSError:
+            custom = ""
         label = custom or _friendly_index_label(d)
         # provenance: report the PAM the index was actually built with (from the
         # .pam_build sidecar), so a pamless index makes clear which PAM geometry it
@@ -1531,10 +1538,10 @@ def _friendly_index_label(name: str) -> str:
     e.g. ``NGG_3_hg38+hg38_1000G_HGDP`` -> "NGG · hg38 + 1000G_HGDP (≤2 bulges)";
     ``NNN_3_hg38+...`` adds "pamless — any same-length PAM". Falls back to the raw name.
     """
-    parts = name.split("_", 2)
-    if len(parts) < 3 or not parts[1].isdigit():
+    parsed = index_fit.parse_index_name(name)  # either form of the name
+    if not parsed:
         return name
-    motif, nstr, rest = parts[0], parts[1], parts[2]
+    motif, nstr, rest = parsed[0], str(parsed[1]), parsed[2]
     bulges = int(nstr) - 1
     genome, dataset = (rest.split("+", 1) + [""])[:2]
     if dataset.startswith(genome + "_"):  # strip redundant genome prefix on the dataset
@@ -1557,9 +1564,8 @@ def pam_motif(pam_value: str) -> Optional[str]:
     folders are named. Reads PAMs/<value>.txt and extracts the PAM substring the
     same way ``build-index-only`` / ``index-genome`` do. Returns None on error.
     """
-    try:
-        with open(os.path.join(current_working_directory, PAMS_DIR, pam_value + ".txt")) as fh:
-            line = fh.readline()
+    try:  # (no link another user put followed: safe_files)
+        line = _first_line(os.path.join(current_working_directory, PAMS_DIR, pam_value + ".txt"))
         seq = line.split()[0]
         pos = int(line.split()[1])
         n = abs(pos)
@@ -1576,9 +1582,8 @@ def pam_geometry(pam_value: str) -> "tuple":
     compatible with the same index only if their total sequence length and
     orientation agree. Reads PAMs/<value>.txt; returns ``(None, None)`` on error.
     """
-    try:
-        with open(os.path.join(current_working_directory, PAMS_DIR, pam_value + ".txt")) as fh:
-            line = fh.readline()
+    try:  # (no link another user put followed: safe_files)
+        line = _first_line(os.path.join(current_working_directory, PAMS_DIR, pam_value + ".txt"))
         seq = line.split()[0]
         pos = int(line.split()[1])
         return len(seq), pos
@@ -1587,35 +1592,57 @@ def pam_geometry(pam_value: str) -> "tuple":
 
 
 def index_build_pam(index_dir: str) -> "tuple":
-    """Provenance of the PAM an index was built with, from its ``.pam_build`` sidecar.
+    """Provenance of the PAM an index was built with: the guide length and side its name
+    says (since 2.10.0), else the geometry its .bin headers record, else its ``.pam_build``
+    sidecar.
 
     ``build-index-only`` / the search pipeline write ``.pam_build`` into each index
     directory as ``<pam_name> <seq_len> <pam_pos>`` so the index self-describes the
-    PAM geometry it can actually serve (see get_pam_options). Falls back to the
-    canonical 20bp-guide, 3' convention (seq_len = 20 + len(motif), pos = len(motif))
-    when the sidecar is absent — correct for the shipped indexes and any index built
-    the standard way. Returns ``(pam_name_or_None, seq_len, pam_pos)``.
+    PAM geometry it can actually serve (see get_pam_options). An index of format 2
+    (CRISPRitz 2.10.0 and later) records its geometry itself, in the header of its .bin
+    files (index_fit), which is read first: the name its ``.pam_build`` gives is kept where
+    that record agrees with it, and an index built by crispritz.py itself, or downloaded,
+    may have none. Falls back to the canonical 20bp-guide, 3' convention (seq_len = 20 +
+    len(motif), pos = len(motif)) when neither is there — correct for the shipped indexes
+    and any index built the standard way. Returns ``(pam_name_or_None, seq_len, pam_pos)``.
     """
+    # A name that says the guide and the side (since 2.10.0: index_fit.parse_index_name)
+    # records them ahead of the sidecar, as the search script's _index_side reads the side.
+    parsed = index_fit.parse_index_name(index_dir)
+    named = None
+    if parsed and parsed[3]:
+        k = len(parsed[0])
+        named = (parsed[3] + k, k if parsed[4] == 3 else -k)
     p = os.path.join(index_dir, ".pam_build")
-    try:
-        with open(p) as fh:
-            parts = fh.readline().split()
-        return parts[0], int(parts[1]), int(parts[2])
+    try:  # (its name is shown in the index's label: no link another user put followed; the
+        # index folder, <data>/genome_library/<name>, says the data folder)
+        parts = _first_line(p, safe_files.job_root(index_dir)).split()
+        recorded = parts[0], int(parts[1]), int(parts[2])
     except (OSError, ValueError, IndexError):
-        pass
-    # no sidecar (e.g. an index built by the search pipeline, which doesn't write
-    # one): recover the geometry from an installed PAM whose motif matches this
-    # index's motif — correct for ANY shipped PAM including 5' Cas12a and 21bp
-    # SaCas9, unlike a hardcoded 20bp/3' guess. Fall back to that convention only
-    # if no PAM matches.
-    motif = os.path.basename(index_dir).split("_")[0]
+        recorded = None
+    if named:
+        return (recorded[0] if recorded else None,) + named
+    five_prime = index_fit.built_five_prime(index_dir)
+    if five_prime is not None:
+        width = len(index_fit.index_pam(index_dir))
+        guide = index_fit.built_guide_len(index_dir)
+        if guide:
+            geometry = (guide + width, -width if five_prime else width)
+            return (recorded[0] if recorded and recorded[1:] == geometry else None,) + geometry
+    if recorded:
+        return recorded
+    # no header that records it, and no sidecar (e.g. an index built by the search
+    # pipeline before it wrote one): recover the geometry from an installed PAM whose
+    # motif matches this index's motif — correct for ANY shipped PAM including 5'
+    # Cas12a and 21bp SaCas9, unlike a hardcoded 20bp/3' guess. Fall back to that
+    # convention only if no PAM matches.
+    motif = index_fit.index_pam(index_dir)
     try:
         pams_dir = os.path.join(current_working_directory, PAMS_DIR)
         for f in sorted(os.listdir(pams_dir)):
             if not f.endswith(".txt") or f.startswith("."):
                 continue
-            with open(os.path.join(pams_dir, f)) as _pf:
-                seq, pos = _pf.readline().split()[:2]
+            seq, pos = _first_line(os.path.join(pams_dir, f)).split()[:2]
             pos = int(pos)
             region = seq[: abs(pos)] if pos < 0 else seq[-abs(pos) :]
             if region == motif:
@@ -1637,34 +1664,35 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
     ``+<ref>_<vcf>`` folder submit_job resolves — so the combined value ``1000G_HGDP``
     matches its combined index while a single ``1000G`` query does not (the search would
     not either). Pamless (all-N) indexes of the same length also match (they serve any
-    PAM). An index built for a guide shorter than this PAM file's serves fewer bulges, or
-    none (index_fit, as the search script takes it). Returns 0 if no matching index exists
-    (only a 0-bulge, index-free search is possible). A variant search also needs the
-    variant index, so callers should take the min with the reference result.
+    PAM), and so do those the search prunes to the PAM by itself: a wider all-N one for a
+    3' PAM, and a dedicated one of a PAM that holds it (NRR for NGG). Each serves only a
+    PAM on the side of the guide it was built for (_index_side_serves). An index built for
+    a guide shorter than this PAM file's serves fewer bulges, or none (index_fit, as the
+    search script takes it). Returns 0 if no matching index exists (only a 0-bulge,
+    index-free search is possible). A variant search also needs the variant index, so
+    callers should take the min with the reference result.
     """
     motif = pam_motif(pam_value)
     if not motif or not genome:
         return 0
+    _len, _pos = pam_geometry(pam_value)
+    three_prime = not (_pos is not None and _pos < 0)
     guide = index_fit.pam_file_spacer(
         os.path.join(current_working_directory, PAMS_DIR, pam_value + ".txt"))
     genome = genome.replace(" ", "_")
     lib = os.path.join(current_working_directory, "genome_library")
     if not os.path.isdir(lib):
         return 0
-    # Accept the exact PAM motif OR an all-N "pamless" index of the SAME width. The
-    # search shell takes a wider all-N index only under --prune-pam, which the web
-    # never passes, so counting one here would offer bulges for an index the search
-    # will not use. Mirrors _resolve_index_dir in
+    # Accept the exact PAM motif, an all-N "pamless" index of the SAME width, and those
+    # the search shell takes only under --prune-pam -- a wider all-N one for a 3' PAM, a
+    # dedicated one of a PAM that holds the motif (index_fit.pam_serves): the web never
+    # passes the flag, and the shell prunes by itself when only such an index serves.
+    # Mirrors _resolve_index_dir in
     # PostProcess/submit_job_automated_new_multiple_vcfs.sh -- the shell and this must
     # not disagree about the same directory. The all-N test, rather than a fixed
     # "N" * len(motif) prefix, keeps out a dedicated PAM that merely starts with N's
     # (the shipped NNNRRT, SaCas9-KKH).
     base_suffix = f"_{genome}"  # base = "<motif>_<N>_<genome>"
-
-    def _pam_serves(pam: str) -> bool:
-        if pam == motif:
-            return True
-        return bool(pam) and set(pam) == {"N"} and len(pam) == len(motif)
     # A variant search needs an index whose enriched-genome name is EXACTLY
     # "<genome>_<dataset>" -- the same "+<ref>_<vcf>" folder submit_job resolves. So the
     # combined dropdown value "1000G_HGDP" matches "..._hg38_1000G_HGDP", and a single
@@ -1681,18 +1709,225 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
     for d in os.listdir(lib):
         if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
             continue
-        base, _, enriched = d.partition("+")  # enriched="" for a reference index
-        if enriched != want_enriched:
+        # "<motif>_<N>_<genome>[+<enriched>]", or the 2.10.0 form that carries the guide
+        # length and the side (index_fit.parse_index_name)
+        parsed = index_fit.parse_index_name(d)
+        if not parsed:
             continue
-        if not base.endswith(base_suffix):
+        rest_genome, _, enriched = parsed[2].partition("+")  # enriched="" for a reference index
+        if enriched != want_enriched or "_" + rest_genome != base_suffix:
             continue
-        stem = base[: -len(base_suffix)]
-        pam, sep, n_str = stem.partition("_")  # "<motif>" , "<N>"
-        if not sep or not n_str.isdigit() or not _pam_serves(pam):
+        if not index_serves_pam(os.path.join(lib, d), motif, three_prime):
             continue
         best = max(best, index_fit.bulge_cap(
-            index_fit.built_guide_len(os.path.join(lib, d)), int(n_str), guide))
+            index_fit.built_guide_len(os.path.join(lib, d)), parsed[1], guide))
     return best
+
+
+def index_serves_pam(index_dir: str, motif: str, three_prime: bool) -> bool:
+    """Whether index ``index_dir`` serves a search for PAM ``motif`` (3' with
+    ``three_prime``) as the search script takes it: its own PAM, an all-N one of its width,
+    or one the search prunes to it by itself (a wider all-N one for a 3' PAM, a dedicated
+    one of a PAM that holds it: index_fit.pam_serves), built for the search's side of the
+    guide (_index_side_serves)."""
+    pam = index_fit.index_pam(index_dir)
+    return (index_fit.pam_serves(pam, motif, True, three_prime) is not None
+            and _index_side_serves(index_dir, pam, motif, three_prime))
+
+
+def _index_side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) -> bool:
+    """Whether index ``index_dir``, of PAM ``pam``, was built for the side of the guide
+    where a search for ``motif`` (a 3' PAM with ``three_prime``) puts its PAM, as the
+    search script's _resolve_index_dir takes it: as the header of its .bin files records
+    (index format 2), else as its .pam_build does (pam_pos < 0 for a 5' PAM); without
+    either, any side for a dedicated index of the motif, and 3' for any other at the
+    published widths, 3 and 8, or an all-N one of the motif's own name (a search before
+    2.8.1 built one of another width from a 5' PAM file with no record). crisprme.py's
+    _side_serves, the same rule; a name that says its side (since 2.10.0:
+    index_fit.parse_index_name) says it first."""
+    parsed = index_fit.parse_index_name(index_dir)
+    if parsed and parsed[4]:
+        return (parsed[4] == 3) == three_prime
+    five_prime = index_fit.built_five_prime(index_dir)
+    if five_prime is not None:
+        return (not five_prime) == three_prime
+    try:  # (no link another user put followed: safe_files; the data folder, the index's)
+        recorded = int(_first_line(os.path.join(index_dir, ".pam_build"),
+                                   safe_files.job_root(index_dir)).split()[-1])
+    except (OSError, ValueError, IndexError):
+        recorded = 0
+    if recorded:
+        return (recorded > 0) == three_prime
+    if pam == motif and (not pam or set(pam) != {"N"}):
+        return True
+    return three_prime and (pam == motif or len(pam) in (3, 8))
+
+
+# --------------------------------------------------------------------------- #
+# The PAM picker of a PAM-less index (docs/DYNAMIC_PAM_INDEX_COMPAT.md §8)
+#
+# A PAM-less (all-N) index serves any PAM of its guide length on its side of the guide
+# that is no longer than its flank: for a 3' PAM shorter than the flank, the search prunes
+# the index to it by itself. The search form's PAM list holds the PAM files installed in
+# PAMs/; the picker offers the PAMs such an index serves that are not, by enzyme or typed
+# (checked when the field is left), and writes the chosen one's PAM file into PAMs/, as
+# Settings' "Define a nuclease / PAM" does, so that the form then searches it as any other.
+# --------------------------------------------------------------------------- #
+
+# Common nucleases: the PAM, the side of the guide it is on and the guide length each
+# needs. "recommended" ones head the list; NRR, the default PAM, is the one recommended for
+# an IND package.
+ENZYME_TABLE = [
+    {"enzyme": "SpCas9", "pam": "NRR", "side": 3, "guide_len": 20,
+     "label": "SpCas9 · NRR (NAA, NAG, NGA, NGG; the default, recommended for IND)",
+     "recommended": True},
+    {"enzyme": "SpCas9", "pam": "NRG", "side": 3, "guide_len": 20,
+     "label": "SpCas9 · NRG (NAG, NGG)", "recommended": True},
+    {"enzyme": "SpCas9", "pam": "NGG", "side": 3, "guide_len": 20,
+     "label": "SpCas9 · NGG", "recommended": True},
+    {"enzyme": "SpG", "pam": "NGN", "side": 3, "guide_len": 20,
+     "label": "SpG · NGN", "recommended": True},
+    {"enzyme": "SpRY", "pam": "NRN", "side": 3, "guide_len": 20,
+     "label": "SpRY · NRN", "recommended": True},
+    {"enzyme": "SpRY", "pam": "NYN", "side": 3, "guide_len": 20,
+     "label": "SpRY · NYN", "recommended": True},
+    {"enzyme": "SpCas9VQR", "pam": "NGA", "side": 3, "guide_len": 20,
+     "label": "VQR · NGA", "recommended": True},
+    {"enzyme": "SpCas9VRER", "pam": "NGCG", "side": 3, "guide_len": 20,
+     "label": "VRER · NGCG", "recommended": True},
+    {"enzyme": "xCas9", "pam": "NG", "side": 3, "guide_len": 20,
+     "label": "xCas9 · NG", "recommended": True},
+    {"enzyme": "ScCas9", "pam": "NNG", "side": 3, "guide_len": 20,
+     "label": "S. canis (ScCas9) · NNG", "recommended": False},
+    {"enzyme": "St1Cas9", "pam": "NNAGAA", "side": 3, "guide_len": 20,
+     "label": "S. thermophilus (St1Cas9) · NNAGAA", "recommended": False},
+    {"enzyme": "NmeCas9", "pam": "NNNNGATT", "side": 3, "guide_len": 20,
+     "label": "N. meningitidis (NmeCas9) · NNNNGATT", "recommended": False},
+    {"enzyme": "SaCas9", "pam": "NNGRRT", "side": 3, "guide_len": 21,
+     "label": "SaCas9 · NNGRRT (21-nt guide)", "recommended": False},
+    {"enzyme": "Cas12a", "pam": "TTTV", "side": 5, "guide_len": 23,
+     "label": "Cas12a · TTTV (5' PAM, 23-nt guide)", "recommended": False},
+]
+
+
+def pamless_index_geometry(genome: Optional[str], variant_choice=None) -> Optional[Dict]:
+    """The widest PAM-less (all-N) index installed for ``genome`` -- for a variant search,
+    of the dataset ``variant_choice`` (the dropdown's value) -- as ``{"name", "k" (its
+    flank), "side" (3 or 5), "guide_len"}`` (index_build_pam: its .pam_build, or the
+    published geometry, a 3' build for a 20-nt guide), or None where there is none. Of two,
+    the wider serves more PAMs."""
+    if not genome:
+        return None
+    genome = genome.replace(" ", "_")
+    lib = os.path.join(current_working_directory, "genome_library")
+    datasets = [d for d in str(variant_choice or "").split("+") if d and d != "ref"]
+    want = (f"{genome}+{genome}_{datasets[0]}", f"{genome}+{datasets[0]}") if datasets else (
+        genome,)
+    best = None
+    try:
+        names = sorted(os.listdir(lib))
+    except OSError:
+        return None
+    for d in names:
+        parsed = index_fit.parse_index_name(d)
+        if (not parsed or parsed[2] not in want or d.endswith("_INDELS")
+                or not os.path.isdir(os.path.join(lib, d)) or set(parsed[0]) != {"N"}):
+            continue
+        _name, seq_len, pos = index_build_pam(os.path.join(lib, d))
+        k = len(parsed[0])
+        geometry = {"name": d, "k": k, "side": 3 if pos > 0 else 5,
+                    "guide_len": seq_len - abs(pos)}
+        if best is None or k > best["k"]:
+            best = geometry
+    return best
+
+
+def pamless_pam_problem(pam: str, geometry: Dict, guide_len: Optional[int] = None,
+                        side: Optional[int] = None) -> Optional[str]:
+    """Why the PAM-less index of ``geometry`` (pamless_index_geometry) cannot serve PAM
+    ``pam`` (for a guide of ``guide_len`` nt, on ``side``; the index's by default), or None
+    where it can: an IUPAC motif no longer than its flank, on its side of the guide, for its
+    guide length; a 5' one as long as the flank (the engine pads a shorter PAM on the far
+    side of the guide only)."""
+    pam = (pam or "").strip().upper()
+    guide_len = geometry["guide_len"] if guide_len is None else guide_len
+    side = geometry["side"] if side is None else side
+    if not pam:
+        return "type a PAM, e.g. NGN"
+    bad = sorted(set(c for c in pam if c not in "ACGTRYSWKMBDHVN"))
+    if bad:
+        return f"{', '.join(bad)} is no IUPAC base (A C G T R Y S W K M B D H V N)"
+    if set(pam) == {"N"}:
+        return "a PAM of N alone constrains nothing: pick the index's own PAM-less PAM file"
+    if side != geometry["side"]:
+        return (f"a {side}' PAM: this index stores the flank on the {geometry['side']}' side "
+                f"of the guide, so it needs an index built for a {side}' PAM")
+    if guide_len != geometry["guide_len"]:
+        return (f"a {guide_len}-nt guide: this index was built for a {geometry['guide_len']}-nt "
+                f"guide, so it needs an index of its own")
+    if len(pam) > geometry["k"]:
+        return f"{pam} is longer than this index's {geometry['k']}-nt flank"
+    if side == 5 and len(pam) != geometry["k"]:
+        return (f"a 5' PAM must be as long as the flank ({geometry['k']} nt): the engine pads a "
+                f"shorter one on the far side of the guide only")
+    return None
+
+
+def pamless_presets(geometry: Dict, installed_only: bool = False) -> List[Dict]:
+    """The picker's options for the PAM-less index of ``geometry``: each ENZYME_TABLE entry,
+    the recommended ones first, those the index cannot serve disabled, with the reason; with
+    ``installed_only`` (a server online, which adds no PAM file), those whose PAM file is not
+    installed too (installed_pam_file)."""
+    options = []
+    for entry in sorted(ENZYME_TABLE, key=lambda e: not e["recommended"]):
+        why = pamless_pam_problem(entry["pam"], geometry, entry["guide_len"], entry["side"])
+        if not why and installed_only and installed_pam_file(entry["pam"], geometry) is None:
+            why = "no PAM file of it on this server, which adds none online"
+        options.append({
+            "label": entry["label"] + (f" -- not on this index: {why}" if why else ""),
+            "value": f"{entry['enzyme']}:{entry['pam']}",
+            "disabled": bool(why),
+        })
+    return options
+
+
+def installed_pam_file(pam: str, geometry: Dict) -> Optional[str]:
+    """The installed PAM file (its name, the search form's value) of ``pam`` for the guide
+    length and the side of the PAM-less index of ``geometry`` -- the motif and geometry
+    write_pamless_pam_file writes, whatever the file is named -- or None where there is
+    none."""
+    pam = (pam or "").strip().upper()
+    seq_len = geometry["guide_len"] + len(pam)
+    pos = len(pam) if geometry["side"] == 3 else -len(pam)
+    for option in get_available_PAM():
+        if (pam_motif(option["value"]) == pam
+                and pam_geometry(option["value"]) == (seq_len, pos)):
+            return option["value"]
+    return None
+
+
+def write_pamless_pam_file(pam: str, geometry: Dict, enzyme: str = "Custom") -> str:
+    """Writes the PAM file of ``pam`` for the guide length and the side of the PAM-less
+    index of ``geometry`` into PAMs/, named as the shipped ones are
+    (``<guide>bp-<PAM>-<enzyme>``, ``<PAM>-<guide>bp-<enzyme>`` for a 5' PAM), unless one of
+    that name is there; returns the name (the search form's value). ``pam`` must be one
+    pamless_pam_problem passes, and ``enzyme`` a name of ENZYME_TABLE or "Custom"."""
+    pam = pam.strip().upper()
+    guide = geometry["guide_len"]
+    if geometry["side"] == 3:
+        name, line = f"{guide}bp-{pam}-{enzyme}", f"{'N' * guide}{pam} {len(pam)}\n"
+    else:
+        name, line = f"{pam}-{guide}bp-{enzyme}", f"{pam}{'N' * guide} -{len(pam)}\n"
+    path = os.path.join(current_working_directory, PAMS_DIR, name + ".txt")
+    if not os.path.lexists(path):
+        # made anew, never through a link another user put at its name (safe_files)
+        safe_files.makedirs(os.path.dirname(path), current_working_directory)
+        try:
+            with safe_files.create(path, current_working_directory) as fh:
+                fh.write(line)
+        except FileExistsError:  # made meanwhile
+            pass
+    return name
 
 
 def reference_bulge_capacity(genome: str, pam_value: str) -> int:
@@ -1820,7 +2055,8 @@ def get_variant_dataset_options(genome: str) -> List:
                 continue
             if not any(d.endswith(s) for s in suffixes):
                 continue
-            motif = d.split("_")[0]
+            # (in either form of the name: "20-NRR" was taken for the PAM of 20-NRR_3_...)
+            motif = index_fit.index_pam(d)
             pam_name, _ilen, _ipos = index_build_pam(os.path.join(lib, d))
             tag = pam_name or motif
             if motif == "N" * len(motif):
@@ -1868,13 +2104,18 @@ def get_variant_dataset_options(genome: str) -> List:
         for d in sorted(os.listdir(lib)):
             if d.endswith("_INDELS") or not os.path.isdir(os.path.join(lib, d)):
                 continue
-            _, _, enriched = d.partition("+")  # enriched = "<genome>_<dataset[s]>"
-            if not enriched.startswith(f"{genome_norm}_"):
+            # <PAM>_<N>_<genome>+<enriched>, enriched = "<genome>_<dataset>", in either form
+            # of the name: an index of this genome alone (an index of another genome, of a
+            # dataset named after this one, was offered here: FR :278)
+            parsed = index_fit.parse_index_name(d)
+            indexed, _, enriched = (parsed[2] if parsed else "").partition("+")
+            if indexed != genome_norm or not enriched.startswith(f"{genome_norm}_"):
                 continue
-            core = enriched[len(genome_norm) + 1:]  # dataset token(s), e.g. "1000G_HGDP"
+            core = enriched[len(genome_norm) + 1:]  # the dataset, e.g. "HGDP1kGP"
             if core and core not in seen:
-                label = core.replace("_", " + ")  # "1000G_HGDP" -> "1000G + HGDP"
-                options.append({"label": label + _pam_note(core), "value": core})
+                # (named as its VCF folder names it: an underscore of the name showed as
+                # " + ", as for a merged panel of two datasets, FR :286)
+                options.append({"label": core + _pam_note(core), "value": core})
                 seen.add(core)
     # tag each variant option with its index data_type (Phase 2.2) so the user sees
     # sites-only vs genotyped(-phased) at a glance (read from the registry manifest,
@@ -1916,6 +2157,19 @@ def variant_dataset_has_genotypes(genome: str, dataset_value: str) -> bool:
     return False
 
 
+def genotype_oracle_installed() -> bool:
+    """True when the phased HGDP + 1000 Genomes genotypes a sites-only panel's rows are
+    checked against are installed (the carrier gate's oracle: Dictionaries/
+    genotypes_hg38_HGDP1kGP/, or the folder CRISPRME_GENOTYPE_TIER names)."""
+    try:
+        import haplotype_prioritizer
+    except Exception:  # noqa: BLE001 - an install without it has no gate
+        return False
+    return haplotype_prioritizer.find_oracle(
+        os.path.join(current_working_directory, "Dictionaries"),
+        os.environ.get("CRISPRME_GENOTYPE_TIER") or None) is not None
+
+
 # Friendly labels for the registry manifest's ``data_type`` (Phase 2.1).
 _DATA_TYPE_LABEL = {
     "sites-only": "sites-only (allele frequencies)",
@@ -1933,14 +2187,15 @@ def _vcf_folder_has_samples(vdir: str) -> Optional[bool]:
     """Whether the .vcf.gz files of the VCF folder ``vdir`` genotype samples: True when
     the #CHROM header of one of them has sample columns, False when each one read has
     none (a sites-only dataset), None when the folder holds no readable one."""
-    try:
-        files = sorted(f for f in os.listdir(vdir) if f.endswith(".vcf.gz"))
+    try:  # (no link another user put followed: safe_files)
+        files = sorted(f for f in safe_files.listdir(vdir, current_working_directory)
+                       if f.endswith(".vcf.gz"))
     except OSError:
         return None
     found = None
     for fname in files:
         try:
-            with gzip.open(os.path.join(vdir, fname), "rt", errors="replace") as fh:
+            with _open_gz_text(os.path.join(vdir, fname)) as fh:
                 for line in fh:
                     if line.startswith("#CHROM"):
                         if len(line.rstrip("\r\n").split("\t")) > 9:
@@ -1952,6 +2207,30 @@ def _vcf_folder_has_samples(vdir: str) -> Optional[bool]:
         except Exception:  # noqa: BLE001 - unreadable: no claim
             pass
     return found
+
+
+def _unreadable_vcf(vdir: str) -> Optional[str]:
+    """The first .vcf.gz file of the VCF folder ``vdir`` with no readable #CHROM header (not
+    gzip, cut short, or no VCF), from which Settings writes no sample list
+    (settings_page._vcf_header_samples, the same rule), or None."""
+    try:  # (no link another user put followed: safe_files)
+        files = sorted(f for f in safe_files.listdir(vdir, current_working_directory)
+                       if f.endswith(".vcf.gz"))
+    except OSError:
+        return None
+    for fname in files:
+        try:
+            with _open_gz_text(os.path.join(vdir, fname)) as fh:
+                for line in fh:
+                    if line.startswith("#CHROM"):
+                        break
+                    if not line.startswith("##"):
+                        return fname
+                else:
+                    return fname
+        except Exception:  # noqa: BLE001 - not gzip, cut short, unreadable
+            return fname
+    return None
 
 
 def _vcf_dataset_has_samples(genome_norm: str, dnorm: str) -> bool:
@@ -1984,11 +2263,11 @@ def variant_dataset_data_type(genome: str, dataset_value: str) -> Optional[str]:
         regdir = os.path.join(dic, name)
         if not os.path.isdir(regdir):
             continue
-        try:
-            for f in sorted(os.listdir(regdir)):
+        try:  # (shown as the dataset's label: no link another user put followed)
+            for f in sorted(safe_files.listdir(regdir, current_working_directory)):
                 if f.startswith("reg_") and f.endswith(".idx"):
-                    with open(os.path.join(regdir, f)) as fh:
-                        dt = json.load(fh).get("data_type")
+                    dt = json.loads(safe_files.read_text(
+                        os.path.join(regdir, f), current_working_directory)).get("data_type")
                     return dt or None  # all chroms share it; one read suffices
         except (OSError, ValueError):
             pass
@@ -2012,17 +2291,42 @@ def samplesid_problem(vcf_folder: str, dataset: str) -> Optional[str]:
     vdir = os.path.join(current_working_directory, VCFS_DIR, vcf_folder)
     if _vcf_folder_has_samples(vdir) is False:
         # no list comes from a VCF that names no sample, and no build makes the
-        # registry its variants need (docs/DESIGN_mega_index.md)
+        # registry its variants need (docs/DESIGN_mega_index.md). The note names the
+        # index that has one as a web user gets it, not that file (FV :342)
         return (
             f"The variant dataset '{dataset}' is sites-only: its VCFs have no sample "
             f"columns, so it has no sample list (samplesIDs/{vcf_folder}.samplesID.txt), "
             "and a search with it fails at its end without one. A search reports the "
             "variants of a sites-only VCF only through a per-dataset allele-frequency "
-            "registry, as the shipped hg38_mega index has (docs/DESIGN_mega_index.md); "
-            "building its index does not make one. Search the reference genome, or a "
-            "VCF dataset with samples."
+            "registry, as the hg38_mega index published on HuggingFace has (Settings "
+            "downloads it, under Download a prebuilt index); building its index does not "
+            "make one. Search the reference genome, or a VCF dataset with samples."
         )
-    if os.path.isdir(vdir):
+    # a merged panel's list (1000G_HGDP's) is the union of its datasets' (hg38_1000G's and
+    # hg38_HGDP's), which Submit makes when they are all there: one of them is what is
+    # missing, and no dataset of the panel's name was ever added (FR :98)
+    prefix = vcf_folder[: -len(dataset) - 1] if vcf_folder.endswith(f"_{dataset}") else ""
+    parts = [os.path.join("samplesIDs", f"{prefix}_{part}.samplesID.txt")
+             for part in dataset.split("_")] if prefix and "_" in dataset else []
+    missing = [p for p in parts if not os.path.isfile(os.path.join(current_working_directory, p))]
+    if not os.path.isdir(vdir) and parts and len(missing) < len(parts):
+        return (
+            f"No sample list for the variant dataset '{dataset}': a search with it reads "
+            f"samplesIDs/{vcf_folder}.samplesID.txt (one row per sample its VCFs genotype), "
+            f"which Submit makes from the lists of the datasets it merges ({', '.join(parts)}), "
+            f"and {' and '.join(missing)} {'is' if len(missing) == 1 else 'are'} missing. If its "
+            "index came from HuggingFace, remove the index in Settings and download it again "
+            "there, which installs the lists; or add the missing file yourself, then submit "
+            "again."
+        )
+    unreadable = _unreadable_vcf(vdir) if os.path.isdir(vdir) else None
+    if unreadable:
+        # a Settings build writes the list from every VCF's header, and writes none when
+        # one has no readable header (M6): the advice to build it led nowhere
+        how = (f"Its VCF file {unreadable} has no readable header (a file cut short, or no "
+               "VCF), so no build can write the list from it: remove the dataset in Settings "
+               "and add it again with that file whole, or add the list yourself")
+    elif os.path.isdir(vdir):
         how = ("Build its variant index in Settings, which writes the list from the VCF "
                "header, or add the file yourself")
     else:
@@ -2058,11 +2362,11 @@ def variant_dataset_sample_count(genome: str, dataset_value: str) -> int:
         regdir = os.path.join(dic, name)
         if not os.path.isdir(regdir):
             continue
-        try:
-            for f in sorted(os.listdir(regdir)):
+        try:  # (no link another user put followed: safe_files)
+            for f in sorted(safe_files.listdir(regdir, current_working_directory)):
                 if f.startswith("reg_") and f.endswith(".idx"):
-                    with open(os.path.join(regdir, f)) as fh:
-                        dbs = json.load(fh).get("databases") or {}
+                    dbs = json.loads(safe_files.read_text(
+                        os.path.join(regdir, f), current_working_directory)).get("databases") or {}
                     return sum(int(d.get("sample_count", 0) or 0) for d in dbs.values())
         except (OSError, ValueError, AttributeError):
             pass
@@ -2103,7 +2407,10 @@ def get_pam_options(genome: str, variant_choice: Optional[str]) -> List:
     dataset is included, a variant search needs a variant index for that PAM, so the
     list is restricted to PAMs that actually have one for genome+dataset -- except a
     pamless ``NNN`` variant index, which serves every PAM (the requested PAM is
-    enforced by the post-search filter), so its presence unlocks all PAMs again.
+    enforced by the post-search filter), so its presence unlocks all PAMs again, and
+    a wider one every 3' PAM of its guide length, and a dedicated one every PAM its
+    PAM holds (NGG, NAG, NRG and NGA on an NRR index): the search prunes those to the
+    PAM by itself (_resolve_index_dir, index_fit.pam_serves).
     """
     all_pams = get_available_PAM()
     if variant_choice in (None, "", "ref"):
@@ -2130,30 +2437,40 @@ def get_pam_options(genome: str, variant_choice: Optional[str]) -> List:
                 continue
             if not any(d.endswith(sfx) for sfx in suffixes):
                 continue
-            motif = d.split("_")[0]  # <motif>_<N>_<genome>+<vcf_folder>
+            # <motif>_<N>_<genome>+<vcf_folder>, or the 2.10.0 form of the name
+            motif = index_fit.index_pam(d)
             if motif == "N" * len(motif):
                 # PAMLESS index: it serves any PAM SEQUENCE, but only of the SAME
                 # geometry it was built for — a k-mer index cannot search a longer
-                # (or 5' vs 3') PAM. So unlock only PAMs whose total length and
-                # orientation match, and whose PAM window fits (|pos| <= the index
-                # window). Geometry comes from the index's .pam_build sidecar.
+                # (or 5' vs 3') PAM. So unlock only PAMs whose guide length and
+                # orientation match, and whose PAM window fits: as wide as the index's,
+                # or, for a 3' PAM, narrower (the search prunes the flank to it).
+                # Geometry comes from the index's .pam_build sidecar.
                 _name, ilen, ipos = index_build_pam(os.path.join(lib, d))
                 for pv, (slen, spos) in geom.items():
                     if slen is None:
                         continue
                     same_orient = (spos < 0) == (ipos < 0)
-                    if slen == ilen and same_orient and abs(spos) <= abs(ipos):
+                    if same_orient and slen - abs(spos) == ilen - abs(ipos) and (
+                            abs(spos) == abs(ipos) or (spos > 0 and spos < ipos)):
                         ok.add(pv)
             else:
                 # SPECIFIC index: serves exactly the PAM(s) whose motif matches, of a guide
                 # its stored window fits with no bulge at least (index_fit: several PAM
                 # files of one motif can differ in guide length, and the index's name says
                 # nothing of which it was built for).
+                # A dedicated index of a PAM that holds this one (NRR for NGG) serves it
+                # too, pruned, on the side of the guide it was built for.
                 built = index_fit.built_guide_len(os.path.join(lib, d))
-                n_str = d.split("_")[1]
+                n_str = d.split("_")[1]  # (<N>, in either form of the name)
                 for pv, (slen, spos) in geom.items():
-                    if pam_motif(pv) == motif and (
-                            slen is None or not n_str.isdigit()
+                    pv_motif = pam_motif(pv)
+                    if pv_motif != motif and not (
+                            index_fit.pam_holds(motif, pv_motif) and slen is not None
+                            and _index_side_serves(os.path.join(lib, d), motif, pv_motif,
+                                                   spos > 0)):
+                        continue
+                    if (slen is None or not n_str.isdigit()
                             or index_fit.fits(built, int(n_str), slen - abs(spos), 0, 0)):
                         ok.add(pv)
         per_dataset_ok.append(ok)
@@ -2222,8 +2539,11 @@ def _sort_bed(fname: str, outfname: str) -> str:
     Raises:
         SystemExit: If sorting fails.
     """
-    with open(outfname, "w") as out:
-        code = subprocess.call(["sort-bed", fname], stdout=out)
+    # (read with no link another user put followed, and written in a folder of the
+    # caller's own: sort_annotation)
+    with safe_files.open_read(fname, current_working_directory, "rb") as fin, \
+            open(outfname, "w") as out:
+        code = subprocess.call(["sort-bed", "-"], stdin=fin, stdout=out)
     if code != 0:
         raise subprocess.SubprocessError("Sorting BED file failed")
     assert os.path.isfile(outfname)
@@ -2255,49 +2575,31 @@ def compress_file(fname: str) -> str:
         gz_path, plain_path = fname, fname[:-3]
     else:
         gz_path, plain_path = f"{fname}.gz", fname
+    cwd = current_working_directory
     # defensively clean up cruft left behind by interrupted runs so a stale
     # temporary or lock file cannot corrupt the shared annotation directory
     for cruft in (f"{plain_path}.tmp", f"{gz_path}.tmp", f"{gz_path}.tbi.lock"):
         if os.path.isfile(cruft):
-            subprocess.call(["rm", "-f", cruft])
+            with contextlib.suppress(OSError):
+                safe_files.remove(cruft, cwd)
     # idempotent path: the plain file was already compressed by a previous run
     # (bgzip -f had removed it) - reuse the existing .gz instead of failing
-    if not os.path.isfile(plain_path):
-        if os.path.isfile(gz_path):
+    if not safe_files.is_file(plain_path, cwd):
+        if safe_files.is_file(gz_path, cwd):
             return gz_path
         raise subprocess.SubprocessError(
             f"Cannot compress file, neither {plain_path} nor {gz_path} found"
         )
-    # non-destructive compression: keep the source file (-k) and overwrite any
-    # stale .gz (-f) so re-submitting the same job is safe
-    code = subprocess.call(["bgzip", "-k", "-f", plain_path])
-    if code != 0:
-        raise subprocess.SubprocessError("Compressing and indexing file failed")
+    # non-destructive compression: the source file kept, and any stale .gz replaced so
+    # re-submitting the same job is safe; read and written with no link another user put
+    # followed (safe_files: bgzip -f wrote the .gz by name, through a link there)
+    with safe_files.open_read(plain_path, cwd, "rb") as fin, \
+            safe_files.replace(gz_path, cwd, "wb") as fout:
+        code = subprocess.call(["bgzip", "-c"], stdin=fin, stdout=fout)
+        if code != 0:
+            raise subprocess.SubprocessError("Compressing and indexing file failed")
     assert os.path.isfile(gz_path)
     return gz_path
-
-
-def _mv_file(fname: str, outfname: str) -> str:
-    """Renames or moves a file to a new location.
-
-    Uses the mv command to move or rename the specified file. Raises an error if 
-    the operation fails.
-
-    Args:
-        fname: Path to the source file.
-        outfname: Path to the destination file.
-
-    Returns:
-        The path to the moved or renamed file.
-
-    Raises:
-        SystemExit: If the move or rename operation fails.
-    """
-    code = subprocess.call(["mv", fname, outfname])
-    if code != 0:
-        raise subprocess.SubprocessError("Renaming file failed")
-    assert os.path.isfile(outfname)
-    return outfname
 
 
 def sort_annotation(annotationfile: str) -> str:
@@ -2320,25 +2622,38 @@ def sort_annotation(annotationfile: str) -> str:
         gz_path, plain_path = annotationfile, annotationfile[:-3]
     else:
         gz_path, plain_path = f"{annotationfile}.gz", annotationfile
-    decompressed_here = False
-    if not os.path.isfile(plain_path):
-        if os.path.isfile(gz_path):
-            _decompress_file(gz_path, plain_path)
-            decompressed_here = True
+    cwd = current_working_directory
+    if safe_files.is_file(plain_path, cwd):
+        source = plain_path
+    elif safe_files.is_file(gz_path, cwd):
+        source = gz_path
+    else:
+        raise subprocess.SubprocessError(
+            f"Annotation file not found: {annotationfile}"
+        )
+    # Each intermediate file in a folder of the web app's own beside the file (the same
+    # file system: the result is renamed), and the result renamed over the .gz with no link
+    # followed (safe_files): the decompressed, the sorted and the bgzipped file were written
+    # beside it, by name, through any link another user put there under those names. The
+    # source read with no link followed either; the plain file, when there, stays as it
+    # was. The folder is used through its descriptor alone (safe_files.private_dir: one made
+    # by name in a folder others write could be renamed away, and a link put in its place).
+    with safe_files.private_dir(os.path.dirname(gz_path), cwd, ".crisprme-sort-") as tmp:
+        if source == gz_path:
+            plain = _decompress_file(gz_path, os.path.join(tmp.path, "plain.bed"))
+            with open(plain, "rb") as fin, \
+                    open(os.path.join(tmp.path, "sorted.bed"), "w") as out:
+                code = subprocess.call(["sort-bed", "-"], stdin=fin, stdout=out)
+            if code != 0:
+                raise subprocess.SubprocessError("Sorting BED file failed")
         else:
-            raise subprocess.SubprocessError(
-                f"Annotation file not found: {annotationfile}"
-            )
-    annotationfile_sorted = _sort_bed(plain_path, f"{plain_path}.tmp.sorted.bed")
-    annotationfile_sorted_bgzip = compress_file(annotationfile_sorted)
-    result = _mv_file(annotationfile_sorted_bgzip, gz_path)
-    # clean up the intermediate sorted BED (compress_file keeps its source with
-    # -k, so remove it here) to avoid leaving cruft in the shared annotation dir
-    if os.path.isfile(annotationfile_sorted):
-        subprocess.call(["rm", "-f", annotationfile_sorted])
-    if decompressed_here and os.path.isfile(plain_path):
-        subprocess.call(["rm", plain_path])
-    return result
+            _sort_bed(plain_path, os.path.join(tmp.path, "sorted.bed"))
+        code = subprocess.call(["bgzip", "-f", os.path.join(tmp.path, "sorted.bed")],
+                               pass_fds=(tmp.fd,))
+        if code != 0:
+            raise subprocess.SubprocessError("Compressing and indexing file failed")
+        safe_files.replace_from(os.path.join(tmp.path, "sorted.bed.gz"), gz_path, cwd)
+    return gz_path
 
 
 # --- annotation manager ---------------------------------------------------------
@@ -2397,7 +2712,7 @@ def read_enabled_annotations(genome: str) -> List[str]:
     d = _annotations_dir()
     installed = set(os.listdir(d)) if os.path.isdir(d) else set()
     path = _enabled_manifest_path()
-    if not os.path.isfile(path):
+    if not os.path.lexists(path):
         if g == "hg38":
             b = resolve_builtin_annotation()
             defaults = [b] if b else []
@@ -2408,10 +2723,10 @@ def read_enabled_annotations(genome: str) -> List[str]:
                 defaults.append(BUILTIN_INTOGEN_HG38)
             return defaults
         return []
-    try:
-        with open(path) as fh:
-            names = list(json.load(fh).get("genomes", {}).get(g, {}).get("enabled", []))
-    except (json.JSONDecodeError, OSError):
+    try:  # (no link another user put followed: safe_files)
+        names = list(json.loads(safe_files.read_text(path, current_working_directory))
+                     .get("genomes", {}).get(g, {}).get("enabled", []))
+    except (ValueError, OSError, AttributeError):
         names = []
     return [
         n for n in names
@@ -2422,20 +2737,21 @@ def read_enabled_annotations(genome: str) -> List[str]:
 def write_enabled_annotations(genome: str, enabled: List[str]) -> None:
     """Persist the enabled annotation list for a genome (atomic tmp + replace)."""
     g = _norm_genome(genome)
-    os.makedirs(_annotations_dir(), exist_ok=True)
+    cwd = current_working_directory
+    safe_files.makedirs(_annotations_dir(), cwd)
     path = _enabled_manifest_path()
     manifest = {"version": 1, "genomes": {}}
-    if os.path.isfile(path):
-        try:
-            with open(path) as fh:
-                manifest = json.load(fh)
-        except (json.JSONDecodeError, OSError):
+    if os.path.lexists(path):
+        try:  # (no link another user put followed: safe_files)
+            manifest = json.loads(safe_files.read_text(path, cwd))
+        except (ValueError, OSError):
             manifest = {"version": 1, "genomes": {}}
+    if not isinstance(manifest, dict):
+        manifest = {"version": 1, "genomes": {}}
     manifest.setdefault("genomes", {})[g] = {"enabled": list(dict.fromkeys(enabled))}
-    tmp = path + ".tmp"
-    with open(tmp, "w") as fh:
-        json.dump(manifest, fh, indent=2)
-    os.replace(tmp, path)
+    # through a temporary name of its own renamed over it: a link another user put at the
+    # manifest's name, or at the fixed temporary name this used, is never written through
+    safe_files.write_text(path, cwd, json.dumps(manifest, indent=2))
 
 
 def is_annotation_enabled(genome: str, name: str) -> bool:
@@ -2459,10 +2775,9 @@ def read_email_config() -> Dict[str, str]:
         "password_set": False,
     }
     path = _email_config_path()
-    if os.path.isfile(path):
-        try:
-            with open(path) as fh:
-                saved = json.load(fh)
+    if os.path.lexists(path):
+        try:  # (no link another user put followed: safe_files)
+            saved = json.loads(safe_files.read_text(path, current_working_directory))
             if isinstance(saved, dict):
                 cfg["smtp_host"] = str(saved.get("smtp_host", cfg["smtp_host"]))
                 cfg["smtp_port"] = int(saved.get("smtp_port", cfg["smtp_port"]))
@@ -2497,11 +2812,11 @@ def write_email_config(
         return "Sender must be a valid email address."
     path = _email_config_path()
     existing_pw = ""
-    if os.path.isfile(path):
-        try:
-            with open(path) as fh:
-                existing_pw = json.load(fh).get("password", "") or ""
-        except (json.JSONDecodeError, OSError):
+    if os.path.lexists(path):
+        try:  # (no link another user put followed: safe_files)
+            existing_pw = json.loads(safe_files.read_text(
+                path, current_working_directory)).get("password", "") or ""
+        except (ValueError, OSError, AttributeError):
             existing_pw = ""
     cfg = {
         "smtp_host": str(smtp_host).strip(),
@@ -2520,11 +2835,11 @@ def write_email_config(
             )
         password = existing_pw
     cfg["password"] = password
-    tmp = path + ".tmp"
-    with open(tmp, "w") as fh:
-        json.dump(cfg, fh, indent=2)
-    os.chmod(tmp, 0o600)  # the file holds an app password
-    os.replace(tmp, path)
+    # the file holds an app password: made 0600, under a temporary name of its own (O_EXCL,
+    # O_NOFOLLOW), and renamed over the name (safe_files). It went through the fixed name
+    # .email.json.tmp, where a link, or a file, another user put took the password
+    safe_files.write_text(path, current_working_directory, json.dumps(cfg, indent=2),
+                          perm=0o600)
     return None
 
 
@@ -2537,9 +2852,16 @@ def validate_annotation_bed(path: str) -> Optional[str]:
     tab-separated columns, integer start<=end, and a non-empty whitespace-free
     label. Handles .bed and .bed.gz.
     """
-    if not os.path.isfile(path):
+    # a file of the data folder (an upload's .part) read with no link another user put
+    # followed (safe_files); one elsewhere (a temporary file of the page's own) as it is
+    in_data = path.startswith(os.path.join(current_working_directory, ""))
+    try:
+        size = (safe_files.getsize(path, current_working_directory) if in_data
+                else os.path.getsize(path) if os.path.isfile(path) else None)
+    except OSError:
+        size = None
+    if size is None:
         return f"File not found: {os.path.basename(path)}"
-    size = os.path.getsize(path)
     if size == 0:
         return "Annotation file is empty."
     if size > MAX_ANNOTATION_BYTES:
@@ -2547,10 +2869,14 @@ def validate_annotation_bed(path: str) -> Optional[str]:
             f"Annotation file is too large ({size // (1024 * 1024)} MB > "
             f"{MAX_ANNOTATION_BYTES // (1024 * 1024)} MB)."
         )
-    opener = gzip.open if path.endswith(".gz") else open
     checked = 0
     try:
-        with opener(path, "rt") as fh:
+        if in_data:
+            fh = (_open_gz_text(path) if path.endswith(".gz")
+                  else safe_files.open_read(path, current_working_directory))
+        else:
+            fh = gzip.open(path, "rt") if path.endswith(".gz") else open(path, "rt")
+        with fh:
             for lineno, line in enumerate(fh, 1):
                 s = line.rstrip("\n")
                 if not s or s.startswith(("#", "track", "browser")):
@@ -2604,25 +2930,48 @@ def _cosmic_mod():
             return None
 
 
+def _cosmic_record() -> Dict:
+    """The COSMIC attestation record (cosmic_license.get_cosmic_license's), read with no link
+    another user put followed (safe_files): its attestation is shown in Settings. {} when
+    there is none, or it cannot be read."""
+    c = _cosmic_mod()
+    if not c:
+        return {}
+    try:
+        data = json.loads(safe_files.read_text(c.license_path(_annotations_dir()),
+                                               current_working_directory))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def cosmic_license_enabled() -> bool:
     """True only if the user has attested a COSMIC licence in Settings (default False)."""
-    c = _cosmic_mod()
-    return bool(c and c.cosmic_enabled(_annotations_dir()))
+    return bool(_cosmic_record().get("enabled", False))
 
 
 def cosmic_license_attestation() -> str:
     """The stored COSMIC attestation text (empty when none)."""
-    c = _cosmic_mod()
-    return c.get_cosmic_license(_annotations_dir()).get("attestation", "") if c else ""
+    return _cosmic_record().get("attestation", "") or ""
 
 
 def set_cosmic_license(enabled: bool, attestation: str = "") -> bool:
-    """Persist the COSMIC licence attestation. Returns False if the helper is
-    unavailable (COSMIC then stays excluded, the safe default)."""
+    """Persist the COSMIC licence attestation (cosmic_license.license_record's text) through
+    safe_files, as the other files of Annotations/ are written: the folder reached with no
+    link another user put there followed, and the record made under a name of its own
+    (O_CREAT|O_EXCL|O_NOFOLLOW), its mode given as it is made, then renamed over its name.
+    cosmic_license.set_cosmic_license, which this called, set its temporary file's mode by
+    that file's name, which followed a link another user put in its place, making a file of
+    the user's readable by all (the review of wave 1c-a, A1). Returns False if the helper is
+    unavailable (COSMIC then stays excluded, the safe default); a path refused, or a folder
+    that cannot be written, raises OSError (RefusedPath)."""
     c = _cosmic_mod()
     if not c:
         return False
-    c.set_cosmic_license(_annotations_dir(), enabled, attestation)
+    cwd = current_working_directory
+    safe_files.makedirs(_annotations_dir(), cwd)
+    safe_files.write_text(c.license_path(_annotations_dir()), cwd,
+                          c.license_record(enabled, attestation), perm=0o644)
     return True
 
 
@@ -2650,9 +2999,11 @@ def build_active_annotation(genome: str) -> Tuple[str, str]:
     # during the merge below. The cosmic state is folded into the cache signature so the
     # active bed is rebuilt when the attestation is toggled.
     _c = _cosmic_mod()
-    cosmic_ok = bool(_c and _c.cosmic_enabled(d))
+    cosmic_ok = bool(_c) and cosmic_license_enabled()
     need_strip = (not cosmic_ok) and any("cosmic" in n.lower() for n in enabled)
-    members = [os.path.join(d, n) for n in enabled if os.path.isfile(os.path.join(d, n))]
+    cwd = current_working_directory
+    # (each member read with no link another user put followed: safe_files)
+    members = [os.path.join(d, n) for n in enabled if safe_files.is_file(os.path.join(d, n), cwd)]
     if not members:
         return ("vuoto.txt", "vuoto.txt")
     # fast path: a single built-in bundle is used as-is ONLY when there is nothing to
@@ -2662,38 +3013,68 @@ def build_active_annotation(genome: str) -> Tuple[str, str]:
     active = os.path.join(d, f"{ACTIVE_ANNOTATION_PREFIX}{g}.bed")
     active_gz = active + ".gz"
     sig_path = os.path.join(d, f"{ACTIVE_ANNOTATION_PREFIX}{g}.sig")
+    stats = {m: safe_files.stat_file(m, cwd) for m in members}
     sig = "|".join(sorted(enabled)) + f"||cosmic={'on' if cosmic_ok else 'off'}||" + ";".join(
-        f"{os.path.basename(m)}:{os.path.getsize(m)}:{int(os.path.getmtime(m))}" for m in members
+        f"{os.path.basename(m)}:{stats[m].st_size}:{int(stats[m].st_mtime)}" for m in members
     )
-    fresh = (
-        os.path.isfile(active_gz)
-        and os.path.isfile(sig_path)
-        and open(sig_path).read() == sig
-    )
+
+    def _sig_now():
+        try:
+            return safe_files.read_text(sig_path, cwd)
+        except OSError:
+            return None
+
+    fresh = safe_files.is_file(active_gz, cwd) and _sig_now() == sig
     if not fresh:
-        tmp = active + ".building"
-        with open(tmp, "w") as out:
-            for m in members:
-                opener = gzip.open if m.endswith(".gz") else open
-                with opener(m, "rt") as fh:
-                    for line in fh:
-                        if need_strip and _c and _c.is_cosmic_row(line):
-                            continue  # COSMIC excluded until a licence is attested
-                        out.write(line)
-        os.replace(tmp, active)
-        sort_annotation(active)  # sort + bgzip -> active_gz
-        if os.path.isfile(active):
-            os.remove(active)  # drop the plain intermediate; keep only the .gz
-        with open(sig_path, "w") as fh:
-            fh.write(sig)
+        # merged in a folder of the web app's own beside it, sorted and bgzipped there
+        # (sort_annotation), and renamed over .active.<genome>.bed.gz with no link followed
+        # (safe_files): the merged file (.building), the plain one and the signature were
+        # written by name, through any link another user put there. The folder is used
+        # through its descriptor alone (safe_files.private_dir, as sort_annotation's).
+        with safe_files.private_dir(d, cwd, ".crisprme-active-") as tmp:
+            merged = os.path.join(tmp.path, os.path.basename(active))
+            with open(merged, "w") as out:
+                for m in members:
+                    fh = (_open_gz_text(m) if m.endswith(".gz")
+                          else safe_files.open_read(m, cwd))
+                    with fh:
+                        for line in fh:
+                            if need_strip and _c and _c.is_cosmic_row(line):
+                                continue  # COSMIC excluded until a licence is attested
+                            out.write(line)
+            sorted_gz = _sort_and_bgzip(merged, tmp.fd)
+            safe_files.replace_from(sorted_gz, active_gz, cwd)
+        if os.path.lexists(active):  # (a plain one an earlier release left)
+            with contextlib.suppress(OSError):
+                safe_files.remove(active, cwd)
+        safe_files.write_text(sig_path, cwd, sig)
     return (os.path.basename(active_gz), gencode)
 
 
 def _decompress_file(fname: str, outfname: str) -> str:
-    """Decompresses a bgzipped file to a specified output file."""
-    with open(outfname, "wb") as out:
-        code = subprocess.call(["gunzip", "-k", "-c", fname], stdout=out)
+    """Decompresses the bgzipped file ``fname`` of the data folder, read with no link another
+    user put followed (safe_files), to ``outfname``, a file of a folder of the caller's own
+    (sort_annotation)."""
+    with safe_files.open_read(fname, current_working_directory, "rb") as fin, \
+            open(outfname, "wb") as out:
+        code = subprocess.call(["gunzip", "-c"], stdin=fin, stdout=out)
     if code != 0:
         raise subprocess.SubprocessError("Decompressing annotation file failed")
     assert os.path.isfile(outfname)
     return outfname
+
+
+def _sort_and_bgzip(plain: str, folder_fd: int) -> str:
+    """``plain``, a BED file of a folder of the caller's own, sorted and bgzipped beside it:
+    ``<plain>.gz`` (the merged active annotation: build_active_annotation). ``folder_fd``,
+    the folder's descriptor, which bgzip inherits (safe_files.private_dir)."""
+    sorted_bed = plain + ".sorted"
+    with open(plain, "rb") as fin, open(sorted_bed, "w") as out:
+        code = subprocess.call(["sort-bed", "-"], stdin=fin, stdout=out)
+    if code != 0:
+        raise subprocess.SubprocessError("Sorting BED file failed")
+    code = subprocess.call(["bgzip", "-f", sorted_bed], pass_fds=(folder_fd,))
+    if code != 0:
+        raise subprocess.SubprocessError("Compressing and indexing file failed")
+    os.replace(sorted_bed + ".gz", plain + ".gz")
+    return plain + ".gz"

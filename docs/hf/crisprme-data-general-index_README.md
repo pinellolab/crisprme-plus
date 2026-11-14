@@ -14,6 +14,14 @@ viewer: false
 
 # CRISPRme+ general indexes — wide-flank, PAM-less
 
+> **A newer general index exists.** CRISPRme+ **2.10.0** publishes the general index again,
+> built by CRISPRitz 2.10.0 in index format 2, as `20-NNNNNNNN_3_hg38` and
+> `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` in
+> [`lucapinello/crisprme-indexes-format2`](https://huggingface.co/datasets/lucapinello/crisprme-indexes-format2),
+> where it also stands for `NNN_3` (not built again for 2.10.0: it serves every search
+> `NNN_3` serves, at the same speed). The archives here are CRISPRme+ 2.8.1's (index format 1),
+> kept unchanged for 2.8.1.
+
 One index that serves **many PAMs**. A *general* index stores the raw genomic
 flank instead of a fixed PAM, so a single build answers searches for any 3′ PAM no
 longer than that flank — `NGG`, `NRG`, `NRR`, `NGA`, `NAG`, `NNGRRT` and so on —
@@ -72,7 +80,9 @@ at any width: use a dedicated index, which `crisprme.py build-index-only` builds
 ## Usage
 
 ```bash
-# the genome, annotations, PAMs and sample lists (plus the NRG_3_hg38 reference index)
+# the genome, annotations, PAMs and sample lists (plus the default reference index:
+# CRISPRme+ 2.10.0: 20-NRR_3_hg38, from lucapinello/crisprme-indexes-format2; 2.8.1:
+# NRG_3_hg38, from lucapinello/crisprme-data)
 crisprme.py download --what all --path .
 
 # fetch the general index (routes here automatically on flank width)
@@ -81,19 +91,21 @@ crisprme.py download --what index --index-name NNNNNNNN_3_hg38+hg38_HGDP1kGP --p
 # then search with whatever PAM you need -- no rebuild
 crisprme.py complete-search --genome Genomes/hg38 \
   --vcf list_vcf.txt --samplesID list_samplesID.txt \
-  --guide guide.txt --pam PAMs/20bp-NRG-SpCas9.txt \
+  --guide guide.txt --pam PAMs/20bp-NRR-SpCas9.txt \
   --mm 4 --bDNA 1 --bRNA 1 --prune-pam --index-path genome_library \
   --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
   --output my_search
 ```
 
 Run the search from the folder you downloaded into: `download` writes
-`list_vcf.txt` and `list_samplesID.txt` there, and `--prune-pam` needs
-`--index-path`. `guide.txt` holds one spacer per line, padded with an `N` for each
+`list_vcf.txt` and `list_samplesID.txt` there (CRISPRme+ 2.8.1 needs `--prune-pam` with
+`--index-path`). `guide.txt` holds one spacer per line, padded with an `N` for each
 PAM position (`NNN` for a 3-nt PAM).
 
-`--prune-pam` is **CLI-only**: the web form does not pass the flag, so a general
-index cannot be used from the web interface.
+CRISPRme+ 2.8.1's `--prune-pam` is **CLI-only**: its web form does not pass the flag, so a
+general index cannot be used from its web interface. Since CRISPRme+ 2.10.0 a search prunes
+by itself, from the command line or the web, whenever no installed index serves its PAM
+unpruned, and says so; `--prune-pam` and `--index-path` are then not needed.
 
 ## Equivalence claim
 
@@ -101,9 +113,10 @@ A PAM-less index of flank *K* searched with `--prune-pam` and a 3′ PAM of leng
 *L ≤ K* produces the **same report as a dedicated index built for that PAM**, but for
 what a flank wider than the PAM cannot index at a contig's very end and start: a + strand
 PAM with 1 to *K − L* nt after it to the end, and a − strand PAM in the first *K − L* nt,
-are not indexed, and one exactly *K − L* nt from the start is reported on the + strand at
-another position. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG sites, none
-on a primary chromosome; CRISPRme+ says so when a search reads such a flank.
+are not indexed. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG sites, none
+on a primary chromosome; CRISPRme+ says so when a search reads such a flank. CRISPRitz
+2.9.1 (CRISPRme+ 2.8.1) also reports one exactly *K − L* nt from the start on the + strand
+at another position; CRISPRitz 2.10.0 (CRISPRme+ 2.10.0) reads it right.
 Measured genome-wide for guide `ACTGAAATCTGTAAGCAGGC` at `NRG` 4 mismatches + 1 DNA
 bulge + 1 RNA bulge over HGDP + 1000 Genomes with per-sample resolution: the flank-8 arm, the flank-3 arm and the
 dedicated `NRG_3` arm give **byte-identical** `integrated_results.tsv`

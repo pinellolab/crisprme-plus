@@ -31,6 +31,8 @@ test_indel_haplotype_resolution.py).
 import bisect
 import itertools
 
+import indel_window
+import site_alleles
 from overlay_indel_snps import map_fake_offset_to_real
 
 CONFIRMED = "CONFIRMED"
@@ -109,62 +111,6 @@ def cis_cooccurrence(indel_gt_by_sample, snp_gts_by_sample):
     return cis_carriers, phase_state, ac
 
 
-def forward_snp_tokens(reg, chrom, used, global_group_id="global"):
-    """Build FORWARD-STRAND variant tokens / rsIDs / MAFs for the cis SNP(s).
-
-    Used by the INDEL post-analysis CONFIRMED-cis branch to enrich the indel row
-    with the full real-haplotype variant set (indel + co-occurring SNPs) so the
-    report's Variant column + observed_haplotypes companion list ALL the variants
-    the off-target actually uses, not the indel alone.
-
-    Args:
-      reg: a Tier-0 RegistryReader (duck-typed: ``alts_at(pos1)`` -> list[str],
-        ``ref(pos1, alt)`` -> forward-strand ref base, ``rsid(pos1, alt)`` ->
-        rsID or None, ``lookup(pos1, alt)`` -> {group_id: Counts} with
-        ``.allele_freq()``). All reads are FORWARD-strand by construction.
-      chrom: chromosome string for the token prefix.
-      used: the ``used_snps_for_target`` output -- a list of ``(real0, rsid, gt)``
-        tuples where ``real0`` is a 0-based reference position (registry key =
-        real0 + 1).
-      global_group_id: the registry's GLOBAL group id (default "global").
-
-    CRITICAL: the ``rsid``/``gt`` carried in ``used`` came from the caller's
-    ``snp_at`` closure, whose REF/ALT are strand-COMPLEMENTED to the target strand
-    (for the guide-vs-alt test only). We therefore re-read REF/ALT/rsID/AF straight
-    from the registry here so every token is the forward-strand
-    ``chrom_pos1_REF_ALT`` that resultIntegrator expects -- it splits the variant
-    column on ',' and strand-corrects each token itself. The token / rsID / MAF
-    format mirrors the SNP path EXACTLY
-    (simple_analysis_registry.retrieve_5tuple):
-      * token : ``chrom + "_" + str(pos1) + "_" + ref + "_" + alt``
-      * rsID  : ``reg.rsid(pos1, alt)`` or "." when missing
-      * MAF   : ``"%.6g" % global_allele_freq`` (same formatting as the SNP path)
-
-    Returns three POSITION-ALIGNED lists ``(tokens, rsids, mafs)`` so the caller can
-    append them 1:1 to the row's variant / rsID / MAF columns. A SNP whose registry
-    record is absent (defensive -- it was just read in this scope) is skipped from
-    all three lists together, so the 1:1 alignment is never broken.
-    """
-    tokens, rsids, mafs = [], [], []
-    for (real0, _rs, _g) in used:
-        pos1 = real0 + 1
-        alts = reg.alts_at(pos1)
-        if not alts:
-            continue
-        alt = alts[0]  # biallelic SNP position (same choice as the decode's snp_at)
-        ref = reg.ref(pos1, alt) or "N"
-        rsid = reg.rsid(pos1, alt)
-        if rsid is None:
-            rsid = "."
-        groups = reg.lookup(pos1, alt)
-        gcnt = groups.get(global_group_id) if groups else None
-        af = gcnt.allele_freq() if gcnt is not None else 0.0
-        tokens.append(chrom + "_" + str(pos1) + "_" + ref + "_" + alt)
-        rsids.append(rsid)
-        mafs.append("%.6g" % af)
-    return tokens, rsids, mafs
-
-
 def joint_af(ac, an):
     """Joint indel+SNP cis allele frequency (ac / an), or 0.0 if an falsy."""
     return (ac / an) if an else 0.0
@@ -184,8 +130,10 @@ def putative_joint_af(marginal_afs):
     return min(afs)
 
 
-# The IUPAC ambiguity chars an overlaid SNP position can carry in the target seq.
-_IUPAC = set("RYSWKMBDHVryswkmbdhv")
+# The IUPAC ambiguity chars an overlaid SNP position can carry in the target seq, and Q,
+# the code of a position whose reference base and SNP ALTs hold all four bases (N is a
+# gap, never a variant).
+_IUPAC = set("RYSWKMBDHVQryswkmbdhvq")
 
 _COMP = str.maketrans("ACGTacgt", "TGCAtgca")
 
@@ -196,7 +144,7 @@ def complement(base):
 
 
 def build_offset_to_real(dna_aligned, fake_start, strand, indel_fake_start,
-                         indel_start, ref, alt):
+                         indel_pos1, indel_start, ref, alt):
     """Map each aligned column of an indel off-target's DNA to a real 0-based ref
     position (or None for a bulge/inserted column).
 
@@ -205,8 +153,11 @@ def build_offset_to_real(dna_aligned, fake_start, strand, indel_fake_start,
       fake_start:  the target's leftmost fake position (search col 4, forward coord).
       strand:      '+' or '-' (search col 6).
       indel_fake_start: the indel's fake-region start (log FAKEPOS start).
-      indel_start, ref, alt: the indel's real 0-based start + REF/ALT (for the
-        piecewise fake->real map).
+      indel_pos1, indel_start, ref, alt: the indel's VCF POS (1-based), its window's real
+        0-based start (the log's CHR field) + REF/ALT (for the piecewise fake->real map).
+        The window's left flank is indel_pos1 - 1 - indel_start (indel_window.left_flank),
+        as holds_indel, reference_start and window_place read it: never assumed, so the
+        windows of CRISPRitz 2.10.0 (30 bases) and of 2.9.1 (25) map alike.
 
     Returns a list ``real_of`` aligned to ``dna_aligned`` (real 0-based pos or None).
 
@@ -221,11 +172,12 @@ def build_offset_to_real(dna_aligned, fake_start, strand, indel_fake_start,
     """
     base_cols = [j for j, ch in enumerate(dna_aligned) if ch != "-"]
     n = len(base_cols)
+    left = indel_window.left_flank(indel_pos1, indel_start)
     real_of = [None] * len(dna_aligned)
     for i, j in enumerate(base_cols):
         fpos = fake_start + i if strand == "+" else fake_start + (n - 1 - i)
         real_of[j] = map_fake_offset_to_real(
-            fpos - indel_fake_start, indel_start, len(ref), len(alt)
+            fpos - indel_fake_start, indel_start, len(ref), len(alt), left
         )
     return real_of
 
@@ -311,7 +263,7 @@ def used_snps_for_target(guide_seq, target_seq, offset_to_real, snp_at,
 _CODE = {
     "A": "A", "C": "C", "G": "G", "T": "T",
     "R": "AG", "Y": "CT", "S": "CG", "W": "AT", "K": "GT", "M": "AC",
-    "B": "CGT", "D": "AGT", "H": "ACT", "V": "ACG", "N": "ACGT",
+    "B": "CGT", "D": "AGT", "H": "ACT", "V": "ACG", "N": "ACGT", "Q": "ACGT",
 }
 _BASE_ORDER = "ACGT"
 
@@ -364,14 +316,30 @@ class SnpColumn(object):
         self.known = known
 
 
-def _gt_tokens(gt):
-    """(allele tokens, kind) of a genotype: kind is "phased" ('|'), "unphased" ('/')
-    or "haploid" (one token, e.g. a male chrX call)."""
-    if "|" in gt:
-        return gt.split("|"), "phased"
-    if "/" in gt:
-        return gt.split("/"), "unphased"
-    return [gt], "haploid"
+# (allele tokens, kind) of a genotype: kind is "phased" ('|'), "unphased" ('/') or
+# "haploid" (one token, e.g. a male chrX call)
+_gt_tokens = site_alleles.gt_tokens
+
+
+def record_name(name):
+    """The name of an indel or MNV record, '<contig>_<POS>_<REF>_<ALT>' as CRISPRitz's
+    indel log writes it, with REF and ALT in upper case (split from the right: a contig
+    name can hold '_'). VCF 4.x reads REF and ALT whatever their case, and so does the
+    fake-indel window (CRISPRitz writes the ALT in place of the REF, and the search reads
+    the window in upper case); CRISPRitz 2.10.0 writes the log in upper case too (its
+    enricher reads REF and ALT so), while one of 2.9.1 or earlier (or of 2.10.0 before that
+    rule) keeps the VCF's text: HPRC chr22, normalised as CRISPRme builds it, writes 1,546
+    indel records in lower case, 140 of them beside a line of the same indel in upper case
+    (chr22:23541792 TG>T and tg>t). Named as written, such two lines
+    were two records, the carriers of one target split over two rows; named so, they are
+    one, as two lines of one indel written alike are (the merge folds their rows, and the
+    readers of the phased indel store merge their carriers:
+    build_indel_genotypes.merge_store_carriers)."""
+    head, sep, alt = name.rpartition("_")
+    contig_pos, sep2, ref = head.rpartition("_")
+    if not sep or not sep2:
+        return name
+    return "%s_%s_%s" % (contig_pos, ref.upper(), alt.upper())
 
 
 def kept_bases(ref, alt):
@@ -448,14 +416,401 @@ def holds_indel(first, last, indel_pos1, indel_start, ref, alt):
     of the deleted ones. Anything else lies wholly in a flank: plain reference (or SNP)
     sequence that does not need the indel, at a coordinate the indel shifts.
     ``indel_start`` is the real 0-based start of the window (the log's), so the REF's
-    first base is at offset indel_pos1 - 1 - indel_start (overlay_indel_snps.LEFT_FLANK
-    on a full window)."""
+    first base is at offset indel_pos1 - 1 - indel_start, the window's left flank
+    (indel_window.left_flank: 30 bases for CRISPRitz 2.10.0, 25 up to 2.9.1)."""
     alt_at = indel_pos1 - 1 - indel_start
     added_from = alt_at + kept_bases(ref, alt)        # first base the ALT adds or replaces
     added_to = alt_at + len(alt) - shared_tail(ref, alt)  # and the base past the last
     if added_from < added_to:
         return first < added_to and last >= added_from
     return first < added_from and last >= added_from  # the bases either side of a deletion
+
+
+def reference_start(offset, indel_pos1, indel_start, ref, alt):
+    """The 0-based reference coordinate an indel row starts at when its first aligned
+    base (the leftmost, on either strand) is at ``offset`` of a fake-indel window whose
+    real 0-based start is ``indel_start``.
+
+    The window is the reference up to the indel, its ALT, then the reference past its
+    REF, so ``indel_start + offset`` is the base's place on the haplotype that carries
+    the indel. That is its reference coordinate for a flank base before the indel, for
+    a base REF and ALT share at the start (the anchor) and for an ALT base standing in
+    a REF base's place (an MNV's, or a base an indel replaces). A base an insertion
+    adds has no reference coordinate: there, the haplotype's coordinate is a base of
+    the reference 1 to len(ALT) - len(REF) bases past the insertion's anchor, which the
+    target does not hold. The row starts instead at the reference base the added bases
+    follow (a normalized insertion's anchor: its VCF POS, 1-based), the place
+    target_ref_span already counts as the target's. A base past the change (a shared
+    tail, the downstream flank) is the reference base it is, len(REF) - len(ALT) on.
+
+    Up to 2.8.1 every row was placed at ``indel_start + offset``, so a row whose first
+    base is one an insertion adds started past the insertion, its REF text was read
+    there, and its Variant_info_spacer+PAM put the insertion, before its start, at
+    position 1 (the - strand: the last)."""
+    alt_at = indel_pos1 - 1 - indel_start
+    k = offset - alt_at
+    c = kept_bases(ref, alt)
+    t = shared_tail(ref, alt)
+    if k < 0 or len(ref) == len(alt) or k < c:
+        return indel_start + offset  # a flank base, an MNV's, or a base REF and ALT share
+    if k >= len(alt) - t:
+        return indel_start + offset - len(alt) + len(ref)  # past the change
+    j = k - c  # a base of the ALT's changed middle
+    if j < len(ref) - c - t:
+        return indel_start + offset  # it stands in the place of the REF base it replaces
+    # a base the ALT adds: the place of the last REF base before it
+    return indel_pos1 - 2 + len(ref) - t
+
+
+# ---------------------------------------------------------------------------
+# Counting along an indel row's target (2.10.0)
+# ---------------------------------------------------------------------------
+# A SNP row's target is reference bases, and Variant_info_spacer+PAM numbers each of
+# its variants by its distance from the row's start along the reference
+# (resultIntegrator). An indel row's target is bases of the haplotype carrying its
+# indel: an insertion's bases are in it, a deletion's are not. Its variants are
+# numbered the same way along that haplotype: from the target's first base on it to
+# each variant's base on it. Up to 2.8.1 they were numbered along the reference, so a
+# variant past the indel was off by len(ALT) - len(REF), also on a row starting on a
+# base an insertion adds, which 2.8.1 placed at that base's place on the haplotype;
+# counted along the reference from the insertion's anchor, where 2.10.0 places such a
+# row, it would be off by the inserted bases the target holds, less one.
+
+
+def haplotype_place(pos1, indel_pos1, ref, alt):
+    """The place (1-based), on a haplotype carrying the indel (VCF POS ``indel_pos1``,
+    ``ref``, ``alt``), of the reference base at ``pos1`` (1-based): its own before the
+    bases the indel changes and on the bases REF and ALT share at the start,
+    len(ALT) - len(REF) on past them (the bases they share at the end included). A base
+    the indel deletes or replaces is on no haplotype carrying it: None."""
+    a = indel_pos1 - 1
+    q = pos1 - 1
+    if q < a + kept_bases(ref, alt):
+        return pos1
+    if q >= a + len(ref) - shared_tail(ref, alt):
+        return pos1 + len(alt) - len(ref)
+    return None
+
+
+def haplotype_base_kind(h, indel_pos1, ref, alt):
+    """("ref", p) for the base at place ``h`` (0-based) of a haplotype carrying the indel
+    when it is reference position p (a flank base, a base REF and ALT share at either
+    end); ("alt", p) for an ALT base standing in the place of the REF base p it replaces
+    (an MNV's, a complex record's); ("added", None) for a base the ALT adds, which has no
+    reference position."""
+    a = indel_pos1 - 1
+    c = kept_bases(ref, alt)
+    t = shared_tail(ref, alt)
+    if h < a + c:
+        return "ref", h
+    if h >= a + len(alt) - t:
+        return "ref", h - len(alt) + len(ref)
+    if h - a - c < len(ref) - c - t:
+        return "alt", h
+    return "added", None
+
+
+def row_first_base(strand, start, alt_aligned, ref_aligned, indel, snps=()):
+    """The place (0-based) of an indel row's first aligned base (the leftmost, on either
+    strand) on the haplotype carrying its indel ``indel`` (VCF POS, REF, ALT) and its SNP
+    alts ``snps`` [(POS, REF, ALT)], from what the row shows: its Start_coordinate
+    ``start``, its aligned ALT (the target) and its aligned REF, which holds the reference
+    bases from ``start`` on, as many as the target holds (alignRefFromVar).
+
+    That place is ``start`` unless the first base is one the indel adds: such a row
+    starts at the base the added bases follow (reference_start), and its first base is
+    the k-th added base, k >= 1, at ``start`` + k. The row does not say k, and the bases
+    do: the target is the haplotype's bases from its first base on, and the haplotype
+    from ``start`` on is the REF text's first base when it is a reference one, the ALT's
+    bases, then the REF text's bases past the indel, with the SNP alts the row names. The
+    smallest k at which they are the target's and that holds every SNP alt the row names
+    is taken: the row names the SNP alts its haplotypes hold in its target (the post-
+    analysis names those at the code columns of the place it resolved), so a place where
+    the same bases read without one of them is another row's target (2.10.0, M-R3-N2: in
+    a GGT repeat, a target read from the 1st and the 4th added base, the row's SNP the 4th
+    place's 22nd base and past the 1st place's end, was placed at the 1st, its SNP
+    numbered 25 in a target of 23 bases). Two places can hold the same target with the
+    same SNP alts only in a repeat the target lies wholly in, where they hold the same
+    bases (the smaller is the base itself on a row starting on a reference base). Where no
+    place holds every SNP alt the row names (none of them reaches the haplotype read
+    here), the smallest k at which the bases are the target's; none of them, which a row
+    the post-analysis wrote never gives: ``start``.
+
+    Cost: the haplotype is cut from the REF text and the ALT in slices and the target
+    found in it with ``str.find``, so no Python step is taken per base of the ALT. Built
+    base by base (haplotype_base_kind for each of its len(ALT) - len(REF) + 23 bases, then
+    a slice compared at each k), a row at the anchor of one of the 402 insertions of 53.9
+    to 54.4 kb that HPRC holds at chr22:10690626 took 83 ms, and the merge
+    (remove_contiguous_samples) places each of the 16,058 rows of the README guide's chr22
+    search that start inside them."""
+    ipos, iref, ialt = indel
+    if len(ialt) <= len(iref):
+        return start  # no base added
+    t = shared_tail(iref, ialt)
+    if start != ipos - 2 + len(iref) - t:
+        return start  # the row starts before the added bases' anchor
+    target = alt_aligned.replace("-", "").upper()
+    refb = ref_aligned.replace("-", "").upper()
+    if not target or len(refb) != len(target):
+        return start
+    if strand == "-":
+        target, refb = _revcomp(target), _revcomp(refb)
+    n, more = len(target), len(ialt) - len(iref)
+    # The haplotype's n + more bases from ``start`` on, by haplotype_base_kind: ``start``
+    # holds the ALT's base number ``at`` (from 0; len(REF) - t - 1). It is the REF text's
+    # first base when it is one REF and ALT share at the start (at < c, a plain insertion),
+    # and an ALT base standing in a REF base's place otherwise; then come the ALT's bases
+    # up to its shared tail, then the REF text's bases from its second on (the tail
+    # included).
+    c = kept_bases(iref, ialt)
+    at = start - ipos + 1
+    hap = (refb[0] if at < c else "") + ialt[max(c, at):len(ialt) - t].upper() + refb[1:]
+    held = []  # (first, last) index in hap of each SNP alt the row names that reaches it
+    if snps:
+        slots = list(hap)
+        put = {}
+        for pos1, _r, alt in snps:
+            place = haplotype_place(pos1, ipos, iref, ialt)
+            if place is not None and 0 <= place - 1 - start < len(slots):
+                slots[place - 1 - start] = alt.upper()
+                put[place - 1 - start] = len(alt)
+        # a slot's place in the joined haplotype: its own, plus what the multi-base alts
+        # written before it add (a step per SNP alt, none per base of the ALT)
+        extra = 0
+        for i in sorted(put):
+            held.append((i + extra, i + extra + max(1, put[i]) - 1))
+            extra += put[i] - 1
+        hap = "".join(slots)
+    k = hap.find(target)
+    if not 0 <= k <= more:
+        return start
+    if held:
+        # the smallest k whose reading holds every SNP alt the row names: one between the
+        # last alt's end less the target's length and the first alt's start (one find)
+        lo_k = max(0, max(hi for _lo, hi in held) - n + 1)
+        hi_k = min(more, min(lo for lo, _hi in held))
+        if lo_k <= hi_k:
+            k2 = hap.find(target, lo_k, hi_k + n)
+            if k2 >= 0:
+                return start + k2
+    return start + k
+
+
+def variant_places(strand, start, alt_aligned, ref_aligned, tokens):
+    """(place of the row's first base, [place of each variant's POS base]) on the
+    haplotype carrying the row's indel, for the Variant_info_spacer+PAM numbering:
+    ``tokens`` are the row's variants [(POS, REF, ALT)], forward strand, as
+    Variant_info_genome names them, the indel's first. A row whose variants have no indel
+    (a SNP row, an MNV row: no base added or lost) has the reference's: (``start``, their
+    POS). An indel's own POS base, its anchor, is before the bases it changes, so it keeps
+    its place; a SNP past the indel is len(ALT) - len(REF) on (haplotype_place); and the
+    first base is row_first_base's."""
+    indel = next((tk for tk in tokens if len(tk[1]) != len(tk[2])), None)
+    if indel is None:
+        return start, [tk[0] for tk in tokens]
+    snps = [tk for tk in tokens if tk is not indel]
+    places = [indel[0] if tk is indel else
+              (haplotype_place(tk[0], *indel) or tk[0]) for tk in tokens]
+    first = row_first_base(strand, start, alt_aligned, ref_aligned, indel, snps) if snps \
+        else start
+    return first, places
+
+
+def _revcomp(seq):
+    return seq.translate(_COMP)[::-1]
+
+
+# ---------------------------------------------------------------------------
+# Where an indel row's PAM is judged on the reference (2.10.0)
+# ---------------------------------------------------------------------------
+# PAM_creation asks whether the reference holds a valid PAM where the row's PAM is. On an
+# indel row that place depends on which of the target's bases are the indel's, and in a
+# repeat that is not fixed: the VCF writes an insertion at the left end of its repeat
+# (bcftools norm left-aligns it), but the same haplotype holds the same bases with the
+# inserted sequence rotated through the repeat and written further right, and a deletion
+# likewise. Up to 2.8.1 the PAM was judged where the VCF writes the indel, so the answer
+# depended on that choice: an insertion of a repeat unit next to a reference PAM, written
+# left of it, puts inserted bases in a PAM the reference holds (created, wrongly), and a
+# row that starts on a reference base read its REF alignment's window, which is not the
+# reference PAM beside the protospacer when the indel lies between them (on the - strand
+# with a 3' PAM, the + strand with a 5' one, where the row starts at the PAM's far end: an
+# insertion's bases, or a deletion's, shift that window off the PAM's place).
+#
+# The rule reads every placement of the indel on the row's haplotype -- the reference
+# with the row's own variants: its indel and the SNP alts it names -- and judges the PAM
+# where the reference holds it, in that order:
+#   1. a placement that puts the whole PAM on reference bases (no inserted base, no
+#      deletion's junction inside it): the reference bases it sits on there. Without a
+#      SNP alt of the row in the PAM they are the PAM's own bases, so not created (a
+#      tandem duplication of the PAM's bases: the "inserted" PAM is the reference's own,
+#      shifted);
+#   2. else, a PAM that every placement makes wholly of the bases the insertion adds: an
+#      additional PAM, which the reference does not have there, created even where the
+#      reference holds a valid PAM beside the protospacer (decision D4, 2.10.0: up to
+#      2.10.0's drafts step 3 read that PAM beside the protospacer, and a valid one there
+#      read not created);
+#   3. else a placement that puts the protospacer's base that touches the PAM on a
+#      reference base: the reference PAM beside it, on the PAM's side (the PAM's place
+#      beside that protospacer). A deletion's PAM always has one, its bases all being
+#      reference bases;
+#   4. else (an insertion that holds that base in every placement, the protospacer's end
+#      and the PAM's start or the whole PAM): no reference place, created.
+# The placements of one kind read the same reference bases (but for a SNP alt of the row in
+# a PAM that a repeat spans: placed before the indel and past it, the PAM sits on two
+# places, and it is not created if either holds the motif), and step 2 asks about every
+# placement, so the answer depends on the haplotype alone, not on where in its repeat the
+# VCF writes the indel.
+#
+# A complex record replaces REF bases and adds bases or loses some (A>T plus inserted
+# bases: HPRC writes many insertions so). It is read as haplotype_base_kind and
+# reference_start read it: its first min(len(REF), len(ALT)) changed bases stand in the
+# places of the REF bases they replace, as an MNV's, and its other ALT bases are added
+# after them (or its other REF bases deleted). The replaced bases are read as a SNP alt of
+# the row is, the reference base each replaces, and the added (deleted) bases are placed
+# as an insertion's (a deletion's), so a PAM made of a complex record's added bases is
+# judged as one made of an insertion's. An MNV moves no base: its PAM is read on the
+# reference under it, by the caller.
+
+
+def _with_alts(genome, lo, hi, alts):
+    """genome[lo:hi], upper case, with the SNP alts ``alts`` {0-based position: base} in
+    it (the reference as the row's haplotype holds it outside its indel); None past
+    either end of the genome."""
+    if lo < 0 or hi > len(genome):
+        return None
+    seq = genome[lo:hi].upper()
+    hits = [q for q in alts if lo <= q < hi]
+    if not hits:
+        return seq
+    seq = list(seq)
+    for q in hits:
+        seq[q - lo] = alts[q]
+    return "".join(seq)
+
+
+def pam_reference_place(genome, indel, snps, first, n, k, pam_right):
+    """Where an indel row's PAM is judged on the reference (the rule above): ("ref", los),
+    the k reference bases genome[lo:lo + k] (forward strand) of each place ``lo`` the rule
+    finds -- the PAM is not created if one of them holds the motif; ("created", ()), no
+    placement of the indel gives the PAM a place on the reference, or every placement makes
+    it wholly of inserted bases (D4), so the indel created it; None for a record that adds
+    no base and loses none (an MNV), which the caller judges on the reference under the
+    PAM, as 2.8.1.
+
+    A PAM that placements put on the reference has one place there or two -- before the
+    indel and past it, which hold the same bases --, and the first is the VCF's placement's
+    when it has one. A SNP alt of the row in the PAM, or a base a complex record replaces,
+    is read as the reference base it replaces, and then the two can differ: both are given
+    (a row without SNP alts or replaced bases gets the first only). The PAM beside the
+    protospacer has one place.
+
+    ``indel`` is the row's indel (VCF POS, REF, ALT); ``snps`` [(POS, REF, ALT)] the SNP
+    alts the row names next to it; ``first`` the target's first base (the leftmost,
+    forward) on the haplotype carrying the indel, in the fake-indel window's coordinates
+    carried to the chromosome (the reference's before the indel, its ALT written whole
+    from POS, then the reference's shifted by len(ALT) - len(REF)); ``n`` its bases;
+    ``k`` the PAM's; ``pam_right``: the PAM is the target's right end, forward (the +
+    strand with a 3' PAM, the - strand with a 5' one).
+
+    The indel's changed bases start at POS - 1 + the bases REF and ALT share at the start
+    (the anchor); a complex record's first min(gone, added) of them stand in REF bases'
+    places, and e is the base past those. An insertion's m added bases lie at [e, e + m)
+    of the haplotype and can sit s bases further right while the haplotype's next s bases
+    repeat them (H[e + i] = H[e + m + i]), or further left likewise; a deletion's d bases,
+    deleted from the reference at [e, e + d), leave the haplotype's junction before its
+    base e, which can move while the reference repeats them (R[e + i] = R[e + d + i]).
+    Those comparisons read the reference with the row's SNP alts and the bases a complex
+    record replaces, so a placement keeps the same haplotype with the same variants. With
+    the PAM at [p0, p0 + k) of the haplotype:
+      * an insertion placed at x leaves the PAM on the reference, as genome[p0:] when
+        x >= p0 + k and as genome[p0 - m:] when x + m <= p0; it makes the PAM wholly of
+        inserted bases when p0 + k - m <= x <= p0, which holds for every placement when it
+        holds for the VCF's and the insertion can move neither to p0 + 1 nor to
+        p0 + k - m - 1 (the placements are an interval, x = e - left .. e + right);
+        otherwise the protospacer's base by the PAM is on the reference when x >= p0 (PAM
+        at the right) or x + m <= p0 + k (at the left), and the PAM beside it is
+        genome[p0:p0 + k] or genome[p0 - m:p0 - m + k];
+      * a deletion's junction at x leaves the PAM on the reference, as genome[p0:] when
+        x >= p0 + k and as genome[p0 + d:] when x <= p0; otherwise the PAM beside the
+        protospacer is genome[p0:p0 + k] (PAM at the right) or genome[p0 + d:p0 + d + k].
+    Only the shifts those tests need are read, each one slice comparison, so a long
+    insertion, or a long run of replaced bases, adds no Python step per base."""
+    ipos, iref, ialt = indel
+    c = kept_bases(iref, ialt)
+    t = shared_tail(iref, ialt)
+    gone, added = len(iref) - c - t, len(ialt) - c - t
+    if gone == added:
+        return None  # an MNV: its ALT bases stand in REF bases' places, none added or lost
+    # a complex record's bases that stand in REF bases' places, at [rep_at, e): read as the
+    # row's SNP alts are; its other bases are an insertion's (a deletion's) at e
+    r = min(gone, added)
+    rep_at, rep = ipos - 1 + c, ialt[c:c + r].upper()
+    e = rep_at + r
+    gone, added = gone - r, added - r
+    p0 = first + n - k if pam_right else first
+    alts = {}
+    for p, _r, a in snps or ():
+        alts[p - 1] = a.upper()
+
+    def hap_ref(lo, hi):  # the reference as the row's haplotype holds it outside the indel
+        seq = _with_alts(genome, lo, hi, alts)
+        if seq is None or not r or hi <= rep_at or lo >= e:
+            return seq
+        a, b = max(lo, rep_at), min(hi, e)
+        return seq[:a - lo] + rep[a - rep_at:b - rep_at] + seq[b - lo:]
+
+    if added:
+        m = added
+        ins = ialt[c + r:c + r + m].upper()
+
+        def moves(s):  # the inserted bases can sit s bases further right (left if s < 0)
+            if s > 0:
+                if hap_ref(e, e + 1) != ins[0]:
+                    return False  # not a repeat on that side (no slice read)
+                x = hap_ref(e, e + s)
+                return x is not None and (ins + x)[:s] == x
+            if hap_ref(e - 1, e) != ins[-1]:
+                return False
+            y = hap_ref(e + s, e)
+            return y is not None and (y + ins)[s:] == y
+
+        # the PAM before the insertion (x >= p0 + k: genome[p0:]) or past it
+        # (x + m <= p0: genome[p0 - m:]), where the VCF has it, then by moving it
+        los = [p0] if e >= p0 + k else [p0 - m] if e + m <= p0 else []
+        if not los or alts or r:
+            if p0 not in los and moves(p0 + k - e):
+                los.append(p0)
+            if p0 - m not in los and moves(p0 - m - e):
+                los.append(p0 - m)
+        if los:
+            return "ref", tuple(los)
+        # D4: every placement makes the PAM wholly of the inserted bases (the VCF's does, and
+        # the insertion can move neither past p0 nor before p0 + k - m): created, whatever
+        # PAM the reference holds beside the protospacer
+        if p0 + k - m <= e <= p0 and not moves(p0 + 1 - e) and not moves(p0 + k - m - 1 - e):
+            return "created", ()
+        if pam_right:
+            if e >= p0 or moves(p0 - e):
+                return "ref", (p0,)
+        elif e + m <= p0 + k or moves(p0 + k - e - m):
+            return "ref", (p0 - m,)
+        return "created", ()
+    d = gone
+
+    def slides(lo, s):  # the deleted bases can sit at lo .. lo + d - 1 instead
+        x = hap_ref(lo, lo + s)
+        z = hap_ref(lo + d, lo + d + s)
+        return x is not None and z is not None and x == z
+
+    los = [p0] if e >= p0 + k else [p0 + d] if e <= p0 else []
+    if not los or alts or r:
+        if p0 not in los and e < p0 + k and slides(e, p0 + k - e):
+            los.append(p0)  # the junction moved past the PAM
+        if p0 + d not in los and e > p0 and slides(p0, e - p0):
+            los.append(p0 + d)  # before it
+    if los:
+        return "ref", tuple(los)
+    return "ref", ((p0,) if pam_right else (p0 + d,))
 
 
 # ---------------------------------------------------------------------------
@@ -489,7 +844,8 @@ def local_haplotype(lo, hi, window, others=()):
     inclusive), as [(place, source)] in the order the haplotype holds them.
 
     ``window`` (VCF POS, REF, ALT) is the indel of the fake-indel window, written as the
-    window writes it: its REF out, its ALT in, the anchor base included. ``others`` are
+    window writes it: its REF out, its ALT in, the anchor base included; None for a
+    haplotype read around a SNP row's target, which holds no window indel. ``others`` are
     the haplotype's other indels; the bases one shares with its REF at either end
     (kept_bases, shared_tail) stay reference bases. A source is a reference position
     (int), whose base is the haplotype's own allele there, or a base an ALT puts in
@@ -502,13 +858,15 @@ def local_haplotype(lo, hi, window, others=()):
     keeps: two records at one POS always do (an insertion and a deletion there are two
     alleles of one site, though the bases each changes do not meet). The bases do not
     depend on the order of ``others``."""
-    refs = sorted((p1 - 1, p1 - 1 + len(ref)) for p1, ref, _alt in [window, *others])
+    records = ([window] if window is not None else []) + list(others)
+    refs = sorted((p1 - 1, p1 - 1 + len(ref)) for p1, ref, _alt in records)
     if any(b[0] < a[1] for a, b in zip(refs, refs[1:])):
         return None  # two REFs share a base
     edits = []
-    p1, ref, alt = window
-    s = p1 - 1
-    edits.append((s, s + len(ref), alt, s - 1, 2))
+    if window is not None:
+        p1, ref, alt = window
+        s = p1 - 1
+        edits.append((s, s + len(ref), alt, s - 1, 2))
     for p1, ref, alt in others:
         s = p1 - 1
         c = kept_bases(ref, alt)
@@ -542,7 +900,7 @@ def _same_base(x, y, value):
     return bx is not None and bx == by
 
 
-def target_pairs(window_hap, hap, first, last):
+def target_pairs(window_hap, hap, first, last, through=()):
     """The ways ``hap`` can hold the bases ``window_hap`` holds at places first..last
     (the target's first and last base on the window; local_haplotype), at the target's
     own place: one from the place of its first base on, one up to the place of its last
@@ -553,8 +911,9 @@ def target_pairs(window_hap, hap, first, last):
     and the base past them: for a deletion, the junction). The haplotype must have the
     bases through that indel, as the row names it, not only in a stretch that another of
     its variants has lengthened (a repeat unit gained upstream can push the indel out of
-    a stretch whose bases are those of the window). Always two, in that order: a target
-    the window written out does not hold has neither."""
+    a stretch whose bases are those of the window). ``through``: more places the stretch
+    must hold, the bases of the SNPs a SNP row names (snp_target_held). Always two, in
+    that order: a target the window written out does not hold has neither."""
     keys = [k for k, _s in window_hap]
     try:
         i, j = keys.index(first), keys.index(last)
@@ -563,7 +922,7 @@ def target_pairs(window_hap, hap, first, last):
     want = [s for _k, s in window_hap[i:j + 1]]
     n = len(want)
     lit = [x for x in range(i, j + 1) if len(keys[x]) == 3 and keys[x][1] == 2]
-    core = {keys[x] for x in lit}
+    core = {keys[x] for x in lit} | set(through)
     if lit and lit[-1] < j:
         core.add(keys[lit[-1] + 1])  # the base past the window's ALT: a deletion's junction
     hkeys = [k for k, _s in hap]
@@ -591,6 +950,65 @@ def holds_target_bases(ways, value):
                for pairs in ways)
 
 
+# ---------------------------------------------------------------------------
+# A SNP row's carrier whose haplotype holds an indel inside the target (2.10.0)
+# ---------------------------------------------------------------------------
+# A SNP row is a target on the reference with SNP alleles: the enriched genome holds
+# no indel, so its carriers are read from SNP genotypes. A carrier whose haplotype
+# holding the row's SNPs also holds an indel that changes the target's bases does not
+# have the row's sequence there. As for an indel row's second indel (2.8.1), that is
+# read on the haplotype's bases: in a tandem repeat a unit gained or lost at the
+# target's edge leaves them as they are.
+
+
+def snp_target_span(start, target_len):
+    """(lo, hi): the reference bases (0-based, inclusive) a SNP row's target covers: its
+    start and as many bases as the target holds, the PAM and any DNA-bulge base
+    included (an RNA bulge is a gap of the guide, no base of the target)."""
+    return start, start + target_len - 1
+
+
+def snp_target_frame(lo, hi, indels):
+    """(first, last): the reference positions (0-based, inclusive) snp_target_held
+    writes a haplotype over: the target's span and, on either side, its length and the
+    bases the haplotype's indels ``indels`` [(POS, REF, ALT)] add or delete."""
+    margin = hi - lo + 1 + sum(abs(len(r) - len(a)) for _p, r, a in indels)
+    return lo - margin, hi + margin
+
+
+def snp_target_held(lo, hi, snps, held, value, reference):
+    """True iff a haplotype holding a SNP row's SNPs and some indels has the row's
+    target at its place: the bases of the reference lo..hi (0-based, inclusive) with the
+    haplotype's own alleles there, read from the target's first base on or up to its
+    last base, the stretch holding the base of every SNP the row names (``snps``, their
+    0-based positions), not one another variant pushed out of it.
+
+    ``held`` gives, for each way (from the first base on, up to the last base), the
+    haplotype's indels [(POS, REF, ALT)] that way reads, or None where it cannot be read
+    (an indel there that cannot be put on a slot). ``value`` (source -> base, None where
+    not known) gives the haplotype's alleles, the row's at a position of lo..hi;
+    ``reference`` is the chromosome's sequence. A way that reads two records of one base
+    (two indels whose REFs share a base, or a SNP alt of the haplotype on a base of an
+    indel's REF) cannot be read."""
+    through = [(p, 0) for p in snps]
+    for side in (0, 1):
+        indels = held[side]
+        if indels is None:
+            continue
+        if any(not 0 <= q < len(reference) or value(q) != reference[q]
+               for p, r, _a in indels for q in range(p - 1, p - 1 + len(r))):
+            continue  # a SNP alt on a base of the indel's REF: two records of one base
+        first, last = snp_target_frame(lo, hi, indels)
+        hap = local_haplotype(first, last, None, indels)
+        if hap is None:
+            continue  # two of its indels overlap
+        ways = target_pairs(local_haplotype(first, last, None), hap, (lo, 0), (hi, 0),
+                            through)
+        if holds_target_bases([ways[side]], value):
+            return True
+    return False
+
+
 class IndelCarriers(object):
     """The carriers of one indel, parsed once: {sample: (genotype tokens, kind,
     indel-carrying slots)} plus the slot total. ``phase_known`` is False when they
@@ -611,14 +1029,9 @@ class IndelCarriers(object):
                 self.total_slots += len(islots)
 
 
-def _for_alt(gt, token):
-    """A genotype as "this alt or not": ``token``, the allele index of the alt, becomes
-    "1", any other allele "0"; a missing allele stays "."."""
-    toks, kind = _gt_tokens(gt)
-    norm = ["1" if t == token else ("." if t == "." else "0") for t in toks]
-    if kind == "haploid":
-        return norm[0]
-    return ("|" if kind == "phased" else "/").join(norm)
+# A genotype as "this alt or not": the alt's allele index becomes "1", any other allele
+# "0", a missing allele stays "."
+_for_alt = site_alleles.for_alt
 
 
 def biallelic_site(rec):
@@ -628,41 +1041,15 @@ def biallelic_site(rec):
     record holds, but a record with several alts on one line (C>A,T) keeps its raw
     genotype under every alt its sample carries: S:2|1 is listed under A and under T.
     The allele index of an alt is the token all its carriers share, and when that
-    leaves more than one (a single carrier, 2|1), the one no other alt of the position
-    needs; the record's own alt then reads "1", any other allele "0": 2|1 is 0|1 under
+    leaves more than one (a single carrier, 2|1), the one no other alt of the position's
+    lines of several ALTs needs (a line of one ALT there settles none: its 1 is its own
+    line's); the record's own alt then reads "1", any other allele "0": 2|1 is 0|1 under
     A, 1|0 under T. Where the genotypes cannot say which index is the alt (every carrier
     of two alts is 1|2) no slot can be tied to it: "1/0", one copy on an unknown slot,
     so the carrier is resolved PUTATIVE on the alleles it does carry. A position with
-    no foreign index (split or biallelic records) comes back as it is."""
-    plain = ("0", "1", ".")
-    if all(t in plain for carriers in rec.values() for g in carriers.values()
-           for t in _gt_tokens(g)[0]):
-        return rec
-    shared = {}
-    for alt, carriers in rec.items():
-        common = None
-        for g in carriers.values():
-            toks = {t for t in _gt_tokens(g)[0] if t not in ("0", ".")}
-            common = toks if common is None else common & toks
-        shared[alt] = common or set()
-    settled = True
-    while settled:
-        settled = False
-        taken = {next(iter(c)) for c in shared.values() if len(c) == 1}
-        for alt, c in shared.items():
-            if len(c) > 1 and c & taken:
-                shared[alt] = c - taken
-                settled = True
-    out = {}
-    for alt, carriers in rec.items():
-        c = shared[alt]
-        if len(c) == 1:
-            token = next(iter(c))
-            out[alt] = {s: _for_alt(g, token) for s, g in carriers.items()}
-        else:
-            out[alt] = {s: "/".join(["1"] + ["0"] * (len(_gt_tokens(g)[0]) - 1))
-                        for s, g in carriers.items()}
-    return out
+    no foreign index (split or biallelic records) comes back as it is. The rule is
+    every reader's (site_alleles.per_alt)."""
+    return site_alleles.per_alt(rec)
 
 
 def resolve_carriers(columns, indel_gts, phase_known=True, others=()):
@@ -926,7 +1313,18 @@ def parse_dict_value(value):
     """Parse one per-sample SNP dictionary value (``my_dict_<chrom>.json``): entries
     ``<sample:gt,...>;<ref>,<alt>;<rsID>;<AF>`` joined by '$', one per alt. Returns
     ``[(ref, alt, rsid, af, {sample: gt})]`` for the single-base ACGT alts (the SNPs
-    the overlay codes); malformed entries are skipped."""
+    the overlay codes), one per REF>ALT, each genotype read against its own alt's
+    allele index (site_alleles.read_records) among every alt of one character the value
+    lists, a '*' too (the Tier-1 store's compile, tier0_compile.iter_dict_records, reads
+    them so: a carrier of the '*' alone tells its index); malformed entries are
+    skipped. The REF is read in upper case (C>G beside c>G, which CRISPRitz codes alike,
+    is one allele) and the ALT as the dictionary writes it, as the Tier-1 compile reads
+    them. CRISPRitz 2.10.0 reads REF and ALT in upper case as it reads the VCF, so its
+    dictionary holds no lower-case allele (c>g is the entry C,G, coded); one of CRISPRitz
+    2.9.1 or earlier (or of 2.10.0 before that rule) lists C>g as an entry of g, an ALT its
+    genome does not code, so it is no allele of the genome and the base filter drops it,
+    as the Tier-1 path keeps only ACGT alts (read in upper case, its carriers were read as
+    carriers of G)."""
     out = []
     for entry in str(value).split("$"):
         parts = entry.split(";")
@@ -935,18 +1333,24 @@ def parse_dict_value(value):
         refalt = parts[1].strip().split(",")
         if len(refalt) < 2:
             continue
-        ref, alt = refalt[0].strip().upper(), refalt[1].strip().upper()
-        if len(ref) != 1 or len(alt) != 1 or ref not in _BASE_ORDER or alt not in _BASE_ORDER:
+        ref, alt = refalt[0].strip().upper(), refalt[1].strip()
+        if len(ref) != 1 or len(alt) != 1:
             continue
         carriers = {}
         for tok in parts[0].split(","):
             sid, sep, gt = tok.strip().partition(":")
             if sid and sep:
-                carriers[sid] = gt.strip()
+                gt = gt.strip()
+                carriers[sid] = (site_alleles.merge_gt(carriers[sid], gt)
+                                 if sid in carriers else gt)
         rsid = parts[2].strip() or "."
         af = parts[3].strip() if len(parts) > 3 else ""
         out.append((ref, alt, rsid, af, carriers))
-    return out
+    # each genotype read against its own alt's allele index, two records of one REF>ALT
+    # merged (a slot carries the alt if either puts it there): site_alleles.read_records;
+    # then the bases
+    return [r for r in site_alleles.read_records(out)
+            if r[0] in _BASE_ORDER and r[1] in _BASE_ORDER]
 
 
 def load_dict_snps(dict_path, chrom, positions):

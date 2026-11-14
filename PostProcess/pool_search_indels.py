@@ -2,6 +2,7 @@
 
 import gzip
 import os
+import shlex
 import sys
 import tempfile
 from multiprocessing import Pool
@@ -151,14 +152,6 @@ def _pam_line(pam_path: str):
     return seq, int(size)
 
 
-def _index_pam(pam_path: str) -> str:
-    """The PAM index-genome names an index by, read from a PAM file as crispritz.py
-    reads it: the first |n| bases of its sequence for a 5' PAM (n < 0), the last n
-    for a 3' one."""
-    seq, size = _pam_line(pam_path)
-    return seq[:-size] if size < 0 else seq[-size:]
-
-
 def _fake_genome(fake_dir: str):
     """What a chromosome's fake-indel genome holds, by pool_index_indels.py's test of it
     (_fake_genome_is_empty): "sequence", "empty" (every FASTA header-only: no indel,
@@ -205,6 +198,12 @@ prune_pam_flag = "--prune-pam" if prune_pam == "1" else ""
 # index beside it -- a library given with --index-path, or the working directory's
 index_library = (sys.argv[16] if len(sys.argv) > 16
                  else os.path.join(current_working_directory, "genome_library"))
+# optional: that variant index's name, <true_pam>_<bMax>_<ref>+<vcf> or, since 2.10.0, the
+# form that carries the guide length and the side (<guide>-<PAM>_... for a 3' PAM,
+# <PAM>-<guide>_... for a 5' one: index_fit.parse_index_name); its INDELS index is
+# <name>_INDELS. The sub-indexes in it keep the engine's names, <true_pam>_<bMax>_fake<chrom>.
+variant_index = (sys.argv[17] if len(sys.argv) > 17
+                 else f"{true_pam}_{bMax}_{ref_name}+{vcf_name}")
 
 
 def _in_chrom_view():
@@ -247,8 +246,7 @@ def _own_pam():
         return None
     k = len(true_pam)
     guide, n, name = len(seq) - abs(size), (k if size > 0 else -k), None
-    built = os.path.join(_outside_view(index_library),
-                         f"{true_pam}_{bMax}_{ref_name}+{vcf_name}", ".pam_build")
+    built = os.path.join(_outside_view(index_library), variant_index, ".pam_build")
     try:
         with open(built) as fh:
             got = fh.read().rsplit(None, 2)
@@ -302,7 +300,7 @@ def _holds_vcfs(vcf_folder):
         return False
 
 
-def _rebuild(raw_fakechrom, fasta):
+def _rebuild(raw_fakechrom, fasta, with_variant=False):
     """How to rebuild the INDELS index this search reads, the end of "Rebuild it", by what
     is here. With the dataset's VCFs, the build-index-only command, with the PAM file the
     index was built with, that does it, with the enrichment that makes the fake-indel
@@ -315,32 +313,55 @@ def _rebuild(raw_fakechrom, fasta):
     another PAM, built with one that is not in _pam_dirs): the steps are said in words,
     never as a command with a blank to fill in. complete-test --chrom's view may not hold
     that genome, and an INDELS index built there would go with the view, so that run sends
-    the user to a run that does build it."""
+    the user to a run that does build it. ``with_variant``: the INDELS index is of another
+    enrichment than the dataset's indel logs (_window_mismatch), and the variant index of its
+    name, built with it, goes with it where it is there (indel_window.with_its_variant_index),
+    for the build, or this search with the enriched genome in place, to build both from the
+    enrichment in place; a download swaps in both from one archive."""
+    import indel_window
+
     cwd = os.path.normpath(_outside_view(current_working_directory))
     indels_index = os.path.join(os.path.normpath(_outside_view(index_library)),
-                                f"{true_pam}_{bMax}_{ref_name}+{vcf_name}_INDELS")
+                                f"{variant_index}_INDELS")
+    also = indel_window.with_its_variant_index(indels_index)[1:] if with_variant else []
     # (a downloaded index comes without the fake-indel genome. download skips an index
     # whose INDELS index is in place, and else swaps in both from one archive: a variant
     # index left there survives a download that fails, as for an index that is not on
     # the hub)
-    download = (f"rm -rf '{indels_index}' && crisprme.py download --what index --index-name "
-                f"{os.path.basename(indels_index)[: -len('_INDELS')]} --path '{cwd}'")
+    # (each path quoted as a shell reads it back, a quote in it too: indel_window.quote)
+    q = indel_window.quote
+    download = (f"rm -rf {q(indels_index)} && crisprme.py download --what index --index-name "
+                f"{os.path.basename(indels_index)[: -len('_INDELS')]} --path {q(cwd)}")
     # (where the search's --vcf list spells the dataset as VCFs/<name>, the search looks in
     # VCFs/VCFs/<name>, and takes the chromosomes from the indel logs)
     named = os.path.join(cwd, "VCFs", vcf_name)
     vcfs = next((d for d in (_outside_view(vcf_dir), named) if _holds_vcfs(d)), None)
     own = _own_pam()
     pam = _pam_file_of(*own) if own else pam_file
+    it = "them" if also else "it"
     if fasta and not (vcfs and pam):
         search = ("complete-test without --chrom, or a complete-search of this index,"
                   if _in_chrom_view() else "this search again,")
-        return (f": remove the INDELS index with rm -rf '{indels_index}' and run {search} which "
-                f"builds it anew from the fake-indel genome in {os.path.dirname(raw_fakechrom)}")
+        enriched = os.path.join(cwd, "Genomes", f"{ref_name}+{vcf_name}")
+        if not also:
+            return (f": remove the INDELS index with rm -rf {q(indels_index)} and run {search} "
+                    f"which builds it anew from the fake-indel genome in "
+                    f"{os.path.dirname(raw_fakechrom)}")
+        if os.path.isdir(enriched):
+            # (the search builds a missing variant index from the enriched genome in place)
+            return (f": remove both with rm -rf {q(indels_index)} {q(also[0])} and run {search} "
+                    f"which builds them anew from the enrichment in place, {enriched} and the "
+                    f"fake-indel genome in {os.path.dirname(raw_fakechrom)}")
+        # (no enriched genome here to build the variant index from, nor the VCFs and the PAM
+        # file of a build: the search would build the INDELS index alone)
+        return (f": for an index you downloaded, download it again: {download}; for one you "
+                f"built, put its enriched genome back in '{enriched}' and run {search} which "
+                f"then says how to rebuild them")
     if not vcfs:
         return (f": for an index you downloaded, download it again: {download}; for one you "
                 f"built, put its VCFs back in '{named}' and run this search again, which then "
-                f"gives the command that rebuilds it")
-    remove = [indels_index]
+                f"gives the command that rebuilds {it}")
+    remove = [indels_index] + also
     again = ""
     if not fasta:
         # build-index-only makes that genome as it enriches, and with an enriched
@@ -349,17 +370,38 @@ def _rebuild(raw_fakechrom, fasta):
         again = f"; or, for an index you downloaded, download it again: {download}"
     # the bulges build-index-only builds the index's N from
     n = int(bMax) - 1 if bMax.isdigit() and int(bMax) > 0 else bMax
-    rest = f"--bDNA {n} --bRNA {n} --vcf '{vcfs}' --path '{cwd}'"
+    rest = f"--bDNA {n} --bRNA {n} --vcf {q(vcfs)} --path {q(cwd)}"
     if pam:
-        removed = " ".join("'%s'" % p for p in remove)
+        removed = " ".join(q(p) for p in remove)
         return (f": rm -rf {removed} && crisprme.py build-index-only --genome "
-                f"'{_outside_view(ref_folder)}' --pam '{pam}' {rest}{again}")
+                f"{q(_outside_view(ref_folder))} --pam {q(pam)} {rest}{again}")
     named = f"{own[1]}.txt, " if own[1] else ""
     return (f" with build-index-only and a PAM file of the PAM it was built with ({named}the "
             f"line '{own[0]}'), which is not in {' or '.join(_pam_dirs())}: remove "
-            + " and ".join("'%s'" % p for p in remove)
+            + " and ".join(q(p) for p in remove)
             + f", write that PAM file, and run crisprme.py build-index-only with it as --pam, "
-              f"and --genome '{_outside_view(ref_folder)}' {rest}{again}")
+              f"and --genome {q(_outside_view(ref_folder))} {rest}{again}")
+
+
+def _other_sub_indexes_format(sub):
+    """The index format of the .bin files of the other sub-indexes of the INDELS index
+    ``sub`` is a sub-index of (the newest, of the first that holds one), or None where none
+    holds a .bin: index-genome builds them all in one run, with one CRISPRitz. Read where the
+    sub-index really is: complete-test --chrom's view links the one sub-index alone."""
+    import index_fit
+
+    parent, own = os.path.split(os.path.realpath(sub))
+    try:
+        others = sorted(os.listdir(parent))
+    except OSError:
+        return None
+    for other in others:
+        if other != own and os.path.isdir(os.path.join(parent, other)):
+            formats = [f for f in index_fit.bin_formats(os.path.join(parent, other))
+                       if f is not None]
+            if formats:
+                return max(formats)
+    return None
 
 
 def _empty_index(chrom, indexed_fakechrom, raw_fakechrom):
@@ -372,8 +414,10 @@ def _empty_index(chrom, indexed_fakechrom, raw_fakechrom):
     tells, read by buildTST's own rule (crispritz_bins, as build-index-only checks a
     build): when no contig of it holds a target of the index's own PAM (the search's,
     or the one a PAM-less index standing in for it was built with: _own_pam), a build
-    holds no .bin. Anything else may be a broken or partial build, and the search must
-    not pass it off as an empty result.
+    holds no .bin. The rule is that of the index format the sub-index was built in, which
+    it records (index_fit.write_index_meta), else that of the other sub-indexes' .bin
+    files, else that of format 2 (crispritz_bins.index_format). Anything else may be a
+    broken or partial build, and the search must not pass it off as an empty result.
     """
     if os.path.isfile(os.path.join(indexed_fakechrom, NO_TARGETS)):
         return True, (f"No {true_pam} target in the indels of {chrom}: skipping its indel "
@@ -397,7 +441,8 @@ def _empty_index(chrom, indexed_fakechrom, raw_fakechrom):
                     with open(built_with, "w") as fh:
                         fh.write(own[0] + "\n")
                 missing, unread = crispritz_bins.missing_bins(
-                    indexed_fakechrom, raw_fakechrom, built_with, int(bMax))
+                    indexed_fakechrom, raw_fakechrom, built_with, int(bMax),
+                    _other_sub_indexes_format(indexed_fakechrom))
             if not missing and not unread:
                 return True, (f"No {true_pam} target in the indels of {chrom}: skipping its "
                               f"indel search (its index holds no .bin, and {raw_fakechrom} "
@@ -456,6 +501,85 @@ def _missing_index(chrom, indexed_fakechrom, raw_fakechrom):
             f"{_rebuild(raw_fakechrom, fasta)}")
 
 
+def _window_mismatch(chrom, indexed_fakechrom, raw_fakechrom):
+    """The ERROR for ``chrom`` when its sub-index of the INDELS index was built from
+    fake-indel windows (the ones it records, index_fit.write_index_meta's
+    indel_window.META_KEY, or 25/27 for one of index format 1, which only CRISPRitz 2.9.1
+    and earlier build: indel_window.index_window) of another width than the chromosome's
+    indel log holds: the two come from two enrichments (an index kept beside an enrichment
+    made again with CRISPRitz 2.10.0, say), so the log maps no target of that index right
+    (each window's start, ALT and FAKEPOS are another enrichment's), and every indel row
+    of it would be wrong. None where they agree, or either does not tell (a sub-index of
+    format 2 that records none: its rows are mapped by its log's own windows, as every
+    reader of the log maps them, whatever their width). The rebuild it names removes the
+    variant index of the INDELS index's name too, where it is there (_rebuild): up to the
+    review of wave 1c-a (W1C-B2R2-2) it named the INDELS index alone, whose build kept the
+    variant index of the other enrichment, and the search then read it with no word."""
+    import indel_window
+
+    recorded = indel_window.index_window(indexed_fakechrom) \
+        if os.path.isdir(indexed_fakechrom) else None
+    path = indel_window.log_path(log_indels_dir, chrom)
+    if recorded is None or path is None:
+        return None
+    try:
+        logged = indel_window.log_windows(path)
+    except (OSError, ValueError, EOFError):
+        return None
+    if not logged or logged == {recorded}:
+        return None
+    try:  # (the FASTAs index-genome would index there)
+        fasta = any(f.strip().split(".")[-1] == "fa" for f in os.listdir(raw_fakechrom))
+    except OSError:
+        fasta = False
+    # (the variant index of its name, which a build makes with it from one enrichment, and
+    # which holds no window to tell its own: indel_window.with_its_variant_index)
+    paired = indel_window.with_its_variant_index(os.path.join(
+        os.path.normpath(_outside_view(index_library)), f"{variant_index}_INDELS"))[1:]
+    return (f"ERROR: the indel index of {chrom} ({_outside_view(indexed_fakechrom)}) was built "
+            f"from fake-indel windows of {indel_window.describe(recorded)} reference bases (before "
+            f"an indel's REF and after it), while the indel log {_outside_view(path)} holds windows "
+            f"of {' and '.join(indel_window.describe(w) for w in sorted(logged))}: the index and "
+            f"the log come from two enrichments, and the log would place every indel off-target "
+            f"of {chrom} wrong. Install the index and its dictionaries from one build or one "
+            f"download."
+            + (f" The variant index of its name ({paired[0]}) was built with it, from the same "
+               f"enrichment, which it holds no window to tell: it goes too, or it would be "
+               f"searched with the dataset's dictionaries, its alleles another enrichment's."
+               if paired else "")
+            + f" Rebuild {'them' if paired else 'it'}{_rebuild(raw_fakechrom, fasta, True)}")
+
+
+def _window_notes():
+    """What this search says, on stdout (the run's log_verbose.txt), of the fake-indel
+    windows of the dataset when its targets (the PAM file's guide and PAM) with the DNA
+    bulges it allows need more bases than they hold (indel_window.target_note): such indel
+    off-targets are held by no index. The windows are those the indel logs record; how a
+    sites-only dataset gets wider ones is not by enriching it again (indel_window.sites_only,
+    of its VCFs in vcf_dir or its registry), and its kit in place goes first, each part named
+    by absolute path in the working directory as the user knows it (_outside_view), its
+    indexes in the library the search reads too (indel_window.kit_removal; the note named
+    none of it up to the review of wave 1c-a, W1C-B1)."""
+    import indel_window
+
+    try:
+        seq, _size = _pam_line(pam_file)
+        bdna = int(bDNA)
+    except (OSError, ValueError):
+        return []
+    try:
+        widths = set().union(*indel_window.dataset_windows(log_indels_dir).values())
+    except (OSError, ValueError, EOFError):
+        return []
+    notes = [w for w in sorted(widths)
+             if indel_window.target_note(w, len(seq), bdna, "indel search", vcf_name)]
+    sites = notes and indel_window.sites_only(current_working_directory, vcf_name, vcf_dir)
+    workdir = os.path.normpath(_outside_view(current_working_directory))
+    return [indel_window.target_note(w, len(seq), bdna, "indel search", vcf_name, bool(sites),
+                                     workdir, ref_name, [_outside_view(index_library)])
+            for w in notes]
+
+
 def search_indels(chrom):
     """Run the per-chromosome indel off-target search for one fake-indel chromosome.
 
@@ -488,7 +612,7 @@ def search_indels(chrom):
         return SKIPPED
     indexed_fakechrom = os.path.join(
         index_library,
-        f"{true_pam}_{bMax}_{ref_name}+{vcf_name}_INDELS",
+        f"{variant_index}_INDELS",
         f"{true_pam}_{bMax}_fake{chrom}",
     )
     raw_fakechrom = os.path.join(
@@ -497,6 +621,11 @@ def search_indels(chrom):
         f"{ref_name}+{vcf_name}_INDELS",
         f"fake_{vcf_name}_{chrom}",
     )
+    said = _window_mismatch(chrom, indexed_fakechrom, _outside_view(raw_fakechrom))
+    if said:
+        sys.stderr.write(said + "\n")
+        sys.stderr.flush()
+        return REFUSED
     if os.path.isdir(indexed_fakechrom) and not _holds_bin(indexed_fakechrom):
         empty, said = _empty_index(chrom, indexed_fakechrom, _outside_view(raw_fakechrom))
         if empty:
@@ -535,6 +664,8 @@ def search_indels(chrom):
 
 log_indels_dir = os.path.join(current_working_directory, "Dictionaries", "log_indels_" + vcf_name)
 chrs = _dataset_chroms(vcf_dir, log_indels_dir)
+for _note in _window_notes():
+    print(_note, flush=True)
 
 # cpus = len(os.sched_getaffinity(0))
 # if cpus - 3 < 10:
@@ -580,7 +711,10 @@ if len(skipped) == len(chrs):
     with open(merged, "w") as fh:
         fh.write(_TARGETS_HEADER + "\n")
 else:
-    os.system(f'sed -i 1i"{header}" {merged}')
+    # the header is read from a chromosome's part file, a file of the output folder, which
+    # others may write (its group, under a umask of 002): it reaches sed quoted, never as the
+    # shell's own text, where a "$(...)" in it ran (2.10.0, the review of lane S, round 4)
+    os.system(f"sed -i {shlex.quote('1i' + header)} {merged}")
 
 
 # os.system('echo "Search INDELs End: '+datetime.now().strftime('%Y-%m-%d %H:%M:%S')+'" >> '+output_folder+'/../log.txt')

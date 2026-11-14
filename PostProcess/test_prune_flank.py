@@ -7,7 +7,9 @@ index searched under --prune-pam for a narrower PAM misses the sites whose flank
 (idx audit IDX-5: 3 of 36 rows on the synthetic genome, 2.6% of the indel rows on chr22). The
 index records nothing of its engine; its trees do, as an N nibble (0) in a flank, which no
 earlier build stores (prune_flank). A flank wider than the PAM also cannot index a PAM at a
-contig's end (IDX-4): the search says both on stdout, and into the run's Params.txt.
+contig's end (IDX-4): complete-search says both on stdout, and into the run's Params.txt; the
+search script, of a search it prunes by itself (one the web launched), in its log
+(test_defaults_and_index_flex).
 
 The trees are fabricated as buildTST writes them (measured on real ones: for an odd flank the
 last byte's high nibble is padding, its low nibble the last base).
@@ -18,6 +20,7 @@ import io
 import os
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import types
@@ -186,10 +189,79 @@ class TheSearch(_Dir):
             "WARNING [complete-search]: NNNNNNNN_4_g stores no N in the flank of any target "
             "where its genome has one: it was built before CRISPRitz 2.9.1"), notes)
 
+    def test_the_warning_names_a_route_that_serves_the_search_whole(self):
+        """Its advice was to "search without --prune-pam and --index-path, which builds a
+        dedicated index": since 2.10.0 such a search prunes by itself from that very index
+        (_prune_on_its_own) and builds none, so the advice sent the user round the same
+        warning. It names the two routes that serve the search whole: the index built
+        again, or a dedicated index of the PAM beside it, which the search takes first."""
+        from unittest import mock
+        old = self.index("NNNNNNNN_4_g", flanks=("ACGTACGT", "TTTTACGT"))
+        warning = self.crisprme._wider_flank_notes([old], "NRG", self.genome)[1]
+        self.assertNotIn("without --prune-pam", warning)
+        self.assertTrue(warning.endswith(
+            "Remove it and build it again with build-index-only (which keeps an index it "
+            "finds in place), or put a dedicated NRG index beside it, which a search takes "
+            "before it (build one with build-index-only, or download one if it is "
+            "published)."), warning)
+        # the search the older advice named takes that same index, pruning by itself (the
+        # library is the working directory's), and builds none; with a dedicated index
+        # beside it, that one answers it, unpruned
+        with mock.patch.object(self.crisprme, "current_working_directory", self.root), \
+                mock.patch.object(self.crisprme, "_engine_prunes", return_value=True):
+            self.assertEqual(
+                self.crisprme._prune_on_its_own("_", "g", [], "NRG", 2, True, 20, 1, 1), old)
+            dedicated = self.index("NRG_3_g", flanks=("TTT",))
+            self.assertIsNone(
+                self.crisprme._prune_on_its_own("_", "g", [], "NRG", 2, True, 20, 1, 1))
+        self.assertEqual(self.takes(prune=False), dedicated)
+        self.assertEqual(self.crisprme._wider_flank_notes([dedicated], "NRG", self.genome), [])
+
     def test_an_index_of_the_pams_width_says_nothing(self):
         for name in ("NNN_3_g", "NRG_3_g"):
             self.assertEqual(self.crisprme._wider_flank_notes(
                 [self.index(name, flanks=("TTT",))], "NRG", self.genome), [])
+
+
+class TheSearchScriptsCommand(_Dir):
+    """The search script runs prune_flank.py for a search it prunes by itself (one the web
+    launched, which never passes --prune-pam): the notes complete-search says on its console,
+    on stdout, with the web app's route in the warning's advice, and nothing on stderr, which
+    fails the stage, whatever it is handed (an index or a genome that is not there, none)."""
+
+    def run_it(self, *args):
+        return subprocess.run([sys.executable, os.path.join(HERE, "prune_flank.py"), *args],
+                              capture_output=True, text=True)
+
+    def test_its_notes_on_stdout_and_nothing_on_stderr(self):
+        genome = self.path("Genomes", "g")
+        os.makedirs(genome)
+        with open(os.path.join(genome, "chrN.fa"), "w") as fh:
+            fh.write(">chrN\n" + "ACGT" * 20 + "N" * 30 + "ACGT" * 20 + "\n")
+        old = self.path("genome_library", "NNNNNNNN_3_g")
+        tree(os.path.join(old, "NNNNNNNN_chrN_1.bin"), 8, ["ACGTACGT", "TTTTACGT"])
+        run = self.run_it("NGG", genome, old, "", old)  # (once each; "": none taken)
+        self.assertEqual((run.returncode, run.stderr), (0, ""))
+        lines = run.stdout.splitlines()
+        self.assertEqual(len(lines), 2, run.stdout)
+        self.assertTrue(lines[0].startswith(
+            "NOTE: --prune-pam serves the 3-nt PAM NGG from NNNNNNNN_3_g, whose stored flank is "
+            "8 nt"), lines[0])
+        self.assertTrue(lines[1].startswith(
+            "WARNING: NNNNNNNN_3_g stores no N in the flank of any target where its genome has "
+            "one"), lines[1])
+        self.assertIn("(build one with crisprme.py build-index-only or in the web app's "
+                      "Settings, or download one if it is published)", lines[1])
+        # an index and a genome that are not there: the flank, from the index's name, alone
+        run = self.run_it("NGG", self.path("none"), self.path("genome_library", "NNNNNNNN_3_x"),
+                          self.path("genome_library", "NNNNNNNN_3_x+ds"))
+        self.assertEqual((run.returncode, run.stderr), (0, ""))
+        self.assertEqual(len(run.stdout.splitlines()), 1, run.stdout)
+        # none handed, or none wider than the PAM: nothing
+        for args in (("NGG", genome), ("NGG", genome, "", self.path("genome_library", "NNN_3_g"))):
+            with self.subTest(args=args[2:]):
+                run = self.run_it(*args)
+                self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""))
 
 
 if __name__ == "__main__":

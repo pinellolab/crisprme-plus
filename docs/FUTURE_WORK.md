@@ -3,7 +3,8 @@
 Deferred, non-blocking enhancements. None are correctness bugs; each is a self-contained
 improvement another contributor (or agent) can pick up. For each: **why**, **current behavior**,
 **what to build**, **code pointers**, **acceptance**. Keep this list current — move an item to the
-CHANGELOG when it ships, and delete it from here.
+CHANGELOG when it ships, and delete it from here. What the next release is to bring, the haplotype
+scan of CRISPRme+ 2.10.1 first, is in [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
@@ -33,25 +34,34 @@ values, and matching the indel companion's shape); genotyped indices unchanged.
 
 ---
 
-## 2. Dense-panel search: per-chromosome parallelism + benchmark
-**Why.** Dense / pamless variant panels are the slowest searches. The combinatorial blow-up itself is
-already tamed (the `--max-edits` bound + the high-variant-density greedy cap `CRISPRME_IUPAC_CAP` +
-the Tier-0 registry cache / O(1) LRU that shipped in 2.5.3 and remains in place as of 2.8.1). What's left is raw throughput: the
-search still processes contigs largely serially.
+## 2. Dense-panel search: what is left of the post-analysis' parallelism
+**Why.** Dense variant panels are the slowest searches. The combinatorial blow-up itself is tamed
+(the `--max-edits` bound, the high-variant-density greedy cap `CRISPRME_IUPAC_CAP`, the Tier-0
+registry cache, and since 2.10.0 the exact haplotype pre-check), and since 2.10.0 the post-analysis
+runs each chromosome in pieces over one pool of `--thread` workers (`PostProcess/postproc_pool.py`:
+threads that each run one subprocess at a time, no longer the `multiprocessing` `Pool` whose
+`pool.map` deadlocked at `--thread 200` in earlier releases; the files are those of one process a
+chromosome, byte for byte: METHODS.md §5). What is left is serial within a chromosome.
 
-**What to build.** Run the dense-panel search **per chromosome in parallel** and **measure** the
-wall-clock speedup vs. the current path on a dense panel (e.g. the mega or a pamless index). Fold in
-the known post-analysis fix while here: `pool_post_analisi_snp.py` spins up `Pool(cores)` (~200 on a
-big host) across hundreds of contigs and FD-inheritance **deadlocks** the parent `pool.map` at very
-high `--thread`; cap workers (~16–32) + `maxtasksperchild`.
+**Current behavior.** Per chromosome, the extraction, sorting and clustering of the raw targets
+(about 5 min for IGH's 37.6 million indel raw targets), the merge of the pieces, and the
+CRISPR-Bulge scoring of all of the chromosome's rows, which the merge does in one process to keep
+the batches of one process (13 of the 20 min of a population-level SNP stage of chr22 on a loaded
+node), run on one core. Equal line ranges are not equal costs (IGH: one SNP piece 294 s, the
+others 77 s or less). Each piece repeats the start-up one process does (about 30% more CPU per
+sample on chr22).
 
-**Code pointers.** `PostProcess/pool_post_analisi_snp.py` (the `Pool` worker count), the
-`complete-search` submit chain in `crisprme.py`, `CRISPRME_IUPAC_CAP` + the high-variant-density
-region handling. See memory notes `crisprme-postanalysis-pool-deadlock`,
-`variant-search-complexity-explosion`. (Was tracking task #174.)
+**What to build.** Score the CRISPR-Bulge batches in parallel, each in the batch one process forms,
+with a test that the floats do not depend on the process that scores them; cut the ranges by an
+estimate of their cost (the windows' variant columns) rather than by lines; measure a genome-wide
+search on the indexes of the 2.10.0 rebuild at `--thread 16` and `--thread 200`.
 
-**Acceptance.** Measured speedup on a dense/pamless genome-wide search with byte-identical results,
-and no `Pool` deadlock at `--thread 200`.
+**Code pointers.** `PostProcess/postproc_pool.py` (`run_stage`, `n_pieces`, `ranges`),
+`PostProcess/merge_pieces.py` (`score_cbulge`), `PostProcess/cbulge_rows.py`; the drivers'
+`cluster` and `finish` stages (`scriptAnalisiNNN_v3.sh`, `analisi_indels_NNN.sh`).
+
+**Acceptance.** The same files, byte for byte, as `CRISPRME_POSTPROC_PIECES=0` (RELEASE_CHECKLIST
+step 4d), and a measured speed-up on IGH alone and genome-wide.
 
 ---
 
@@ -63,7 +73,9 @@ scoring without full 2^k-IUPAC haplotype enumeration.
 per-score **worst-possible** reconstruction. The min-edit lower bound is proven for
 SNP + bulge + single-indel, but **BREAKS** (verified false-negative even at k=0) for ≥2 cis indels in
 a protospacer and for equal-length MNVs — a size-aware slack / flag-all-multi-indel-windows / `norm -a`
-fix is needed; multi-indel-in-cis is common (~17–19% of real indel off-targets). CFD worst-case is
+fix is needed; multi-indel-in-cis is common in raw counts (~17–19% of real indel off-targets), most
+of it in STR/VNTR repeats: ~1–2% of indel loci after repeat-masking, and ~0.1–0.2% of indel
+off-targets genuinely missed (METHODS §8). CFD worst-case is
 already exact via factorization (`twopass_cfd_exact.py`, 0-ULP verified); CRISPR-Bulge would be
 shortlist-only.
 
@@ -80,8 +92,12 @@ shortlist-only.
 the `mega` cap-8 worst-case (6.77M OTs), and at 4/1/1 on HGDP1kGP vs mega — but not on the **HPRC**
 pangenome index at a high budget. A quick coverage item, not a gap.
 
-**What to build.** Run `ACTGAAATCTGTAAGCAGGC` on `NRG_3_hg38+hg38_HPRC` at a high edit budget
-(e.g. 6/2/2 with `--max-total-edits`) and record the result for the validation matrix. (Was tracking
+**What to build.** Run `ACTGAAATCTGTAAGCAGGC` on the HPRC index (`20-NRR_3_hg38+hg38_HPRC` of
+2.10.0, its NRG search pruned; 2.8.1's `NRG_3_hg38+hg38_HPRC`) at a high edit budget (e.g. 6/2/2
+with `--max-total-edits`) and record the result for the validation matrix. On an index of 2.10.0,
+which codes every allele, `complete-search` warns of such a budget, whose variant search can
+explode in the dense loci ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §14): measure first how it
+fares on HPRC, a panel of 232 samples, or run it with the haplotype scan of 2.10.1. (Was tracking
 task #242.)
 
 **Acceptance.** HPRC ACTGA high-budget result captured alongside the other indices'.

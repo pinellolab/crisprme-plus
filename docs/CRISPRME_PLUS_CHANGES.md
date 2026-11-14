@@ -196,7 +196,8 @@ white navbar, favicons, vendored font, README + website typography.
    (e.g. `--max-total-edits 10`) to effectively disable the cap.
 
 2. **New results file** `..._high_variant_density_regions.bed` is written per
-   variant search. Targets in windows above `CRISPRME_IUPAC_CAP` (default 10)
+   variant search (since 2.10.0 one line a dense window, read from every raw target before
+   the haplotype pre-check). Targets in windows above `CRISPRME_IUPAC_CAP` (default 10)
    ambiguity codes are represented by a bounded/greedy row rather than the full 2^k
    enumeration, so counts in those extreme regions differ from an uncapped 2.1.x run.
    **Escape hatch:** set `CRISPRME_IUPAC_CAP=-1` to disable the cap (full enumeration).

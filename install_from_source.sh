@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Install CRISPRme+ 2.8.1 FROM SOURCE, without the Bioconda crisprme/crispritz
-# packages. Builds CRISPRitz 2.9.1 from source and installs both CRISPRitz and
+# Install CRISPRme+ 2.10.0 FROM SOURCE, without the Bioconda crisprme/crispritz
+# packages. Builds CRISPRitz from source (the tag the Dockerfile's crispritz_ref
+# pins) and installs both CRISPRitz and
 # CRISPRme into the ACTIVE conda environment ($CONDA_PREFIX), using the same
 # bin/ + opt/ layout the Bioconda/Docker builds use (crisprme.py resolves
 # PostProcess as <dir-of-crisprme.py>[:-3] + opt/crisprme/PostProcess/).
@@ -12,7 +13,7 @@
 #   mamba activate crisprme
 #   bash install_from_source.sh
 #
-# Override the CRISPRitz tag with CRISPRITZ_REF (default v2.9.1).
+# Override the CRISPRitz tag with CRISPRITZ_REF (by default the Dockerfile's crispritz_ref).
 set -euo pipefail
 
 # Linux only: environment.yml has packages with no macOS build, and CRISPRitz's
@@ -23,14 +24,15 @@ if [ "$(uname -s)" = Darwin ]; then
 fi
 
 : "${CONDA_PREFIX:?Activate the conda env first: 'mamba activate crisprme'}"
-CRISPRITZ_REF="${CRISPRITZ_REF:-v2.9.1}"
+CRISPRITZ_REF="${CRISPRITZ_REF:-v2.10.0}"
 CXX="${CXX:-g++}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # this crisprme checkout
 
 echo ">> Building CRISPRitz ${CRISPRITZ_REF} from source (compiler: ${CXX})"
 TMP="$(mktemp -d)"
 SRC="${TMP}/crispritz-src"
-git clone --depth 1 --branch "${CRISPRITZ_REF}" \
+# (a tag checks out as a detached HEAD: no advice about it, which reads as a problem)
+git -c advice.detachedHead=false clone --depth 1 --branch "${CRISPRITZ_REF}" \
     https://github.com/pinellolab/CRISPRitz.git "${SRC}"
 cd "${SRC}"
 ${CXX} -std=c++11 -O3 -fopenmp \

@@ -392,9 +392,12 @@ crisprme.py build-index-only --genome <hg38/> --pam 20bp-NRG-SpCas9.txt \
 NRG (NAG+NGG) SpCas9 PAM; 2 DNA + 2 RNA bulges; RAW (uncompressed) registry and SNP+indel
 co-occurrence ON — consistent with the other production indexes (bulges are a build parameter;
 mismatches are a search-time parameter, run at `--mm 6`). Output
-`genome_library/NRG_3_hg38+hg38_HGDP1kGP` (+ `_INDELS`) + `Dictionaries/{registry,genotypes,
+`genome_library/NRG_3_hg38+hg38_HGDP1kGP` (+ `_INDELS`; CRISPRme 2.10.0 and later name it for
+its guide length and side, `20-NRG_3_hg38+hg38_HGDP1kGP`) + `Dictionaries/{registry,genotypes,
 indel_genotypes,log_indels}_hg38_HGDP1kGP` + `variant_count.json` (**125,180,264 SNPs +
-17,192,381 indels**; `phased:true`); every `reg_<chrom>.idx` carries `data_type=genotyped-phased`.
+17,192,381 indels** in 2.8.1's build, whose CRISPRitz 2.9.1 coded only the last record of a
+split site, METHODS §2: a build with CRISPRitz 2.10.0, which codes every allele, writes its own
+count; `phased:true`); every `reg_<chrom>.idx` carries `data_type=genotyped-phased`.
 
 ### 7.4 chrX pseudoautosomal (PAR) ploidy — a correctness requirement
 chrX is hemizygous in males ONLY outside the pseudoautosomal regions. On GRCh38: PAR1
@@ -532,7 +535,10 @@ sequence and every indel carrier.
 
 ### 9c. The dense-window APPROXIMATION (the greedy cap) + FLAGS + DEFAULT behaviour
 Enumerating the lattice is 2^k in the number of co-located variants, so extreme-density windows are
-**capped**: `capped = _FAST_MODE OR (CRISPRME_IUPAC_CAP ≥ 0 AND #variants > CRISPRME_IUPAC_CAP)`.
+**capped**: `capped = _FAST_MODE OR (CRISPRME_IUPAC_CAP ≥ 0 AND sequences > 2^CRISPRME_IUPAC_CAP)`,
+where a window's sequences are the product of the bases its letters stand for (2 for a two-allele
+column, 3 for a three-allele one, 4 for a four-allele `Q`; a count of variant columns up to 2.8.1,
+the same on a window of two-allele columns), and the default cap is 10 (METHODS.md §5).
 
 - **Population-level** (`CRISPRME_FAST_MODE=1`; `--population-level`, and the default on a
   sites-only / unphased / hybrid / reference-only index): **every** multi-variant window emits ONE
@@ -550,12 +556,20 @@ Enumerating the lattice is 2^k in the number of co-located variants, so extreme-
   chr14:106770868 that nobody actually carries; the real observed haplotypes there are ≤2 variants,
   CFD ≈ 0). Per the per-sample contract — report an off-target only when ≥1 real individual carries it —
   the chimera is suppressed; the window surfaces only its real observed haplotypes. This is the path
-  of an index with the dict-less tiers, such as this one: an index built without `--samplesID` has
-  none, and its per-sample search goes the classic dictionary path, which still reports a capped
-  window by its greedy worst-case alignment, whose listed carriers need not carry every variant in it
-  (METHODS.md §5).
+  of an index with the dict-less tiers, such as this one; since 2.10.0 an index built without
+  `--samplesID`, which has none, goes the same path, reading the same genotypes in its classic
+  per-sample dictionaries (up to 2.8.1 it still reported a capped window by its greedy worst-case
+  alignment, whose listed carriers need not carry every variant in it; METHODS.md §5).
 - Every capped window is still logged to **`<out>.high_variant_density_regions.bed`** so approximated
-  regions are visible, never silent; the reference off-target row keeps the locus in the table.
+  regions are visible, never silent; the reference off-target row keeps the locus in the table. So is
+  every window of 2^20 sequences or more, whatever the cap. Since 2.10.0 the file holds one line a
+  window, read from every raw target of the search before the haplotype pre-check skips any
+  (METHODS.md §5), its carriers the samples carrying an ALT of the window. Its `greedy` column
+  says whether a greedy worst-case alignment stands for the window (0 on the observed-haplotype
+  path per sample, and for a hyperdense window a per-sample search enumerated within the cap);
+  only then, or for a row that names no carrier (a sites-only dataset's), does
+  `High_variant_density_region` say so, and under `--per-sample` it says otherwise that the
+  haplotypes its carriers have are reported.
 - The **`observed_haplotypes.tsv`** report companion lists, for every multi-haplotype site, EACH real
   observed haplotype with its variant set, both scores (CFD + CRISPR-Bulge), carriers and AF — so the
   full per-sample set a dense site contributes is visible, not just the per-cluster representative.

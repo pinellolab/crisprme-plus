@@ -51,28 +51,30 @@ other program a command runs), but not Hugging Face's folder: `HF_HOME` stays
 sends it). A `MPLCONFIGDIR`, `XDG_CACHE_HOME` or `HF_HOME` you set is used as it is.
 
 `docker run --read-only` makes `/tmp` read-only as well, so it needs a writable temporary folder:
-add `--tmpfs /tmp`, or set `CRISPRME_TMPDIR` to a folder of the mounted data folder. Without one,
-a search still ends, but the CRISPR-Bulge scorer and the report have nowhere to write: CRISPR-Bulge
-scores read -1, no report zip is written, and only a WARNING in the search's error log says so.
+add `--tmpfs /tmp`, or set `CRISPRME_TMPDIR` to a folder of the mounted data folder (or to that
+folder itself: `-w /DATA -e CRISPRME_TMPDIR=/DATA`). Without one,
+the CRISPR-Bulge scorer and the report have nowhere to write, and complete-search stops before
+it starts, saying so (before 2.10.0 the search ended with CRISPR-Bulge scores of -1, no report zip,
+and only a WARNING in its error log).
 
 ---
 
 ## 2. A genome-wide search needs a lot of disk — plan for it
 
 The default variant-aware install (`download --what all`, then
-`download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`) takes **~98 GB** on disk
-(measured: 97.9 GB) before any results:
+`download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP`) takes **~150 GB** on disk
+(measured: 150.0 GB, with 2.8.1's `NRR_3_hg38+hg38_HGDP1kGP`) before any results:
 
 | Item | Approx size |
 |---|---|
 | Reference genome (hg38) | ~3 GB |
-| Reference + variant-aware indexes (`NRG_3_hg38`, `NRG_3_hg38+hg38_HGDP1kGP` and its indel index) | ~41 GB |
+| Reference + variant-aware indexes (`20-NRR_3_hg38`, `20-NRR_3_hg38+hg38_HGDP1kGP` and its indel index) | ~94 GB |
 | Its `Dictionaries/`: genotype store ~30 GB, allele-frequency registry ~8.5 GB, indel genotype store ~7.7 GB, indel logs ~6.5 GB (fetched by default; per-sample analysis, this index's default, reads the store) | ~52 GB |
-| Annotations | ~1 GB |
+| Annotations | ~0.1 GB |
 | Per-run results (grows with mismatches/bulges; larger for per-sample runs, the default on a phased index) | GB–tens of GB |
 
-The install peaks around 103 GB while the genotype store unpacks. Keep everything on a
-disk with **~150 GB free** before a first variant-aware run.
+The install peaks around 161 GB while the archives unpack. Keep everything on a
+disk with **~200 GB free** before a first variant-aware run.
 Use `CRISPRME_TMPDIR` (Section 1) on the same roomy disk.
 
 **Reclaiming space:** by default `complete-search` removes bulky intermediates when
@@ -89,9 +91,9 @@ Some releases before 2.7.10 printed this at the start of a search:
 > bulges. This combination can crash the underlying search engine (issue #105 ...)`
 
 CRISPRme+ no longer prints it. The crash it warned about was fixed in CRISPRitz 2.7.1,
-and every supported install pins a later CRISPRitz (2.9.1 for CRISPRme+ 2.8.1). Only if
-you run CRISPRme against an older, unpinned CRISPRitz and a search **aborts with a memory
-error** while using a degenerate PAM (`NRG`, `NNN`, …) *with* bulges, either:
+and every supported install pins a later CRISPRitz, of CRISPRme's own major.minor (2.10.0 for
+CRISPRme+ 2.10.0). Only if you run CRISPRme against an older, unpinned CRISPRitz and a search
+**aborts with a memory error** while using a degenerate PAM (`NRG`, `NNN`, …) *with* bulges, either:
 
 - retry with bulges set to 0 (`--bDNA 0 --bRNA 0`), or
 - use a fully-specified PAM (e.g. `NGG` instead of `NRG`).
@@ -101,20 +103,31 @@ error** while using a degenerate PAM (`NRG`, `NNN`, …) *with* bulges, either:
 ## 4. Per-sample runs need memory (and a genotyped index)
 
 Per-sample analysis resolves genotypes across the whole panel (e.g. 4,091 individuals
-for the HGDP+1000G index) and is both slower and more memory-hungry than the
-population-level analysis. On a large panel budget **tens of GB of RAM** per run. It is
-the default on a genotyped + phased index (HGDP + 1000 Genomes, HPRC), and `--per-sample`
-forces it on any other genotyped one.
+for the HGDP+1000G index) and reads the panel's genotype store: on a large panel budget
+**tens of GB of RAM** per genome-wide run (the README's
+[§0](../README.md#0-system-requirements) gives what a search of one chromosome took). It is the
+default on a genotyped + phased index (HGDP + 1000 Genomes, HPRC), and `--per-sample` forces it
+on any other genotyped one.
 
 - `--per-sample` requires a **genotyped** index. It no-ops (with a warning) on a
-  sites-only index such as `NRG_3_hg38+hg38_mega`.
+  sites-only index such as `20-NRR_3_hg38+hg38_mega`.
 - Named carriers / personal risk cards come from the **genotype store** bundled with
   the index (`download --what index`, unless you pass `--no-genotypes`). Without it
   (and without the classic per-sample dictionaries) a search runs population-level,
   naming the carriers of an indel alone (the index holds them), and `--per-sample`
   falls back to it with a `WARNING` that names the dataset: re-download without
   `--no-genotypes` to get carriers.
-- If you only need site-level results, pass `--population-level` — it is much lighter.
+- If you only need site-level results, pass `--population-level`. Which mode is faster
+  depends on the panel. On the indexes CRISPRitz 2.10.0 builds, which code every allele, a
+  population-level search reads no haplotype, so nothing skips the raw targets of the dense
+  windows of the immunoglobulin loci, which a per-sample search skips when no sample can have
+  them: on HGDP + 1000 Genomes (4,091 samples) the README guide's population-level search of
+  chr22 took 23 to 32 min against 8 to 11 min per sample. On a small panel it can be the faster:
+  on HPRC (232 samples) 9 to 12 min against 14 to 17 min per sample (16 threads; METHODS.md
+  §5). These were measured during 2.10.0's development, on fake-indel windows of 25/27; on the
+  release's 30/30 the integration's gate (8 threads a search, with many searches at once) took
+  31 against 10 min on HGDP + 1000 Genomes and 9 against 14 min on HPRC, and beside mega 39
+  against 17 min (README, "What the default search costs").
   On a phased index leaving out `--per-sample` is not enough, since per-sample is that
   index's default; population-level is the default only on a sites-only, unphased,
   hybrid or reference-only index.
@@ -147,7 +160,8 @@ due to initialization overhead.
 - **Get everything a reference scan needs:** `crisprme.py download --what all` fetches
   the genome, annotations, PAMs, sample lists, and the default reference index.
 - **Add a variant-aware index:** `crisprme.py download --what index --index-name
-  NRG_3_hg38+hg38_HGDP1kGP` (the recommended phased HGDP + 1000 Genomes default).
+  20-NRR_3_hg38+hg38_HGDP1kGP` (the recommended phased HGDP + 1000 Genomes default, of the
+  default SpCas9 NRR PAM, for a 20-nt guide).
 - The public repository ships **prebuilt indexes** that already encode the variants, so
   you do not need the VCFs to search the shipped datasets. It also hosts their source
   VCFs (`hg38_HGDP1kGP`, `hg38_HPRC`, `hg38_mega`), for building an index yourself:
@@ -166,14 +180,119 @@ Independent `complete-search` jobs can run in parallel, but give each job its ow
 long-standing collision where two jobs stripping the same COSMIC-containing annotation
 raced on a temp file is fixed in 2.7.10.)
 
+On a machine other people use, keep the data folder, the output folders and the temporary
+folder (`$TMPDIR`, or `CRISPRME_TMPDIR` when set) writable by you alone (a umask of 022 or
+077, or `chmod go-w` on them; a shared temporary folder such as `/tmp` will do while it is
+sticky). Anyone who can write a folder a search or the web app works in can do more there
+than change the inputs and the results:
+
+- stop the search, by making first a name it makes there (the post-analysis's
+  `<output>.pieces` folder, for one);
+- rename a folder the search made there and put their own in its place (a rename needs only
+  write access to the folder that holds it), and put links in it, which the search then
+  writes through, over files of yours elsewhere (the web app follows none: below);
+- put lines and names in the files it reads there (its inputs, and the files it writes and
+  reads back), which older parts of the pipeline still pass to shell commands; and, in a
+  temporary folder that is not sticky, replace the modules TensorFlow writes there and then
+  imports.
+
+What holds wherever you run it, since 2.10.0:
+
+- Python looks for no module in the folder CRISPRme is run from: every `python -c`, `-m` or
+  `-` it runs is isolated (`-I`), and `--debug` keeps the `PostProcess/` beside the
+  `crisprme.py` that runs. Before 2.10.0 the scorer's health check, which every search runs
+  first from the folder you run `crisprme.py` in, loaded a module put there, and `--debug` took
+  that folder's `PostProcess/` for its own;
+- no file CRISPRme writes is loaded as code (they are JSON or text; TensorFlow's own
+  modules, above, and the web app's table cache, in a folder of the server's own, below,
+  aside), and the web app's Settings Retry re-runs a job with the command the server
+  launched it with, kept in its memory and run without a shell. Before 2.10.0 it ran through
+  a shell the command a job's `Settings/<job>/cmd.json` held;
+- the values a review found going from a job's files into shell commands as the shell's own
+  text are quoted or checked now: the guides of the guide file, the indel targets' header,
+  the names of the CFD graph files, and the guide and the annotation of the results' region
+  page;
+- the temporary files and folders it makes with `tempfile.mkdtemp`, `mkstemp` or `mktemp -d`
+  take names no one else could make first. Where they are made, in the temporary folder or
+  (the annotation temp folders, without `CRISPRME_TMPDIR`) in the working directory, only a
+  sticky or private folder keeps others from replacing them; and the intermediate files a
+  search writes in its output folder keep fixed names (such as `<file>.tmp`);
+- the web app follows no link another user put in its data folder. Every file it reads,
+  serves or writes there (a search's logs, parameters and results, the downloads of
+  `/Results/<path>`, the Settings jobs' logs, the uploads, the email, concurrent searches
+  and COSMIC licence settings, the annotation manifest, the sample lists, the PAM files, an
+  index's label) is reached one folder at a time with `O_NOFOLLOW` (`openat`), and must be a
+  regular file with no other name: not a link, a FIFO, a device or, in a folder others can
+  write, a hard link. A folder that one of its files names (the personal-assembly results
+  page reads the two haplotypes' folders the combined job's `.Params.txt` names) must be a
+  folder of `Results/` named alone: a link, a `..` or a path there is refused. A file it
+  writes whole is made under a name of its own (`O_EXCL`) and renamed over its name, so a
+  link there is replaced, not written through, and a log is opened with `O_NOFOLLOW`; a
+  program it runs on a job's files (the plots, the radar chart, the region page's lookup)
+  reads copies of them or its standard input, and the zips are made in Python. A folder it
+  makes for files of its own in a folder others can write (a program's outputs in a job's
+  folder, an uploaded genome or personal-assembly bundle unpacked in `Genomes/` or
+  `Assemblies/`, an annotation sorted) is used through its descriptor alone (Linux's
+  `/proc/self/fd`), never by its name again: renamed away, with a link put in its place, its
+  name leads nowhere the web app writes. A link is followed only where no one else can have
+  put it: a link of yours in a folder only you can write (or a sticky one of yours), such as
+  a genome linked to a shared copy, a VCF dataset registered from a server folder, or
+  `Results/` or `Settings/` linked onto a volume; in a folder your group can write, the web
+  app refuses those too, and below `Results/` and `Settings/` it follows none. A Settings
+  job's folder is writable by you alone, and the cache of the results tables, pickles that
+  Flask-Caching loads, is in a folder of the server's own in the temporary folder (in memory
+  when that folder is not private or sticky), no longer in `Cache/` of the data folder, which
+  can be deleted. Before 2.10.0 the web app followed such links: it showed and served files of
+  yours to anyone who could reach it (it listens on every network interface, `0.0.0.0`), the
+  results of any search of yours too, through the haplotype folder a combined job's
+  `.Params.txt` named; it wrote through them, a chunked upload's data, the email password and
+  a job's logs among what it wrote, and through a link put in place of a folder it had made:
+  an uploaded archive unpacked into a folder of yours (a bundle's `.ssh/` into your home),
+  and every file of a folder of yours moved into a job's `imgs/`, which it then served; it
+  copied a JSON file of yours that a link named into the data folder, readable by all, when
+  the concurrent searches setting was saved; and another user's pickle in `Cache/` ran as you
+  when it was loaded.
+
+What a shared server still needs, with all of the above:
+
+- the search, and the other commands the web app starts (a download, an index build), still
+  follow links in the folders they write and write through them, as the list above says: keep
+  the data folder, the output folders and the temporary folder writable by you alone, or the
+  web app refuses the links of yours there as well;
+- the web app has no login: anyone who can reach its port can start searches and download,
+  upload and delete data in Settings. On a machine others can reach, let only those you trust
+  reach it (a firewall, or Docker's `-p 127.0.0.1:8080:8080` and an SSH tunnel: README,
+  Local Web Interface);
+- a folder that others can write through an ACL its mode bits do not show (macOS, NFSv4)
+  counts as yours: the web app follows your links there.
+
+`test_safe_files` (in the unit-test job) tests how the web app opens a file of its data folder
+and uses a folder it makes there, `test_web_no_links` (in the web image's step) the pages that
+read, serve and write one, through the real Dash server, each with a link another user put
+there or a folder of the web app's renamed and a link put in its place, and
+`test_settings_progress` the Settings page's, without Dash. A test (`test_no_code_from_files`,
+in the unit-test job and the web image's) keeps out of CRISPRme what a scan of the source can
+show: loads that run code (pickle and the like, `eval`, `exec`, YAML loads but `safe_load`), a
+temporary name made by name only, and a `python -c`, `-m` or `-` that is not isolated. It also
+runs `process_summaries.py` and `assemble_cfd_graphs.py` on a line or a name another user could
+put in a search's folder and, in the web image's step, `crisprme.py --debug` from a folder
+holding someone else's `PostProcess/`. The other fixes above have tests of their own:
+`test_scorer_env` (the scorer's health check, its self-test and the look-up of its env's
+python), `test_settings_progress` (the Retry), `test_indel_empty_chromosome` (the indel targets'
+header) and `test_web_shell_safety` (the region page). The scan cannot follow every value read
+back into a shell command, which is one more reason to keep these folders yours.
+
 ---
 
 ## 8. Very high `--thread` can stall post-analysis
 
-The post-analysis pool is bounded by `--thread`. On many-core nodes, extremely high
-values (e.g. `--thread 200`) can stall the per-chromosome pool. A value in the
-**16–32** range is a good balance on large machines; raising it further rarely helps
-and can hurt.
+The post-analysis pool is bounded by `--thread` (and by memory; at most 32 workers unless
+`CRISPRME_POSTPROC_MAX_WORKERS` says otherwise). Since 2.10.0 it runs each chromosome in
+pieces over those workers, so a dense locus no longer runs on one core
+(`CRISPRME_POSTPROC_PIECES=0` runs one process a chromosome, as before). On many-core
+nodes, extremely high values (e.g. `--thread 200`) stalled the per-chromosome pool of
+earlier releases. A value in the **16–32** range is a good balance on large machines;
+raising it further rarely helps and can hurt.
 
 ---
 
@@ -199,23 +318,353 @@ removes the folder of a run that is gone, but one made in another container (eac
 `docker run --rm` has a new host name) cannot be checked, so it is left in place,
 with a line on stdout that says so.
 
-**Fix.** Once no CRISPRme container is building, remove them:
-`rm -rf genome_library/.build-index-only-* Genomes/.build-index-only-enrich-* Dictionaries/.build-index-only-dicts-*`
-from your data folder.
+**Fix.** Once no CRISPRme container is building, remove them, from your data folder:
+
+```bash
+find genome_library -mindepth 1 -maxdepth 1 -name '.build-index-only-*' -exec rm -rf -- {} +
+find Genomes -mindepth 1 -maxdepth 1 -name '.build-index-only-enrich-*' -exec rm -rf -- {} +
+find Dictionaries -mindepth 1 -maxdepth 1 -name '.build-index-only-dicts-*' -exec rm -rf -- {} +
+```
+
+A `find` of each name pattern does the same pasted into bash or into zsh, whichever of the
+three folders holds such a folder. Up to 2.8.1 this section gave one `rm -rf` of the three
+patterns, which zsh, the default shell of macOS, expands itself: where one of them matched
+nothing, it stopped the whole command (`no matches found`) and removed none of them.
 
 ## 11. A search stops and says no index serves it
 
 Each of these names the index and what to do; none of them removes anything.
 
 - **`no variant index here serves this search (...)`.** The dataset's indexes are for another PAM or
-  fewer bulges, or need `--prune-pam`, and neither its VCFs nor its enriched genome are here to build
-  one. A download holds its own index only: `NRG_3_hg38+hg38_HGDP1kGP` searches NRG (and, with a
-  20-nt guide, up to 2 bulges of each type). Search with what the message lists, or install another
-  index ([Precomputed indexes](PRECOMPUTED_INDEXES.md)).
+  fewer bulges, and neither its VCFs nor its enriched genome are here to build one. A download holds
+  its own index only: `20-NRR_3_hg38+hg38_HGDP1kGP` searches NRR, and the PAMs NRR holds (NGG, NAG,
+  NGA, NRG), pruned to them (and, with a 20-nt guide, up to 2 bulges of each type). Search with what
+  the message lists, or install another index ([Precomputed indexes](PRECOMPUTED_INDEXES.md)).
 - **`index '...' is not installed, and this run cannot build it`.** The library is on a read-only
   mount, has no write permission or is full, and lacks the index this PAM and these bulges need. Make
   it writable, or run `build-index-only` where it is, or search with no bulges, which opens no index.
 - **`... was built for a 20-nt guide, and this search has a 23-nt guide ...: it stores too few bases
-  per site`.** An index name carries no guide length, and this search builds its own under that name.
-  Move that index aside, or run from another working directory. Any published index serves a 21-nt
-  guide at up to 1 bulge of each type.
+  per site`.** This search builds its own index under a name that says its guide length (since
+  2.10.0: `23-NGG_2_hg38`), and an index of that name is there, whose trees were built for another
+  guide (a folder renamed by hand). Name it for the guide it was built for, as the ERROR says (`mv
+  .../23-NGG_2_hg38 .../20-NGG_2_hg38`), or move it aside. An index of the older name
+  (`NGG_2_hg38`) built for another guide is left as it is, and the search builds its own beside it.
+  Any published index serves a 21-nt guide at up to 1 bulge of each type.
+
+## 12. A build or a search refuses to enrich a dataset anew
+
+**Symptom.** `build-index-only`, or a variant search, stops before it builds anything with
+`No finished enrichment of <dataset> is in place (...), so ... would enrich it anew with the
+installed CRISPRitz, whose fake-indel windows are 30/30; but an earlier enrichment of it, whose
+records tell windows of 25/27 (...), left what was built from it: ...`.
+
+**Cause.** The dataset's enriched genome (`Genomes/<genome>+<dataset>`) is not there (removed to
+save space, or never installed: an index download holds none), while its dict-less tiers or
+indexes are, built from an enrichment of CRISPRitz 2.9.1 or earlier (CRISPRme 2.8.1, fake-indel
+windows of 25/27). A new enrichment of CRISPRitz 2.10.0 differs from it in its SNPs too (2.9.1
+enriched only the last ALT of a site written on several records), and a search would read the
+stores of the two together, with carriers or rows wrong or lost.
+
+**Fix.** Remove what the message lists (it gives the `rm -rf` command, each path absolute), then
+run `build-index-only` with the dataset's VCFs and its `--samplesID`, which enriches it anew and
+builds its tiers and index; or put the earlier enrichment back and search it as it is (its windows
+hold targets of up to 27 bases, guide, PAM and DNA bulges counted, 26 at an MNV). Beside the stores
+of an enrichment of the installed CRISPRitz's windows, a dataset is enriched anew as before.
+`build-index-only` run on an enrichment of 2.9.1's windows in place says how to enrich it with
+2.10.0's in the same way (METHODS §4). The refusal goes by what the earlier enrichment's records
+tell (its indel logs, an INDELS index of it, or a variant index of it in index format 1): with
+all of those removed, nothing tells its windows, and its tiers or a variant index of format 2
+left in place are not caught.
+
+**A sites-only dataset (`hg38_mega`).** The message reads `... would enrich it anew from its
+VCFs; but hg38_mega is sites-only: its VCFs name no sample, and CRISPRitz writes a fake-indel
+window only for an indel a sample carries, so an enrichment of them holds none, while its indel
+logs or its INDELS indexes record windows of ...`, whatever their width. The mega's windows come
+from its enriched-genome kit, whose indels a synthetic sample carries
+(`seq_script/merge_panels/mega_rebuild.sh`, the mega's recipe of 2.10.0, builds the whole kit
+so): enriched anew from its VCFs, it would lose every indel off-target. Put its kit back
+(`Genomes/hg38+hg38_mega` and `_INDELS`: download the kit,
+[Precomputed indexes](PRECOMPUTED_INDEXES.md)) and build or search as before; for the
+windows of 2.10.0, install its archive and kit of CRISPRme 2.10.0 in place of what the message
+lists, or build the kit again that way. Its registry, which comes from its VCFs alone (their
+INFO AF fields), is never in that list.
+
+**Building the mega's kit again.** The recipe builds the dataset whole, its VCFs, registry
+and indel frequencies too, in a working directory that holds none of it: it refuses one that
+holds the dataset's VCFs, or a part it builds, and makes nothing there. So run it in a new
+working directory, then put what it built in place of every part of the dataset in the data
+folder: the commands below remove each such part by name first, whatever a message's own
+`rm -rf` removed or left, namely the kit in place and all that was built from it (its genomes,
+dictionaries, indel logs, tiers and every index of the dataset, which the messages name for
+removal too) and the dataset's VCFs, registry and indel frequencies, which the recipe wrote
+anew. Remove any copy of the dataset's indexes in a library you search with `--index-path`
+too. The commands run in bash whatever shell you paste them into, bash or zsh (the
+default shell of macOS, which reads a pasted `#` as a word, not a comment, and stops a command
+at a pattern that matches nothing): `bash -euo pipefail -s ... <<'EOF'` hands them to bash as
+they are written, which stops at the first command that fails (an unset or empty variable
+among them): nothing in the data folder is removed or moved unless the recipe has built the
+whole dataset and passed its checks, and every part they move in is there. A mistyped `SRC`,
+a missing chromosome FASTA or a disk that fills during the recipe stops them with the data
+folder as it was; remove `NEW`, which the recipe refuses once it holds a part, and run them
+again. Set, in the shell you paste them into (no `export` needed: they are passed to bash as
+its arguments), `DATA` the data folder, `NEW` a new folder outside it on the same file system
+(so that each move is a rename, which needs no space), `SRC` a folder of the merged VCFs the
+mega is built from, `mega.<chrom>.afmax.vcf.gz`, each an absolute path (`crisprme.py download
+--what vcf --dataset hg38_mega --path <dir>` fetches them into `<dir>/VCFs/hg38_mega`, `<dir>`
+being another folder than `NEW`, which the recipe refuses once it holds the dataset's VCFs; a
+2.8.1 install's `VCFs/hg38_mega` holds them, so you can give it as `SRC`: it is removed only
+after the recipe has built the dataset from it), and `REPO` the CRISPRme repository of 2.10.0,
+whose `PAMs/` holds the recipe's PAM file (a data folder that CRISPRme 2.8.1 set up has none of
+NRR). Run the commands one of two ways. In a shell inside the image (`docker run -it ...
+bash`, or `apptainer run ... crisprme.sif bash`, which start it with the image's environment),
+`REPO` is `/opt/conda/opt/crisprme` and the recipe's `RUN` prefix stays empty. From the host, with the recipe's programs run in the container, export `RUN` first,
+the container prefix the recipe's header describes, and set `REPO` to a checkout of the
+repository of 2.10.0 on the host: the recipe runs the scripts of `$REPO/PostProcess` through
+`RUN`, so the container must see `REPO`, `DATA`, `NEW` and `SRC` at the paths the host gives
+them (bind them so). Set to the image's path on the host, `REPO` stops the commands at their
+first `cp`, the data folder unchanged:
+
+```bash
+bash -euo pipefail -s "$DATA" "$NEW" "$SRC" "$REPO" <<'EOF'
+# bash, whichever shell this is pasted into: it stops at the first command that fails, so the
+# data folder changes only after the recipe has built the whole dataset
+DATA=${1:?DATA is not set} NEW=${2:?NEW is not set} SRC=${3:?SRC is not set} \
+  REPO=${4:?REPO is not set}
+# a new working directory: the FASTAs of the chromosomes the mega is built on and no other
+# (chr1-22, X and Y), and the PAM file, the repository's
+mkdir -p "$NEW/Genomes/hg38" "$NEW/PAMs"
+for c in chr{1..22} chrX chrY; do ln -s "$DATA/Genomes/hg38/$c.fa" "$NEW/Genomes/hg38/"; done
+cp "$REPO/PAMs/20bp-NRR-SpCas9.txt" "$NEW/PAMs/"
+# (its input /dev/null: bash reads these commands from its own input, the recipe must not)
+PAM=PAMs/20bp-NRR-SpCas9.txt bash "$REPO/seq_script/merge_panels/mega_rebuild.sh" "$NEW" "$SRC" \
+  < /dev/null
+# each part the recipe built that the moves below take, there before anything is removed
+for p in Genomes/hg38+hg38_mega Genomes/hg38+hg38_mega_INDELS Dictionaries/log_indels_hg38_mega \
+  Dictionaries/registry_hg38_mega Dictionaries/indel_af_hg38_mega VCFs/hg38_mega; do
+  [ -d "$NEW/$p" ] || { echo "no $NEW/$p: the data folder is left as it was" >&2; exit 1; }
+done
+ls -d "$NEW"/genome_library/*_hg38+hg38_mega "$NEW"/genome_library/*_hg38+hg38_mega_INDELS
+mkdir -p "$DATA/Genomes" "$DATA/genome_library" "$DATA/Dictionaries" "$DATA/VCFs" "$DATA/samplesIDs"
+# in the data folder, every part of the dataset the recipe built (each it refuses where it
+# runs): the kit in place and all that was built from it, then the dataset's VCFs, registry
+# and indel frequencies, which the recipe wrote anew
+rm -rf "$DATA/Genomes/hg38+hg38_mega" "$DATA/Genomes/hg38+hg38_mega_INDELS" \
+  "$DATA/Dictionaries/dictionaries_hg38_mega" "$DATA/Dictionaries/log_indels_hg38_mega" \
+  "$DATA/Dictionaries/genotypes_hg38_mega" "$DATA/Dictionaries/indel_genotypes_hg38_mega" \
+  "$DATA/VCFs/hg38_mega" "$DATA/Dictionaries/registry_hg38_mega" \
+  "$DATA/Dictionaries/indel_af_hg38_mega"
+# and the dataset's indexes, of every PAM (<PAM>_<N>_hg38+hg38_mega and its _INDELS), a find of
+# each name pattern: none of them, or one kind alone, is no error (a hidden folder is a build's)
+find "$DATA/genome_library" -mindepth 1 -maxdepth 1 -name '*_[0-9]_hg38+hg38_mega' \
+  -not -name '.*' -exec rm -rf -- {} +
+find "$DATA/genome_library" -mindepth 1 -maxdepth 1 -name '*_[0-9]_hg38+hg38_mega_INDELS' \
+  -not -name '.*' -exec rm -rf -- {} +
+# what the recipe built, moved in (not its reference index, genome_library/<guide>-<PAM>_<N>_hg38)
+mv "$NEW/Genomes/hg38+hg38_mega" "$NEW/Genomes/hg38+hg38_mega_INDELS" "$DATA/Genomes/"
+mv "$NEW"/genome_library/*_hg38+hg38_mega "$NEW"/genome_library/*_hg38+hg38_mega_INDELS \
+  "$DATA/genome_library/"
+mv "$NEW/Dictionaries/log_indels_hg38_mega" "$NEW/Dictionaries/registry_hg38_mega" \
+  "$NEW/Dictionaries/indel_af_hg38_mega" "$DATA/Dictionaries/"
+mv "$NEW/VCFs/hg38_mega" "$DATA/VCFs/"
+[ -e "$DATA/samplesIDs/hg38_mega.samplesID.txt" ] \
+  || mv "$NEW/samplesIDs/hg38_mega.samplesID.txt" "$DATA/samplesIDs/"
+EOF
+```
+
+The recipe's last step, `verify_mega_chrom.py`, prints `ALL PASS` for every chromosome. The
+index it built is of its PAM; for another, run `build-index-only --pam <it>` on the data folder,
+which reuses the kit. The name patterns of the `find` take an index of up to 8 bulges of a type
+(`_[0-9]_`, the N of its name being its bulges plus one, as the messages' own removal does): one
+built with `--bDNA` or `--bRNA` of 9 or more (`_10_` and up), which no build of the web or of the
+README makes, is removed by hand. Each
+message's removal and these commands do the same pasted into bash or into zsh.
+
+**A message that says to remove the mega's enriched genome.** Where a search finds the mega's
+INDELS index incomplete, or of other windows than its indel logs, and the fake-indel genome
+(`Genomes/hg38+hg38_mega_INDELS`) is not in place while the dataset's VCFs are, its ERROR ends
+`Rebuild it: rm -rf ... <data>/Genomes/hg38+hg38_mega && crisprme.py build-index-only ...` (or
+`Rebuild them:`). For `hg38_mega` do not run it: `build-index-only` refuses the sites-only
+dataset (above), after that `rm` has removed its enriched genome. Put the kit back instead (its
+download, or the recipe above).
+
+## 13. A build or a search says a fake-indel genome and its indel logs come from two enrichments
+
+**Symptom.** `build-index-only`, before it builds anything, or a variant search that would
+build an index from the enrichment in place (the INDELS index it lacks beside a variant index in
+place, say), before it puts the SNP codes on the fake-indel genome, stops with
+`The fake-indel genome Genomes/<genome>+<dataset>_INDELS and the indel logs ... come from two
+enrichments: on <chrom>, the window of ... ends elsewhere there`; or `download --what index`
+warns that `the enrichment of <dataset> in place ... is another one than the archive's`. Nothing
+is changed: the SNP overlay, which places each code by the logs, refuses such a genome too.
+
+**Cause.** The dataset's indel logs, dictionaries and tiers came one way (a download of an index
+installs them) and its enriched and fake-indel genomes another (an enrichment made here, by
+another CRISPRitz, whose windows were another width). An index built from the enrichment in place
+would be read with the other enrichment's logs: every indel row misplaced.
+
+**Fix.** Put the enrichment that goes with the logs in place of this one: remove it, as the
+message says (`rm -rf` of the enriched and the fake-indel genome), and install the published
+index's enriched-genome kit ([Precomputed indexes](PRECOMPUTED_INDEXES.md)); or remove all of the
+dataset that comes from an enrichment (the message lists it) and run `build-index-only` with its
+VCFs and `--samplesID`, which enriches it anew. For a sites-only dataset (`hg38_mega`) the second
+way is to build its kit again with a synthetic sample (`seq_script/merge_panels/mega_rebuild.sh`,
+the enriched genome, the fake-indel genome and their indexes in one build), as the message says:
+an enrichment of its VCFs would hold no fake-indel window. The recipe runs in a new working
+directory, and what it built goes in place of all of the dataset that comes from an enrichment
+(the message lists it) and of the dataset's VCFs, registry and indel frequencies, which it
+writes anew: the commands, which remove each of those parts by name once the recipe has built
+the whole dataset, and change nothing in the data folder where it fails, are in section 12,
+"Building the mega's kit again" (they run in bash, pasted into bash or into zsh). The `rm -rf`
+of the messages, each path quoted, does the same in either shell.
+
+## 14. A search above 1 DNA + 1 RNA bulge warns, then runs for hours or runs out of memory
+
+**Symptom.** `complete-search` prints `WARNING [complete-search]: <m> mismatch(es) + <d> DNA +
+<r> RNA bulge(s) ... on a variant index that codes every allele (index format 2, CRISPRitz
+2.10.0). Above the 1 DNA + 1 RNA default, ...` (its `.Params.txt` keeps it, and its
+`log_verbose.txt` says it again, a web search's too); the search then runs for many hours, or its
+index search is killed for memory: `log_error.txt` then holds
+`ERROR: searchTST (index search) failed (signal SIGKILL)` and `complete-search` exits 1 (a
+container or a job killed as a whole ends with exit status 137 and no message).
+
+**Cause.** The indexes of 2.10.0 code every allele of a split site, so the densest windows of
+the variant genome, in the immunoglobulin loci (IGL on chr22, IGH on chr14, IGK on chr2), spell
+millions of sequences, and each bulge beyond one of a type multiplies the alignments the search
+writes there: on IGL alone, at the default `--max-total-edits` of 6, 0.76 million SNP raw
+targets at 4 + 1 + 1 and 33.7 million at 4 + 2 + 2 (28 GB of memory), where the indel search
+wrote 204 million (157 GB; on the fake-indel windows of 25/27 of 2.10.0's development). No step
+after the search removes that cost.
+
+**Fix.** Keep 1 DNA + 1 RNA bulge, the default, and raise `--mm` first for a wider search; or
+keep `--max-total-edits` at 3 or less, which bounds the alignments; or search the reference
+alone, or a chromosome that holds none of those loci. CRISPRme 2.10.1 is planned to search, in
+those regions, the samples' own haplotypes, indels included, in place of the variant genome's
+combinations (the haplotype scan); the indexes of 2.10.0 serve it as they are.
+
+## 15. A row that looks wrong: the known limits of 2.10.0
+
+Each is rare and changes no other row. [METHODS.md](../METHODS.md) §10 lists them, with their
+scale where it was measured, and §4 gives the rules behind them.
+
+- **A carrier listed for a SNP that its own target does not hold.** On an indel row, a carrier
+  whose haplotype holds a second indel that pushes one of the row's named SNPs out of the
+  target's bases is listed on the row all the same. On 1000 Genomes chr22, a per-sample search of
+  seven guides at 4 mismatches + 2 DNA + 2 RNA bulges lists one such carrier (NA20515, at VEGFA
+  site 1), and none of the 17 gate searches of 2.10.0 does. The haplotype scan planned for
+  2.10.1 reads each carrier's own bases.
+- **One target written as two rows, or twice, in a microsatellite.** In a tandem repeat that
+  holds a whole target, the merge places each row by its own bases, and the target's
+  alignments can fit different places of the repeat: they can then go to two rows, or the
+  target be written twice (in 10,000 trials of a model of microsatellites at 1 + 1 bulges and
+  `--merge` 3, 134 targets split and 15 were written twice). No row is lost or wrong, and no search
+  of real data checked has such a target. To be fixed in 2.10.1.
+- **An unphased carrier of two ALTs on a row that needs the reference there.** A carrier whose
+  call is unphased (`/`) is listed, PUTATIVE, on every subset of its variants a target can hold.
+  For a call of two ALTs at one position (`1/2`), that includes a row that needs the reference
+  base there, which its genotype rules out: both of its slots hold an ALT. The rows are the same
+  for a line of several ALTs and for its split form.
+- **On a classic install, an unphased carrier only on the row of all its variants.** A
+  per-sample search of an index built without `--samplesID` (a classic install, as the
+  benchmark `complete-test` builds its own) lists a carrier with an unphased call in a phased VCF
+  only on the row of all its variants of a window together, where a dict-less install lists it
+  on the row of each subset too. Build the index with `--samplesID`, or download a published
+  one.
+
+## 16. A search refuses an index or an enrichment of one release beside the Dictionaries of another
+
+**Symptom.** `complete-search` stops before it writes anything, with one line:
+`Error: NRG_3_hg38+hg38_HGDP1kGP is an index of a build of hg38_HGDP1kGP whose enrichment wrote
+fake-indel windows of 25/27 (CRISPRme 2.8.1 or earlier), and the Dictionaries of hg38_HGDP1kGP in
+<data folder>/Dictionaries are of another build, whose indel logs record windows of 30/30
+(CRISPRme 2.10.0): a search of it would read the alleles of one build with the carriers and
+frequencies of the other. ...`; a search the web app launched ends at once with the same line,
+`ERROR: ...`, in its `log_error.txt`, before it searches any of its datasets. Or the other way: an
+index of 2.10.0 (windows of 30/30) beside Dictionaries of 25/27. Or, the same way, for the
+enrichment in place, which a search with no bulges scans (the web's bulge menus start at 0;
+`complete-search --bDNA 0 --bRNA 0`): `Error: the enrichment of hg38_HGDP1kGP in place (<data
+folder>/Genomes/hg38+hg38_HGDP1kGP, and its fake-indel genome <data
+folder>/Genomes/hg38+hg38_HGDP1kGP_INDELS) is of another build than the Dictionaries of
+hg38_HGDP1kGP in <data folder>/Dictionaries: their indel logs (...) record fake-indel windows of
+30/30 (CRISPRme 2.10.0), and its fake-indel genome is not the one they describe: on chr22, the
+window of chr22_10524814_TTAG_T, which the log places at 0-61 of the fake sequence, ends elsewhere
+there (no separator after it). ...`.
+
+**Cause.** The data folder holds indexes of CRISPRme 2.8.1 and was upgraded: a download of an index
+of 2.10.0 (`20-NRR_3_hg38+hg38_HGDP1kGP`, say, from the command line or from the web Settings page)
+installed its panel's Dictionaries in place of those 2.8.1's archives of the panel installed (the
+download said so: `WARNING: ... installed with Dictionaries of another build of <panel>`). An index
+of 2.8.1 is still in `genome_library/`, and a search that takes it (a search of a PAM whose index of
+2.10.0 is not installed: NRG beside `20-NRR_3_...`, say) would read its alleles with the
+Dictionaries of 2.10.0, which code every allele of a split site where 2.8.1 coded the last record's
+alone (1.95 % of HGDP + 1000 Genomes' SNP records), and whose fake-indel windows are another width,
+so every indel row would be misplaced. The two builds are told apart by those windows: 25/27 for
+an index of 2.8.1, which is of index format 1, and 30/30 for the indexes and Dictionaries of 2.10.0
+([METHODS.md](../METHODS.md) §4, "SNP+indel off-targets"). The other way comes from Dictionaries of 2.8.1 put back beside
+an index of 2.10.0: an archive of 2.8.1 installed there by CRISPRme 2.8.1 itself, which
+`download` of 2.10.0 refuses to do. A search of an index of either release with its own
+Dictionaries runs, as does an index of 2.10.0 built from 2.8.1's enriched-genome kit beside that
+kit's Dictionaries.
+
+The enrichment: 2.8.1's `build-index-only` leaves a panel's enrichment in the data folder, its
+enriched genome in `Genomes/hg38+<panel>` and its fake-indel genome in
+`Genomes/hg38+<panel>_INDELS`, and so does 2.8.1's enriched-genome kit of the panel
+(`build-inputs/<panel>.tar.gz` in `lucapinello/crisprme-data`). A download of an index of 2.10.0
+does not replace it, and says so: `WARNING: the enrichment of <panel> in place ... is another one
+than the archive's`. A search with no bulges scans that enriched genome where it holds every
+chromosome of the genome, in place of the variant index, and a search builds from it an index it
+lacks (a variant index of another PAM, or an INDELS index that is not there); either reads it with
+the Dictionaries. 2.8.1's `build-index-only` of all of hg38 leaves an enrichment of every
+chromosome. Its kits hold chr1-22, X and Y alone: beside all of hg38, as `download --what genome`
+installs it, a search with no bulges does not read one and searches the index, and only a build of
+an index reads it. Its fake-indel genome tells its build: 2.8.1's CRISPRitz cut it at windows of
+25/27, 2.10.0's at 30/30, and the indel logs record those of the Dictionaries' enrichment. It is
+read marked unfinished too (`.building`, which a `build-index-only` stopped while it put the SNP
+codes on it leaves there): the SNP codes move no window. Nothing else in it tells: the enriched
+genomes of the two releases have the same files, sizes and headers, and differ only at the sites
+the VCFs write on several records, where 2.10.0 codes every ALT. A search with bulges of an
+installed index and its INDELS index reads no enrichment, and runs.
+
+**Fix.** Either way, keep the indexes of each build in a data folder of their own, with their own
+Dictionaries:
+
+- **Search the index of 2.10.0 that replaces it**, which the message names, and remove the old
+  one with the `rm -rf` the message gives (its paths quoted for bash and zsh):
+  `crisprme.py download --what index --index-name 20-NRG_3_hg38+hg38_HGDP1kGP`. A search then
+  takes the new index; with the old one removed, a search of NRG also takes the installed
+  `20-NRR_3_hg38+hg38_HGDP1kGP`, pruned to NRG, where no index of NRG is installed.
+- **Keep searching the index of 2.8.1** in a new data folder, where `download` of 2.10.0 installs an
+  archive of 2.8.1 by its own name, with its own Dictionaries (and names the index of 2.10.0 that
+  replaces it): `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path
+  <new data folder>`, after `crisprme.py download --what all --path <new data folder>`.
+- **The other way**, an index of 2.10.0 beside Dictionaries of 2.8.1: download it again into a new
+  data folder, which installs the Dictionaries it was built with, and search it there.
+- **The enrichment of 2.8.1**: remove it with the `rm -rf` the message gives (`Genomes/hg38+<panel>`
+  and `Genomes/hg38+<panel>_INDELS`). A search with no bulges then searches the installed variant
+  index, as a search with bulges does. To build an index of another PAM, install the panel's
+  enriched-genome kit of 2.10.0 in its place ([Precomputed indexes](PRECOMPUTED_INDEXES.md)).
+
+**Not checked: 2.8.1's per-sample dictionaries and genotype store.** The check reads the
+Dictionaries by their indel logs alone, which a download of 2.10.0 replaces, and the enrichment in
+place by its fake-indel genome (an enriched genome without one, which no build or kit leaves, is
+not checked). It does not read two folders of 2.8.1 that a download of an index of 2.10.0 can
+leave beside them, and that a search of that index then reads:
+
+- `Dictionaries/dictionaries_<panel>`, the per-sample dictionaries that 2.8.1's `build-index-only`
+  writes. The Dictionaries bundle of 2.10.0 does not carry them, so its install leaves a panel's
+  built with 2.8.1 in place, and a search then takes each site's alleles, carriers and rsIDs from
+  them, and only the frequencies from 2.10.0's registry: at a split site, the last record's ALT
+  alone, as 2.8.1 coded it.
+- `Dictionaries/genotypes_<panel>`, the genotype store of 2.8.1, which its downloads of HGDP + 1000
+  Genomes and HPRC installed, and its `build-index-only` wrote given `--samplesID`. A download of
+  2.10.0 replaces it with its own store, but not with `--no-genotypes`, nor where the store's fetch
+  failed (`NOTE: could not fetch Tier-1 genotype store ...`), and a later download of that index
+  takes the old one for installed.
+
+So after installing an index of 2.10.0 of a panel that 2.8.1 built or installed in that data
+folder, remove the panel's `Dictionaries/dictionaries_<panel>`, and its
+`Dictionaries/genotypes_<panel>` unless the download said `Installed Tier-1 genotype store
+genotypes_<panel>/`; then download the index again, without `--no-genotypes`, where you want the
+store, which installs 2.10.0's. Remove too 2.8.1's enrichment of the panel, `Genomes/hg38+<panel>`
+and `Genomes/hg38+<panel>_INDELS`, or put 2.10.0's kit in its place: a search refuses it where it
+reads it, as above. Or install the indexes of 2.10.0 in a new data folder, which holds none of
+2.8.1's.

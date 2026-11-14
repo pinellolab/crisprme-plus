@@ -1078,8 +1078,8 @@ class _ShippedScript(unittest.TestCase):
             vcfs.write_text(self.VCF + "\n")
             samples.write_text("")
         samples = given or samples
-        # complete-search refuses --prune-pam without --index-path; the usual value
-        # is the working directory's own genome_library
+        # complete-search refused --prune-pam without --index-path before 2.10.0; a run
+        # given the flag names the working directory's own genome_library, as one did
         if index_path is None:
             index_path = self.library if prune else "_"
         args = [self.home / "Genomes" / "hg38", vcfs, guides, pam_file, empty, samples,
@@ -1158,10 +1158,14 @@ class EveryScanInTheShippedScript(_ShippedScript):
         self.assertServedBy(self.run_pipeline(prune=1), "NNN_3", prune=1)
         self.assertServedBy(self.run_pipeline(prune=0), "NNN_3", prune=0)
 
-    def test_a_wide_flank_alone_is_used_only_under_prune(self):
+    def test_a_wide_flank_alone_is_searched_pruned(self):
+        # without --prune-pam the search prunes by itself (2.10.0): it stopped for want of
+        # a variant index, and said to pass the flag
         self.install("NNNNNNNN_3")
         self.assertServedBy(self.run_pipeline(prune=1), "NNNNNNNN_3", prune=1)
-        self.assertNoVariantIndex(self.run_pipeline(prune=0))
+        run = self.run_pipeline(prune=0)
+        self.assertServedBy(run, "NNNNNNNN_3", prune=1)
+        self.assertIn("searching with --prune-pam, as if it was given", run.stdout)
 
     def test_a_dedicated_index_at_a_larger_budget_beats_a_tighter_stand_in(self):
         self.install("NRG_4", "NNN_3")
@@ -1176,7 +1180,7 @@ class EveryScanInTheShippedScript(_ShippedScript):
         self.assertTrue(run.precomputed, run.stdout)
         self.assertFalse(run.enriched)
         self.assertEqual([c[1] for c in run.builds], ["hg38"])
-        self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
+        self.assertEqual(run.searched(variant=False), ("20-NRG_2_hg38", False))  # (built)
         self.assertEqual(run.searched(variant=True), (f"NRG_3_hg38+{self.VCF}", False))
 
     def test_a_reference_index_alone_is_not_a_precomputed_variant_index(self):
@@ -1256,7 +1260,7 @@ class EveryScanInTheShippedScript(_ShippedScript):
         # ... otherwise a dedicated NRG index is built and searched, never NGG_3
         plain = self.run_pipeline(prune=0, variant=False)
         self.assertEqual([c[1] for c in plain.builds], ["hg38"])
-        self.assertEqual(plain.searched(variant=False), ("NRG_2_hg38", False))
+        self.assertEqual(plain.searched(variant=False), ("20-NRG_2_hg38", False))
 
     def test_a_different_dedicated_pam_beside_a_stand_in(self):
         self.install("NGG_3", "NNN_3")
@@ -1295,7 +1299,7 @@ class EveryScanInTheShippedScript(_ShippedScript):
         # without --index-path the search builds a dedicated index and searches it
         plain = self.run_pipeline(pam="23bp-TTTV-Cas12a", prune=0, variant=False)
         self.assertEqual([c[1] for c in plain.builds], ["hg38"])
-        self.assertEqual(plain.searched(variant=False), ("TTTV_2_hg38", False))
+        self.assertEqual(plain.searched(variant=False), ("TTTV-23_2_hg38", False))
 
     def test_a_5_prime_pam_prefers_its_dedicated_index(self):
         self.install("TTTV_3", "NNNN_3", "NNNNNNNN_3")
@@ -1310,17 +1314,19 @@ _PAM_5P_3 = ("23bp-NNN-5p", "N" * 23 + " -3\n")
 
 
 class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
-    """The side of the guide an all-N index was built for is known only from its
-    .pam_build (_index_side). A search that built one wrote none, so a 5' PAM-less
-    index a search had built was taken for a 3' build and refused by every later 5'
-    search under --index-path, which --prune-pam needs: TTTV with --prune-pam on the
-    NNNN_2 a 27bp-NNNN-5p search had built stopped with "no matching reference index",
-    where the resolver before the side check took it and found the dedicated index's
-    3 rows. And an all-N search PAM builds its index under the name of an all-N index,
-    so one in place under that name, built for the other side, was searched as if just
-    built: no target, exit 0. A search now records the side of an all-N index it
-    builds, refuses one in the way, and says why an all-N index under --index-path was
-    not used."""
+    """The side of the guide an all-N index was built for is known from its name since
+    2.10.0, and else only from its .pam_build (_index_side). A search that built one wrote
+    none, so a 5' PAM-less index a search had built was taken for a 3' build and refused by
+    every later 5' search under --index-path, which --prune-pam needs: TTTV with
+    --prune-pam on the NNNN_2 a 27bp-NNNN-5p search had built stopped with "no matching
+    reference index", where the resolver before the side check took it and found the
+    dedicated index's 3 rows. And an all-N search PAM built its index under the name of an
+    all-N index, so one in place under that name, built for the other side, was searched as
+    if just built: no target, exit 0; 2.8.1 refused it as in the way. A search now records
+    the side of an index it builds, builds it under a name that says its guide length and
+    its side (_build_name), beside an index of the older name built for the other side,
+    which it neither searches nor touches, and says why an all-N index under --index-path
+    was not used."""
 
     def pam_build(self, name):
         return (self.library / name / ".pam_build").read_text()
@@ -1330,27 +1336,27 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
         run = self.run_pipeline(pam=pam, pam_text=text, variant=False,
                                 env={"STUB_BUILD_WRITES": "1"})
         self.assertEqual([c[1] for c in run.builds], ["hg38"])
-        self.assertEqual(run.searched(variant=False), ("NNNN_2_hg38", False))
-        self.assertEqual(self.pam_build("NNNN_2_hg38"), "27bp-NNNN-5p 27 -4\n")
+        self.assertEqual(run.searched(variant=False), ("NNNN-23_2_hg38", False))
+        self.assertEqual(self.pam_build("NNNN-23_2_hg38"), "27bp-NNNN-5p 27 -4\n")
         # and a 5' search under --index-path takes it, as it took one before
         for prune in (0, 1):
             run = self.run_pipeline(pam="23bp-TTTV-Cas12a", prune=prune, variant=False,
                                     index_path=self.library)
             self.assertEqual(run.builds, [])
-            self.assertEqual(run.searched(variant=False), ("NNNN_2_hg38", bool(prune)))
+            self.assertEqual(run.searched(variant=False), ("NNNN-23_2_hg38", bool(prune)))
             self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Reference failed")
 
     def test_a_3_prime_all_n_build_records_its_side_and_a_dedicated_one_too(self):
-        # (a dedicated index is named alike by PAM files of both sides: cli5 D2)
+        # (a dedicated index was named alike by PAM files of both sides: cli5 D2)
         run = self.run_pipeline(pam="20bp-NRG-SpCas9", variant=False,
                                 env={"STUB_BUILD_WRITES": "1"})
-        self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
-        self.assertEqual(self.pam_build("NRG_2_hg38"), "20bp-NRG-SpCas9 23 3\n")
+        self.assertEqual(run.searched(variant=False), ("20-NRG_2_hg38", False))
+        self.assertEqual(self.pam_build("20-NRG_2_hg38"), "20bp-NRG-SpCas9 23 3\n")
         run = self.run_pipeline(pam="20bp-NNN-NO-PAM", variant=False,
                                 env={"STUB_BUILD_WRITES": "1"})
         self.assertEqual([c[1] for c in run.builds], ["hg38"])
-        self.assertEqual(run.searched(variant=False), ("NNN_2_hg38", False))
-        self.assertEqual(self.pam_build("NNN_2_hg38"), "20bp-NNN-NO-PAM 23 3\n")
+        self.assertEqual(run.searched(variant=False), ("20-NNN_2_hg38", False))
+        self.assertEqual(self.pam_build("20-NNN_2_hg38"), "20bp-NNN-NO-PAM 23 3\n")
 
     def test_a_variant_build_records_its_side_too(self):
         pam, text = _PAM_5P_4
@@ -1358,59 +1364,63 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
                                 env={"STUB_BUILD_WRITES": "1", "STUB_ENRICH": "1"})
         self.assertTrue(run.enriched)
         self.assertEqual([c[1] for c in run.builds][:2], ["hg38", f"hg38+{self.VCF}"])
-        self.assertEqual(run.searched(variant=True), (f"NNNN_2_hg38+{self.VCF}", False))
-        self.assertEqual(self.pam_build(f"NNNN_2_hg38+{self.VCF}"), "27bp-NNNN-5p 27 -4\n")
+        self.assertEqual(run.searched(variant=True), (f"NNNN-23_2_hg38+{self.VCF}", False))
+        self.assertEqual(self.pam_build(f"NNNN-23_2_hg38+{self.VCF}"), "27bp-NNNN-5p 27 -4\n")
+        # its INDELS index under its name, the engine's renamed: nothing under the older one
+        self.assertTrue((self.library / f"NNNN-23_2_hg38+{self.VCF}_INDELS").is_dir())
+        self.assertEqual(sorted(p.name for p in self.library.iterdir()),
+                         ["NNNN-23_2_hg38", f"NNNN-23_2_hg38+{self.VCF}",
+                          f"NNNN-23_2_hg38+{self.VCF}_INDELS"])
 
-    def assertRefused(self, run, index, have, why, pam_file, want, also="", hint=""):
-        """The run stopped before it built or searched anything, at `index`, built
-        for side `have`, in the way of this search's own all-N index."""
-        lib = os.path.realpath(self.library)
-        self.assertEqual(run.builds, [])
-        self.assertIsNone(run.searched(variant=False))
-        self.assertIsNone(run.searched(variant=True))
-        self.assertEqual(run.stderr,
-                         f"ERROR: {lib}/{index} is in the way: this search builds its index "
-                         "under that name\n"
-                         f"       {index} is a PAM-less index for a PAM on the {have}' side of "
-                         f"the guide ({why}), and {pam_file} puts the PAM on the {want}' side, "
-                         "so a search of it would find nothing\n" + hint +
-                         f"       move it{also} out of {lib}, or run this search from another "
-                         "working directory\n")
+    def assertBuiltBeside(self, run, index, built, pam_file, variant=False, record=None):
+        """The run built and searched its own index `built`, under the name of 2.10.0,
+        beside `index`, an index of the older name for the other side, which it neither
+        searched nor changed (its .pam_build stays `record`): 2.8.1 stopped on it as in the
+        way of the index it built under that name."""
+        self.assertIn(f"hg38+{self.VCF}" if variant else "hg38", [c[1] for c in run.builds])
+        self.assertEqual(run.searched(variant=variant), (built, False))
+        self.assertNotIn("is in the way", run.stderr)
+        self.assertEqual(self.pam_build(built).split()[0], pam_file)
+        if record is not None:
+            self.assertEqual(self.pam_build(index), record)
 
-    def test_an_all_n_search_does_not_search_one_built_for_the_other_side(self):
-        # It used to: the build path found the name in place and searched it.
+    def test_an_all_n_search_builds_its_own_beside_one_built_for_the_other_side(self):
+        # It once searched it: the build path found the name in place. 2.8.1 refused it.
         self.install("NNN_2", variant=False)
         built_for(self.library / "NNN_2_hg38", -3)
-        self.assertRefused(self.run_pipeline(pam="20bp-NNN-NO-PAM", variant=False),
-                           "NNN_2_hg38", 5, "as its .pam_build records",
-                           "20bp-NNN-NO-PAM.txt", 3)
-        self.assertEqual(self.pam_build("NNN_2_hg38"), "23bp-NNN-NO-PAM 23 -3\n")  # untouched
+        run = self.run_pipeline(pam="20bp-NNN-NO-PAM", variant=False,
+                                env={"STUB_BUILD_WRITES": "1"})
+        self.assertBuiltBeside(run, "NNN_2_hg38", "20-NNN_2_hg38", "20bp-NNN-NO-PAM",
+                               record="23bp-NNN-NO-PAM 23 -3\n")
+        self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Reference failed")
 
-    def test_nor_a_5_prime_one_a_3_prime_build_without_a_record(self):
+    def test_and_a_5_prime_one_beside_a_3_prime_build_without_a_record(self):
         self.install("NNN_2", variant=False)
         pam, text = _PAM_5P_3
-        self.assertRefused(
-            self.run_pipeline(pam=pam, pam_text=text, variant=False), "NNN_2_hg38", 3,
-            "it records no side in a .pam_build, and an index that does not is taken for "
-            "a 3' build", "23bp-NNN-5p.txt", 5,
-            hint="       if it was built from a 5' PAM file, record that by running "
-                 "'crisprme.py build-index-only' with that file, the same --genome (and "
-                 "--vcf) and --bDNA 1\n")
-        # once its side is recorded, it is searched
+        run = self.run_pipeline(pam=pam, pam_text=text, variant=False,
+                                env={"STUB_BUILD_WRITES": "1"})
+        self.assertBuiltBeside(run, "NNN_2_hg38", "NNN-20_2_hg38", "23bp-NNN-5p")
+        self.assertFalse((self.library / "NNN_2_hg38" / ".pam_build").exists())
+        # one in place recorded for its side is searched, and one of the 2.10.0 name ahead of it
         built_for(self.library / "NNN_2_hg38", -3)
+        shutil.rmtree(self.library / "NNN-20_2_hg38")
         run = self.run_pipeline(pam=pam, pam_text=text, variant=False)
         self.assertEqual(run.reference, "NNN_2_hg38")
         self.assertEqual(run.searched(variant=False), ("NNN_2_hg38", False))
 
-    def test_the_variant_build_path_refuses_one_too(self):
+    def test_the_variant_build_path_builds_its_own_beside_one_too(self):
         # the reference index serves; the variant one in place was built for the 5' side
         self.install("NNN_2")
         built_for(self.library / "NNN_2_hg38", 3)
         built_for(self.library / f"NNN_2_hg38+{self.VCF}", -3)
-        run = self.run_pipeline(pam="20bp-NNN-NO-PAM", env={"STUB_ENRICH": "1"})
+        run = self.run_pipeline(pam="20bp-NNN-NO-PAM",
+                                env={"STUB_ENRICH": "1", "STUB_BUILD_WRITES": "1"})
         self.assertEqual(run.reference, "NNN_2_hg38")
-        self.assertRefused(run, f"NNN_2_hg38+{self.VCF}", 5, "as its .pam_build records",
-                           "20bp-NNN-NO-PAM.txt", 3, also=f" and NNN_2_hg38+{self.VCF}_INDELS")
+        self.assertBuiltBeside(run, f"NNN_2_hg38+{self.VCF}", f"20-NNN_2_hg38+{self.VCF}",
+                               "20bp-NNN-NO-PAM", variant=True, record="23bp-NNN-NO-PAM 23 -3\n")
+        self.assertEqual(run.indels, None)  # (built, not found in place)
+        self.assertTrue((self.library / f"20-NNN_2_hg38+{self.VCF}_INDELS").is_dir())
+        self.assertTrue((self.library / f"NNN_2_hg38+{self.VCF}_INDELS").is_dir())  # its own
 
     def test_an_index_this_run_may_use_is_not_refused(self):
         # the same side, and a dedicated PAM, whose index is never all-N
@@ -1421,21 +1431,28 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
         self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Reference failed")
         run = self.run_pipeline(pam="23bp-TTTV-Cas12a", variant=False)
         self.assertEqual([c[1] for c in run.builds], ["hg38"])
-        self.assertEqual(run.searched(variant=False), ("TTTV_2_hg38", False))
+        self.assertEqual(run.searched(variant=False), ("TTTV-23_2_hg38", False))
 
-    def assertNoMatchSaysWhy(self, run, note, pam, n=2):
+    def assertNoMatchSaysWhy(self, run, note, pam, n=2, guide=20, side=3):
         """Under --index-path: the error, why the all-N index there was not used
-        (`note`, if any), and what would serve."""
+        (`note`, if any), and what would serve: an index of the older name (as the indexes
+        published up to 2.8.1 are, of N = 3), and the one a build gives it since 2.10.0, of a
+        `guide`-nt guide on the `side` of the guide; the download it advises names the index
+        as 2.10.0 publishes it (its form, N = 3)."""
         lib = os.path.realpath(self.library)
+        named = f"{guide}-{pam}" if side == 3 else f"{pam}-{guide}"
+        older = f"{pam}_{max(n, 3)}_hg38"
+        published = f"{named}_{max(n, 3)}_hg38"
         self.assertIsNone(run.searched(variant=False))
         self.assertEqual(run.stderr,
                          f"ERROR: no matching reference index under --index-path '{lib}'\n"
                          + note +
                          f"       expected an index '{pam}_N_hg38' with N >= {n} "
-                         f"(e.g. {pam}_{n}_hg38)\n"
+                         f"(e.g. {older}, or {named}_{n}_hg38 as a build names it "
+                         "since 2.10.0)\n"
                          f"       re-run 'crisprme.py download --what index --index-name "
-                         f"{pam}_{n}_hg38' (it fetches the shared reference index too), or "
-                         "build it with 'crisprme.py build-index-only'.\n")
+                         f"{published}' if it is published (it fetches the shared reference "
+                         "index too), or build it with 'crisprme.py build-index-only'.\n")
 
     def test_index_path_says_why_an_all_n_index_there_was_not_used(self):
         self.install("NNN_2", variant=False)
@@ -1449,48 +1466,55 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
                 "3' side, so a search of it would find nothing\n", "NNN")
 
     def test_and_an_index_without_a_record_is_named_with_how_to_record_its_side(self):
-        # a 5' PAM-less index a search built before this release
+        # a 5' PAM-less index a search built before this release: named for its side, a
+        # name records it, as for a 3' one (2.8.1 said to record it with build-index-only,
+        # which still does)
         self.install("NNNN_2", variant=False)
+        lib = os.path.realpath(self.library)
         self.assertNoMatchSaysWhy(
             self.run_pipeline(pam="23bp-TTTV-Cas12a", prune=1, variant=False),
             "       NNNN_2_hg38 is a PAM-less index for a PAM on the 3' side of the guide "
             "(it records no side in a .pam_build, and an index that does not is taken for "
             "a 3' build), and 23bp-TTTV-Cas12a.txt puts the PAM on the 5' side, so a search "
             "of it would find nothing\n"
-            "       if it was built from a 5' PAM file, record that by running "
-            "'crisprme.py build-index-only' with that file, the same --genome (and --vcf) "
-            "and --bDNA 1\n", "TTTV")
+            f"       if it was built from a 5' PAM file, name it so: mv '{lib}/NNNN_2_hg38' "
+            f"'{lib}/NNNN-<guide length>_2_hg38', which records that\n", "TTTV",
+            guide=23, side=5)
 
-    def test_a_dedicated_index_of_the_other_side_in_the_way_is_refused(self):
-        # a 3' build of TTTV under the name a 5' TTTV search builds: it was searched, and
-        # reported a site that is in no chromosome, at exit 0 (cli5 D2)
+    def test_a_dedicated_index_of_the_other_side_has_one_built_beside_it(self):
+        # a 3' build of TTTV under the name a 5' TTTV search built: it was searched, and
+        # reported a site that is in no chromosome, at exit 0 (cli5 D2); 2.8.1 refused it
         self.install("TTTV_2", variant=False)
         Path(self.library, "TTTV_2_hg38", ".pam_build").write_text("20bp-TTTV-3p 24 4\n")
-        run = self.run_pipeline(pam="23bp-TTTV-Cas12a", variant=False)
-        self.assertIsNone(run.searched(variant=False))
-        self.assertEqual(run.builds, [])
-        self.assertIn(f"ERROR: {self.library}/TTTV_2_hg38 is in the way: this search builds its "
-                      "index under that name\n"
-                      "       TTTV_2_hg38 is an index for a PAM on the 3' side of the guide (as "
-                      "its .pam_build records), and 23bp-TTTV-Cas12a.txt puts the PAM on the 5' "
-                      "side, so a search of it would report sites that are not there and miss "
-                      "the real ones\n", run.stderr)
+        run = self.run_pipeline(pam="23bp-TTTV-Cas12a", variant=False,
+                                env={"STUB_BUILD_WRITES": "1"})
+        self.assertBuiltBeside(run, "TTTV_2_hg38", "TTTV-23_2_hg38", "23bp-TTTV-Cas12a",
+                               record="20bp-TTTV-3p 24 4\n")
 
     def test_an_unrecorded_all_n_index_of_another_width_is_not_taken_for_a_3_prime_pam(self):
         # flows OF-8: the NNNN_2 a 5' search of 2.8.0 left, then a 3' NGCG search
         self.install("NNNN_2", variant=False)
         plain = self.run_pipeline(pam="20bp-NGCG-SpCas9VRER", variant=False)
         self.assertEqual([c[1] for c in plain.builds], ["hg38"])
-        self.assertEqual(plain.searched(variant=False), ("NGCG_2_hg38", False))
+        self.assertEqual(plain.searched(variant=False), ("20-NGCG_2_hg38", False))
+        lib = os.path.realpath(self.library)
+        # (and, since 2.10.0, how to use one built for a 3' PAM: a name that says its side,
+        # here for the guide length its trees say, which these stand-ins do not)
         self.assertNoMatchSaysWhy(
             self.run_pipeline(pam="20bp-NGCG-SpCas9VRER", prune=1, variant=False),
             "       NNNN_2_hg38 is a PAM-less index that records no side of the guide in a "
             ".pam_build, and a search before 2.8.1 built one of that width from a 5' PAM file as "
-            "well as from a 3' one, so it is not taken for a 3' PAM\n", "NGCG")
+            "well as from a 3' one, so it is not taken for a 3' PAM\n"
+            f"       if it was built from a 3' PAM file, name it so: mv '{lib}/NNNN_2_hg38' "
+            f"'{lib}/<guide length>-NNNN_2_hg38', which records that\n", "NGCG")
 
     def test_a_plain_miss_says_what_it_said(self):
+        # (but the index to download, of N = 3 for up to 2 bulges: it named the one of the
+        # search's N, bulges + 1, and no index of N = 2 is published)
         self.install("NGG_3", variant=False)
         self.assertNoMatchSaysWhy(self.run_pipeline(prune=1, variant=False), "", "NRG")
+        self.assertNoMatchSaysWhy(self.run_pipeline(prune=1, variant=False, bulges=3), "",
+                                  "NRG", n=4)
 
 
 class AnUnfinishedBuildIsNotSearched(_ShippedScript):
@@ -1561,6 +1585,52 @@ class AnUnfinishedBuildIsNotSearched(_ShippedScript):
                                      "finish, or run build-index-only again to its end, then run "
                                      "this search again\n")
         self.assertEqual(run.calls, [])
+
+    def test_an_indels_index_built_while_its_fake_indel_genome_changed_is_not_kept(self):
+        """build-index-only marks the fake-indel genome only just before the first FASTA it
+        changes as it puts the SNP codes on it in place: a search past its check of the mark
+        before then built its INDELS index from the FASTAs not coded yet, blind to their
+        SNPs, and every later run kept it (R2-F1). An INDELS index during whose build a
+        FASTA of the genome changed, or after which the mark is there, is not kept."""
+        self.install("NRG_3")
+        indels = self.library / f"NRG_3_hg38+{self.VCF}_INDELS"
+        shutil.rmtree(indels)
+        genome = self.home / "Genomes" / f"hg38+{self.VCF}_INDELS"
+        fake = genome / f"fake_{self.VCF}_chr1" / "fakechr1.fa"
+        fake.parent.mkdir(parents=True)
+        fake.write_text(">fakechr1\nACGTACGTACGTACGTACGTACGTACGT\n")
+        for overlay in ("coded a FASTA", "is at it"):
+            with self.subTest(overlay=overlay):
+                built = self.root / f"built {overlay}"
+                launched = self.launch(env={"STUB_BUILD_UNTIL": str(built),
+                                            "STUB_BUILD_WRITES": "1"})
+                _wait_for(lambda: any(c[0] == "index-genome" for c in launched.calls()), 60,
+                          "the INDELS build")
+                if overlay == "coded a FASTA":  # as overlay_fake_chromosome writes one
+                    staged = fake.parent / ".overlay-x"
+                    staged.mkdir()
+                    (staged / "fakechr1.fa.tmp").write_text(
+                        ">fakechr1\nACGTACGTACGTRCGTACGTACGTACGT\n")
+                    os.replace(staged / "fakechr1.fa.tmp", fake)
+                    staged.rmdir()
+                else:
+                    (genome / ".building").mkdir()
+                built.touch()
+                run = self.finish(launched)
+                self.assertEqual(launched.proc.returncode, 1)
+                self.assertEqual(run.stderr, (
+                    f"ERROR: {genome} changed while this search built NRG_3_hg38+{self.VCF}"
+                    "_INDELS from it: a build-index-only run puts the SNP codes on it, and the "
+                    "index would be blind to those not on yet, so it is not kept. Let that run "
+                    "finish, then run this search again\n"))
+                self.assertFalse(indels.exists())
+                self.assertFalse(Path(f"{indels}.lock").exists())
+                self.assertIsNone(run.searched(variant=True))
+                shutil.rmtree(genome / ".building", ignore_errors=True)
+        # with nothing changed meanwhile, it is kept and searched, as before
+        run = self.run_pipeline(env={"STUB_BUILD_WRITES": "1"})
+        self.assertTrue(indels.is_dir())
+        self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Variant failed")
 
     def test_the_indel_genotype_store_is_not_refused_when_it_is_not_read(self):
         # CRISPRME_INDEL_SNP=0: no SNP+indel co-occurrence, so the store is not read
@@ -2649,29 +2719,93 @@ sys.exit(rc if rc >= 0 else 128 - rc)
 """
 
 
-class BuildLocksInTheShippedScript(_ShippedScript):
-    """The same locks, taken by whole runs of the shipped script. A reference-only
-    search with no index installed builds NRG_2_hg38 under
-    genome_library/NRG_2_hg38.lock; STUB_HOLD_BUILD keeps that build running until
-    the test kills or interrupts the run."""
+class APathThatHoldsAQuote(_Locks):
+    """IR2A-R2-4, the review of wave 2a of CRISPRme 2.10.0: the search script quoted the
+    paths of the commands it gives by hand, '<path>' (how to clear a lock, how to name an
+    index), and a path that holds a quote, a working directory "Luca's data", cut such a
+    command there, pasted: the shell waited for a quote to close the rest. _quote_paths
+    quotes each as a shell reads it back, in bash and in zsh."""
 
     def setUp(self):
         super().setUp()
-        self.index = self.library / "NRG_2_hg38"
-        self.lock = self.library / "NRG_2_hg38.lock"
+        self.top = self.dir
+        self.dir = self.top / "Luca's data"
+        self.dir.mkdir()
+        self.lock = self.dir / "NRG_2_hg38.lock"
+        self.out = self.dir / "NRG_2_hg38"
+
+    def test_each_path_reads_back_pasted_into_bash_or_zsh(self):
+        from test_indel_window import same_argv
+        paths = [str(self.lock), "it''s", "'", "", "a\\b $HOME `id` \"q\" * ~"]
+        script = (f"{_lock_helpers()}_quote_paths " + " ".join(_q(p) for p in paths)
+                  + '\nprintf "%s" "$_quoted"\n')
+        got = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        self.assertEqual((got.returncode, got.stderr), (0, ""))
+        self.assertTrue(got.stdout.startswith(" '%s/Luca'\\''s data/" % self.top), got.stdout)
+        self.assertEqual(same_argv(self, "rm" + got.stdout, str(self.top)), [["rm"] + paths])
+
+    def test_the_rm_a_wait_gives_clears_the_lock_pasted_into_bash_or_zsh(self):
+        from test_indel_window import paste_both
+        self.hold(None)  # (no owner record: waited for, and how to clear it said)
+        self.out.mkdir()
+        (self.out / "x.bin").write_text("")
+        rc, out, err = self.take(stop_after=2.5)
+        self.assertEqual(rc, -signal.SIGKILL, out + err)
+        notice = next(ln for ln in out.splitlines() if ln.startswith("Still waiting for "))
+        command = notice.split("clear the lock and what it left with: ", 1)[1]
+        paste_both(self, command, str(self.top))
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()),
+                         ["stderr1", "stdout1"])
+
+
+class AnUnfinishedPartWhosePathHoldsAQuote(unittest.TestCase):
+    """IR2A-R2-4: the same for how complete-search's refusal of a part of a dataset that
+    build-index-only marks unfinished says to remove it (unfinished_marks.dataset_parts)."""
+
+    def test_its_rm_removes_that_part_pasted_into_bash_or_zsh(self):
+        import unfinished_marks
+        from test_indel_window import paste_both
+        top = tempfile.mkdtemp(prefix="unfinished_quote_")
+        self.addCleanup(shutil.rmtree, top, True)
+        work = os.path.join(top, "Luca's data")
+        dicts = os.path.join(work, "Dictionaries")
+        for name in ("registry_ds", "genotypes_ds", "indel_genotypes_ds", "keep"):
+            os.makedirs(os.path.join(dicts, name, ".building"))
+        with mock.patch.dict(os.environ, {"CRISPRME_INDEL_SNP": "1"}):
+            parts = unfinished_marks.dataset_parts(work, "hg38", "ds", True)
+        removes = [re.search(r"\((rm -rf .*)\)$", rerun) for _, _, rerun in parts]
+        self.assertEqual([m is not None for m in removes], [True, True, False])
+        for m, gone in zip(removes, (["genotypes_ds", "registry_ds"], ["indel_genotypes_ds"])):
+            before = set(os.listdir(dicts))
+            paste_both(self, m.group(1), top)
+            self.assertEqual(sorted(before - set(os.listdir(dicts))), gone)
+        self.assertEqual(os.listdir(dicts), ["keep"])
+
+
+class BuildLocksInTheShippedScript(_ShippedScript):
+    """The same locks, taken by whole runs of the shipped script. A reference-only
+    search with no index installed builds 20-NRG_2_hg38 (since 2.10.0 a name that says the
+    guide length and the side) under genome_library/20-NRG_2_hg38.lock, in a folder of that
+    lock (_build_in_lock); STUB_HOLD_BUILD keeps that build running until the test kills or
+    interrupts the run."""
+
+    def setUp(self):
+        super().setUp()
+        self.index = self.library / "20-NRG_2_hg38"
+        self.lock = self.library / "20-NRG_2_hg38.lock"
 
     def start_build(self):
-        """A run that is building NRG_2_hg38, and so holds its lock."""
+        """A run that is building 20-NRG_2_hg38, and so holds its lock."""
         run = self.launch(variant=False, env={"STUB_HOLD_BUILD": "1"})
         _wait_for(lambda: any(c[0] == "index-genome" for c in run.calls()), 60,
                   "the build to start")
         return run
 
     def assertBuiltAndSearched(self, run):
-        """`run` rebuilt NRG_2_hg38 itself, searched it, and released its lock."""
+        """`run` rebuilt 20-NRG_2_hg38 itself, searched it, and released its lock."""
         self.assertIsNone(run.reference, run.stdout)  # never taken for a finished index
         self.assertEqual([c[1] for c in run.builds], ["hg38"])
-        self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
+        self.assertEqual(run.searched(variant=False), ("20-NRG_2_hg38", False))
         self.assertFalse(self.lock.exists(), "the run left its lock behind")
         # nothing failed before the reference search, where the stub stops the run
         self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Reference failed",
@@ -2808,11 +2942,11 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         built.touch()
         run = self.finish(waiter, timeout=60)
         self.assertEqual(run.builds, [])
-        self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
+        self.assertEqual(run.searched(variant=False), ("20-NRG_2_hg38", False))
         self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Reference failed",
                          run.stderr)
         self.assertEqual(self.finish(holder, timeout=60).searched(variant=False),
-                         ("NRG_2_hg38", False))
+                         ("20-NRG_2_hg38", False))
 
     @unittest.skipUnless(os.path.exists("/proc/self/stat"),
                          "a stopped run is told from a live one through /proc")
@@ -2856,9 +2990,9 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         built.touch()
         run = self.finish(waiter, timeout=60)
         self.assertEqual(run.builds, [])
-        self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
+        self.assertEqual(run.searched(variant=False), ("20-NRG_2_hg38", False))
         self.assertEqual(self.finish(holder, timeout=60).searched(variant=False),
-                         ("NRG_2_hg38", False))
+                         ("20-NRG_2_hg38", False))
 
     @unittest.skipUnless(os.path.exists("/proc/self/stat"),
                          "a dead run that was never reaped is told from a live one through /proc")
@@ -2976,7 +3110,7 @@ class BuildLocksInTheShippedScript(_ShippedScript):
     def test_a_run_whose_variant_index_lock_was_taken_over_meanwhile_leaves_it_to_that_run(self):
         # resumed with its lock lost, a failed build removed the taker's variant index
         self.install("NRG_2", variant=False)  # a reference index; the variant one is built
-        var = self.library / f"NRG_2_hg38+{self.VCF}"
+        var = self.library / f"20-NRG_2_hg38+{self.VCF}"
         lock = Path(f"{var}.lock")
         for fails in (False, True):
             with self.subTest(build_fails=fails):
@@ -3069,8 +3203,8 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         (self.index / "chr1.bin").write_bytes(b"")
         built.touch()  # ... and its run lets go of the lock
         run = self.finish(waiter, timeout=60)
-        self.assertEqual(run.reference, "NRG_2_hg38")
-        self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
+        self.assertEqual(run.reference, "20-NRG_2_hg38")
+        self.assertEqual(run.searched(variant=False), ("20-NRG_2_hg38", False))
         self.assertEqual(run.builds, [])
         self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Reference failed",
                          run.stderr)
@@ -3232,7 +3366,7 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         self.assertIn(["index-genome", f"hg38+{self.VCF}"], [c[:2] for c in run.calls])
         self.assertIn(["index-genome", f"hg38+{self.VCF}_INDELS/NRG_2_fakechr1"],
                       [c[:2] for c in run.calls])
-        self.assertEqual(run.searched(variant=True), (f"NRG_2_hg38+{self.VCF}", False))
+        self.assertEqual(run.searched(variant=True), (f"20-NRG_2_hg38+{self.VCF}", False))
         self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Variant failed",
                          run.stderr)
 
@@ -3241,8 +3375,42 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         # that never wrote one), and the build replaces it. A lock found free with its
         # "output" in place must not count such a directory as built.
         self.index.mkdir()
-        run = self.run_pipeline(variant=False, timeout=60)
+        run = self.run_pipeline(variant=False, timeout=60, env={"STUB_BUILD_WRITES": "1"})
         self.assertBuiltAndSearched(run)
+        self.assertEqual(sorted(p.name for p in self.index.iterdir()), [".pam_build", "chr1.bin"])
+
+    def test_a_build_leaves_nothing_under_its_name_and_touches_no_index_of_the_older_one(self):
+        # The engine writes an index under the older name, <PAM>_<N>_<genome>, and removes
+        # a folder of that name first. It runs in a folder of the build lock, and its index
+        # is renamed into place, under the name of 2.10.0, once whole: an index of the older
+        # name in place (here one of the other side, which 2.8.1 stopped on, as in the way)
+        # is never touched, and a build killed partway leaves its part in the lock, which
+        # the run that takes the lock over clears.
+        older = self.library / "NRG_2_hg38"
+        older.mkdir()
+        (older / "chr1.bin").write_bytes(b"theirs")
+        (older / ".pam_build").write_text("23bp-NRG-5p 23 -3\n")
+        built = self.root / "built"
+        run = self.launch(variant=False, env={"STUB_BUILD_UNTIL": str(built)})
+        _wait_for(lambda: any(c[0] == "index-genome" for c in run.calls()), 60,
+                  "the build to start")
+        (scratch,) = self.lock.glob("build.*")
+        part = scratch / "genome_library" / "NRG_2_hg38"  # what the engine writes there
+        part.mkdir(parents=True)
+        (part / "chr1.bin").write_bytes(b"half")
+        os.killpg(run.proc.pid, signal.SIGKILL)  # an OOM kill, a container stop
+        run.proc.wait()
+        self.assertFalse(self.index.exists())
+        self.assertEqual((older / "chr1.bin").read_bytes(), b"theirs")
+        after = self.run_pipeline(variant=False, timeout=60, env={"STUB_BUILD_WRITES": "1"})
+        self.assertIn(f"Stale lock {self.lock}: the run that held it (pid {run.proc.pid} ",
+                      after.stdout)
+        self.assertBuiltAndSearched(after)
+        self.assertEqual((self.index / "chr1.bin").read_bytes(), b"")  # the stub's, not "half"
+        self.assertEqual((older / "chr1.bin").read_bytes(), b"theirs")
+        self.assertEqual((older / ".pam_build").read_text(), "23bp-NRG-5p 23 -3\n")
+        self.assertEqual(sorted(p.name for p in self.library.iterdir()),
+                         ["20-NRG_2_hg38", "NRG_2_hg38"])
 
     def test_a_lock_with_no_owner_record_is_waited_on_never_broken(self):
         # an older CRISPRme's lock: whether its run is still alive cannot be told
@@ -3331,7 +3499,7 @@ class BuildLocksInTheShippedScript(_ShippedScript):
 
     def test_an_interrupted_variant_index_build_leaves_its_lock_and_the_next_run_redoes_it(self):
         self.install("NRG_2", variant=False)  # a reference index; the variant one is built
-        var = self.library / f"NRG_2_hg38+{self.VCF}"
+        var = self.library / f"20-NRG_2_hg38+{self.VCF}"
         lock = Path(f"{var}.lock")
         for sig in self.INTERRUPTS:
             with self.subTest(signal=sig.name):
@@ -3601,7 +3769,7 @@ class ALibraryTheRunCannotWriteTo(_ShippedScript):
         self.assertFalse([c for c in run.calls if c[0] == "search"], run.calls)
 
     def test_a_reference_search_with_bulges_stops(self):
-        self.assertRefused(self.run_pipeline(variant=False), "NRG_2_hg38")
+        self.assertRefused(self.run_pipeline(variant=False), "20-NRG_2_hg38")
         self.assertIn("--index-path", self.run_pipeline(variant=False).stderr)
 
     def test_a_variant_search_stops_at_the_missing_variant_index(self):
@@ -3611,7 +3779,7 @@ class ALibraryTheRunCannotWriteTo(_ShippedScript):
         folder.mkdir()
         (folder / "chr1.enriched.fa").write_text(">chr1\nACGT\n")
         run = self.run_pipeline()
-        self.assertRefused(run, f"NRG_2_hg38+{self.VCF}")
+        self.assertRefused(run, f"20-NRG_2_hg38+{self.VCF}")
         # --index-path does not serve a variant index
         self.assertNotIn("--index-path", run.stderr)
 
@@ -3655,7 +3823,7 @@ class ALibraryTheRunCannotWriteTo(_ShippedScript):
             "STUB_MKDIR_ONCE": str(self.root / "once"), "STUB_BUILD_WRITES": "1"})
         self.assertNotIn("is not installed", run.stderr)
         self.assertEqual([c[1] for c in run.builds], ["hg38"])
-        self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
+        self.assertEqual(run.searched(variant=False), ("20-NRG_2_hg38", False))
 
 
 class NoVariantIndexAndNothingToBuildOneFrom(_ShippedScript):
@@ -3671,22 +3839,29 @@ class NoVariantIndexAndNothingToBuildOneFrom(_ShippedScript):
         self.assertEqual(run.calls, [])
         return run
 
+    def engine_cannot_prune(self):
+        """The stub engine as a CRISPRitz without --prune-pam: its source never names it."""
+        (self.root / "bin" / "crispritz.py").write_text(
+            _STUB_ENGINE.replace("--prune-pam", "the flag"))
+
     def assertNothingMade(self):
         self.assertEqual(sorted(p.name for p in (self.home / "Genomes").iterdir()), ["hg38"])
         self.assertEqual(sorted(p.name for p in (self.home / "Dictionaries").iterdir()),
                          [f"log_indels_{self.VCF}", f"registry_{self.VCF}"])
 
     def test_it_names_what_was_asked_what_is_installed_and_what_to_do(self):
-        self.install("NRG_3")
-        run = self.refused(pam="20bp-NGG-SpCas9")
+        # (an NGG index, which does not hold NRG: an NRG one holds NGG, and serves it
+        # pruned, ADedicatedIndexServesAPamItHolds in test_defaults_and_index_flex)
+        self.install("NGG_3")
+        run = self.refused()
         self.assertEqual(
             run.stderr.splitlines()[0],
             "ERROR: no variant index here serves this search (genome hg38, dataset "
-            f"{self.VCF}, PAM NGG, 1 DNA and 1 RNA bulge(s), a 20-nt guide), and none can be "
+            f"{self.VCF}, PAM NRG, 1 DNA and 1 RNA bulge(s), a 20-nt guide), and none can be "
             f"built: neither its VCFs (VCFs/{self.VCF}) nor its enriched genome (Genomes/hg38+"
-            f"{self.VCF}) is installed. Variant indexes installed for {self.VCF}: NRG_3_hg38+"
+            f"{self.VCF}) is installed. Variant indexes installed for {self.VCF}: NGG_3_hg38+"
             f"{self.VCF} (up to 2 bulge(s) of each type). To install one: crisprme.py download "
-            f"--what index --index-name NGG_3_hg38+{self.VCF} if it is published, or crisprme.py "
+            f"--what index --index-name 20-NRG_3_hg38+{self.VCF} if it is published, or crisprme.py "
             "build-index-only with the dataset's VCFs (docs/PRECOMPUTED_INDEXES.md)")
         self.assertEqual(len(run.stderr.splitlines()), 1, run.stderr)
         self.assertNothingMade()
@@ -3697,11 +3872,14 @@ class NoVariantIndexAndNothingToBuildOneFrom(_ShippedScript):
         self.assertIn(f"NRG_2_hg38+{self.VCF} holds this PAM with up to 1 bulge(s) of each type: "
                       "search with no more.", run.stderr)
 
-    def test_a_wider_pam_less_index_is_named_with_the_flags_it_needs(self):
+    def test_a_wider_pam_less_index_is_named_where_the_engine_cannot_prune(self):
+        # (where it can, the search prunes by itself: EveryScanInTheShippedScript)
+        self.engine_cannot_prune()
         self.install("NNNNNNNN_3")
         run = self.refused()
-        self.assertIn(f"NNNNNNNN_3_hg38+{self.VCF} can serve it from the command line: run this "
-                      "search again with --prune-pam --index-path genome_library.", run.stderr)
+        self.assertIn(f"NNNNNNNN_3_hg38+{self.VCF} serves it pruned to this PAM at leaf time "
+                      "(--prune-pam), which the installed CRISPRitz cannot do: install a "
+                      "CRISPRitz build that supports --prune-pam (CRISPRme pins one).", run.stderr)
 
     def test_not_one_that_would_not_serve_it(self):
         # too shallow for the budget, or built for the other side
@@ -3725,40 +3903,47 @@ class NoVariantIndexAndNothingToBuildOneFrom(_ShippedScript):
 
     def test_under_index_path_it_names_the_variant_indexes_there(self):
         # (a variant index at --index-path serves the search: EveryScanInTheShippedScript)
-        self.install("NRG_3", library=self.root / "shared")
-        run = self.refused(pam="20bp-NGG-SpCas9", index_path=self.root / "shared")
-        self.assertIn(f"Variant indexes installed for {self.VCF}: NRG_3_hg38+{self.VCF} ",
+        self.install("NGG_3", library=self.root / "shared")
+        run = self.refused(index_path=self.root / "shared")
+        self.assertIn(f"Variant indexes installed for {self.VCF}: NGG_3_hg38+{self.VCF} ",
                       run.stderr)
         self.assertNotIn("supplies the reference index only", run.stderr)
 
     def test_an_index_that_serves_with_its_dictionaries_gone_says_so(self):
+        # and how to download it again: a download of an installed index brings what of it
+        # is missing, the dictionaries too since 2.10.0 (FR :163), and Settings downloads
+        # none that is installed
         self.install("NRG_3")
         shutil.rmtree(self.home / "Dictionaries" / f"registry_{self.VCF}")
         run = self.refused()
-        self.assertIn("Its dictionaries are not installed", run.stderr)
+        self.assertIn(
+            f"Its dictionaries are not installed (Dictionaries/registry_{self.VCF} or "
+            f"dictionaries_{self.VCF}, and log_indels_{self.VCF}): download the index again, "
+            f"which installs them (crisprme.py download --what index --index-name NRG_3_hg38+"
+            f"{self.VCF}; in the web app, remove the index in Settings, then download it "
+            "there). ", run.stderr)
         self.assertNotIn("--prune-pam", run.stderr)  # (it needs no flag)
 
     def test_the_enriched_genome_alone_can_build_it(self):
         # the build-inputs kit: no VCFs, and an index for another PAM builds from it
-        self.install("NRG_3")
+        self.install("NGG_3")
         folder = self.home / "Genomes" / f"hg38+{self.VCF}"
         folder.mkdir()
         (folder / "chr1.enriched.fa").write_text(">chr1\nACGT\n")
-        run = self.run_pipeline(pam="20bp-NGG-SpCas9", env={"STUB_BUILD_WRITES": "1"})
+        run = self.run_pipeline(env={"STUB_BUILD_WRITES": "1"})
         self.assertNotIn("no variant index here", run.stderr)
         self.assertIn(f"hg38+{self.VCF}", [c[1] for c in run.builds])
 
     def test_vcfs_alone_can_build_it(self):
-        self.install("NRG_3")
-        run = self.run_pipeline(pam="20bp-NGG-SpCas9", env={"STUB_ENRICH": "1", "STUB_BUILD_WRITES": "1"})
+        self.install("NGG_3")
+        run = self.run_pipeline(env={"STUB_ENRICH": "1", "STUB_BUILD_WRITES": "1"})
         self.assertNotIn("no variant index here", run.stderr)
         self.assertTrue(run.enriched)
 
     def test_an_empty_vcf_folder_is_no_vcfs(self):
-        self.install("NRG_3")
+        self.install("NGG_3")
         (self.home / "VCFs" / self.VCF).mkdir(parents=True)
-        self.assertIn("no variant index here serves this search",
-                      self.refused(pam="20bp-NGG-SpCas9").stderr)
+        self.assertIn("no variant index here serves this search", self.refused().stderr)
 
     def test_a_reference_search_is_not_held_to_it(self):
         run = self.run_pipeline(variant=False, env={"STUB_BUILD_WRITES": "1"})
@@ -3834,13 +4019,44 @@ class TheSnpCodesOfASearchsOwnEnrichment(_ShippedScript):
                          sorted(["hg38", f"hg38+{self.VCF}", f"hg38+{self.VCF}_INDELS"]))
 
     def test_a_store_in_place_is_kept(self):
+        # one of 2.10.0, whose .done marker says it holds the records of PASS and '.'
         self.install("NRG_2", variant=False)
         self.vcfs()
         self.store.mkdir()
         (self.store / "gt_indel_chr1.tsv.gz").write_bytes(gzip.compress(b"kept\n"))
+        (self.store / "gt_indel_chr1.tsv.gz.done").write_text("1\nFILTER\tPASS,.\n")
         self.run_pipeline(env={"STUB_ENRICH": "snp", "STUB_BUILD_WRITES": "1"})
         with gzip.open(self.store / "gt_indel_chr1.tsv.gz", "rt") as fh:
             self.assertEqual(fh.read(), "kept\n")
+
+    def test_the_opt_out_is_in_the_runs_log(self):
+        """CRISPRME_INDEL_SNP=0 changes the rows of every dataset (2.8.1's two passes), and
+        nothing in the results says so: the search's stdout, its log_verbose.txt, does,
+        once per variant dataset (the real-data indel check refuses such a run on it)."""
+        note = ("NOTE: the SNP+indel co-occurrence is off (CRISPRME_INDEL_SNP=0): every SNP "
+                f"code of the fake-indel genome of {self.VCF} reads as the reference base")
+        self.install("NRG_2", variant=False)
+        self.vcfs()
+        run = self.run_pipeline(env={"STUB_ENRICH": "snp", "STUB_BUILD_WRITES": "1",
+                                     "CRISPRME_INDEL_SNP": "0"})
+        self.assertEqual(run.stdout.count(note), 1, run.stdout)
+        self.assertFalse(self.store.exists())
+        run = self.run_pipeline(env={"STUB_ENRICH": "snp", "STUB_BUILD_WRITES": "1"})
+        self.assertNotIn("SNP+indel co-occurrence is off", run.stdout)
+
+    def test_a_store_of_an_earlier_release_in_place_is_written_again(self):
+        # its marker (or none) does not say that it leaves out the records whose FILTER the
+        # search skips, which no fake-indel window holds (build_indel_genotypes)
+        self.install("NRG_2", variant=False)
+        self.vcfs()
+        self.store.mkdir()
+        (self.store / "gt_indel_chr1.tsv.gz").write_bytes(gzip.compress(b"old\n"))
+        (self.store / "gt_indel_chr1.tsv.gz.done").write_text("1\n")
+        run = self.run_pipeline(env={"STUB_ENRICH": "snp", "STUB_BUILD_WRITES": "1"})
+        with gzip.open(self.store / "gt_indel_chr1.tsv.gz", "rt") as fh:
+            self.assertIn("S2", fh.read(), run.stdout + run.stderr)
+        self.assertEqual((self.store / "gt_indel_chr1.tsv.gz.done").read_text().splitlines()[1:],
+                         ["FILTER\tPASS,."])
 
     def test_a_fake_genome_in_place_is_coded_before_its_index_is_built(self):
         # one a search before 2.8.1 enriched, or that came another way
@@ -3912,21 +4128,17 @@ class AnIndexBuiltForAnotherGuideInTheScript(_ShippedScript):
         if variant:
             built_for_guide(self.library / f"{prefix}_hg38+{self.VCF}", guide)
 
-    def test_a_same_named_index_for_a_shorter_guide_stops_the_search(self):
-        # the plain two-search sequence: a 20-nt search builds NGG_2, the next one is 23-nt
+    def test_an_index_of_the_older_name_for_a_shorter_guide_has_its_own_built_beside_it(self):
+        # the plain two-search sequence: a 20-nt search of 2.8.1 built NGG_2, the next one
+        # is 23-nt. It stopped on it: "This search builds its index under that name"
         self.install_built("NGG_2", 20)
-        run = self.run_pipeline(variant=False, **self.p23)
-        self.assertEqual(run.stderr.splitlines()[0],
-                         "ERROR: NGG_2_hg38 was built for a 20-nt guide, and this search has a "
-                         "23-nt guide with 1 DNA and 1 RNA bulge(s): it stores too few bases per "
-                         "site, so a search of it would report wrong alignments and lose "
-                         "off-targets. This search builds its index under that name: move it out "
-                         f"of {self.library}, or run this search from another working directory")
-        self.assertEqual(run.builds, [])
-        self.assertIsNone(run.searched(variant=False))
+        run = self.run_pipeline(variant=False, env={"STUB_BUILD_WRITES": "1"}, **self.p23)
+        self.assertNotIn("too few bases", run.stderr)
+        self.assertEqual([c[1] for c in run.builds], ["hg38"])
+        self.assertEqual(run.searched(variant=False), ("23-NGG_2_hg38", False))
         self.assertTrue((self.library / "NGG_2_hg38" / "chr1.bin").exists())
 
-    def test_a_same_named_variant_index_stops_it_too_and_names_its_companion(self):
+    def test_so_does_a_variant_index_of_the_older_name(self):
         self.install_built("NGG_2", 23)  # the reference fits
         (self.library / f"NGG_2_hg38+{self.VCF}").mkdir()
         built_for_guide(self.library / f"NGG_2_hg38+{self.VCF}", 20)
@@ -3934,16 +4146,38 @@ class AnIndexBuiltForAnotherGuideInTheScript(_ShippedScript):
         folder = self.home / "Genomes" / f"hg38+{self.VCF}"
         folder.mkdir()
         (folder / "chr1.enriched.fa").write_text(">chr1\nACGT\n")
-        run = self.run_pipeline(**self.p23)
-        self.assertRegex(run.stderr, rf"^ERROR: NGG_2_hg38\+{self.VCF} was built for a 20-nt guide")
-        self.assertIn(f"move it and NGG_2_hg38+{self.VCF}_INDELS out of", run.stderr)
-        self.assertIsNone(run.searched(variant=True))
+        (self.home / "Genomes" / f"hg38+{self.VCF}_INDELS").mkdir()
+        run = self.run_pipeline(env={"STUB_BUILD_WRITES": "1"}, **self.p23)
+        self.assertNotIn("too few bases", run.stderr)
+        self.assertEqual(run.reference, "NGG_2_hg38")
+        self.assertEqual([c[1] for c in run.builds], [f"hg38+{self.VCF}"])
+        self.assertEqual(run.searched(variant=True), (f"23-NGG_2_hg38+{self.VCF}", False))
+        self.assertTrue((self.library / f"NGG_2_hg38+{self.VCF}" / "chr1.bin").exists())
+
+    def test_an_index_of_the_2_10_0_name_built_for_another_guide_stops_the_search(self):
+        # one named for a 23-nt guide whose trees were built for a 20-nt one (a rename by
+        # hand) is in the way of the index this search builds under that name: refused, with
+        # the name of what it is
+        self.install_built("NGG_2", 20)
+        (self.library / "NGG_2_hg38").rename(self.library / "23-NGG_2_hg38")
+        run = self.run_pipeline(variant=False, **self.p23)
+        self.assertEqual(run.stderr.splitlines()[0],
+                         "ERROR: 23-NGG_2_hg38 was built for a 20-nt guide, and this search has a "
+                         "23-nt guide with 1 DNA and 1 RNA bulge(s): it stores too few bases per "
+                         "site, so a search of it would report wrong alignments and lose "
+                         "off-targets. This search builds its index under that name: name it for "
+                         f"the guide it was built for (mv '{self.library}/23-NGG_2_hg38' "
+                         f"'{self.library}/20-NGG_2_hg38'), move it out of {self.library}, or run "
+                         "this search from another working directory")
+        self.assertEqual(run.builds, [])
+        self.assertIsNone(run.searched(variant=False))
+        self.assertTrue((self.library / "23-NGG_2_hg38" / "chr1.bin").exists())
 
     def test_another_budget_of_a_shorter_guide_is_passed_over_and_the_search_builds_its_own(self):
         self.install_built("NGG_3", 20)
         run = self.run_pipeline(variant=False, env={"STUB_BUILD_WRITES": "1"}, **self.p23)
         self.assertEqual([c[1] for c in run.builds], ["hg38"])
-        self.assertEqual(run.searched(variant=False), ("NGG_2_hg38", False))
+        self.assertEqual(run.searched(variant=False), ("23-NGG_2_hg38", False))
 
     def test_a_guide_the_index_serves_is_not_rebuilt_or_refused(self):
         self.install_built("NGG_3", 20)
@@ -4107,16 +4341,14 @@ class AFinishedRunRestoresOnlyRealAnnotations(unittest.TestCase):
 
 
 def _samplefile_blocks():
-    """The shipped blocks that handle the samplefile ($6), verbatim: the one that adds
-    its trailing newline as a run starts (from its comment to its fi), the loop that
-    reads the datasets it lists, and the one that strips the newline as a finished run
-    ends (from its comment to its fi)."""
+    """The shipped blocks that handle the samplefile ($6), verbatim: the one that copies it
+    into the output folder with its trailing newline as a run starts (from its comment to
+    its fi), and the loop that reads the datasets it lists. (Up to 2.8.1 the newline went
+    to $6 itself, and a third block stripped it as a finished run ended.)"""
     text = _SCRIPT.read_text()
     blocks = []
     for first, last in (("# $6 is the samplefile", "\nfi\n"),
-                        ("while read samples; do", "\ndone <$sampleID\n"),
-                        ("# Strip the trailing newline from the empirical/sample file",
-                         "\nfi\n")):
+                        ("while read samples; do", "\ndone <$sampleID\n")):
         start = text.index(first)
         blocks.append(text[start:text.index(last, start) + len(last)])
     return blocks
@@ -4171,28 +4403,28 @@ class TheSamplesPlaceholderIsNeverWritten(_ShippedScript):
                          run.stderr)
         self.assertEqual(self.vuoto.read_bytes(), b"")
 
-    def test_a_real_samplefile_still_gets_its_newline_and_loses_it_again(self):
-        # the newline that `while read` needs for the last line, stripped as a finished
-        # run ends; the placeholder is left as it is by both, even one an older run left
-        # a newline in
-        add, _, strip = _samplefile_blocks()
+    def test_a_real_samplefile_is_read_from_a_copy_with_its_newline(self):
+        # the newline that `while read` needs for the last line goes to a copy in the
+        # output folder, and the list itself is left as it is (RV4-1), as is the
+        # placeholder, even one an older run left a newline in
+        add, _ = _samplefile_blocks()
         samples = self.root / "samples.txt"
         samples.write_text(f"{self.VCF}.samplesID.txt")
         self.vuoto.write_bytes(b"\n")
-        for block, body in ((add, f"{self.VCF}.samplesID.txt\n"),
-                            (strip, f"{self.VCF}.samplesID.txt")):
-            for samplefile in (samples, self.vuoto):
-                out = self.run_blocks(samplefile, block)
-                self.assertEqual((out.returncode, out.stderr), (0, ""))
-            self.assertEqual(samples.read_text(), body)
-            self.assertEqual(self.vuoto.read_bytes(), b"\n")
+        for samplefile in (samples, self.vuoto):
+            out = self.run_blocks(samplefile, add)
+            self.assertEqual((out.returncode, out.stderr), (0, ""))
+        self.assertEqual(samples.read_text(), f"{self.VCF}.samplesID.txt")
+        self.assertEqual((self.root / "blocks" / ".samplesID_list_searched.txt").read_text(),
+                         f"{self.VCF}.samplesID.txt\n")
+        self.assertEqual(self.vuoto.read_bytes(), b"\n")
 
     def test_a_samples_list_of_ones_own_called_vuoto_txt_is_read_whole(self):
         # its one line has no newline, so `while read` reads it only with the one the
-        # script adds; a finished run leaves the list as it was, and the placeholder alone.
-        # Told apart by name, the list got no newline, its dataset was never read, and
-        # the run failed only at its end, on the samples its results name.
-        add, read, strip = _samplefile_blocks()
+        # script adds; the list is left as it was, and the placeholder alone. Told apart
+        # by name, the list got no newline, its dataset was never read, and the run
+        # failed only at its end, on the samples its results name.
+        add, read = _samplefile_blocks()
         rows = "S1\tPOP1\tSUP1\tF\nS2\tPOP1\tSUP1\tM\n"
         (self.home / "samplesIDs").mkdir()
         (self.home / "samplesIDs" / f"{self.VCF}.samplesID.txt").write_text(
@@ -4200,7 +4432,7 @@ class TheSamplesPlaceholderIsNeverWritten(_ShippedScript):
         mine = self.root / "lists" / "vuoto.txt"
         mine.parent.mkdir()
         mine.write_text(f"{self.VCF}.samplesID.txt")
-        out = self.run_blocks(mine, add, read, strip)
+        out = self.run_blocks(mine, add, read)
         self.assertEqual((out.returncode, out.stderr), (0, ""))
         read_in = self.root / "blocks" / ".sampleID.txt"
         self.assertEqual(read_in.read_text() if read_in.exists() else "", rows)

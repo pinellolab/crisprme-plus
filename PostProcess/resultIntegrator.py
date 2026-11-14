@@ -5,6 +5,8 @@ import operator
 from posixpath import expanduser
 from intervaltree import IntervalTree
 from utils import gene_region_class
+import bisect
+import indel_snp_cis as _isc
 import sys
 import time
 import glob
@@ -152,6 +154,52 @@ def createBedforMultiAlternative(variantList, samples):
         haplotype += int(allele1[count]) + int(allele2[count])
     # return to save the haplo freq divided by the number of alleles in 1000G (i.e. 2548samples*2alleles)
     return float(haplotype) / 5096
+
+
+def variant_info_spacer_pam(variants, strand, start, aligned_spacer, alt, ref):
+    """Variant_info_spacer+PAM of one block: each variant of ``variants`` (its
+    Variant_info_genome, chrom_POS_REF_ALT tokens, forward strand) numbered along the
+    target, written in the target's orientation.
+
+    A variant's number is the distance from the row's start to its POS base, the row's
+    first aligned base being 1: on the + strand from the left, POS - start; on the -
+    strand from the right, len(aligned spacer) + 1 - (POS - start), less for a deletion
+    the bases it deletes, its REF and ALT reverse-complemented. A variant before the
+    start (an insertion whose added bases the target starts on) is 1 on the + strand,
+    the last on the - strand.
+
+    On an indel row the distance is counted along the haplotype carrying the indel, which
+    holds the bases an insertion adds and not those a deletion removes
+    (indel_snp_cis.variant_places): from the target's first base there, which on a row
+    starting on an added base is past the row's start, the insertion's anchor, to each
+    variant's base there, which past the indel is len(ALT) - len(REF) on. Up to 2.8.1 it
+    was counted along the reference."""
+    if str(variants) == "NA":
+        return ["NA"]
+    toks = []
+    for elem in str(variants).strip().split(","):
+        split = elem.strip().rsplit("_", 3)
+        toks.append((int(split[1]), split[2], split[3]))
+    first, places = _isc.variant_places(strand, int(start), alt, ref, toks)
+    out = []
+    for (_pos, vref, valt), place in zip(toks, places):
+        if "+" in str(strand):
+            var_pos = place - first
+            if var_pos < 1:
+                var_pos = 1
+            out.append(str(var_pos) + vref + ">" + valt)
+            continue
+        correction = len(vref) - len(valt) if len(valt) < len(vref) else 0
+        var_pos = place - first
+        if var_pos < 1:
+            var_pos = len(aligned_spacer)
+        else:
+            # counted from the end of the sequence, which is reverse-complemented
+            var_pos = abs(place - first - 1 - len(aligned_spacer) + correction)
+        out.append(str(var_pos)
+                   + "".join(reversed([rev_comp(b) for b in vref])) + ">"
+                   + "".join(reversed([rev_comp(b) for b in valt])))
+    return out
 
 
 print("READING INPUT FILES")
@@ -323,13 +371,27 @@ for count, line in enumerate(inEmpiricalResults):
 
 # High-variant-density regions (#144): load every
 # <out>.high_variant_density_regions.bed the search produced, so each off-target row
-# can be flagged when it lands in a dense window. In such a window the greedy
-# worst-case alignment is what gets reported and ADDITIONAL haplotype alignments may
-# exist -- the bed carries the region span, variant count, carriers and the FULL IUPAC
-# protospacer, surfaced verbatim so an interested user can dig into the other alignments.
+# can be flagged when it lands in a dense window. In a population-level search such a
+# window is reported by its greedy worst-case alignment and ADDITIONAL haplotype
+# alignments may exist; under --per-sample a genotyped dataset's dense window is the
+# haplotypes its carriers have, as any window (new_simple_analysis.py; since 2.10.0 on the
+# classic dictionaries too), and a row that names no carrier, a sites-only dataset's, is
+# still the population-level analysis's -- the bed carries the region span, variant count,
+# carriers and the FULL IUPAC protospacer, surfaced verbatim so an interested user can dig
+# into the other alignments, and (2.10.0) the window's bits: log2 of the sequences it spells,
+# and whether a greedy worst-case alignment stands for it (greedy 0: its rows are its
+# carriers' own haplotypes, as a per-sample search reports any window).
 hvdr_by_chrom = {}
+# 2.10.0: the regions of windows the sites-only density guard withheld from a sites-only
+# dataset's indel post-analysis (greedy "withheld-region", sites_only_guard.py): a row is
+# noted by one only where no window of the list covers it (a region, wider than its windows,
+# would otherwise come first and stand for the row's own window)
+hvdr_region_by_chrom = {}
+_hvdr_folder = os.path.dirname(outFile_name) or "."
+# the search's mode, as new_simple_analysis.py reads it (CRISPRME_FAST_MODE: "1" =
+# population-level, "0" or unset = per-sample)
+_PER_SAMPLE = not int(os.environ.get("CRISPRME_FAST_MODE", "0") or "0")
 try:
-    _hvdr_folder = os.path.dirname(outFile_name) or "."
     for _bed in glob.glob(
         os.path.join(_hvdr_folder, "*high_variant_density_regions.bed")
     ):
@@ -342,29 +404,103 @@ try:
             _chrom, _s, _e = _f[0], int(_f[1]), int(_f[2])
             _nvar = _f[4]
             _iupac = _f[6] if len(_f) > 6 else ""
-            hvdr_by_chrom.setdefault(_chrom, IntervalTree())[_s - 1 : _e + 1] = (
+            _bits = _f[7] if len(_f) > 7 else ""
+            # a BED of 2.8.1 has no such column: its note said so of every window
+            _greedy = _f[9] != "0" if len(_f) > 9 else True
+            # 2.10.0: "withheld", a window the sites-only density guard took out of a
+            # sites-only dataset's post-analysis (sites_only_guard.py): no row of it;
+            # "withheld-region", a region of such windows of its indel post-analysis
+            _flag = _f[9] if len(_f) > 9 else ""
+            _withheld = _flag in ("withheld", "withheld-region")
+            (hvdr_region_by_chrom if _flag == "withheld-region" else hvdr_by_chrom).setdefault(
+                _chrom, IntervalTree())[_s - 1 : _e + 1] = (
                 _nvar,
                 _iupac,
+                _bits,
+                _greedy,
+                _withheld,
             )
 except Exception as _hvdr_err:  # never break integration on a bad/missing bed
     print("high-variant-density BED join skipped:", _hvdr_err)
 
+# Four-allele positions (2.10.0): <out>.four_allele_positions.bed, 0-based, lists each
+# position of the windows the search reported where the variant genome writes Q (the
+# reference base and three ALTs cover A, C, G and T). A row whose window holds one is
+# flagged in the same column as a dense window.
+four_allele_by_chrom = {}
+try:
+    for _bed in glob.glob(os.path.join(_hvdr_folder, "*four_allele_positions.bed")):
+        for _ln in open(_bed):
+            if _ln.startswith("#") or not _ln.strip():
+                continue
+            _f = _ln.rstrip("\n").split("\t")
+            four_allele_by_chrom.setdefault(_f[0], set()).add(int(_f[1]))
+    four_allele_by_chrom = {c: sorted(p) for c, p in four_allele_by_chrom.items()}
+except Exception as _fa_err:  # never break integration on a bad/missing bed
+    four_allele_by_chrom = {}
+    print("four-allele positions BED join skipped:", _fa_err)
 
-def _hvdr_note(chrom, pos):
+
+def _hvdr_note(chrom, pos, greedy=True):
+    # ``greedy``: the row is its window's greedy worst-case alignment (a population-level
+    # one, or a sites-only dataset's); False for a per-sample row, one of the haplotypes
+    # the window's carriers have. The window's BED line says whether one stands for it
+    # (its greedy column; a BED of 2.8.1 has none, and its note said so of every window):
+    # either makes the note say so.
     tree = hvdr_by_chrom.get(chrom)
-    if not tree:
-        return "NA"
-    hits = tree[pos]
+    hits = tree[pos] if tree else set()
+    region = False
+    if not hits:
+        tree = hvdr_region_by_chrom.get(chrom)
+        hits = tree[pos] if tree else set()
+        region = True
     if not hits:
         return "NA"
-    nvar, iupac = sorted(hits)[0].data
-    note = (
-        "high_variant_density (%s variants): a greedy worst-case alignment is "
-        "reported here; additional haplotype alignments may exist" % nvar
+    nvar, iupac, bits, window_greedy, withheld = sorted(hits)[0].data
+    note = "high_variant_density (%s variants%s)" % (
+        nvar, ", 2^%s sequences" % bits if bits else ""
     )
+    if withheld and region:
+        # a region whose windows the guard withheld from a sites-only dataset's indel
+        # post-analysis (its densest window's variants, sequences and letters)
+        note += (
+            ": the sites-only density guard withheld a sites-only dataset's indel "
+            "alignments in this region; other haplotype alignments may exist"
+        )
+    elif withheld:
+        # the sites-only density guard withheld the window's candidates of a sites-only
+        # dataset (the mega) from its post-analysis: none of its alignments is a row
+        note += (
+            ": the sites-only density guard withheld a sites-only dataset's alignments "
+            "of this window; other haplotype alignments may exist"
+        )
+    elif greedy or window_greedy:
+        note += (
+            ": a greedy worst-case alignment is reported here; additional haplotype "
+            "alignments may exist"
+        )
+    else:
+        note += ": the haplotypes its carriers have are reported here"
     if iupac:
         note += "; full_IUPAC=%s" % iupac
     return note
+
+
+def _four_allele_note(chrom, start, aligned):
+    """The four-allele positions (1-based) in the window of a row starting at ``start``
+    (0-based) whose aligned target is ``aligned``, as "four_allele_positions=chr:pos,...";
+    "" when it holds none."""
+    positions = four_allele_by_chrom.get(chrom)
+    if not positions:
+        return ""
+    end = start + len(aligned.replace("-", ""))
+    first = bisect.bisect_left(positions, start)
+    last = bisect.bisect_left(positions, end)
+    if first == last:
+        return ""
+    return "four_allele_positions=" + ",".join(
+        "%s:%d" % (chrom, p + 1) for p in positions[first:last]
+    )
 
 
 # writing header in file
@@ -456,135 +592,14 @@ for nline, line in enumerate(inCrispritzResults):
         if _annot_dist_val != 0:
             saveDict["Annotation_GENCODE"] = "intergenic"
 
-    variantList = ["NA"]
-    if str(target[18]) != "NA":  # check if target has variants reported (CFD)
-        variantList = str(target[18]).strip().split(",")
-        # generate variant nucleotide reverse complemented always in positive strand
-        for count, elem in enumerate(variantList):
-            split = str(elem).strip().split("_")
-            split_one_len = len(split[2])
-            split_second_len = len(split[3])
-            correction = 0
-            if "+" in str(target[7]):  # strand
-                # var pos is equal to pos_of_variant-real_position
-                var_pos = int(split[1]) - int(target[5])  # real_position
-                if var_pos < 1:
-                    var_pos = 1
-                variantList[count] = str(var_pos) + str(split[2]) + ">" + str(split[3])
-            else:
-                firstcomp = ""
-                secondcomp = ""
-                var_pos = int(split[1]) - int(target[5])
-                if var_pos < 1:
-                    var_pos = len(target[1])
-                else:
-                    # if var pos non negative, count the position in reverse strand so starting from end of the sequence that is been reversed complemented
-                    if split_second_len < split_one_len:
-                        correction = split_one_len - split_second_len
-                    var_pos = abs(
-                        int(split[1]) - int(target[5]) - 1 - len(target[1]) + correction
-                    )
-                for piece in str(split[2]):
-                    firstcomp += rev_comp(piece)
-                for piece in str(split[3]):
-                    secondcomp += rev_comp(piece)
-                variantList[count] = (
-                    str(var_pos)
-                    + "".join(reversed(firstcomp))
-                    + ">"
-                    + "".join(reversed(secondcomp))
-                )
-    variantList_highest_cfd = variantList
-
-    variantList = ["NA"]
-    if str(target[42]) != "NA":  # check if target has variants reported (MMBUL)
-        variantList = str(target[42]).strip().split(",")
-        var_pos = []
-        # generate variant position corrected to be in the positive strand
-        for count, elem in enumerate(variantList):
-            split = str(elem).strip().split("_")
-            split_one_len = len(split[2])
-            split_second_len = len(split[3])
-            correction = 0
-            if "+" in str(target[31]):
-                # var pos is equal to pos_of_variant-real_position
-                var_pos = int(split[1]) - int(target[29])
-                if var_pos < 1:
-                    var_pos = 1
-                variantList[count] = str(var_pos) + str(split[2]) + ">" + str(split[3])
-            else:
-                firstcomp = ""
-                secondcomp = ""
-                var_pos = int(split[1]) - int(target[29])
-                if var_pos < 1:
-                    var_pos = len(target[25])  # aligned_sgRNA
-                else:
-                    # if var pos non negative, count the position in reverse strand so starting from end of the sequence that is been reversed complemented
-                    if split_second_len < split_one_len:
-                        correction = split_one_len - split_second_len
-                    var_pos = abs(
-                        int(split[1])
-                        - int(target[29])
-                        - 1
-                        - len(target[25])
-                        + correction
-                    )
-                for piece in str(split[2]):
-                    firstcomp += rev_comp(piece)
-                for piece in str(split[3]):
-                    secondcomp += rev_comp(piece)
-                variantList[count] = (
-                    str(var_pos)
-                    + "".join(reversed(firstcomp))
-                    + ">"
-                    + "".join(reversed(secondcomp))
-                )
-    variantList_fewest_mm_b = variantList
-
-    variantList = ["NA"]
-    if str(target[66]) != "NA":  # check if target has variants reported (CRISPR-Bulge)
-        variantList = str(target[66]).strip().split(",")
-        var_pos = []
-        # generate variant position corrected to be in the positive strand
-        for count, elem in enumerate(variantList):
-            split = str(elem).strip().split("_")
-            split_one_len = len(split[2])
-            split_second_len = len(split[3])
-            correction = 0
-            if "+" in str(target[55]):
-                # var pos is equal to pos_of_variant-real_position
-                var_pos = int(split[1]) - int(target[53])
-                if var_pos < 1:
-                    var_pos = 1
-                variantList[count] = str(var_pos) + str(split[2]) + ">" + str(split[3])
-            else:
-                firstcomp = ""
-                secondcomp = ""
-                var_pos = int(split[1]) - int(target[53])
-                if var_pos < 1:
-                    var_pos = len(target[49])  # aligned_sgRNA
-                else:
-                    # if var pos non negative, count the position in reverse strand so starting from end of the sequence that is been reversed complemented
-                    if split_second_len < split_one_len:
-                        correction = split_one_len - split_second_len
-                    var_pos = abs(
-                        int(split[1])
-                        - int(target[53])
-                        - 1
-                        - len(target[49])
-                        + correction
-                    )
-                for piece in str(split[2]):
-                    firstcomp += rev_comp(piece)
-                for piece in str(split[3]):
-                    secondcomp += rev_comp(piece)
-                variantList[count] = (
-                    str(var_pos)
-                    + "".join(reversed(firstcomp))
-                    + ">"
-                    + "".join(reversed(secondcomp))
-                )
-    variantList_highest_crispr_bulge = variantList
+    # each block's Variant_info_spacer+PAM, numbered along its target: on an indel row,
+    # along the haplotype carrying the indel (variant_info_spacer_pam)
+    variantList_highest_cfd = variant_info_spacer_pam(
+        target[18], target[7], target[5], target[1], target[2], target[3])
+    variantList_fewest_mm_b = variant_info_spacer_pam(
+        target[42], target[31], target[29], target[25], target[26], target[27])
+    variantList_highest_crispr_bulge = variant_info_spacer_pam(
+        target[66], target[55], target[53], target[49], target[50], target[51])
 
     saveDict["Spacer+PAM"] = str(target[15])
     saveDict["Strand_(highest_CFD)"] = str(target[7])
@@ -1170,13 +1185,26 @@ for nline, line in enumerate(inCrispritzResults):
             saveDict["Susceptible_to_TBE"] = "y"
 
     # #144: flag this off-target if it lands in a high-variant-density window
-    # (chrom=target[4], highest-CFD start=target[5]); "NA" otherwise.
+    # (chrom=target[4], highest-CFD start=target[5]); "NA" otherwise. A per-sample row
+    # names its carriers (target[13]; "NA" for a reference row), but a sites-only
+    # dataset's, which names none. And (2.10.0) if its window (the highest-CFD alignment's,
+    # target[2]) holds a four-allele position.
     try:
         saveDict["High_variant_density_region"] = _hvdr_note(
-            str(target[4]), int(target[5])
+            str(target[4]), int(target[5]),
+            greedy=not _PER_SAMPLE or not str(target[13]).strip()
         )
     except (ValueError, IndexError):
         saveDict["High_variant_density_region"] = "NA"
+    try:
+        _fa_note = _four_allele_note(str(target[4]), int(target[5]), str(target[2]))
+    except (ValueError, IndexError):
+        _fa_note = ""
+    if _fa_note:
+        saveDict["High_variant_density_region"] = (
+            _fa_note if saveDict["High_variant_density_region"] == "NA"
+            else saveDict["High_variant_density_region"] + "; " + _fa_note
+        )
 
     # derive the single-class gene region from the finalized GENCODE feature-set +
     # protein-coding gene distance (shared helper => identical to the report/web).

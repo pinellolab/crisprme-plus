@@ -216,7 +216,10 @@ def _load_ensure_samplesid(workdir):
     src = open(page).read()
     node = next(n for n in ast.parse(src).body
                 if isinstance(n, ast.FunctionDef) and n.name == "_ensure_samplesid")
-    ns = {"os": os, "threading": threading, "current_working_directory": workdir}
+    import safe_files  # (PostProcess/: how the page reads the lists and writes the union)
+
+    ns = {"os": os, "threading": threading, "current_working_directory": workdir,
+          "safe_files": safe_files}
     exec(ast.get_source_segment(src, node), ns)  # noqa: S102 - trusted own source
     return ns["_ensure_samplesid"]
 
@@ -245,8 +248,14 @@ class TestSamplesIDWrittenWholeOrNotAtAll(unittest.TestCase):
 
     def full_disk(self):
         """Every file opened for writing in samplesIDs/, and every copy into it,
-        takes half of its data, then fails as on a full disk."""
+        takes half of its data, then fails as on a full disk (the web page writes its
+        files through safe_files.replace: so does it)."""
+        import contextlib
+
+        import safe_files
+
         real_open, real_copy, sdir = open, shutil.copy2, self.sdir
+        real_replace = safe_files.replace
 
         def fake_open(path, mode="r", *args, **kwargs):
             fh = real_open(path, mode, *args, **kwargs)
@@ -257,7 +266,24 @@ class TestSamplesIDWrittenWholeOrNotAtAll(unittest.TestCase):
             with real_open(src) as fh, real_open(dst, "w") as out:
                 _FullDisk(out).write(fh.read())
 
-        return mock.patch("builtins.open", fake_open), mock.patch("shutil.copy2", fake_copy)
+        @contextlib.contextmanager
+        def fake_replace(path, root, mode="w", **kwargs):
+            with real_replace(path, root, mode, **kwargs) as fh:
+                inside = os.path.dirname(os.path.abspath(str(path))) == sdir
+                yield _FullDisk(fh) if inside else fh
+
+        class _Both:  # (the two patches as one context manager)
+            def __enter__(self):
+                self.a = mock.patch("builtins.open", fake_open)
+                self.b = mock.patch.object(safe_files, "replace", fake_replace)
+                self.a.start()
+                self.b.start()
+
+            def __exit__(self, *exc):
+                self.b.stop()
+                self.a.stop()
+
+        return _Both(), mock.patch("shutil.copy2", fake_copy)
 
     def written(self):
         """What samplesIDs/ holds: {name: text}, hidden files too."""

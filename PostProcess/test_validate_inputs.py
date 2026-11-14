@@ -14,9 +14,12 @@ paths / already-parsed data, so each check gets its own ``TestCase`` with a
 "clean" case and the specific failure mode(s) it exists to catch (see
 ``validate_inputs_plan.md`` at the repo root for the rationale behind each
 check). Fixtures are built on the fly under ``tempfile.TemporaryDirectory()``
-so the suite is fully self-contained and leaves nothing behind.
+so the suite is fully self-contained and leaves nothing behind. The last class
+checks what ``gnomAD-converter --multiallelic`` says of the lines it writes, the other
+text that tells a user what CRISPRme makes of a VCF line listing several ALTs.
 """
 
+import ast
 import contextlib
 import gzip
 import io
@@ -25,6 +28,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1011,6 +1015,48 @@ class TestRunLightweightEndToEnd(unittest.TestCase):
             self.assertFalse(report.has_errors(), report.render())
             self.assertIn("dictless registry", report.render())
 
+    def test_a_line_of_several_alts_warns_without_the_full_scan(self):
+        # It warned only in --full_input_validate, only at 10 ALTs or more. Each VCF's
+        # first records are read on every run now.
+        with tempfile.TemporaryDirectory() as tmp:
+            genomedir, vcf_dirs, guidefile, pamfile = self._build_clean_fixture(tmp)
+            make_vcf_gz(os.path.join(vcf_dirs[0], "chr1.vcf.gz"),
+                        [vcf_record(pos=100), vcf_record(pos=150, alt="C,G", info="AF=0.1,0.2"),
+                         vcf_record(pos=170, alt="T")])
+            report = vi.run_lightweight(genomedir, vcf_dirs, guidefile, pamfile)
+            self.assertFalse(report.has_errors(), report.render())
+            self.assertIn("chr1.vcf.gz: 1 of its first 3 records list several ALTs on one "
+                          "line (e.g. chr1:150 A>C,G)", report.render())
+
+    def test_the_bounded_scan_stops_at_its_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "chr1.vcf.gz")
+            make_vcf_gz(path, [vcf_record(pos=100 + i) for i in range(5)]
+                        + [vcf_record(pos=200, alt="C,G", info="AF=0.1,0.2")])
+            self.assertEqual(vi.check_vcf_multi_alt(path, max_records=5), [])
+            self.assertEqual(len(vi.check_vcf_multi_alt(path, max_records=6)), 1)
+
+    def test_two_lines_of_several_alts_at_one_position_warn_without_the_full_scan(self):
+        """C-R1-4: two lines that each list several ALTs at one position (CRISPRme's readers
+        cannot tell their allele numbers apart: METHODS section 4) were warned of by the
+        opt-in full scan alone; the bounded scan of every run warns of those among the first
+        records too, with the positions. Two lines of several indels, or a line of several
+        ALTs whose FILTER the enricher skips, are no such position."""
+        with tempfile.TemporaryDirectory() as tmp:
+            genomedir, vcf_dirs, guidefile, pamfile = self._build_clean_fixture(tmp)
+            make_vcf_gz(os.path.join(vcf_dirs[0], "chr1.vcf.gz"),
+                        [vcf_record(pos=100, alt="C,T", info="AF=0.1,0.2"),
+                         vcf_record(pos=100, alt="G,AT", info="AF=0.1,0.2"),
+                         vcf_record(pos=200, alt="AT,AC", info="AF=0.1,0.2"),
+                         vcf_record(pos=200, alt="AG,ACC", info="AF=0.1,0.2"),
+                         vcf_record(pos=300, alt="C,T", info="AF=0.1,0.2"),
+                         vcf_record(pos=300, alt="G,T", info="AF=0.1,0.2", filt="LowQual")])
+            report = vi.run_lightweight(genomedir, vcf_dirs, guidefile, pamfile)
+            self.assertFalse(report.has_errors(), report.render())
+            self.assertIn("chr1.vcf.gz: 1 position(s) among its first 6 records hold two or "
+                          "more lines that each list several ALTs (e.g. chr1:100)",
+                          report.render())
+
 
 # ===========================================================================
 # _normalize_chrom
@@ -1051,6 +1097,12 @@ class TestCheckVcfFullScan(unittest.TestCase):
         path = os.path.join(tmp, "chr1.vcf.gz")
         make_vcf_gz(path, records, header=header)
         return vi.check_vcf_full_scan(path, expected_chrom, chrom_length)
+
+    @staticmethod
+    def _other_than_multi_alt(issues):
+        """The issues but the WARN every line listing several ALTs gets, for the tests
+        of another check on such a line."""
+        return [i for i in issues if "several ALTs on one line" not in i.message]
 
     def test_empty_vcf_header_only_passes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1100,6 +1152,13 @@ class TestCheckVcfFullScan(unittest.TestCase):
             self.assertEqual(len(issues), 1)
             self.assertEqual(issues[0].severity, vi.WARN)
             self.assertIn("AF field position varies", issues[0].message)
+            # (a limit of the CRISPRitz up to 2.9.1, which 2.10.0, the one this CRISPRme
+            # installs, does not have: it said a later record "now safely reads as a blank AF")
+            self.assertIn("CRISPRitz 2.9.1 and earlier read every record's AF at the first "
+                          "record's position", issues[0].message)
+            self.assertIn("CRISPRitz 2.10.0, which this CRISPRme installs, finds each record's "
+                          "AF by its key", issues[0].message)
+            self.assertNotIn("blank AF", issues[0].message)
 
     def test_zero_pass_rate_errors(self):
         # unlike the partial <10% case below, 0% is a total, guaranteed
@@ -1160,7 +1219,42 @@ class TestCheckVcfFullScan(unittest.TestCase):
             issues = self._scan(tmp, records, chrom_length=1000)
             self.assertEqual(issues, [])
 
-    def test_high_allele_count_multiallelic_warns(self):
+    def test_a_line_of_two_alts_warns_with_what_crisprme_does(self):
+        # It warned only at 10 ALTs or more, of a substring match of allele indexes
+        # CRISPRitz 2.9.1 no longer makes; now every line of two or more ALTs, with what
+        # CRISPRme does with its genotypes.
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [vcf_record(pos=1000, ref="A", alt="C,G", info="AF=0.1,0.05",
+                                 samples=("1|2",)),
+                       vcf_record(pos=2000, ref="A", alt="T", samples=("0|1",))]
+            issues = self._scan(tmp, records)
+            self.assertEqual(len(issues), 1)
+            self.assertEqual(issues[0].severity, vi.WARN)
+            self.assertIn("1 record(s) list several ALTs on one line (e.g. chr1:1000 A>C,G)",
+                          issues[0].message)
+            self.assertIn("read against each ALT's own allele index", issues[0].message)
+            self.assertIn("PUTATIVE", issues[0].message)
+
+    def test_a_line_of_several_alts_warns_of_its_ids(self):
+        # CRISPRitz add-variants writes a line's first ID for each of its ALTs (in the
+        # dictionary and the indel log): the rows of rs2's ALT name rs1. The warning
+        # said nothing of it. Split, each ALT's record holds the whole ID column, which
+        # a SNP's rows give whole and an indel's by its first ID alone (the indel log
+        # holds no other, of any indel record): the warning implied that splitting
+        # gives every ALT its line's IDs.
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [vcf_record(pos=1000, vid="rs1;rs2", ref="A", alt="C,G",
+                                  info="AF=0.1,0.05", samples=("1|2",))]
+            issues = self._scan(tmp, records)
+            self.assertEqual(len(issues), 1)
+            self.assertIn("Each ALT of such a line is given the line's first ID",
+                          issues[0].message)
+            self.assertIn("the rows of the second ALT name the first's (rs1)",
+                          issues[0].message)
+            self.assertIn("a SNP's rows give it whole (rs1;rs2), an indel's its first ID "
+                          "(rs1), as for every indel record", issues[0].message)
+
+    def test_a_line_of_ten_alts_warns_once(self):
         with tempfile.TemporaryDirectory() as tmp:
             alleles = ["C", "G", "T", "C", "G", "T", "C", "G", "T", "C"]  # 10 alleles
             alt = ",".join(alleles)
@@ -1168,17 +1262,7 @@ class TestCheckVcfFullScan(unittest.TestCase):
             records = [vcf_record(pos=1000, ref="A", alt=alt, info=f"AF={af}")]
             issues = self._scan(tmp, records)
             self.assertEqual(len(issues), 1)
-            self.assertEqual(issues[0].severity, vi.WARN)
-            self.assertIn(">=10 ALT alleles", issues[0].message)
-
-    def test_below_threshold_allele_count_no_warning(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            alleles = ["C", "G", "T", "C", "G", "T", "C", "G", "T"]  # 9 alleles
-            alt = ",".join(alleles)
-            af = ",".join(["0.01"] * len(alleles))  # enough AF values to isolate this check
-            records = [vcf_record(pos=1000, ref="A", alt=alt, info=f"AF={af}")]
-            issues = self._scan(tmp, records)
-            self.assertEqual(issues, [])
+            self.assertIn("1 record(s) list several ALTs on one line", issues[0].message)
 
     def test_af_index_overflow_warns(self):
         # 2 single-char SNP ALT alleles (positions 1, 2) but only 1 AF value.
@@ -1187,7 +1271,7 @@ class TestCheckVcfFullScan(unittest.TestCase):
         # -- WARN, not ERROR.
         with tempfile.TemporaryDirectory() as tmp:
             records = [vcf_record(pos=1000, ref="A", alt="C,G", info="AF=0.1")]
-            issues = self._scan(tmp, records)
+            issues = self._other_than_multi_alt(self._scan(tmp, records))
             self.assertEqual(len(issues), 1)
             self.assertEqual(issues[0].severity, vi.WARN)
             self.assertIn("fewer comma-separated AF values", issues[0].message)
@@ -1195,7 +1279,7 @@ class TestCheckVcfFullScan(unittest.TestCase):
     def test_af_index_sufficient_values_passes(self):
         with tempfile.TemporaryDirectory() as tmp:
             records = [vcf_record(pos=1000, ref="A", alt="C,G", info="AF=0.1,0.05")]
-            issues = self._scan(tmp, records)
+            issues = self._other_than_multi_alt(self._scan(tmp, records))
             self.assertEqual(issues, [])
 
     def test_af_index_indel_overflow_warns(self):
@@ -1204,7 +1288,7 @@ class TestCheckVcfFullScan(unittest.TestCase):
         # from REF), positions 1 and 2, but only 1 AF value is present.
         with tempfile.TemporaryDirectory() as tmp:
             records = [vcf_record(pos=1000, ref="AT", alt="A,ATTT", info="AF=0.1")]
-            issues = self._scan(tmp, records)
+            issues = self._other_than_multi_alt(self._scan(tmp, records))
             self.assertEqual(len(issues), 1)
             self.assertEqual(issues[0].severity, vi.WARN)
             self.assertIn("multiallelic indel site(s)", issues[0].message)
@@ -1212,7 +1296,7 @@ class TestCheckVcfFullScan(unittest.TestCase):
     def test_af_index_indel_sufficient_values_passes(self):
         with tempfile.TemporaryDirectory() as tmp:
             records = [vcf_record(pos=1000, ref="AT", alt="A,ATTT", info="AF=0.1,0.05")]
-            issues = self._scan(tmp, records)
+            issues = self._other_than_multi_alt(self._scan(tmp, records))
             self.assertEqual(issues, [])
 
     def test_af_index_equal_length_multichar_counts_as_indel(self):
@@ -1222,7 +1306,7 @@ class TestCheckVcfFullScan(unittest.TestCase):
         # the length-mismatch case above.
         with tempfile.TemporaryDirectory() as tmp:
             records = [vcf_record(pos=1000, ref="AT", alt="GC,ATTT", info="AF=0.1")]
-            issues = self._scan(tmp, records)
+            issues = self._other_than_multi_alt(self._scan(tmp, records))
             self.assertEqual(len(issues), 1)
             self.assertEqual(issues[0].severity, vi.WARN)
             self.assertIn("multiallelic indel site(s)", issues[0].message)
@@ -1240,7 +1324,7 @@ class TestCheckVcfFullScan(unittest.TestCase):
         # check would have silently missed it.
         with tempfile.TemporaryDirectory() as tmp:
             records = [vcf_record(pos=1000, ref="A", alt="C,ATCG", info="AF=0.1")]
-            issues = self._scan(tmp, records)
+            issues = self._other_than_multi_alt(self._scan(tmp, records))
             self.assertEqual(len(issues), 1)
             self.assertEqual(issues[0].severity, vi.WARN)
             self.assertIn("multiallelic indel site(s)", issues[0].message)
@@ -1280,16 +1364,144 @@ class TestCheckVcfFullScan(unittest.TestCase):
             self.assertIn("symbolic ALT notation", issues[0].message)
             self.assertIn("never searched", issues[0].message)
 
-    def test_duplicate_chr_pos_warns(self):
+    def test_split_records_of_one_site_do_not_warn(self):
+        # It said a second record at a CHR+POS was dropped. CRISPRitz 2.10.0 codes and
+        # lists every ALT of a split site (bcftools norm -m -any, the published panels'
+        # form), each its own allele.
         with tempfile.TemporaryDirectory() as tmp:
             records = [
                 vcf_record(pos=100, ref="A", alt="T"),
                 vcf_record(pos=100, ref="A", alt="C"),
             ]
             issues = self._scan(tmp, records)
+            self.assertEqual(issues, [])
+
+    def test_two_records_of_one_ref_alt_warn_that_their_carriers_are_merged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [
+                vcf_record(pos=100, ref="A", alt="T", samples=("1|0",)),
+                vcf_record(pos=100, ref="A", alt="AT", samples=("0|1",)),
+                vcf_record(pos=100, ref="A", alt="T", samples=("0|1",)),
+                vcf_record(pos=200, ref="A", alt="C", samples=("0|1",)),
+            ]
+            issues = self._scan(tmp, records)
             self.assertEqual(len(issues), 1)
             self.assertEqual(issues[0].severity, vi.WARN)
-            self.assertIn("duplicate CHR+POS", issues[0].message)
+            self.assertIn("1 record(s) repeat the REF>ALT of an earlier record at their "
+                          "position (e.g. chr1:100 A>T; 1 position(s) hold more than one "
+                          "record)", issues[0].message)
+            self.assertIn("one allele, their carriers merged", issues[0].message)
+
+    def test_an_indel_written_in_two_cases_is_one_ref_alt(self):
+        """C-R1-1: VCF 4.x reads REF and ALT whatever their case, and CRISPRme reads an
+        indel's or MNV's so (HPRC chr22 writes 140 indels on two lines in two cases, TG>T
+        beside tg>t): the survey counts such lines as one REF>ALT, as it counts two lines
+        written alike. It compared them as written and counted none. (An SNV's REF is read
+        in upper case too, its ALT as written: the next test.)"""
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [
+                vcf_record(pos=100, ref="TG", alt="T", samples=("1|0",)),
+                vcf_record(pos=100, ref="tg", alt="t", samples=("0|1",)),
+                vcf_record(pos=200, ref="AC", alt="GT", samples=("1|0",)),
+                vcf_record(pos=200, ref="Ac", alt="gT", samples=("0|1",)),
+            ]
+            issues = self._scan(tmp, records)
+            self.assertEqual(len(issues), 1, issues)
+            self.assertIn("2 record(s) repeat the REF>ALT of an earlier record at their "
+                          "position (e.g. chr1:100 TG>T, chr1:200 AC>GT; 2 position(s) hold "
+                          "more than one record)", issues[0].message)
+            self.assertIn("tg>t beside TG>T is one allele", issues[0].message)
+
+    def test_an_snv_whose_ref_is_written_in_two_cases_is_one_ref_alt(self):
+        """C-R2-2: two lines C>G and c>G are one allele (the input validator compared an
+        SNV as written and counted none); since CRISPRitz 2.10.0 reads REF and ALT in upper
+        case, as VCF 4.x does, so is A>T beside A>t, which it counted as another REF>ALT
+        (an ALT in lower case was not coded, and warned apart)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [
+                vcf_record(pos=100, ref="C", alt="G", samples=("1|0",)),
+                vcf_record(pos=100, ref="c", alt="G", samples=("0|1",)),
+                vcf_record(pos=200, ref="A", alt="T", samples=("1|0",)),
+                vcf_record(pos=200, ref="A", alt="t", samples=("0|1",)),
+            ]
+            issues = self._other_than_multi_alt(self._scan(tmp, records))
+            self.assertEqual(len(issues), 1, issues)
+            self.assertIn("2 record(s) repeat the REF>ALT of an earlier record at their "
+                          "position (e.g. chr1:100 C>G, chr1:200 A>T; 2 position(s) hold "
+                          "more than one record)", issues[0].message)
+            self.assertIn("and so is c>g beside C>G", issues[0].message)
+
+    def test_an_snv_whose_alt_is_in_lower_case_is_read_as_its_upper_case(self):
+        """The sweep of C-R1-1 warned that CRISPRitz codes no lower-case ALT (so an SNV
+        written so was never searched, though its dictionary listed the carriers). CRISPRitz
+        2.10.0 reads REF and every ALT in upper case, as VCF 4.x does (its
+        docs/MULTIALLELIC_ENRICHMENT.md sections 2.1 and 2.9): such an SNV is coded and
+        searched, and the warning, which was no longer true, is gone. Nothing else is said
+        of these records."""
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [
+                vcf_record(pos=100, ref="C", alt="t", samples=("1|0",)),
+                vcf_record(pos=200, ref="c", alt="T", samples=("1|0",)),
+                vcf_record(pos=300, ref="A", alt="G,c", info="AF=0.1,0.2", samples=("1|2",)),
+                vcf_record(pos=400, ref="A", alt="g", filt="LowQual", samples=("1|0",)),
+                vcf_record(pos=500, ref="g", alt="a", samples=("0|1",)),
+            ]
+            issues = self._other_than_multi_alt(self._scan(tmp, records))
+            self.assertEqual(issues, [])
+            self.assertFalse(any("lower case" in i.message
+                                 for i in self._scan(tmp, records)), issues)
+
+    def test_a_ref_alt_is_keyed_whatever_its_case(self):
+        """CRISPRitz 2.10.0 reads REF and every ALT in upper case: an SNV written C>G on one
+        line and c>g on another is one allele (one dictionary entry, the carriers merged),
+        as an indel written TG>T and tg>t is, and as an ALT of a line listing several is
+        (A>G,c beside A>C): the survey of repeated REF>ALTs counts each such line, naming
+        the allele in upper case. An ALT holding '<' (a symbolic allele) is an ID, read as
+        written: <DEL> beside <del> is no repeat. Keyed with the SNV's ALT as written, the
+        survey counted only the indel."""
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [
+                vcf_record(pos=100, ref="C", alt="G", samples=("1|0",)),
+                vcf_record(pos=100, ref="c", alt="g", samples=("0|1",)),
+                vcf_record(pos=200, ref="A", alt="C", samples=("1|0",)),
+                vcf_record(pos=200, ref="A", alt="G,c", info="AF=0.1,0.2", samples=("0|1",)),
+                vcf_record(pos=300, ref="TG", alt="T", samples=("1|0",)),
+                vcf_record(pos=300, ref="tg", alt="t", samples=("0|1",)),
+                vcf_record(pos=400, ref="A", alt="<DEL>", samples=("1|0",)),
+                vcf_record(pos=400, ref="a", alt="<del>", samples=("0|1",)),
+            ]
+            issues = [i for i in self._other_than_multi_alt(self._scan(tmp, records))
+                      if "symbolic ALT" not in i.message]
+            self.assertEqual(len(issues), 1, issues)
+            self.assertIn("3 record(s) repeat the REF>ALT of an earlier record at their "
+                          "position (e.g. chr1:100 C>G, chr1:200 A>C, chr1:300 TG>T; 4 "
+                          "position(s) hold more than one record)", issues[0].message)
+
+    def test_two_lines_of_several_alts_at_one_position_warn(self):
+        """R3A-1: CRISPRitz lists the one-base ALTs of every line of a position in one
+        dictionary value, a line of several ALTs with its own raw allele numbers. A line
+        of one ALT beside one of several is read as CRISPRme documents (it settles no
+        number); two lines of several ALTs cannot be told apart: warned, with the
+        positions. A non-PASS line (the enricher skips it), a line of several indels and a
+        lone line of several ALTs are no such position."""
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [
+                vcf_record(pos=100, ref="A", alt="C", samples=("1|0",)),
+                vcf_record(pos=100, ref="A", alt="G,AT", samples=("1|2",)),
+                vcf_record(pos=200, ref="A", alt="C,T", samples=("1|2",)),
+                vcf_record(pos=200, ref="A", alt="G,AT", samples=("1|2",)),
+                vcf_record(pos=300, ref="A", alt="C,T", samples=("1|2",)),
+                vcf_record(pos=300, ref="A", alt="AT,AC", samples=("1|2",)),
+                vcf_record(pos=400, ref="A", alt="C,T", samples=("1|2",)),
+                vcf_record(pos=500, ref="A", alt="C,T", samples=("1|2",)),
+                vcf_record(pos=500, ref="A", alt="G,T", filt="LowQual", samples=("1|2",)),
+            ]
+            issues = self._scan(tmp, records)
+            warned = [i for i in issues if "two or more lines" in i.message]
+            self.assertEqual(len(warned), 1, issues)
+            self.assertEqual(warned[0].severity, vi.WARN)
+            self.assertIn("1 position(s) hold two or more lines that each list several "
+                          "ALTs (e.g. chr1:200)", warned[0].message)
 
     def test_no_duplicates_no_warning(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1343,6 +1555,46 @@ class TestCheckVcfFullScan(unittest.TestCase):
             issues = self._scan(tmp, records)
             self.assertEqual(issues, [])
 
+    @staticmethod
+    @contextlib.contextmanager
+    def _engine(tmp, lines):
+        """A crispritz.py on PATH holding ``lines`` (the engine the validator reads its
+        fake-indel window from: index_fit._engine_value), its cache cleared."""
+        from PostProcess import index_fit
+
+        bindir = os.path.join(tmp, "bin")
+        os.makedirs(bindir)
+        exe = os.path.join(bindir, "crispritz.py")
+        write_text(exe, "".join(line + "\n" for line in lines))
+        os.chmod(exe, 0o755)
+        index_fit._engine_cache.clear()
+        with mock.patch.dict(os.environ, {"PATH": bindir}):
+            try:
+                yield
+            finally:
+                index_fit._engine_cache.clear()
+
+    def test_indel_start_follows_the_engines_fake_indel_window(self):
+        """CRISPRitz 2.10.0 writes 30 reference bases before an indel (its crispritz.py's
+        INDEL_LEFT), so its enricher skips an indel at a POS below 31: one at 28 or 30
+        warns, one at 31 does not. 2.9.1 (no INDEL_LEFT: 25) skipped one below 26 only."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._engine(tmp, ['VERSION = "2.10.0"', "INDEL_LEFT = 30", "INDEL_RIGHT = 30"]):
+                self.assertEqual(vi.indel_start_proximity(), 31)
+                for pos, warns in ((28, True), (30, True), (31, False)):
+                    issues = self._scan(tmp, [vcf_record(pos=pos, ref="A", alt="AT")])
+                    self.assertEqual(len(issues), int(warns), (pos, issues))
+                    if warns:
+                        self.assertIn("a POS below 31, with fewer than 30 reference bases "
+                                      "between the chromosome start and the record",
+                                      issues[0].message)
+                        self.assertIn("fake-indel window holds 30 reference bases",
+                                      issues[0].message)
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._engine(tmp, ['VERSION = "2.9.1"']):
+                self.assertEqual(vi.indel_start_proximity(), 26)
+                self.assertEqual(self._scan(tmp, [vcf_record(pos=28, ref="A", alt="AT")]), [])
+
 
 # ===========================================================================
 # run_full end-to-end
@@ -1380,9 +1632,9 @@ class TestRunFullEndToEnd(unittest.TestCase):
                 vcf_record(chrom="chr9", pos=1000, ref="A", alt="T"),
                 # breakend notation (ERROR)
                 vcf_record(chrom="chr1", pos=2000, ref="G", alt="G]chr2:500]"),
-                # duplicate CHR+POS (WARN)
+                # one REF>ALT twice at a CHR+POS (WARN)
                 vcf_record(chrom="chr1", pos=3000, ref="A", alt="T"),
-                vcf_record(chrom="chr1", pos=3000, ref="A", alt="C"),
+                vcf_record(chrom="chr1", pos=3000, ref="A", alt="T"),
                 # indel near chromosome start (WARN)
                 vcf_record(chrom="chr1", pos=5, ref="A", alt="AT"),
             ]
@@ -1442,6 +1694,69 @@ class TestSamplesIDColumns(unittest.TestCase):
         report = vi.ValidationReport("t")
         report.add(vi.check_samplesid_columns(config, cwd), ok_message="ok")
         self.assertFalse(report.has_errors())  # WARN only, run proceeds
+
+
+
+# ===========================================================================
+# gnomAD-converter --multiallelic: what it says it writes
+# ===========================================================================
+
+class TestGnomadConverterMultiallelicNote(unittest.TestCase):
+    """--multiallelic said, on stdout, in its help and in the README, that it joins a
+    position's SNPs and indels into one line, with genotypes such as 1|2. bcftools norm
+    -m+ is -m+both: a position's SNP records become one line and its indel records
+    another; and the converter writes unphased genotypes only (GT), so a joined one is
+    such as 1/2 (bcftools 1.24 on A>C, A>T and A>AT at one position: A C,T with 2/1, and
+    A AT apart)."""
+
+    @classmethod
+    def setUpClass(cls):
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)  # the converter imports utils as a sibling
+        import convert_gnomAD_vcfs
+        cls.cg = convert_gnomAD_vcfs
+        root = os.path.dirname(here)
+        with open(os.path.join(root, "crisprme.py")) as fh:
+            tree = ast.parse(fh.read())
+        helper = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                      and n.name == "print_help_gnomad_converter")
+        cls.help = next(n.value for n in ast.walk(helper) if isinstance(n, ast.Constant)
+                        and isinstance(n.value, str) and "--multiallelic" in n.value)
+        with open(os.path.join(root, "README.md")) as fh:
+            readme = fh.read()
+        start = readme.index("- `--multiallelic` (*Optional*)")
+        cls.readme = readme[start:readme.index("\n\n", start)]
+
+    def test_the_join_is_bcftools_norm_m_plus(self):
+        calls = []
+        run = self.cg.subprocess.call
+
+        def call(cmd, **kwargs):
+            if not cmd.startswith(self.cg.BCFTOOLSNORM):
+                return run(cmd, **kwargs)  # utils.remove's rm of the input
+            calls.append(cmd)
+            write_text(cmd.split(" -o ", 1)[1].split()[0], "x")
+            return 0
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "gnomad.chr1.vcf.gz")
+            write_text(src, "x")
+            with mock.patch.object(self.cg.subprocess, "call", call):
+                self.cg.bcftools_merge(src, True)
+        self.assertIn(" -m+ ", calls[0])  # -m+both, not -m+any
+        self.assertEqual([g for g in self.cg.GT if "|" in g], [])  # unphased only
+
+    def test_each_text_says_what_the_join_writes(self):
+        for name, text in (("stdout", self.cg.MULTIALLELIC_NOTE), ("help", self.help),
+                           ("README", self.readme)):
+            with self.subTest(text=name):
+                flat = " ".join(text.split())
+                self.assertNotIn("1|2", flat)
+                self.assertNotIn("SNPs and indels together", flat)
+                self.assertIn("indel records into another", flat)
+                self.assertIn("1/2", flat)
+                self.assertIn("first ID", flat)
 
 
 if __name__ == "__main__":

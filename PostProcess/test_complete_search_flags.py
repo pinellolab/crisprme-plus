@@ -233,9 +233,10 @@ class TestDocumentedCommandsPassTheFlagChecks(unittest.TestCase):
     checks of its flags, or a user who copies it gets an error and nothing else.
 
     The general-index Hugging Face card's only example ran ``--prune-pam`` without
-    ``--index-path``, which complete-search refuses up front ("--prune-pam requires
-    --index-path"). The scan reads the fenced code blocks of the README, METHODS and
-    docs/ (the Hugging Face cards included) and follows backslash continuations.
+    ``--index-path``, which complete-search refused up front before 2.10.0 ("--prune-pam
+    requires --index-path"); since 2.10.0 it takes the flag alone (CHANGELOG, Changed). The
+    scan reads the fenced code blocks of the README, METHODS and docs/ (the Hugging Face
+    cards included) and follows backslash continuations.
     """
 
     IGNORE = frozenset({"--help"})
@@ -273,18 +274,20 @@ class TestDocumentedCommandsPassTheFlagChecks(unittest.TestCase):
         self.assertEqual(offenders, [], "documented complete-search flags no code "
                                         "accepts: " + ", ".join(offenders))
 
-    def test_prune_pam_is_always_given_with_index_path(self):
-        offenders = sorted({str(path) for path, flags in self._commands()
-                            if "--prune-pam" in flags and "--index-path" not in flags})
-        self.assertEqual(offenders, [], "--prune-pam without --index-path, which "
-                                        "complete-search refuses: " + ", ".join(offenders))
-
 
 class TestNoDocumentedCommandIsABareCrisprme(unittest.TestCase):
-    """A bare ``crisprme.py`` prints its list of commands and exits 1, and first
-    creates the CRISPRme folders (``Genomes/``, ``Results/`` and five more) in the
-    directory it runs in. README §1.1.2 gave it to check an install, and §3.1 to
-    show the help; ``--version`` and ``--help`` create nothing."""
+    """A bare ``crisprme.py`` prints its list of commands and exits 1 (before 2.10.0 it
+    first created the CRISPRme folders, ``Genomes/``, ``Results/`` and five more, in the
+    directory it ran in: TestTheHelpMakesNoFolder). README §1.1.2 gave it to check an
+    install, and §3.1 to show the help; ``--version`` exits 0."""
+
+    def test_the_readme_says_what_a_bare_crisprme_py_does(self):
+        # it said that one creates the CRISPRme folders, which 2.10.0's makes none of (C14)
+        text = " ".join(pathlib.Path(REPO, "README.md").read_text(encoding="utf-8").split())
+        self.assertFalse("creates the CRISPRme folders" in text,
+                         "README still says a bare crisprme.py creates the CRISPRme folders")
+        self.assertTrue("(A bare `crisprme.py` prints its list of commands and exits 1; it "
+                        "creates no folder.)" in text, "README does not say what it does")
 
     def test_no_code_block_runs_crisprme_py_alone(self):
         paths = [pathlib.Path(REPO, "README.md"), pathlib.Path(REPO, "METHODS.md")]
@@ -297,8 +300,8 @@ class TestNoDocumentedCommandIsABareCrisprme(unittest.TestCase):
                     fenced = not fenced
                 elif fenced and line.split(" #", 1)[0].strip().lstrip("$ ") == "crisprme.py":
                     offenders.append(f"{path.relative_to(REPO)}:{n}")
-        self.assertEqual(offenders, [], "a bare crisprme.py, which exits 1 and creates "
-                                        "seven folders: " + ", ".join(offenders))
+        self.assertEqual(offenders, [], "a bare crisprme.py, which exits 1: "
+                                        + ", ".join(offenders))
 
 
 class TestThePrunePamHelpSaysWhichSideItServes(unittest.TestCase):
@@ -328,6 +331,10 @@ class TestThePrunePamHelpSaysWhichSideItServes(unittest.TestCase):
         self.assertIn("are not indexed (the search says so)", entry)
         self.assertIn("built by CRISPRme 2.8.1 or later", entry)
         self.assertNotIn("The result is identical to a dedicated index", entry)
+        # (those are the limits of index format 1: one of format 2, which CRISPRitz writes
+        # from 2.10.0, indexes those PAMs, and the search says nothing of it)
+        self.assertIn("from a wider one of index format 1 (built by CRISPRitz 2.9.1 or "
+                      "earlier), a + strand PAM", entry)
 
 
 class TestTheComputeBackendHelpSaysWhatAMissingScorerEnvDoes(unittest.TestCase):
@@ -488,13 +495,20 @@ class TestAnInputErrorIsOneLineBeforeAnyWork(unittest.TestCase):
             f"(e.g. NAG + NGG -> NRG).", quoted_in=4)
 
     def test_a_pam_file_whose_line_is_not_a_motif_and_a_length(self):
-        pam = self.pam("20bp-NGG-SpCas9.txt", "NNNNNNNNNNNNNNNNNNNNNGG\n")
-        self.assertRefused(
-            self.search(pam),
-            f"The PAM file '{os.path.join(os.path.realpath(self.wd), pam)}' must hold the "
-            f"motif and the PAM's length on its first line, as in "
-            f"'NNNNNNNNNNNNNNNNNNNNNGG 3' (a negative length for a PAM at the 5' end of the "
-            f"guide).", quoted_in=4)
+        # (the last three passed a check of the last field alone: a line of the length
+        # alone made Results/out and failed the input check later, one with a third field
+        # searched with that field for the PAM's length, and a blank first line was refused
+        # as a file of two motif lines; the focused review of f8dbe73)
+        for text in ("NNNNNNNNNNNNNNNNNNNNNGG\n", "3\n", "NNNNNNNNNNNNNNNNNNNNNGG 3 4\n",
+                     "\nNNNNNNNNNNNNNNNNNNNNNGG 3\n"):
+            with self.subTest(text=text):
+                pam = self.pam("20bp-NGG-SpCas9.txt", text)
+                self.assertRefused(
+                    self.search(pam),
+                    f"The PAM file '{os.path.join(os.path.realpath(self.wd), pam)}' must hold "
+                    f"the motif and the PAM's length on its first line, as in "
+                    f"'NNNNNNNNNNNNNNNNNNNNNGG 3' (a negative length for a PAM at the 5' end of "
+                    f"the guide).", quoted_in=4)
 
     def test_a_flag_with_no_value(self):
         pam = self.pam("20bp-NGG-SpCas9.txt")
@@ -504,6 +518,102 @@ class TestAnInputErrorIsOneLineBeforeAnyWork(unittest.TestCase):
             with self.subTest(flag=flag, given="before another flag"):
                 self.assertRefused(self.search(pam, flag, "--thread", "2"),
                                    f"Please input a value for flag {flag}")
+
+
+@unittest.skipUnless(_importable(), "crisprme.py dependencies not installed")
+class TestTheSitesOnlyDensityGuardFlags(unittest.TestCase):
+    """--sites-only-density-guard N and --no-sites-only-density-guard (2.10.0): a value
+    that is no whole number of bits, one outside 1 to 64, and both flags together are one
+    'Error: ...' line and exit 1 before Results/<output> is made, as the other input
+    errors (TestAnInputErrorIsOneLineBeforeAnyWork)."""
+
+    GUIDE = TestAnInputErrorIsOneLineBeforeAnyWork.GUIDE
+    setUp = TestAnInputErrorIsOneLineBeforeAnyWork.setUp
+    pam = TestAnInputErrorIsOneLineBeforeAnyWork.pam
+    search = TestAnInputErrorIsOneLineBeforeAnyWork.search
+    assertRefused = TestAnInputErrorIsOneLineBeforeAnyWork.assertRefused
+
+    def test_a_value_that_is_no_number_of_bits(self):
+        pam = self.pam("20bp-NGG-SpCas9.txt")
+        for given in (("x",), ("2.5",), ()):
+            with self.subTest(given=given):
+                self.assertRefused(
+                    self.search(pam, "--sites-only-density-guard", *given),
+                    "Please provide a whole number of bits for --sites-only-density-guard "
+                    "(e.g. 20: windows of 2^20 sequences or more)")
+
+    def test_a_value_out_of_range(self):
+        pam = self.pam("20bp-NGG-SpCas9.txt")
+        for given in ("0", "-1", "65"):
+            with self.subTest(given=given):
+                self.assertRefused(
+                    self.search(pam, "--sites-only-density-guard", given),
+                    "--sites-only-density-guard takes 1 to 64 bits (20 by default); "
+                    "--no-sites-only-density-guard turns it off")
+
+    def test_both_flags(self):
+        self.assertRefused(
+            self.search(self.pam("20bp-NGG-SpCas9.txt"), "--sites-only-density-guard", "20",
+                        "--no-sites-only-density-guard"),
+            "--sites-only-density-guard and --no-sites-only-density-guard are mutually "
+            "exclusive")
+
+
+@unittest.skipUnless(_importable(), "crisprme.py dependencies not installed")
+class TestTheHelpMakesNoFolder(unittest.TestCase):
+    """crisprme.py with no argument prints the help, and made the seven folders of a data
+    folder (Annotations/, Dictionaries/, Genomes/, PAMs/, Results/, VCFs/, samplesIDs/)
+    wherever one ran it to read it (C14)."""
+
+    def test_no_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = subprocess.run([sys.executable, CRISPRME], cwd=tmp, capture_output=True,
+                                 text=True, timeout=120)
+            self.assertIn("complete-search", run.stdout + run.stderr)
+            self.assertEqual(os.listdir(tmp), [])
+
+
+@unittest.skipUnless(_importable() and shutil.which("crispritz.py"),
+                     "runs complete-search, which needs the image's engine")
+class TestACtrlCEndsInOneLine(unittest.TestCase):
+    """Ctrl-C during complete-search ended crisprme.py in a KeyboardInterrupt traceback
+    (install P6). It ends in one line, which names the folder the search wrote into, and the
+    run still ends by SIGINT, as a shell expects of one."""
+
+    def test_a_search_interrupted_while_it_runs(self):
+        import signal
+        import time
+        wd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, wd, ignore_errors=True)
+        os.makedirs(os.path.join(wd, "Genomes", "g"))
+        with open(os.path.join(wd, "Genomes", "g", "chr1.fa"), "w") as fh:
+            fh.write(">chr1\n" + "ACGTTGCAACTAACAGTTGCTTTTATCACAGG" * 2000 + "\n")
+        os.makedirs(os.path.join(wd, "PAMs"))
+        with open(os.path.join(wd, "PAMs", "20bp-NGG-SpCas9.txt"), "w") as fh:
+            fh.write("N" * 21 + "GG 3\n")
+        with open(os.path.join(wd, "guide.txt"), "w") as fh:
+            fh.write("CTAACAGTTGCTTTTATCACNNN\n")
+        # (its lines as a terminal shows them, each as it is printed)
+        env = dict(os.environ, CRISPRME_SKIP_SCORER_ENV="1", CRISPRME_SKIP_MEM_CHECK="1",
+                   PYTHONUNBUFFERED="1")
+        # in a session of its own, which the Ctrl-C of a terminal signals whole
+        run = subprocess.Popen(
+            [sys.executable, CRISPRME, "complete-search", "--genome", "Genomes/g", "--guide",
+             "guide.txt", "--pam", "PAMs/20bp-NGG-SpCas9.txt", "--mm", "4", "--output", "o",
+             "--thread", "1"],
+            cwd=wd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            start_new_session=True)
+        self.addCleanup(lambda: run.poll() is None and os.killpg(run.pid, signal.SIGKILL))
+        for line in run.stdout:  # (it launches the pipeline after this line)
+            if line.startswith("Launching job"):
+                break
+        time.sleep(1)
+        os.killpg(run.pid, signal.SIGINT)
+        _out, err = run.communicate(timeout=300)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(err.splitlines()[-1], "crisprme.py complete-search interrupted "
+                         f"(Ctrl-C): what it wrote is in {os.path.join(wd, 'Results', 'o')}")
+        self.assertEqual(run.returncode, -signal.SIGINT)
 
 
 if __name__ == "__main__":

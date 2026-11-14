@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
-from multiprocessing import Pool
-
 import subprocess
 import os
 import sys
+
+import postproc_pool
 
 output_folder = sys.argv[1]
 ref_folder = sys.argv[2]
@@ -47,14 +47,15 @@ def _checked_chrom(chrom: str) -> str:
     return chrom
 
 
-def start_analysis(chrom):
-    # (no shell: each value is one argument, as the search script passes it on)
-    code = subprocess.call([
+def driver_args(chrom, stage):
+    """post_analisi_snp.sh for one chromosome and stage (postproc_pool: "all" runs the
+    whole post-analysis as one process; "cluster" and "finish" the steps around its
+    analysis in pieces). No shell: each value is one argument, as the search script passes
+    it on."""
+    return [
         "./post_analisi_snp.sh", output_folder, ref_folder, vcf_name, guide_file, mm, bDNA,
-        bRNA, annotation_file, pam_file, dict_folder, final_res, final_res_alt, chrom,
-    ])
-    if code != 0:
-        raise OSError(f"Post-analysis SNP failed on chromsomes {chrom}")
+        bRNA, annotation_file, pam_file, dict_folder, final_res, final_res_alt, chrom, stage,
+    ]
 
 
 def _detect_budget_gb():
@@ -166,14 +167,15 @@ def memory_capped_workers(requested, n_tasks, dict_folder):
     usable_gb = max(1.0, budget_gb - max(2.0, budget_gb * 0.15))
     per_worker_gb = _estimate_worker_gb(dict_folder)
     cap = max(1, int(usable_gb // per_worker_gb))
-    # ABSOLUTE worker cap (default 32; override CRISPRME_POSTPROC_MAX_WORKERS).
-    # Post-analysis is I/O-bound -- each worker only spawns a per-chromosome
-    # subprocess -- so a huge pool buys no speed AND deadlocks: a multiprocessing
-    # Pool with hundreds of workers has every worker inherit every other worker's
-    # internal sentinel pipe at fork, so each pipe ends up held by hundreds of
-    # processes and the pool's completion/join never finalizes (all tasks finish,
-    # the parent hangs in pool.map forever -- observed at 200 workers / 455 contigs
-    # on a 200-core host). Capping keeps the FD-inheritance bounded and safe.
+    # ABSOLUTE worker cap (default 32; override CRISPRME_POSTPROC_MAX_WORKERS). Up to
+    # 2.8.1 the workers were those of a multiprocessing Pool, which deadlocked with
+    # hundreds of them (each inherited every other worker's sentinel pipe at fork, so
+    # pool.map never returned: observed at 200 workers / 455 contigs on a 200-core
+    # host). Since 2.10.0 the workers are postproc_pool's threads, each running one
+    # subprocess at a time (a chromosome's cluster stage, one of its pieces, its merge),
+    # which inherit no such pipes; the cap stays, as each worker's subprocess holds up
+    # to one chromosome's genome string and dictionary keys, and more workers than
+    # that rarely pay (docs/TROUBLESHOOTING.md section 8).
     try:
         abs_cap = int(os.environ.get("CRISPRME_POSTPROC_MAX_WORKERS", "32"))
     except ValueError:
@@ -190,7 +192,10 @@ chroms = [
     if f.endswith(".fa") and not f.endswith(".fai")
 ]
 
-workers, budget_gb, per_worker_gb = memory_capped_workers(ncpus, len(chroms), dict_folder)
+# with option P a chromosome's pieces share the pool, so the workers are not bounded by
+# the number of chromosomes (postproc_pool)
+workers, budget_gb, per_worker_gb = memory_capped_workers(
+    ncpus, len(chroms) if not postproc_pool.pieces_on() else max(ncpus, 1), dict_folder)
 # NOTE: write these diagnostics to STDOUT (log_verbose.txt), never STDERR.
 # The caller (submit_job_automated_new_multiple_vcfs.sh) treats a non-empty
 # stderr log (`[ -s $logerror ]`) as a fatal post-analysis failure, so any
@@ -198,7 +203,10 @@ workers, budget_gb, per_worker_gb = memory_capped_workers(ncpus, len(chroms), di
 sys.stdout.write(
     f"Post-analysis SNPs: {workers} concurrent worker(s) "
     f"(cores={ncpus}, detected memory budget {budget_gb:.1f} GB, "
-    f"est. per-worker {per_worker_gb:.1f} GB)\n"
+    f"est. per-worker {per_worker_gb:.1f} GB); "
+    + ("each chromosome in pieces over them (CRISPRME_POSTPROC_PIECES=0: one process a "
+       "chromosome)\n" if postproc_pool.pieces_on() else
+       "one process a chromosome (CRISPRME_POSTPROC_PIECES=0)\n")
 )
 # Warn (loudly, but to STDOUT) when a single worker's estimated peak exceeds the
 # budget: the per-chromosome SNP dictionary is simply too large for this machine's
@@ -215,5 +223,10 @@ if per_worker_gb > usable_gb:
         f"memory, or set CRISPRME_MAX_MEM_GB to your real limit.\n"
     )
 sys.stdout.flush()
-with Pool(processes=workers) as pool:
-    pool.map(start_analysis, chroms)
+try:
+    postproc_pool.run_stage(
+        "snp", chroms, workers, driver_args, "./new_simple_analysis.py", prepare_dict=True,
+        min_lines=postproc_pool.piece_lines(16000))
+except postproc_pool.StageError as err:
+    sys.stderr.write(f"Post-analysis SNP failed: {err}\n")
+    sys.exit(1)

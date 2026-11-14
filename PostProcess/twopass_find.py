@@ -26,14 +26,15 @@ import functools
 
 # IUPAC ambiguity codes -> the concrete base set they denote (the enriched
 # reference / fake-indel genome stores overlaid SNPs as IUPAC; a plain ACGT base
-# is the singleton set). '-'/'.' are NOT window content (gaps come from bulges).
+# is the singleton set; Q, a position whose reference base and SNP ALTs hold all four
+# bases, is every base). '-'/'.' are NOT window content (gaps come from bulges).
 IUPAC_TO_SET = {
     "A": frozenset("A"), "C": frozenset("C"), "G": frozenset("G"),
     "T": frozenset("T"), "U": frozenset("T"),
     "R": frozenset("AG"), "Y": frozenset("CT"), "S": frozenset("GC"),
     "W": frozenset("AT"), "K": frozenset("GT"), "M": frozenset("AC"),
     "B": frozenset("CGT"), "D": frozenset("AGT"), "H": frozenset("ACT"),
-    "V": frozenset("ACG"), "N": frozenset("ACGT"),
+    "V": frozenset("ACG"), "N": frozenset("ACGT"), "Q": frozenset("ACGT"),
 }
 
 _INF = (1 << 30, 0, 0, 0)  # (D, mm, dna_bulges, rna_bulges) sentinel = unreachable

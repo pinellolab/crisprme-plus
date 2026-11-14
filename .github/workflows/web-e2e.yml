@@ -42,7 +42,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build Python-3.11 image (linux/amd64)
-        run: docker build -t crisprme:web .
+        # CRISPRitz 2.10.0 before its tag: the pushed engine branch's commit (remove at release)
+        run: docker build --build-arg crispritz_ref=4ded5e62230fcea4a4031ae1bf431e64344b5309 -t crisprme:web .
 
       # Regression guard for the alpha bug where a batteries-included install (index
       # only, empty VCFs/) offered only "Reference only" in the variant dropdown, and
@@ -132,17 +133,21 @@ jobs:
       # step there tests nothing), minimap2 and impg (test_assembly_reconcile's truth tests),
       # crisprme.py's imports (test_complete_search_flags's behaviour tests), Dash and Biopython
       # (the rest of test_assembly_annotate, which no other job names, test_app_settings' start
-      # of the web app, and test_web_shell_safety's pages, with bedtools, BEDOPS and zip), and
-      # the index resolver in the image. A skip here would be the same nothing, so the step
-      # fails on any skip but the two the image cannot help: no en_US locale, no ps (the
-      # unit-tests job runs that one).
+      # of the web app, and test_web_shell_safety's pages, with bedtools, BEDOPS and zip),
+      # crisprme.py's start-up (test_no_code_from_files: --debug from a folder holding another
+      # user's PostProcess/), the index resolver in the image, and the pages that follow no
+      # link another user put in the data folder (test_web_no_links, through the real Dash
+      # server: Dash, BEDOPS). A skip here would be the same nothing, so the step fails on any
+      # skip but the two the image cannot help: no en_US locale, no ps (the unit-tests job
+      # runs that one).
       - name: "Tests that need the image's tools (BEDOPS, minimap2, impg, crisprme.py's imports, Dash)"
         run: |
           set -o pipefail
           docker run --rm -w /opt/conda/opt/crisprme/PostProcess crisprme:web \
             python -m unittest test_assembly_annotate test_assembly_reconcile \
               test_complete_search_flags test_post_process_tempdir test_index_resolution \
-              test_app_settings test_web_shell_safety -v \
+              test_app_settings test_web_shell_safety test_no_code_from_files \
+              test_web_no_links -v \
             2>&1 | tee in-image-tests.log
           if grep -E "skipped ['\"]" in-image-tests.log \
               | grep -vE "en_US.UTF-8 is not installed|no ps here to compare"; then

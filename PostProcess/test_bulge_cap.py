@@ -290,6 +290,95 @@ class TestCliBulgeCap(unittest.TestCase):
         self.assertEqual(cap(_MOTIF, _REF, is_variant=True, index_path=shared), 1)
         self.assertEqual(cap(_MOTIF, _REF, is_variant=False, index_path="_"), 0)
 
+    def test_under_index_path_that_library_alone_serves_the_reference_and_none_is_built(self):
+        """Under --index-path a search reads the reference index from that library alone and
+        builds none (it stops when the library holds none): a raw genome, or a reference
+        index of the working directory's library, gave a default of 1 bulge to a search that
+        then stopped on 'no matching reference index under --index-path' (plan 4.8 RV2-5)."""
+        shared = os.path.join(self.root, "shared")
+        os.makedirs(shared)
+        _mkfile(os.path.join(self.root, "Genomes", _REF, "chr22.fa"), ">chr22\nA\n")
+        _mkfile(os.path.join(self.root, "genome_library", f"{_MOTIF}_3_{_REF}",
+                             "TSTgenome.NRG.bin"))
+        _mkfile(os.path.join(self.root, "genome_library", f"{_MOTIF}_3_{_REF}+{_VCF}",
+                             "TSTgenome.NRG.bin"))
+        cap = crisprme._installed_index_bulge_cap
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False), 2)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, index_path=shared), 0)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=True, index_path=shared), 0)
+        # the library's own reference index serves; a variant index is read from either
+        _mkfile(os.path.join(shared, f"{_MOTIF}_2_{_REF}", "TSTgenome.NRG.bin"))
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, index_path=shared), 1)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=True, index_path=shared), 1)
+
+    def test_a_variant_search_that_would_enrich_first_is_refused_up_front(self):
+        """Under --index-path with no reference index there that serves the search, the
+        search script stops, but after it has enriched the genome with the dataset's
+        variants, hours on hg38 (IDX-17 e): complete-search stops first, then. A search with
+        nothing to enrich reaches the script's refusal at once (it says what the library
+        holds), and one whose library a run builds in is left to the script, which waits."""
+        import io
+        from unittest import mock
+        shared = os.path.join(self.root, "shared")
+        os.makedirs(shared)
+        vcfs = os.path.join(self.root, "VCFs", _VCF)
+        _mkfile(os.path.join(vcfs, "x.chr22.vcf.gz"), "")
+        refuse = crisprme._refuse_no_reference_index
+
+        def stop(bulges=1):
+            err = io.StringIO()
+            with mock.patch.object(sys, "stderr", err):
+                try:
+                    refuse(shared, _REF, _MOTIF, bulges + 1, False, True, 20, bulges, bulges,
+                           [vcfs])
+                except SystemExit as exit_:
+                    return exit_.code, err.getvalue()
+            return None, err.getvalue()
+
+        # the index to download: the published one, of N = 3 for up to 2 bulges (it named
+        # the one of the search's N, bulges + 1, and no index of N = 2 is published)
+        for bulges, n in ((1, 3), (2, 3), (3, 4)):
+            with self.subTest(bulges=bulges):
+                code, said = stop(bulges)
+                self.assertEqual(code, 1)
+                self.assertEqual(said, (
+                    f"Error: No reference index under --index-path {shared} serves this search "
+                    f"(genome {_REF}, PAM {_MOTIF}, {bulges} DNA and {bulges} RNA bulge(s)), and "
+                    f"a search builds none there: it would stop on that after enriching the "
+                    f"genome with the dataset's variants (hours on a human genome). Install one "
+                    f"in that library (crisprme.py download --what index --index-name "
+                    f"20-{_MOTIF}_{n}_{_REF} if it is published, or crisprme.py build-index-only), "
+                    f"or run without --index-path, where a search takes an index of the working "
+                    f"directory's library, pruned to this PAM where only such a one serves it, "
+                    f"and builds one from the genome where none does (a "
+                    f"search of the reference genome alone, with --index-path, says what that "
+                    f"library holds)\n"))
+        # a run building one there: the search script waits for it
+        os.makedirs(os.path.join(shared, f"{_MOTIF}_2_{_REF}.lock"))
+        self.assertEqual(stop(), (None, ""))
+        os.rmdir(os.path.join(shared, f"{_MOTIF}_2_{_REF}.lock"))
+        # nothing to enrich: the enriched genome is here
+        os.makedirs(os.path.join(self.root, "Genomes", f"{_REF}+{_VCF}"))
+        self.assertEqual(stop(), (None, ""))
+        os.rmdir(os.path.join(self.root, "Genomes", f"{_REF}+{_VCF}"))
+        # an index there that serves it
+        _mkfile(os.path.join(shared, f"{_MOTIF}_2_{_REF}", "TSTgenome.NRG.bin"))
+        self.assertEqual(stop(), (None, ""))
+
+    def test_a_variant_index_in_the_library_whose_dictionaries_are_elsewhere(self):
+        """A dataset whose variant index the --index-path library holds, with no dictionaries
+        in the working directory: complete-search said "No prebuilt variant index found"
+        while it was there (IDX-17 c); it names the datasets so held, and says where a search
+        reads their dictionaries from."""
+        shared = os.path.join(self.root, "shared")
+        for name in (f"{_MOTIF}_2_{_REF}+{_VCF}", f"20-NRR_3_{_REF}+other",
+                     f"{_MOTIF}_2_hg19+third", f"{_MOTIF}_2_{_REF}+{_VCF}_INDELS"):
+            os.makedirs(os.path.join(shared, name))
+        held = crisprme._variant_index_elsewhere
+        self.assertEqual(held(shared, _REF, [_VCF, "other", "third", "none"]), [_VCF, "other"])
+        self.assertEqual(held("_", _REF, [_VCF]), [])
+        self.assertIn("is in --index-path", open(crisprme.__file__).read())
+
     def test_a_wider_pamless_index_at_index_path_counts_under_prune(self):
         shared = os.path.join(self.root, "shared")
         _mkfile(os.path.join(shared, f"NNNNNNNN_3_{_REF}", "TSTgenome.N.bin"))
@@ -425,7 +514,7 @@ class TestPreflightNoVariantIndex(unittest.TestCase):
                       f"{self.DS}, PAM NGG, 1 DNA and 1 RNA bulge(s), a 20-nt guide)", said)
         self.assertIn(f"NRG_3_{_REF}+{self.DS} (up to 2 bulge(s) of each type, built for a 20-nt "
                       "guide)", said)
-        self.assertIn(f"--index-name NGG_3_{_REF}+{self.DS} if it is published", said)
+        self.assertIn(f"--index-name 20-NGG_3_{_REF}+{self.DS} if it is published", said)
         self.assertEqual(len(said.splitlines()), 1)
 
     def test_a_deeper_budget_is_told_the_bulges_there(self):
@@ -433,9 +522,12 @@ class TestPreflightNoVariantIndex(unittest.TestCase):
         self.assertIn("up to 1 bulge(s) of each type: search with no more",
                       self.check(b=(2, 2)))
 
-    def test_a_wider_pam_less_index_is_named_with_its_flags(self):
+    def test_a_wider_pam_less_index_is_named_with_what_it_needs(self):
+        # (said where a search does not prune by itself: an engine that cannot)
         self.index(f"NNNNNNNN_3_{_REF}+{self.DS}")
-        self.assertIn("--prune-pam --index-path genome_library", self.check())
+        self.assertIn(f"NNNNNNNN_3_{_REF}+{self.DS} serves it pruned to this PAM at leaf time "
+                      "(--prune-pam), which the installed CRISPRitz cannot do: install a "
+                      "CRISPRitz build that supports --prune-pam", self.check())
 
     def test_a_variant_index_at_index_path_serves(self):
         # the search script reads one there first, then in genome_library/ (OF-5)
@@ -451,10 +543,11 @@ class TestPreflightNoVariantIndex(unittest.TestCase):
                       said)
         self.assertNotIn("supplies the reference index only", said)
 
-    def test_a_wider_pam_less_index_at_index_path_is_named_with_that_library(self):
+    def test_a_wider_pam_less_index_at_index_path_is_named_too(self):
         shared = os.path.join(self.root, "shared")
         self.index(f"NNNNNNNN_3_{_REF}+{self.DS}", library="shared")
-        self.assertIn(f"--prune-pam --index-path {shared}.", self.check(path=shared))
+        self.assertIn(f"NNNNNNNN_3_{_REF}+{self.DS} serves it pruned to this PAM",
+                      self.check(path=shared))
 
     def test_an_index_that_serves_goes_on(self):
         self.index(f"NGG_2_{_REF}+{self.DS}", guide=20)
@@ -530,13 +623,16 @@ class TestWebReferenceBulgeCapacity(unittest.TestCase):
         var = pages_utils.index_max_bulges(_REF, _PAM_VALUE, _DATASET)
         self.assertEqual(min(ref, var), 2)
 
-    def test_only_an_equal_width_pamless_index_counts(self):
-        """The web never passes --prune-pam, so the search shell never takes a WIDER
-        all-N index for it; the slider must not offer bulges on the strength of one."""
+    def test_a_wider_pamless_index_counts_for_a_3_prime_pam(self):
+        """The web never passes --prune-pam, and the search shell prunes by itself when
+        only a WIDER all-N index serves (since 2.10.0): it counts for a 3' PAM, as an
+        all-N one of the PAM's width does, and never for a 5' one."""
         _mkfile(os.path.join(self.root, "PAMs", _PAM_VALUE + ".txt"), _PAM_LINE)
+        _mkfile(os.path.join(self.root, "PAMs", "TTTV-20bp-X.txt"), "TTTV" + "N" * 20 + " -4\n")
         _mkfile(os.path.join(self.root, "genome_library", f"NNNNNNNN_3_{_REF}",
                              "TSTgenome.NNNNNNNN.bin"))
-        self.assertEqual(pages_utils.index_max_bulges(_REF, _PAM_VALUE, None), 0)
+        self.assertEqual(pages_utils.index_max_bulges(_REF, _PAM_VALUE, None), 2)
+        self.assertEqual(pages_utils.index_max_bulges(_REF, "TTTV-20bp-X", None), 0)
         _mkfile(os.path.join(self.root, "genome_library", f"NNN_3_{_REF}",
                              "TSTgenome.NNN.bin"))
         self.assertEqual(pages_utils.index_max_bulges(_REF, _PAM_VALUE, None), 2)
@@ -629,8 +725,10 @@ class TestDictlessDefaults(unittest.TestCase):
             csrc = fh.read()
         self.assertRegex(csrc, r"max_total_edits\s*=\s*6",
                          "crisprme.py complete-search default max_total_edits must be 6")
-        # and the CLI bulge derivation is capped at a single bulge of each type
-        self.assertRegex(csrc, r"_SIMPLE_BULGE_CAP\s*=\s*1")
+        # and the CLI bulge derivation is capped at a single bulge of each type: the default
+        # budget, DEFAULT_BULGES, which assembly-search takes too
+        self.assertRegex(csrc, r"_SIMPLE_BULGE_CAP\s*=\s*DEFAULT_BULGES\b")
+        self.assertRegex(csrc, r"(?m)^DEFAULT_BULGES\s*=\s*1\b")
 
 
 class TestPruningNotePersisted(unittest.TestCase):
@@ -817,8 +915,8 @@ class TestIndelZeroBulgeRouting(unittest.TestCase):
 class TestUnwritableWorkingFolder(unittest.TestCase):
     """complete-search, assembly-search and build-index-only ended in a raw OSError traceback
     when a folder of the working directory, or the output folder, could not be created (a
-    read-only mount, no write permission); now one line says so and what to do. crisprme.py
-    with no arguments still prints its help there."""
+    read-only mount, no write permission); now one line says so and what to do. (crisprme.py
+    with no arguments makes no folder: test_complete_search_flags.TestTheHelpMakesNoFolder.)"""
 
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="unwritable_")
@@ -850,9 +948,6 @@ class TestUnwritableWorkingFolder(unittest.TestCase):
         said = self.stops(lambda: crisprme._check_output(["--output", "job"]))
         self.assertEqual(said, f"Error: cannot create {self.root}/Results/job: Read-only file "
                                "system. Run CRISPRme from a working folder you can write to.\n")
-
-    def test_the_help_is_not_stopped(self):
-        crisprme.check_crisprme_dirtree(strict=False)  # (no SystemExit)
 
     def test_a_tree_in_place_needs_nothing_made(self):
         # the read-only use that works: every folder there, an --output elsewhere

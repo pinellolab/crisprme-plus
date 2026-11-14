@@ -7,7 +7,8 @@ every search then fails on that index (``numLeaves=``, ``numNodes=0``, or a cras
 in searchTST). build-index-only and pool_index_indels.py check each .bin the engine
 wrote before they take an index for built.
 
-A .bin is one tree, as saveTST (CRISPRitz's mainParallel.cpp) writes it:
+A .bin is one tree, as saveTST (CRISPRitz's mainParallel.cpp) writes it. In index
+format 1 (CRISPRitz up to 2.9.1):
 
 * int numLeaves (at least 1) and int len_guide;
 * numLeaves targets: int guideIndex, the target's PAM in ceil(P/2) bytes (two bases
@@ -27,6 +28,16 @@ sequence inserted, the middle target's (insall), whose chain of earlier targets
 ends at that middle target. A file cut short anywhere fails one of these. Ints are
 in the byte order of the machine that wrote them, which is this one.
 
+In index format 2 (CRISPRitz 2.10.0 on; its docs/INDEX_FORMAT.md, section 4) a .bin
+opens with a header -- the magic "CZI" 0xFE, the format version, the header's length,
+the flags, the guide length, the PAM length, the max bulges and the PAM -- that searchTST
+checks before it reads the rest (index_fit.read_index_header makes the same checks), and
+ends with the magic again, so a file cut short anywhere lacks it. In between, numLeaves
+and len_guide, then each target: int window start, its PAM as in format 1, a flags byte
+(bit 7: the int -(i + 1) follows; bits 0-4: how many pad bases an alignment may use, at
+most the max bulges; bit 5, a flank partly off the contig, only of an all-N PAM) where
+format 1 has ``0`` or ``_``, then numNodes and the tree as in format 1.
+
 buildTST does not check that a .bin opened either: with the disk's inode table or
 a file-count quota full, it writes nothing for the contigs left and exits 0, and
 every .bin there is whole. A contig with no target gets no .bin, so missing_bins
@@ -34,6 +45,16 @@ tells which contigs without one hold a target, by buildTST's own rule for one. A
 contig of more than TARGETS_A_TREE targets gets several, one a part, every part but
 the last one full: one cut off as its later parts were made has its first parts
 only, so missing_bins also counts the targets of a contig whose last part is full.
+(CRISPRitz 2.10.0 checks every write and exits 1 on a full disk, but an index may come
+from an older one.)
+
+buildTST's rule for a target depends on the index format it writes: format 1 keeps a
+site only where its whole window -- pad, guide and PAM -- lies on the contig with no N
+outside its PAM; format 2 keeps every site whose guide lies on the contig with no N in
+it, the pad may run off the contig or into an N (docs/INDEX_FORMAT.md, section 3). So
+missing_bins applies the rule of the format the index was built in, read from its own
+.bin files, not that of the installed CRISPRitz, which need not be the one that built
+it (index_format).
 """
 
 import array
@@ -41,16 +62,21 @@ import os
 import re
 import struct
 
+import index_fit
+
 
 def bin_problem(path):
-    """What is wrong with the CRISPRitz index file ``path``, or None when it is
-    whole."""
+    """What is wrong with the CRISPRitz index file ``path``, of either index format, or
+    None when it is whole."""
     pam = len(os.path.basename(path).split("_", 1)[0])
     width = 4 + (pam + 1) // 2  # a target, up to its flag
     size = os.path.getsize(path)
     if size < 8:
         return "empty" if not size else f"cut short ({size} bytes)"
     with open(path, "rb") as fh:
+        if fh.read(4) == index_fit.CZI_MAGIC:
+            return _format2_problem(path, size)
+        fh.seek(0)
         leaves = struct.unpack("=i", fh.read(4))[0]
         if leaves <= 0:
             return f"not a tree (numLeaves={leaves})"
@@ -91,14 +117,78 @@ def bin_problem(path):
     return None
 
 
+# What index_fit.read_index_header says of a format-2 file cut short, as bin_problem says it
+_CUT_SHORT = {
+    "cut-short index header": "cut short in its header",
+    "cut short: it does not end in the end-of-index marker":
+        "cut short (it does not end in the end-of-index marker)",
+    "cut short: no leaf count and guide length after its header": "cut short after its header",
+}
+
+
+def _format2_problem(path, size):
+    """bin_problem of a .bin of index format 2: its header, as searchTST checks it
+    (index_fit.read_index_header), its end magic, its targets and its tree."""
+    info = index_fit.read_index_header(path)
+    why = info.get("error")
+    if why in _CUT_SHORT:
+        return f"{_CUT_SHORT[why]} ({size} bytes)"
+    if why and info.get("num_leaves") is not None and info["num_leaves"] <= 0:
+        return f"not a tree (numLeaves={info['num_leaves']})"
+    if why:
+        return f"not an index file this CRISPRme reads ({why})"
+    pam, bulges, leaves = info["pam_len"], info["max_bulges"], info["num_leaves"]
+    width = 4 + (pam + 1) // 2  # a target, up to its flags
+    first, end = 28 + pam + 8, size - 4  # the first target; the end magic
+    if leaves > (end - first) // (width + 1):
+        return f"cut short in its {leaves} targets"
+    with open(path, "rb") as fh:
+        fh.seek(first)
+        block = fh.read(min(end - first, leaves * (width + 5) + 4))
+        fh.seek(end - 5)
+        tail = fh.read(5)
+    nexts = array.array("i", bytes(4 * leaves))
+    distinct, pos = 0, 0
+    try:
+        for i in range(leaves):
+            flags = block[pos + width]
+            # (pad_valid is at most the max bulges, and only an all-N PAM keeps a site whose
+            # flank runs off the contig)
+            if flags & 0x1F > bulges or (flags & 0x20 and not info["pamless"]):
+                return f"corrupt (target {i} of {leaves})"
+            if flags & 0x80:  # HAS_NEXT
+                nexts[i] = struct.unpack_from("=i", block, pos + width + 1)[0]
+                pos += width + 5
+            else:
+                distinct += 1
+                pos += width + 1
+        nodes = struct.unpack_from("=i", block, pos)[0]
+    except (IndexError, struct.error):
+        return f"cut short in its {leaves} targets"
+    if nodes <= 0:
+        return f"not a tree (numNodes={nodes})"
+    odd = 2 * (end - first - pos - 4 - 4 * distinct) - (3 * nodes + 1)
+    if not 0 <= odd <= distinct:
+        return f"cut short in its tree of {nodes} nodes"
+    last = struct.unpack_from("=i", tail, 1)[0]
+    i, steps = -last - 1, 0
+    while 0 <= i < leaves and nexts[i] and steps < leaves:
+        i, steps = -nexts[i] - 1, steps + 1
+    if not (tail[0] == 0xF0 or tail[0] & 0x0F == 0x0F) or i != (leaves - 1) // 2 \
+            or nexts[i]:
+        return f"cut short at the end of its tree of {nodes} nodes"
+    return None
+
+
 def incomplete_bins(directory):
-    """``[(path, problem)]`` for each .bin under ``directory``, an index (an INDELS
-    index has one directory a chromosome), that is not whole."""
+    """``[(path, problem)]`` for each tree under ``directory``, an index (an INDELS
+    index has one directory a chromosome), that is not whole (index_fit.is_tree: a macOS
+    ._<tree>.bin is none)."""
     found = []
     for top, dirs, files in os.walk(directory):
         dirs.sort()
         for name in sorted(files):
-            if name.endswith(".bin"):
+            if index_fit.is_tree(name):
                 path = os.path.join(top, name)
                 problem = bin_problem(path)
                 if problem:
@@ -109,8 +199,11 @@ def incomplete_bins(directory):
 # The four bits buildTST gives a base of the genome (genome_bit_conversion, in
 # CRISPRitz's pamGenerator.cpp; N 0000) and of the PAM (pam_bit_conversion; N 1111):
 # a genome base matches a PAM base when their bits meet, so a genome N matches none.
+# Q, the code CRISPRitz 2.10.0 writes at a position whose reference base and SNP ALTs
+# hold all four bases, is 1111 in the genome: it meets every PAM base. A PAM holds no Q.
 _BITS = dict(zip("ACGTRYSWKMBDHV", (1, 2, 4, 8, 5, 10, 6, 9, 12, 3, 14, 13, 11, 7)))
 _PAM_BITS = dict(_BITS, N=15)
+_BITS["Q"] = 15
 _REVERSE = str.maketrans("ACGTRYMKHDBV", "TGCAYRKMDHVB")  # reversenuc, less the reversal
 # buildTST's TARG_IN_GROUP: it saves a contig's targets, sorted, this many a tree,
 # <PAM>_<contig>_1.bin to _<n>.bin, n their count over this, rounded up
@@ -118,13 +211,74 @@ TARGETS_A_TREE = 5000000
 _CHUNK = 1 << 20  # the positions count_targets has a regex scan at a time
 
 
-def holds_target(seq, pam, pam_len, at_start, max_bulges):
-    """Whether buildTST (CRISPRitz 2.9.1) indexes a target in contig ``seq`` (upper
-    case, each base one of ACGTN and the IUPAC codes), for ``pam`` (the PAM itself,
-    at the start of the pam_len bases of a target with ``at_start``, as a 5' PAM),
-    with ``max_bulges``: as searchPAMonGenome finds its PAM on either strand,
-    guideRegionHasN drops a window of pam_len + max_bulges bases with an N outside its
-    PAM, and main takes each kept window (a window at 0 as on the minus strand)."""
+def _finder(motif):
+    """A regex whose matches start where ``motif``, a PAM, matches a contig's bases."""
+    return re.compile("(?=%s)" % "".join(
+        "[%s]" % "".join(b for b in _BITS if _BITS[b] & _PAM_BITS[base]) for base in motif))
+
+
+def _found(finder, size, seq, a, b):
+    """How many of the positions a to b of ``seq`` start a match of ``finder``, a PAM of
+    ``size`` bases (_finder), a regex scan at a time over _CHUNK positions."""
+    return sum(len(finder.findall(seq, x, min(x + _CHUNK, b + 1) + size - 1))
+               for x in range(a, b + 1, _CHUNK))
+
+
+def _sites2(seq, pam, pam_len, at_start, stop_at_one=False):
+    """How many targets buildTST indexes in contig ``seq`` by the rule of index format 2
+    (docs/INDEX_FORMAT.md section 3.1: searchPAMonGenome and finishLeaf, CRISPRitz
+    2.10.0): on each strand, each site whose guide (the pam_len - len(pam) bases beside
+    its PAM) lies on the contig with no N in it, and whose PAM matches, wholly on the
+    contig -- or, for a PAM of N alone, whose flank base next to the guide is on the
+    contig. The pad plays no part: it may run off the contig or into an N. With
+    ``stop_at_one``, 1 as soon as one is found. None for a PAM that takes every base of a
+    target."""
+    size, n = len(pam), len(seq)
+    guide = pam_len - size
+    if guide < 1:
+        return None
+    if n < guide + 1:
+        return 0
+    total = 0
+    if all(_PAM_BITS[base] == 15 for base in pam):
+        # every position is a PAM on both strands: each guide of an N-free run, but one
+        # ending on the last base (its flank right of it is off the contig) and one
+        # starting on the first (its flank left of it)
+        for run in re.finditer("[^N]{%d,}" % guide, seq):
+            a, b = run.span()
+            total += max(0, min(b, n - 1) - guide - a + 1) + max(0, b - guide - max(a, 1) + 1)
+            if stop_at_one and total:
+                return 1
+        return total
+    if n < size:
+        return 0
+    # the PAM read forward is right of its guide for a 3' PAM, left of it for a 5' one;
+    # read reversed, the other way round. The PAM matches no N, so a site lies wholly in
+    # one N-free run
+    forward, reverse = _finder(pam), _finder(pam.translate(_REVERSE)[::-1])
+    right, left = (reverse, forward) if at_start else (forward, reverse)
+    for run in re.finditer("[^N]{%d,}" % (guide + size), seq):
+        a, b = run.span()
+        # PAM-right: the PAM at nt, the guide nt - guide to nt; PAM-left: the guide past it
+        if stop_at_one:
+            if right.search(seq, a + guide, b) or left.search(seq, a, b - guide):
+                return 1
+            continue
+        total += (_found(right, size, seq, a + guide, b - size)
+                  + _found(left, size, seq, a, b - size - guide))
+    return total
+
+
+def holds_target(seq, pam, pam_len, at_start, max_bulges, index_format=1):
+    """Whether buildTST indexes a target in contig ``seq`` (upper case, each base one of
+    ACGTN, the IUPAC codes and Q), for ``pam`` (the PAM itself, at the start of the
+    pam_len bases of a target with ``at_start``, as a 5' PAM), with ``max_bulges``, in an
+    index of ``index_format``. Format 1 (CRISPRitz 2.9.1): as searchPAMonGenome finds its
+    PAM on either strand, guideRegionHasN drops a window of pam_len + max_bulges bases
+    with an N outside its PAM, and main takes each kept window (a window at 0 as on the
+    minus strand). Format 2: _sites2."""
+    if index_format != 1:
+        return bool(_sites2(seq, pam, pam_len, at_start, stop_at_one=True))
     width, size, n = pam_len + max_bulges, len(pam), len(seq)
     if n < width:
         return False
@@ -168,13 +322,15 @@ def holds_target(seq, pam, pam_len, at_start, max_bulges):
     return False
 
 
-def count_targets(seq, pam, pam_len, at_start, max_bulges):
-    """How many targets buildTST (CRISPRitz 2.9.1) indexes in contig ``seq``, by the
-    rule of holds_target: on each strand, each position where searchPAMonGenome
-    finds its PAM and keeps its window inside the contig, and whose window of
-    pam_len + max_bulges bases guideRegionHasN keeps, with no N outside its PAM (the
-    window at 0 tested as on the minus strand). None for a PAM file whose PAM takes
-    every base of a target."""
+def count_targets(seq, pam, pam_len, at_start, max_bulges, index_format=1):
+    """How many targets buildTST indexes in contig ``seq`` in an index of
+    ``index_format``, by the rule of holds_target. Format 1 (CRISPRitz 2.9.1): on each
+    strand, each position where searchPAMonGenome finds its PAM and keeps its window
+    inside the contig, and whose window of pam_len + max_bulges bases guideRegionHasN
+    keeps, with no N outside its PAM (the window at 0 tested as on the minus strand).
+    Format 2: _sites2. None for a PAM file whose PAM takes every base of a target."""
+    if index_format != 1:
+        return _sites2(seq, pam, pam_len, at_start)
     width, size, n = pam_len + max_bulges, len(pam), len(seq)
     guide = width - size  # the bases of a window but its PAM
     if guide < 1:
@@ -247,21 +403,42 @@ def _read_contig(fasta):
     # (getline's last line, with no \n after it, is not taken; nor is the empty
     # string after a last \n)
     head, body = lines[0], b"".join(lines[1:-1]).upper()
-    if not head.startswith(b">") or body.translate(None, b"ACGTNRYSWKMBDHV"):
+    if not head.startswith(b">") or body.translate(None, b"ACGTNRYSWKMBDHVQ"):
         return None
     return head[1:].decode("utf-8", "surrogateescape"), body.decode("ascii")
 
 
 def _leaves(path):
-    """numLeaves of the .bin ``path``, or None where it cannot be read."""
+    """numLeaves of the .bin ``path``, of either index format (format 2 holds it after its
+    header, at header_len), or None where it cannot be read."""
     try:
         with open(path, "rb") as fh:
+            head = fh.read(12)
+            if head[:4] != index_fit.CZI_MAGIC:
+                return struct.unpack("=i", head[:4])[0]
+            fh.seek(struct.unpack("=i", head[8:12])[0])
             return struct.unpack("=i", fh.read(4))[0]
-    except (OSError, struct.error):
+    except (OSError, ValueError, struct.error):
         return None
 
 
-def missing_bins(directory, genome_dir, pam_file, max_bulges):
+def index_format(directory, default=None):
+    """The index format whose site rule fits the index ``directory`` (holds_target): that
+    of its .bin files, from their own headers (index_fit.bin_format), not that of the
+    installed CRISPRitz, which need not be the one that built it; the newest of them where
+    they differ (index-genome removes a folder before it builds into it, so such a folder
+    was put together from two builds). For a folder with no .bin: the format it records
+    (index_fit.recorded_format: the index of a CRISPRme build that found no target), else
+    ``default``, else 2 (docs/INDEX_FORMAT.md section 8): on an index CRISPRitz 2.9.1 built,
+    format 2's rule errs only by a false "holds a target", which asks for a rebuild, where
+    format 1's on one 2.10.0 built would pass a lost .bin off as an empty result."""
+    formats = [f for f in index_fit.bin_formats(directory) if f is not None]
+    if formats:
+        return max(formats)
+    return index_fit.recorded_format(directory) or default or 2
+
+
+def missing_bins(directory, genome_dir, pam_file, max_bulges, built_format=None):
     """``([(FASTA, contig, written, wanted)], [FASTA])``, of the FASTAs of
     ``genome_dir`` that index-genome indexed into ``directory`` (every ``*.fa``) with
     ``pam_file`` and ``max_bulges``: the first found whose index there lacks a
@@ -269,13 +446,17 @@ def missing_bins(directory, genome_dir, pam_file, max_bulges):
     (None: not counted); and, when none is, those this module would read otherwise
     than buildTST, which may (a byte other than an IUPAC base, CRLF line ends, a
     first line that is no header, a PAM file it cannot read). A contig lacks one when
-    it has none and holds a target (holds_target); when its parts are not 1 to the
+    it has none and holds a target (holds_target, by the rule of the index's format:
+    index_format, whose default ``built_format`` is, for a folder with no .bin and no
+    record of its format, the format of the CRISPRitz that has just built it, or that of
+    the index's other sub-indexes); when its parts are not 1 to the
     last one's number (it takes that many, at least); or when that last part holds
     TARGETS_A_TREE targets, as each part of a contig but its last does, and the
     contig holds more (count_targets). It reads the first line of each FASTA and the
     numLeaves of each contig's last part, then, whole, only the FASTAs of contigs
     without a .bin and of those whose last part is full, up to the first found."""
     pam = _read_pam(pam_file)
+    fmt = index_format(directory, built_format)
     try:
         bins = os.listdir(directory)
     except OSError:
@@ -309,10 +490,10 @@ def missing_bins(directory, genome_dir, pam_file, max_bulges):
         if contig is None:
             unread.append(name)
         elif head not in parts:
-            if holds_target(contig[1], *pam, max_bulges):
+            if holds_target(contig[1], *pam, max_bulges, fmt):
                 return [(name, contig[0], 0, None)], unread
         else:
-            count = count_targets(contig[1], *pam, max_bulges)
+            count = count_targets(contig[1], *pam, max_bulges, fmt)
             if count is None:
                 unread.append(name)
             elif count > len(parts[head]) * TARGETS_A_TREE:

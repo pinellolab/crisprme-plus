@@ -92,6 +92,12 @@ def chunk_upload(page, target, name, data, timeout_s=60):
         if text.startswith(("Upload complete", "Error", "Upload failed")):
             break
         page.wait_for_timeout(250)
+    # a refusal in the cards' red, all else in grey (a refusal was grey too)
+    colour = span.evaluate("el => getComputedStyle(el).color")
+    refused = text.startswith(("Error", "Upload failed"))
+    check(colour == ("rgb(187, 0, 0)" if refused else "rgb(85, 85, 85)"),
+          f"the uploader's {'refusal' if refused else 'message'} is shown in "
+          f"{'red' if refused else 'grey'} ({colour}: {text[:60]!r})")
     return text
 
 

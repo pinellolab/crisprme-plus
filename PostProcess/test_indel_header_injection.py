@@ -30,9 +30,8 @@ rows on N different chromosomes, each looking like a genuine, well-annotated
 variant off-target. Measured genome-wide on guide ACTGAAATCTGTAAGCAGGC at
 NRG 4+1+1 over HGDP+1kGP: 8 phantoms on a dedicated NRG index (= published
 2.8.0) and 11 on a K=8 pamless index, against an identical justified core of
-13,253 indel rows. Which row gets injected depends on what lands at line 1, so
-the count varied by index -- which is why the pamless/dedicated arms never
-agreed.
+indel rows. Which row gets injected depends on what lands at line 1, so the
+count varied by index -- which is why the pamless/dedicated arms never agreed.
 
 These tests assert:
   * pam_filter.py keeps a ``#`` header while still dropping a genuinely

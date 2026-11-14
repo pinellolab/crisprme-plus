@@ -58,6 +58,10 @@ on:
       # into each report, and falls back to test/data/samplesIDs/ for the sample lists.
       - "assets/**"
       - "test/data/**"
+      # the index set of 2.10.0 (the rebuild manifest), which crisprme_hf reads (the index
+      # of 2.10.0 that replaces an archive of 2.8.1) and test_index_set checks; the panel
+      # recipes it calls (seq_script/merge_panels/*.sh, test_panel_recipes) are under **.sh
+      - "seq_script/rebuild/**"
       # test_complete_search_flags reads every .py, .sh, .yml and .yaml file in the
       # repository, seq_script/ and the paper's scripts too, for a complete-search command
       # with a flag complete-search rejects.
@@ -72,8 +76,10 @@ on:
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
-    # The hosted job took 523 s at 2.8.1's first release head, and the steps have grown since.
-    timeout-minutes: 20
+    # The hosted job took 523 s at 2.8.1's first release head, and the steps have grown since:
+    # at 2.10.0's ca74f63 it was cancelled at its limit of 20 minutes, in its second-last step,
+    # with no step failed (run 43439883388).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -96,6 +102,14 @@ jobs:
         # they self-skip, leaving the coordinate-lift behaviour unguarded in CI.
         run: python -m pip install --upgrade pip requests numpy pandas matplotlib pysam pyliftover
 
+      - name: Install zsh (each command CRISPRme prints, and the blocks of the docs, are pasted into bash and into zsh)
+        # zsh, the default shell of macOS, reads a pasted '#' as a word, not a comment, and
+        # stops a command at a pattern that matches nothing: test_indel_window,
+        # test_mega_rebuild, test_build_index_only_atomic and test_indel_empty_chromosome paste
+        # the removals CRISPRme prints and docs/TROUBLESHOOTING.md's blocks into an interactive
+        # bash and an interactive zsh (wave 1c-b of 2.10.0), and skip the zsh half without it.
+        run: command -v zsh || { sudo apt-get update -qq && sudo apt-get install -y -qq zsh; }
+
       - name: Byte-compile the pipeline (syntax check)
         # pages/history_page.py + pages/settings_page.py: syntax-only (py_compile
         # doesn't execute imports), included here since test_history_page_assembly.py
@@ -109,7 +123,9 @@ jobs:
         run: python -m unittest test_crisprme_hf -v
 
       - name: "Web Settings download progress + failure relay (2.8.1; AST-extracted, no Dash)"
-        # with the names Settings refuses, which CRISPRme takes into shell commands
+        # with the names Settings refuses, which CRISPRme takes into shell commands; a job runs
+        # its argv without a shell, in a folder of its own, and Retry re-runs the command the
+        # server launched it with, never a cmd.json of the job's folder (2.10.0)
         working-directory: PostProcess
         run: python -m unittest test_settings_progress -v
 
@@ -123,6 +139,16 @@ jobs:
         # whole, and fails on a skip.
         working-directory: PostProcess
         run: python -m unittest test_web_shell_safety -v
+
+      - name: "No link another user put in the data folder is followed (safe_files; the pages' cases in web-e2e's image)"
+        # The web app followed a link a member of the data folder's group put in Results/,
+        # Settings/ and the job folders in them: it showed and served any file of the user's
+        # to anyone who could reach it, and wrote through one (2.10.0, the review of lane S,
+        # round 5, S-R5-2). How safe_files reads, writes and serves a file runs here; the
+        # pages' cases, through the real Dash server, run in web-e2e's in-image step
+        # (test_web_no_links), and the Settings page's here too (test_settings_progress).
+        working-directory: PostProcess
+        run: python -m unittest test_safe_files -v
 
       - name: HF fallback contract (hf_fetch must raise so callers fall back)
         working-directory: PostProcess
@@ -220,7 +246,15 @@ jobs:
         # read from the row's start: on the + strand with a 3' PAM (the - strand with a 5'
         # one) a deletion or an insertion in the protospacer moved them len(REF) - len(ALT)
         # bases, and a PAM the reference already has was flagged as created (the WALK
-        # panel's chr2:10000 and chr3:20000 rows, pinned here).
+        # panel's chr2:10000 and chr3:20000 rows, pinned here). Since 2.10.0 a PAM holding
+        # bases an insertion adds, or a deletion's junction, is judged wherever in its
+        # repeat the VCF writes the indel (indel_snp_cis.pam_reference_place: the reference
+        # bases it sits on in a placement that leaves it on the reference, else the
+        # reference PAM beside the protospacer's base that touches the PAM, else created),
+        # a complex record read as its replaced bases (the REF bases they replace) and its
+        # added or lost bases (an insertion's or a deletion's), and never created when the
+        # REF alignment is the ALT; the rule's own tests, against every placement built
+        # whole, are in test_indel_snp_cis.
         working-directory: PostProcess
         run: python -m unittest test_indel_pam_creation -v
 
@@ -233,6 +267,7 @@ jobs:
         working-directory: PostProcess
         run: |
           python test_indel_snp_overlay.py
+          python -m unittest test_indel_window -v
           python test_indel_genotypes.py
           python test_indel_snp_cis.py
           python test_indel_snp_bruteforce.py
@@ -257,14 +292,126 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_indel_haplotype_resolution test_indel_overlaid_rows test_check_alt_pam -v
 
-      - name: "Indel row coordinates (2.8.1: an RNA-bulge row starts at its first aligned base, the REF text keeps the target's gaps; both strands, PAM at either end)"
+      - name: "Indel row coordinates (2.8.1: an RNA-bulge row starts at its first aligned base, the REF text keeps the target's gaps; 2.10.0: a row whose first base is one an insertion adds starts at the insertion's anchor, and a PAM holding inserted bases or a deletion's junction is judged wherever in its repeat the VCF writes the indel; both strands, PAM at either end)"
         # Up to 2.8.0 analisi_indels_NNN.py took CRISPRitz's Cluster_Position for an
         # RNA-bulge row on the + strand with a 3' PAM and on the - strand with a 5' PAM,
         # one base before the first aligned base, and the REF text of an RNA,DNA row, and
-        # of a 5' PAM RNA-bulge row, was a base off. The shipped analyzer on planted
-        # alignments given as the engine reports them (pandas + numpy).
+        # of a 5' PAM RNA-bulge row, was a base off. Up to 2.8.1 a row whose first base is
+        # one an insertion adds started at that base's place on the haplotype, and a PAM
+        # holding inserted bases was judged on the REF text read from the row's start; an
+        # unreleased draft of 2.10.0's rules took a PAM made of inserted bases for created on
+        # every row, also on one starting on a reference base whose REF text is its ALT (a
+        # tandem duplication of the PAM's bases), and the next judged it where the VCF
+        # writes the insertion (a repeat unit inserted beside a reference PAM: created; on
+        # the - strand with a 3' PAM, a row starting on a reference base read its REF
+        # text's window, not the reference PAM beside the protospacer, also across a
+        # deletion's junction). The shipped analyzer on planted alignments given as the
+        # engine reports them (pandas + numpy).
         working-directory: PostProcess
         run: python -m unittest test_indel_row_coordinates -v
+
+      - name: "Indel row Variant_info_spacer+PAM (2.10.0: each variant counted along the target on the haplotype carrying the indel, as a SNP row counts it on the reference)"
+        # Up to 2.8.1 resultIntegrator counted an indel row's variants along the reference: a
+        # SNP past an insertion was len(ALT) - len(REF) bases short (long on the - strand), also
+        # on a row starting on a base an insertion adds, which 2.8.1 placed at that base's
+        # place on the haplotype (a SNP before that place got the first number, on the - strand
+        # the last), and one past a deletion as many long (short). Counted along the reference
+        # from the insertion's anchor, where 2.10.0 places such a row, it would be short (long)
+        # by the inserted bases the target holds, less one. The REAL integrator on bestMerge
+        # rows of both strands (GNU cut).
+        working-directory: PostProcess
+        run: python -m unittest test_indel_variant_positions -v
+
+      - name: "Independent real-data indel check (scripts/check_indel_rows.py: its own VCF reader, haplotype builder and aligner; mutation tests that corrupt a right row)"
+        # scripts/check_indel_rows.py is the second opinion on the indel path that
+        # validate-test cannot give: validate-test compares only the engine's SITES
+        # (chromosome, start, strand) on the reference and the SNV-only 1000 Genomes
+        # chr22 genome, so an indel row's coordinate, aligned strings, REF text,
+        # variants, carriers and the alternative-alignment table are never checked
+        # against an independent truth on real data. These tests build a reference, a
+        # phased VCF (plain gzip, and BGZF with a tabix index written by the test) and
+        # rows by hand, assert a right row raises nothing gating, and assert that each
+        # corruption of it is caught: the start shifted by 1 and by an insertion's offset
+        # (the 2.8.1 defect), one target base changed, the aligned spacer rewritten, a
+        # carrier swapped, added or dropped (also when the same target sits elsewhere),
+        # a named variant dropped, a cross-haplotype SNP, a phantom of the shape reported
+        # at chr22:22322768 on 2.8.0, an MNV row and an unphased row with a phantom
+        # base, a merge that keeps the worse of two alignments of one site or of one
+        # target (fewest block, CFD block, a CFD only three decimals tell apart: three
+        # real rows of chr22; one worse only by the merge's next sorting criterion, mm
+        # after mm+bulges or the criteria after a CFD tie), a fold across strands, a
+        # carrier listed for a sequence its MNV changes, a carrier
+        # outside the samples list, an ALT block that lost its variants, a population-
+        # level cluster dropped beside another cluster's row, a row placed past an
+        # insertion's anchor, two targets inside one insertion folded into one, a long
+        # deletion's far junction, a second indel that keeps the target's bases, another
+        # guide's row, a carrier whose second insertion pushes the record's bases out of
+        # the target, a carrier whose second indel puts an SNV's bases where it carries
+        # none, a population-level cluster joined to another only through a target no
+        # carrier holds, two genotyped VCFs that share samples (refused), calls of unknown
+        # phase on the record's REF span, a SNP named for a carrier whose slot's alleles
+        # overlap the record and that holds it on no slot, a slot read without its
+        # phasing artefact that lacks the row's target, a carrier off by rule in a fold
+        # group, a population-level cluster joined through a slot a complex allele takes
+        # off, a haploid SNP call beside a diploid record (the reference stays possible),
+        # a capped window's greedy row in a per-sample chain, inputs other than the
+        # search's (its datasets, budget, PAM, guides, samples list, mode: refused), a
+        # run read in the mode it ran (its .search_mode, not --ci-cd-test, which chooses
+        # none: a population-level cluster joined only by a worst-case SNP row; a run that
+        # records no mode, or contradictory ones, refused), a listed carrier whose slot
+        # has no one sequence and that METHODS' rules take off (a second deletion with a
+        # SNV on the base it deletes; both alts of a split site), two overlapping alleles
+        # that change no base of the target (the carrier judged: an unnamed SNV, a
+        # carrier left off, a dropped row), a carrier whose slot has no reading counted and
+        # never demanded, a slot read without its artefact that chains no target needing a
+        # second indel record, a completeness check of some of a run's guides naming the
+        # others, a PUTATIVE rule offered no choice on the record's own REF span (its
+        # anchor) and, in a search that scores no CFD, the reference base then A, C, G, T,
+        # a record's chain holding its sites-only dataset's rows whoever reads it first
+        # and no coded anchor, a search without bulges read from its --vcf list, a VCF's
+        # FILTER read as CRISPRme's stores read it (a genotyped record outside PASS and
+        # '.' is no record of the search, and its indels stay on their carriers'
+        # haplotypes only where the run read a phased indel store written before 2.10.0,
+        # which kept them: a SNP the search skips leaves its carrier listed, an indel it
+        # skips takes one off a target and off a SNP row on such a store only; a sites-only
+        # one's indels dropped, its SNVs open rows of its SNP rows' chain and none of its
+        # fake-indel windows, whose rows must name the dataset's own PASS SNVs), a search
+        # that says it read no genotype store (its log_verbose.txt, or a --per-sample
+        # search run population-level: refused), a run's release read from its records
+        # (2.10.0's .indexes_searched.txt; every allele of a split site from the variant
+        # index's Q flag or its enriched genome, so its target is demanded, a '*' line no
+        # split site; two listings of one SNV REF>ALT at a position one allele, on a line
+        # of several ALTs too, their calls merged by CRISPRitz 2.10.0's documented rule (a
+        # phased call beside an unphased one of as many copies stays phased), and on a
+        # genome of the last record the earlier line's carriers lost; a slot holding two
+        # ALTs of one position read by the PUTATIVE rule, a carrier it lists required; an
+        # alt of a line of several ALTs untied as CRISPRme's readers untie it (a '*' among
+        # the alts that settle its number, an indel's ALT not); the store's FILTER rule
+        # from the log; the INDELS index's format from its .bin, a 27-nt target at its
+        # fake-indel window's first base left out by format 1, limit-window-edge, and
+        # demanded of format 2, a bulged one read by its site (the guide's length from its
+        # PAM, and format 1's pad); a target or site past the window,
+        # limit-window-reach; no capped greedy row in a 2.10.0 run's chain; a SNP row over
+        # --max-degeneracy a row it may write or not; refused where the records do not
+        # tell and it matters), a search with CRISPRME_INDEL_SNP=0 (its log's NOTE:
+        # refused), one that read a genotyped dataset's indels with no phased indel store
+        # (its log's NOTE: refused), a run of 2.10.0 without its log where the VCF holds
+        # indels or MNVs (only the log says either: refused), and the
+        # SNP-row report (report-only) reading a SNP row's carriers as METHODS section 4
+        # does: a named variant outside the target, the 2.10.0 drop of a carrier whose slot
+        # holds an indel that changes the target (read through a repeat at its edge, an
+        # unreadable slot dropped), a carrier the merge joins from another alignment of the
+        # site, and an unphased individual listed for every subset of its variants.
+        # CRISPRme's documented limits (a split
+        # multi-allelic site, two indels in one target, a complex allele, a phasing
+        # artefact, a repeat unit at the target's edge, a PUTATIVE tie) must come out
+        # under their own non-gating class, and the driver must never pass silently (a
+        # chromosome no VCF covers, one FASTA of several contigs, a sites-only VCF alone
+        # or beside a genotyped one, whose rows list no carrier; a deletion longer than
+        # an unindexed read looks back; a tabix read yields each record once).
+        # Stdlib only -- the checker imports no CRISPRme module, nor do they.
+        working-directory: PostProcess
+        run: python -m unittest test_check_indel_rows -v
 
       - name: "Dict-less bulge cap + defaults + 0-bulge indel routing (v2.3.3)"
         working-directory: PostProcess
@@ -285,6 +432,31 @@ jobs:
       - name: "Observed-haplotype integration (real iupac_decomposition, sentinel tail intact)"
         working-directory: PostProcess
         run: python -m unittest test_observed_haplotype_integration -v
+
+      - name: "Every allele of a position read the same way (2.10.0: a VCF line of several ALTs, two records of one REF>ALT, two ALTs on one haplotype slot, Q, rsID and AF in their variant's place)"
+        # CRISPRitz 2.10.0 codes every ALT of a split site and writes Q at a position of four
+        # bases. The real new_simple_analysis.py on tiers and dictionaries the repository's
+        # compilers build, the real remove_contiguous_samples.py, and every reader of
+        # variant codes (pam_filter, the SNP overlay, the indel resolver, crispritz_bins,
+        # twopass_find, the cluster sort).
+        working-directory: PostProcess
+        run: python -m unittest test_site_alleles -v
+
+      - name: "Carrier gate (2.10.0: a population-level row's variants checked against phased haplotypes, ranked after the others when none carries them together, never dropped) + the per-sample rows (no carrier whose haplotype has an indel in the target; no greedy row of a dense window on the dictionaries) + download --what genotype-oracle"
+        # haplotype_prioritizer.py's tiers on stores the repository's own writers build (the
+        # phased SNP store, the phased indel store, a VCF line with two ALTs), the command
+        # the search runs (the integrated results left byte for byte as they were), the report
+        # that ranks by its companion, the real new_simple_analysis.py's per-sample rows on
+        # the dict-less tiers and on a classic dictionary, the real crisprme.py's gate flags
+        # and banner against test_build_index_only_atomic's stub engine, and the
+        # genotype-oracle download with the HuggingFace client stubbed (pandas + numpy +
+        # matplotlib, installed above).
+        working-directory: PostProcess
+        run: python -m unittest test_haplotype_prioritizer -v
+
+      - name: "SNP rows drop a carrier whose SNP haplotype holds an indel changing the target"
+        working-directory: PostProcess
+        run: python -m unittest test_snp_row_indel_carriers -v
 
       - name: "AF panel denominator uses VCF-filtered genotyped samples"
         working-directory: PostProcess
@@ -357,7 +529,9 @@ jobs:
 
       - name: "Modular scorer env-manager + runner (env lifecycle/state + subprocess protocol; no TF)"
         # scorer_env: detect env manager, create-command shape, atomic state file,
-        # health-check probe. scorer_runner: real stdin/stdout worker protocol against
+        # health-check probe, which with the self-test runs isolated (-I): a module put in the
+        # working directory, the data folder a search runs from, runs nothing (2.10.0).
+        # scorer_runner: real stdin/stdout worker protocol against
         # a stdlib fake worker + graceful-degradation paths. Neither needs TensorFlow.
         # test_crispr_bulge_fidelity, the CRISPR-Bulge fidelity gate, needs TensorFlow and
         # the Refined_TrueOT dataset, so here it skips: what this checks is that it imports
@@ -397,9 +571,19 @@ jobs:
       - name: "CFD score tables validation (JSON structure/counts/anchors; the committed tables are the source of truth)"
         run: python scripts/generate_cfd_tables.py --check
 
-      - name: "Index fit (which guide lengths an index answers; the search script says the same; an index a newer CRISPRitz built is refused, not misread)"
+      - name: "Index fit (which guide lengths an index answers; the search script says the same; an index the installed CRISPRitz cannot read is refused, not misread)"
         working-directory: PostProcess
         run: python -m unittest test_index_fit -v
+
+      - name: "Index format 2 (CRISPRitz 2.10.0's indexes: whole-tree check, site rule by the index's own format, an empty index's record, the scan's preference, .index_meta.json)"
+        # CRISPRme 2.8.1 called every format-2 .bin "not a tree", applied format 1's site rule
+        # to any index (passing a lost .bin off as a contig with no target), read no guide
+        # length from one, and refused every such index. The trees are made as buildTST 2.10.0
+        # writes them and the site rule is checked against buildTST's own loops (ported);
+        # test/index_format2/check_real_engine.py checks both against the real engine, which
+        # this job does not have (run it in an image with the engine under test).
+        working-directory: PostProcess
+        run: python -m unittest test_index_format2 -v
 
       - name: "A search's own enrichment (SNP overlay of the fake-indel genome + phased indel genotype store)"
         working-directory: PostProcess
@@ -440,16 +624,31 @@ jobs:
         # indexes/SHA256SUMS writer (hermetic; it must never emit an empty file), and
         # a chromosome with SNPs but no indels, which CRISPRitz 2.9.1's refusal of an
         # index dir without a .bin turned into a whole-run abort. Plus legacy-index
-        # access: dedicated-PAM and NNN_3 indexes are still listed and downloaded from
-        # the default repo only, and the catalog offers each name's fetchable copy.
+        # access: dedicated-PAM and NNN_3 indexes are still downloaded from the default
+        # repo only, and the catalog offers the indexes of 2.10.0. Plus the location of
+        # 2.10.0's indexes (index format 2) and each panel's Dictionaries bundle and
+        # genotype store, published and fetched once per panel (test_panel_companions),
+        # and the index set of 2.10.0 against the code, its rebuild run dry with every
+        # program stubbed (test_index_set), and the HGDP + 1000 Genomes and HPRC recipes it
+        # calls, run on stubs, stopping at a step that fails (test_panel_recipes).
+        # And the indel search's merge takes the header of its part files in as the line it is:
+        # a "$(...)" another user put there runs nothing (2.10.0).
         working-directory: PostProcess
         run: >
           python -m unittest test_indel_header_injection test_complete_search_flags
           test_index_resolution test_index_repo_routing test_legacy_index_access
           test_iupac_collapse_consistency test_hf_sha256sums
-          test_indel_empty_chromosome -v
+          test_indel_empty_chromosome test_panel_companions test_index_set test_panel_recipes -v
 
-      - name: "build-index-only leaves no partial index or enriched genome, and stops at a search's build lock (and on an index in a newer CRISPRitz format)"
+      - name: "The default PAM and index are NRR, and which index serves a search (2.10.0)"
+        # The NRR PAM file ships and a download of the PAM files installs it, the web form
+        # and its Load Example select it (pages/main_page.py, AST-extracted, no Dash), and
+        # the advice names its index. A search with no bulges builds no index: the shipped
+        # search script against test_index_resolution's stub engine.
+        working-directory: PostProcess
+        run: python -m unittest test_defaults_and_index_flex -v
+
+      - name: "build-index-only leaves no partial index or enriched genome, and stops at a search's build lock (and on an index in a format the installed CRISPRitz does not read)"
         # A later run takes an index directory or an enriched genome that is there for
         # a finished one. build-index-only builds each index in a hidden directory of
         # genome_library and renames it into place once the engine has succeeded, and
@@ -459,8 +658,8 @@ jobs:
         # fake-indel FASTA whole or not at all, and the build directories of runs that
         # are gone are reclaimed. While a search holds the build lock of an output it
         # would use or build, it stops with an ERROR, as it, and a search, do on an index in
-        # the format CRISPRitz 2.9.2 and later write (index format 2), which this release does
-        # not read. The real crisprme.py,
+        # an index format the installed CRISPRitz does not read (format 2, which CRISPRitz
+        # 2.10.0 and later write, under 2.9.1). The real crisprme.py,
         # pool_index_indels.py and overlay_indel_snps.py run against a stub engine on
         # PATH, and a successful build must leave the tree the code before the fix left.
         working-directory: PostProcess
@@ -473,6 +672,23 @@ jobs:
         # against test_build_index_only_atomic's stub engine.
         working-directory: PostProcess
         run: python -m unittest test_build_index_only_layout -v
+
+      - name: "A search refuses a variant index, or an enrichment it reads, of one build beside the Dictionaries of another (an index of 2.8.1 in a data folder upgraded to 2.10.0, and the other way)"
+        # A download of an index of 2.10.0 installs its panel's Dictionaries in place of those
+        # an archive of 2.8.1 installed: complete-search, and the search the web launches, ran
+        # the old index on with the new Dictionaries, and its indel search refused it hours
+        # later; and a search with no bulges scanned 2.8.1's enrichment in place, not the
+        # index, with them. Refused first now, in one line (index_dictionaries.py): the real
+        # crisprme.py and the search script, against test_build_index_only_atomic's stub engine.
+        working-directory: PostProcess
+        run: python -m unittest test_index_dictionaries -v
+
+      - name: "An enriched-genome kit's member list is the same for any packing of its files, and checks a kit once unpacked (scripts/kit_members.py)"
+        # A kit's tarball is not byte-reproducible (tar records each file's time, owner and
+        # order), so its SHA256SUMS proves a download, not what the kit holds: the member list,
+        # build-inputs/<dataset>.members.md5 beside it, does (2.10.0).
+        working-directory: PostProcess
+        run: python -m unittest test_kit_members -v
 
       - name: "CI and the documented self-test run what they say (job limit, path filters, in-image tests, every benchmark)"
         # The workflows and the docs, read as text: a job that is cancelled, never starts, or
@@ -501,7 +717,7 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_compute_backend -v
 
-      - name: "2.5.1 fast mode + mega + scoring (two-pass equivalence/CFD oracle, aggregate carrier-NA, mega registry/indel-AF)"
+      - name: "2.5.1 fast mode + mega + scoring (two-pass equivalence/CFD oracle, aggregate carrier-NA, mega registry/indel-AF, the 2.10.0 mega rebuild recipe)"
         # The two-pass population-level analysis (default since 2.5.3; opt-in `--fast` in
         # 2.5.1, renamed to the `--per-sample` opt-out in 2.5.4): lossless detection +
         # worst-case bound. Plus the all-source mega registry/indel-AF and aggregate
@@ -512,4 +728,50 @@ jobs:
           test_twopass_cfd_exact test_twopass_fast_equivalence test_twopass_legacy_cfd
           test_twopass_lynchpin_counterexamples test_aggregate_carrier_na
           test_build_mega_registry test_build_mega_indel_af test_lossless_dense
-          test_memory_check -v
+          test_memory_check test_prepare_mega_build_vcf test_mega_rebuild -v
+
+      - name: "The ambiguity budget (2.10.0): CRISPRME_IUPAC_CAP in bits, hyperdense windows and four-allele positions flagged, --max-degeneracy, the sites-only density guard"
+        # A three-allele column of a split site coded with every allele weighs log2(3) bits
+        # of the cap, a four-allele one (Q) 2, where the cap counted positions; a window of
+        # 2^20 sequences or more goes to the high-variant-density BED whatever the cap. The
+        # real new_simple_analysis.py and resultIntegrator.py on hand-built rows, the real
+        # crisprme.py complete-search against test_build_index_only_atomic's stub engine,
+        # and the report's dense-region column and inputs card.
+        working-directory: PostProcess
+        run: python -m unittest test_window_density test_sites_only_guard -v
+
+      - name: "The haplotype pre-check, its carriers-first indel twin and the K-skip (2.10.0): exact against every choice"
+        # haplotype_precheck against a brute-force enumeration of every choice of alleles,
+        # counted as new_simple_analysis's finalizer and indel_snp_cis.resolve_target count
+        # them; and the real new_simple_analysis.py with the pre-check on and off (the same
+        # files): a skipped target's reference row, bulged targets (RNA, DNA) skipped and kept
+        # on the dictionary path and the observed one, a minus-strand target, a registry-only
+        # dataset's rows, a fixing ALT a three-allele column lists second; one BED line a
+        # dense window; the K-skip; the wide-budget warning.
+        working-directory: PostProcess
+        run: python -m unittest test_haplotype_precheck -v
+
+      - name: "Option P (2.10.0): a chromosome's post-analysis in pieces, merged byte for byte"
+        # merge_pieces scores CRISPR-Bulge in the batches one process forms, and keeps one
+        # line a dense window and the first companion row of an identity whatever piece holds
+        # them; the pool's ranges and its first-failure stop; its pieces' folder 0700 and their
+        # dictionary copy JSON and 0600, in which a planted pickle runs nothing; the real
+        # new_simple_analysis.py and analisi_indels_NNN.py as one process and as pieces merged
+        # give the same files, and analisi_indels_NNN.py the same with its carriers-first
+        # pre-check on and off (a target at exactly the budget among them); the notes say
+        # what is off.
+        working-directory: PostProcess
+        run: python -m unittest test_postproc_pieces -v
+
+      - name: "What a scan of the source shows of loading code and of temporary names, and read-back values that reach a shell (2.10.0)"
+        # The pieces once read a pickle from the run's output folder, which its group could
+        # replace (2.10.0, the review of lane S, round 3), and every search ran the scorer's
+        # health check as "python -c" from the data folder (round 4): over every module's parse
+        # tree but the tests, no pickle, marshal, shelve or the like, no eval or exec, no unsafe
+        # YAML load, no tempfile.mktemp, no python -c, -m or - that is not isolated (-I); in the
+        # shell scripts, no eval, no name mktemp did not make, no python -c, -m or - that is not
+        # isolated. And process_summaries.py and assemble_cfd_graphs.py run nothing a line or a
+        # name another user put in a search's folder holds. What it cannot see, a folder others
+        # can write still allows (docs/TROUBLESHOOTING.md section 7).
+        working-directory: PostProcess
+        run: python -m unittest test_no_code_from_files -v

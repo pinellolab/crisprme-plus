@@ -12,9 +12,11 @@
 # WHAT THIS PRESERVES (provenance — recoverable per variant):
 #   INFO/AF          POOLED allele frequency, recomputed across ALL merged
 #                    samples (bcftools +fill-tags: AC/AN over the union panel).
-#                    This is what CRISPRme's enricher reports, for a record
-#                    whose INFO has AF where the first record has it (see
-#                    DEPENDENCIES: in this merge's output many records do not).
+#                    This is what CRISPRme's enricher reports: CRISPRitz
+#                    2.10.0's for every record, up to 2.9.1's only for a
+#                    record whose INFO has AF where the first record has it
+#                    (see DEPENDENCIES: in this merge's output many records
+#                    do not).
 #   INFO/AF_<SRC>    each source's ORIGINAL AF, kept verbatim (missing "." where
 #                    that source did not contain the variant).
 #   INFO/SRC         comma-list of the sources that contain the variant, e.g.
@@ -34,20 +36,21 @@
 #   robustness): it matches the AF key EXACTLY, so it takes the pooled AF and
 #   not AF_1000G/AFR_AF that appear earlier in the record; it also guards the
 #   multiallelic AF-count that bcftools merge can produce.
-#   BUT it looks for that key in the VCF's FIRST record only, and reads every
-#   later record's AF at the same place in INFO; a record whose INFO has AF at
-#   another place gets NO AF (its key there is not AF). This merge's records do
-#   not share one INFO layout: a site of one source has fewer keys before AF
-#   than a site of two (merge -m none writes the union of the sources' INFO
-#   keys, and +fill-tags appends AF after them), so every record whose layout
-#   differs from the first record's gets no AF in the index's indel log and
-#   classic per-sample dictionaries. Its indel then has no frequency on any
-#   index, nor its SNP on an index without the dict-less tiers (with them a
-#   SNP's frequency is the registry's AC/AN, counted from the genotypes). The
-#   retired NRG_3_hg38+hg38_1000G2021_HGDP index, built from this merge (via
+#   BUT up to CRISPRitz 2.9.1 it looks for that key in the VCF's FIRST record
+#   only, and reads every later record's AF at the same place in INFO; a
+#   record whose INFO has AF at another place gets NO AF (its key there is not
+#   AF). This merge's records do not share one INFO layout: a site of one
+#   source has fewer keys before AF than a site of two (merge -m none writes
+#   the union of the sources' INFO keys, and +fill-tags appends AF after them),
+#   so every record whose layout differs from the first record's gets no AF in
+#   the index's indel log and classic per-sample dictionaries. Its indel then
+#   has no frequency on any index such a CRISPRitz built, nor its SNP on one
+#   without the dict-less tiers (with them a SNP's frequency is the registry's
+#   AC/AN, counted from the genotypes). The retired
+#   NRG_3_hg38+hg38_1000G2021_HGDP index, built from this merge (via
 #   build_combined_panel.sh), has no AF for 14,567,429 of its 15,583,931
-#   indels. A known limit (METHODS section 8), to be fixed in the next CRISPRitz
-#   release; the recipe below is unchanged.
+#   indels. A known limit (METHODS section 8) of CRISPRitz 2.9.1 and earlier:
+#   2.10.0 finds each record's AF by its key. The recipe below is unchanged.
 #
 # USAGE:
 #   merge_vcf_panels.sh <out_vcf_dir> <chr>

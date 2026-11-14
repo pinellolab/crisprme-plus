@@ -25,6 +25,8 @@ from typing import Dict, Optional
 
 import pandas as pd
 
+import safe_files  # (PostProcess/: how the History page reads a job's files)
+
 _HISTORY_PAGE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pages", "history_page.py"
 )
@@ -43,14 +45,15 @@ _NAMES = [
 
 
 def _load_functions():
-    src = open(_HISTORY_PAGE).read()
+    with open(_HISTORY_PAGE) as fh:  # (left open, it printed a ResourceWarning)
+        src = fh.read()
     tree = ast.parse(src)
     # PARAMS_FILE/GUIDES_FILE are module-level constants history_page.py
     # imports from pages_utils.py, which itself needs a live Dash `app` --
     # inlined here with their known, stable values instead of importing it.
     ns = {
         "os": os, "datetime": datetime, "Dict": Dict, "Optional": Optional,
-        "PARAMS_FILE": ".Params.txt", "GUIDES_FILE": ".guides.txt",
+        "PARAMS_FILE": ".Params.txt", "GUIDES_FILE": ".guides.txt", "safe_files": safe_files,
     }
     found = set()
     for node in tree.body:
@@ -311,13 +314,14 @@ def _load_history_table():
     """construct_history_summary and history_table_body_, with what they call, from
     pages/history_page.py, the html components replaced by _Tag (no Dash here), and the
     form of a job's id, from pages/pages_utils.py."""
-    src = open(_HISTORY_PAGE).read()
+    with open(_HISTORY_PAGE) as fh:  # (left open, it printed a ResourceWarning)
+        src = fh.read()
     ns = {
         "os": os, "sys": __import__("sys"), "pd": pd, "datetime": datetime, "Dict": Dict,
         "List": __import__("typing").List, "Optional": Optional,
         "Tuple": __import__("typing").Tuple, "html": _Html, "URL": "",
         "PARAMS_FILE": ".Params.txt", "GUIDES_FILE": ".guides.txt", "LOG_FILE": "log.txt",
-        "RESULTS_DIR": "Results", "re": re,
+        "RESULTS_DIR": "Results", "re": re, "safe_files": safe_files,
     }
     names = set(_NAMES) | {"read_params", "process_genome", "construct_history_summary",
                            "history_table_body_", "_job_link"}

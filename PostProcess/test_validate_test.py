@@ -209,7 +209,7 @@ class ABenchmarkOffItsReferenceIsSkipped(unittest.TestCase):
         self.assertEqual(code, 0)
 
     def test_the_opt_out_leaves_out_the_bulge_2_benchmarks_saying_so(self):
-        # CRISPRME_SKIP_HEAVY=1, for a very small machine, on complete-test and validate-test
+        # CRISPRME_SKIP_HEAVY=1, to save time on a slow machine, on complete-test and validate-test
         code, lines, compared = self.run_validation("chr22", self.LIGHT, skip_heavy=True)
         self.assertEqual(compared, self.LIGHT)
         heavy = [n for n in self.every() if n not in self.LIGHT]
@@ -333,8 +333,9 @@ class TheFiveEditBenchmarksCatchALostSite(unittest.TestCase):
 
 
 class EveryInstallFindsTheFiveEditReferences(unittest.TestCase):
-    """benchmarks.json's reference_base_url is the main branch, and validate.py goes there
-    for a reference the install does not hold. Docker and source installs hold test/ whole,
+    """benchmarks.json's reference_base_url is the main branch, and validate.py goes there,
+    at the tag of the release that runs (or main itself, for a version with no tag yet), for
+    a reference the install does not hold. Docker and source installs hold test/ whole,
     and CI copies the branch's over the image, so a reference committed with a change is found
     before that change is merged. The Bioconda recipe leaves test/benchmark/brute-force-* out
     of its package: a new reference there would be a 404 on a Bioconda build of a release
@@ -343,9 +344,11 @@ class EveryInstallFindsTheFiveEditReferences(unittest.TestCase):
     # the recipe's own line (recipes/crisprme/build.sh in bioconda-recipes)
     RECIPE_LEAVES_OUT = "brute-force-*"
 
-    def in_the_bioconda_layout(self, reference, md5, download):
+    def in_the_bioconda_layout(self, reference, md5, download, base="https://main.example/",
+                               version=None):
         """download_brute_force_targets on a tree with what the recipe packages under
-        test/benchmark, in a results folder of its own, `download` stubbed."""
+        test/benchmark, in a results folder of its own, `download` stubbed, for the
+        references at ``base`` and the release ``version``."""
         with tempfile.TemporaryDirectory() as d:
             shutil.copytree(REFERENCES, os.path.join(d, "test", "benchmark"),
                             ignore=shutil.ignore_patterns(self.RECIPE_LEAVES_OUT))
@@ -356,7 +359,7 @@ class EveryInstallFindsTheFiveEditReferences(unittest.TestCase):
                 with mock.patch.object(validate, "__file__", os.path.join(d, "PostProcess", "validate.py")), \
                      mock.patch.object(validate, "download", side_effect=download) as fetched, \
                      contextlib.redirect_stderr(io.StringIO()):
-                    path = validate.download_brute_force_targets("https://main.example/", reference, md5)
+                    path = validate.download_brute_force_targets(base, reference, md5, version)
                 return os.path.relpath(path, d) if path.startswith(d) else path, fetched.call_args
             finally:
                 os.chdir(cwd)
@@ -384,6 +387,33 @@ class EveryInstallFindsTheFiveEditReferences(unittest.TestCase):
         path, fetched = self.in_the_bioconda_layout(bench["reference"], bench["md5"], from_main)
         self.assertEqual(fetched.kwargs["http_url"], "https://main.example/" + bench["reference"])
         self.assertTrue(path.endswith(os.path.basename(bench["reference"])))
+
+    def test_a_download_is_of_this_releases_tag(self):
+        # its md5 is the one recorded with this release, and the main branch regenerates a
+        # reference now and then: every installed release fetched main's, and failed
+        # validate-test that day (C11/P7). A version with no tag yet reads main's.
+        bench, _ = registered("cas12a_hbg_simple")
+        ref = os.path.join(REFERENCES, bench["reference"])
+        main = validate.load_benchmarks()["reference_base_url"]
+        self.assertTrue(main.endswith("/pinellolab/crisprme-plus/main/test/benchmark/"), main)
+
+        def fetch(dest, http_url):
+            copy = os.path.join(dest, os.path.basename(http_url))
+            shutil.copyfile(ref, copy)
+            return copy
+        for tag_there, base in ((True, main.replace("/main/", "/v2.10.0/")), (False, main)):
+            with self.subTest(tag_there=tag_there), \
+                    mock.patch.object(validate, "_url_exists", return_value=tag_there) as asked:
+                path, fetched = self.in_the_bioconda_layout(bench["reference"], bench["md5"],
+                                                            fetch, base=main, version="2.10.0")
+                self.assertEqual(fetched.kwargs["http_url"], base + bench["reference"])
+                self.assertEqual(asked.call_args.args,
+                                 (main.replace("/main/", "/v2.10.0/") + bench["reference"],))
+        # the registry's fallback names main as refs/heads/main
+        self.assertEqual(validate.release_base_url(
+            validate._FALLBACK_BENCHMARKS["reference_base_url"], "2.10.0"),
+            "https://raw.githubusercontent.com/pinellolab/crisprme-plus/v2.10.0/test/benchmark/")
+        self.assertIsNone(validate.release_base_url(main, None))
 
     def test_every_committed_reference_has_its_registered_md5(self):
         # a wrong one would send validate.py past the committed copy to the network
@@ -465,7 +495,8 @@ class TheCliCallerAddsNoTraceback(unittest.TestCase):
                 crisprme.validate_test()
         self.assertEqual(cm.exception.code, 1)
         (cmd,), _ = msub.call.call_args
-        self.assertTrue(cmd.endswith("validate.py chr22"), cmd)
+        # (with its version: validate.py downloads the references of this release's tag)
+        self.assertTrue(cmd.endswith(f"validate.py chr22 {crisprme.__version__}"), cmd)
 
     def test_a_passed_validation_returns(self):
         with mock.patch.object(crisprme, "input_args", self.ARGV), \

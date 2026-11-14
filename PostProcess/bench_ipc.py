@@ -54,7 +54,7 @@ def main():
     # (handshake works, first batch deadlocks/broken-pipe). Invoking the env python
     # by absolute path is both the fix and what the production runner should do.
     env_python = subprocess.check_output(
-        [MAMBA, "run", "-n", args.env, "python", "-c", "import sys;print(sys.executable)"],
+        [MAMBA, "run", "-n", args.env, "python", "-I", "-c", "import sys;print(sys.executable)"],
         text=True,
     ).strip().splitlines()[-1]
     print(f"[ipc] env python: {env_python}")

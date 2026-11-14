@@ -22,6 +22,7 @@ on:
       - "test/data/**"
       - "test/indel_snp_oracle/**"
       - "scripts/check_alt_pam.py"
+      - "scripts/check_indel_rows.py"
       - "crisprme.py"
       - ".github/workflows/validate-benchmarks.yml"
       - "test/index_flex/**"
@@ -37,6 +38,7 @@ on:
       - "test/data/**"
       - "test/indel_snp_oracle/**"
       - "scripts/check_alt_pam.py"
+      - "scripts/check_indel_rows.py"
       - "crisprme.py"
       - ".github/workflows/validate-benchmarks.yml"
       - "test/index_flex/**"
@@ -164,12 +166,16 @@ jobs:
           # image layer, so it never caught it. Here we chmod the code dir READ-ONLY
           # (mimicking Apptainer) and run a reference-only search that PRODUCES HITS (so
           # the graphical/summary reference branch — where the bug lived — actually runs).
-          # A regression fails with "Read-only file system" / "Genome enrichment failed".
-          mkdir -p rowork
-          docker run --rm $BRANCH_MOUNT -v "${PWD}/rowork:/DATA" -w /DATA "$IMG" bash -c '
+          # A regression fails with "Permission denied" / "Genome enrichment failed".
+          # The container runs as root, and root writes through permission bits with
+          # CAP_DAC_OVERRIDE: the container drops it, or chmod a-w makes nothing read-only and
+          # the step cannot fail (CI-1). Its working folder is the container's own, which root
+          # owns: a bind-mounted folder of the runner's user is not root's to write in either.
+          docker run --rm --cap-drop DAC_OVERRIDE $BRANCH_MOUNT "$IMG" bash -c '
             set -e
             cp /branch/crisprme.py /opt/conda/bin/crisprme.py
             cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
+            mkdir -p /tmp/rowork && cd /tmp/rowork
             mkdir -p Genomes/synth PAMs
             # genome = guide + NGG PAM repeated -> guaranteed hits (exercises post-analysis)
             python -c "open(\"Genomes/synth/chrS.fa\",\"w\").write(\">chrS\n\"+(\"ACGTACGTACGTACGTACGTAGG\"*200)+\"\n\")"
@@ -197,19 +203,33 @@ jobs:
         run: |
           # A small reference with SpCas9 sites that need an indel, a SNP or both, in
           # cis, in trans, unphased and as two indels on one haplotype; build-index-only
-          # then complete-search both ways, and every indel row is checked against each
+          # then complete-search both ways, and every indel row (and, since 2.10.0, the
+          # carriers of every per-sample SNP-only row) is checked against each
           # carrier's own haplotype built from the VCF (test/indel_snp_oracle): the PAM,
           # the CFD of the row's alignment, its mismatches, that every listed carrier has
           # the sequence, the planted sites' expected rows and the co-occurrence
           # companion. Up to 2.8.0 the post-analysis read the overlay's IUPAC codes
           # column by column without genotypes and failed it (TGA/AGA PAMs, phantom
-          # 0-edit targets, chimeras of two samples' variants). A few minutes.
+          # 0-edit targets, chimeras of two samples' variants). Sites X and X2: an
+          # insertion holding two targets lists both, at its anchor (the merge compares a
+          # site's alignments where they are on the haplotype), and one holding a target
+          # twice lists it once. Sites T and T2: an insertion after a reference
+          # protospacer that copies the reference's PAM there, or adds one before
+          # another: not created. Sites PR, PM, QC, QN, QD, QW, QA (and the Cas12a
+          # profile's CB1, CB3): a PAM holding inserted bases, or a deletion's junction, is
+          # judged wherever in its repeat the VCF writes the indel (2.10.0; the oracle
+          # builds every placement on the haplotype the row's variants make). Then the
+          # Cas12a profile (5' PAM TTTV): targets whose first base is one an insertion
+          # adds, on both strands. Up to 2.8.1 such rows started past the anchor, their
+          # variants were numbered along the reference, and a PAM holding inserted bases
+          # was judged on the REF text read from the row's start. A few minutes each.
           mkdir -p orcwork
           docker run --rm $BRANCH_MOUNT -v "${PWD}/orcwork:/W" "$IMG" bash -c '
             set -e
             cp /branch/crisprme.py /opt/conda/bin/crisprme.py
             cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
             bash /branch/test/indel_snp_oracle/run_oracle.sh /W/run /branch/test/indel_snp_oracle
+            bash /branch/test/indel_snp_oracle/run_oracle.sh /W/run12a /branch/test/indel_snp_oracle cas12a
           '
 
       - name: complete-test (chr22, 1000G) for all registered benchmarks
@@ -248,6 +268,73 @@ jobs:
             echo "FAIL: a benchmark did not run"; exit 1
           fi
 
+      - name: "Independent real-data indel check on the chr22 self-test output (scripts/check_indel_rows.py)"
+        # validate-test above compares only the engine's SITES (chromosome, start,
+        # strand) on the reference and the SNV-only 1000 Genomes chr22 genome, so an
+        # indel row's coordinate, aligned strings, REF text, variants, carriers and the
+        # alternative-alignment table are never checked against an independent truth
+        # (test/benchmark/README.md says so). This step is that check, on the output
+        # complete-test just produced: scripts/check_indel_rows.py writes each sample's
+        # haplotypes itself from the self-test's 1000 Genomes VCF, keeps its own map
+        # from haplotype bases to reference coordinates, and aligns with its own
+        # exhaustive DP aligner -- it imports and copies no CRISPRme code and runs on the
+        # runner, stdlib only, no image (the CFD tables in PostProcess/ are read as data).
+        # Soundness on each benchmark with its own budget (test/benchmark/benchmarks.json),
+        # then completeness of cas9_sg1617 on the whole of chr22 (about 3 min on 4
+        # processes; the step about 4 min). complete-test's searches run in
+        # complete-search's default mode, population-level on the index it builds (their
+        # .search_mode; --ci-cd-test chooses no mode, it keeps the intermediate files), and
+        # write no alternative alignments (.alt_mode = no-alt-alignments), so completeness
+        # is checked per merge cluster here, its SNP rows each alignment's worst case (the
+        # cluster's row must have no more edits than each target and at least its CFD); the
+        # per-sample
+        # completeness gate is the release checklist's step 4c on a real panel, and the
+        # SNP+indel oracle above. Non-gating limit lines (documented CRISPRme limits)
+        # are printed and uploaded on failure; any gating line fails the step, once every
+        # benchmark has been checked (fail=1 records it), so the uploaded findings hold
+        # them all.
+        run: |
+          set -euo pipefail
+          ref=work/Genomes/hg38_chr22
+          vcf=$(ls work/VCFs/hg38_1000G/*.vcf.gz | head -1)
+          [ -d "$ref" ] && [ -n "$vcf" ] || { echo "FAIL: no self-test genome/VCF"; exit 1; }
+          fail=0
+          # name:PAM:mm:bDNA:bRNA:max-total-edits:guide file, from test/benchmark/benchmarks.json
+          for spec in cas9_sg1617:20bp-NGG-SpCas9.txt:4:1:1:6:sg1617_test_guide.txt \
+                      cas12a_hbg:TTTV-20bp-Cas12a.txt:4:1:1:6:hbg_cas12a_test_guide.txt \
+                      cas9_sg1617_n5:20bp-NGG-SpCas9.txt:6:2:2:5:sg1617_test_guide.txt \
+                      cas12a_hbg_n5:TTTV-20bp-Cas12a.txt:6:2:2:5:hbg_cas12a_test_guide.txt \
+                      cas9_sg1617_simple:20bp-NGG-SpCas9.txt:6:2:2:3:sg1617_test_guide.txt \
+                      cas12a_hbg_simple:TTTV-20bp-Cas12a.txt:6:2:2:3:hbg_cas12a_test_guide.txt; do
+            IFS=: read -r name pam mm bd br mt gf <<< "$spec"
+            d=work/Results/crisprme-test-out_$name
+            ls "$d"/*integrated_results.tsv >/dev/null 2>&1 || {
+              echo "[$name] no integrated results table (no row in budget); nothing to check"; continue; }
+            echo "=== check_indel_rows $name ($mm/$bd/$br, cap $mt)"
+            python3 scripts/check_indel_rows.py --results "$d" --reference "$ref" \
+              --vcf "$vcf" --pam "work/PAMs/$pam" --guide "work/$gf" --mm "$mm" --bDNA "$bd" \
+              --bRNA "$br" --max-total-edits "$mt" --chrom chr22 --mode soundness \
+              --out "check_indel_rows_$name.tsv" || fail=1
+          done
+          echo "=== check_indel_rows completeness (cas9_sg1617, chr22)"
+          python3 scripts/check_indel_rows.py \
+            --results work/Results/crisprme-test-out_cas9_sg1617 --reference "$ref" \
+            --vcf "$vcf" --pam work/PAMs/20bp-NGG-SpCas9.txt --guide work/sg1617_test_guide.txt \
+            --mm 4 --bDNA 1 --bRNA 1 --max-total-edits 6 --chrom chr22 --mode completeness \
+            --jobs 4 --out check_indel_rows_completeness.tsv || fail=1
+          if [ "$fail" -ne 0 ]; then
+            echo "FAIL: a gating finding (the check_indel_rows_*.tsv findings are uploaded)"
+            exit 1
+          fi
+
+      - name: Upload the indel-check findings on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: check-indel-rows-findings
+          path: check_indel_rows_*.tsv
+          if-no-files-found: ignore
+
       - name: "ALT-PAM and no-N release gate on the chr22 outputs (no ALT row shows a PAM the search did not match, no reported target holds an N)"
         run: |
           # scripts/check_alt_pam.py: every ALT-origin block of every integrated results
@@ -255,14 +342,18 @@ jobs:
           # Params.txt), with no IUPAC code left. Blind to a motif that allows the base a
           # misreading produces (NRR's last position): the unit tests cover that. And no
           # REF or ALT target of any block may hold an N, an assembly gap, which matches
-          # no guide and no PAM.
+          # no guide and no PAM; but an indel row's REF text, the reference at its
+          # coordinates, may where the run's genome (work/Genomes/<Genome_ref>) itself
+          # holds an N there (2.10.0).
           shopt -s nullglob
           tables=(work/Results/crisprme-test-out_*/*integrated_results.tsv)
           if [ "${#tables[@]}" -eq 0 ]; then echo "FAIL: no integrated results under work/Results"; exit 1; fi
           python3 scripts/check_alt_pam.py "${tables[@]}"
 
+      # also when the job is cancelled: up to three tries of complete-test, each of every
+      # benchmark, can reach timeout-minutes, which cancels the job, and its logs were lost
       - name: Upload logs on failure
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: crisprme-test-out-logs

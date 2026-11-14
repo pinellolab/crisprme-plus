@@ -21,8 +21,10 @@ strip COSMIC from the active annotation when the licence has not been attested.
 """
 
 import gzip
+import io
 import json
 import os
+import tempfile
 from typing import Tuple
 
 # stored under <data_dir>/Annotations/
@@ -59,16 +61,34 @@ def get_cosmic_license(annotations_dir: str) -> dict:
         return {}
 
 
+def license_record(enabled: bool, attestation: str = "") -> str:
+    """The text of the attestation record: what set_cosmic_license writes, and what the web
+    Settings write through safe_files (pages_utils.set_cosmic_license)."""
+    return json.dumps({"version": 1, "enabled": bool(enabled), "attestation": attestation or ""})
+
+
 def set_cosmic_license(annotations_dir: str, enabled: bool, attestation: str = "") -> None:
-    """Persist the COSMIC attestation atomically (tmp + os.replace)."""
+    """Persist the COSMIC attestation atomically: a temporary file of a name of its own
+    (mkstemp: O_EXCL, O_NOFOLLOW), its mode set through its descriptor, renamed over the
+    record. Annotations/, where the record is, may be writable by a group, and anyone who can
+    write it can rename the temporary file away and put a link in its place: a fixed
+    temporary name was written through a link another user put there under it, and a mode
+    set by the temporary file's name (os.chmod) followed such a link, making the file it
+    names readable by all, the email settings with their app password say (the review of
+    wave 1c-a, A1). The web Settings write the record through safe_files
+    (pages_utils.set_cosmic_license)."""
     os.makedirs(annotations_dir, exist_ok=True)
-    tmp = license_path(annotations_dir) + ".tmp"
-    with open(tmp, "w") as fh:
-        json.dump(
-            {"version": 1, "enabled": bool(enabled), "attestation": attestation or ""},
-            fh,
-        )
-    os.replace(tmp, license_path(annotations_dir))
+    fd, tmp = tempfile.mkstemp(prefix=f"{COSMIC_LICENSE_FILE}.", suffix=".tmp",
+                               dir=annotations_dir)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            os.fchmod(fh.fileno(), 0o644)  # (readable as the fixed name was: mkstemp makes 0600)
+            fh.write(license_record(enabled, attestation))
+        os.replace(tmp, license_path(annotations_dir))
+    except BaseException:
+        if os.path.lexists(tmp):
+            os.remove(tmp)
+        raise
 
 
 def _open_maybe_gz(path: str, mode: str):
@@ -112,15 +132,30 @@ def strip_cosmic(in_bed: str, out_bed: str) -> Tuple[int, int]:
     # (one renames it away, the other hits FileNotFoundError). The final os.replace to
     # the shared out_bed is atomic and the content is identical, so last-writer-wins.
     tmp = out_bed + f".{os.getpid()}.tmp"
-    # compression of the temp file must match the FINAL name, not the ".tmp" suffix
-    dst_open = gzip.open(tmp, "wt") if out_bed.endswith(".gz") else open(tmp, "wt")
-    with _open_maybe_gz(in_bed, "rt") as src, dst_open as dst:
-        for line in src:
-            if line and line[0] not in "#\n" and is_cosmic_row(line):
-                dropped += 1
-                continue
-            dst.write(line)
-            if line.strip() and line[0] != "#":
-                kept += 1
-    os.replace(tmp, out_bed)
+    # Made here, never through a name that already stands (O_EXCL): in a folder other
+    # users can write (a shared data folder's Annotations/), one of them could have put a
+    # link there under this name, to a file of the user's that the strip would then
+    # overwrite with the annotation's lines. Such a name raises OSError (FileExistsError),
+    # which the caller takes as a folder it cannot write. Its mode is open()'s, the umask's.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    try:
+        with os.fdopen(fd, "wb") as raw:
+            # compression of the temp file must match the FINAL name, not the ".tmp" suffix
+            dst_open = (gzip.open(raw, "wt") if out_bed.endswith(".gz")
+                        else io.TextIOWrapper(raw))
+            with _open_maybe_gz(in_bed, "rt") as src, dst_open as dst:
+                for line in src:
+                    if line and line[0] not in "#\n" and is_cosmic_row(line):
+                        dropped += 1
+                        continue
+                    dst.write(line)
+                    if line.strip() and line[0] != "#":
+                        kept += 1
+        os.replace(tmp, out_bed)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     return kept, dropped

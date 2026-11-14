@@ -12,7 +12,8 @@ reference off-target row -- we simply never fabricate a carrier-less worst case.
 
 Fixture: 4 UNPHASED variant columns for one sample S, allowed_mms=1. The observed union
 {all 4} = 2 mismatches FAILS the budget, the reference {none} = 2 mismatches FAILS, and
-capped (IUPAC_CAP=2 < 4 cols) the sub-combination enumeration collapses to the union, so
+capped (IUPAC_CAP=2 < the window's 4 bits: 4 two-base columns spell 2^4 sequences) the
+sub-combination enumeration collapses to the union, so
 NO observed haplotype survives. Under the fix the region therefore surfaces NO variant row
 (only the .bed entry). Uncapped (IUPAC_CAP=10) the 0mm sub-combination IS enumerated and
 surfaces with its real carrier -- the control, unchanged. (A single-sample in-budget
@@ -47,9 +48,11 @@ def _build(iupac_cap):
     ref[21], ref[22] = "G", "G"  # PAM cols 20,21,22 == A,G,G -> matches NGG
     genome = "".join(ref)
 
+    # each variant column as the IUPAC code of its two alleles, as the variant genome writes
+    # it (N would be an assembly gap: it spells no sequence, so no bit of the cap)
     dna = list(genome)
-    for i in range(4):
-        dna[i] = "N"  # ambiguity marker at the 4 variant columns
+    dna[0] = dna[1] = "M"  # C or A
+    dna[2] = dna[3] = "W"  # A or T
     dna = "".join(dna)
 
     split = [
@@ -89,6 +92,9 @@ def _run(iupac_cap):
     ns["_phase_confirmation_rows"].clear()
     ns["_phase_confirmation_keys"].clear()
     cluster = []
+    # the main loop lists a dense window in the high-variant-density BED from the raw
+    # target's letters, before it is decomposed (2.10.0: _record_dense_window)
+    ns["_record_dense_window"](split)
     ns["iupac_decomposition"](split, GUIDE.replace("-", ""), GUIDE_NO_PAM, cluster)
     return cluster, ns
 
@@ -103,7 +109,7 @@ def _variant_rows(rows):
 
 class TestHvdrGreedyCap(unittest.TestCase):
     def test_capped_region_emits_no_synthetic_chimera_row(self):
-        """CAPPED (IUPAC_CAP=2 < 4 cols), every observed haplotype gated by the mismatch
+        """CAPPED (IUPAC_CAP=2 < 4 bits), every observed haplotype gated by the mismatch
         budget: --per-sample emits NO synthetic cross-sample worst-case row (2.7.10 "no
         observed carrier -> no report"). The region is still surfaced by the reference row
         + the high-variant-density BED, never a fabricated carrier-less chimera."""
@@ -115,7 +121,8 @@ class TestHvdrGreedyCap(unittest.TestCase):
             % [(r[7], r[12]) for r in var],
         )
         # the region is STILL surfaced in the high-variant-density BED (visibility kept)
-        self.assertIn("chrT", ns["hvdr_bed"].getvalue())
+        self.assertIn("chrT", "".join(ns["hvdr_line"]("chrT", key, rec)
+                                      for key, rec in ns["_hvdr_records"].items()))
 
     def test_uncapped_also_finds_it_via_subcombinations(self):
         """CONTROL: uncapped (IUPAC_CAP=10) the sub-combination enumeration already

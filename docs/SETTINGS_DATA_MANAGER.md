@@ -39,11 +39,10 @@ Type an assembly name and pick a source:
   refused, as by an upload, and nothing is installed: if it holds two genomes (the two
   haplotypes of an assembly), install each under a name of its own. A download replaces a
   genome installed under its name only once it is laid out: one that is refused leaves
-  that genome as it was. Unlike an upload, a
-  `.fasta` file that needs none of this stays a `.fasta` file, which no index or search
-  reads, and the hidden files of an archive go in too (the `._chr1.fa` that macOS `tar`
-  adds beside `chr1.fa`, with which a command-line search stops): rename or remove them in
-  the genome folder, or upload the archive instead.
+  that genome as it was. As for an upload, a `.fasta` file goes in as a `.fa` file (the
+  files an index and a search read), so `chr1.fa` and `chr1.fasta` are two of one name, and
+  the hidden files of an archive are left out (the `._chr1.fa` that macOS `tar` adds beside
+  `chr1.fa`). Before 2.10.0 the two went in as they were.
   Like an upload, it is refused while indexes or variant genomes built on a genome of that
   name are installed, and the page says so before anything is fetched: the link can hold
   another genome than the one they were built from. Download it under another name, or
@@ -82,7 +81,7 @@ crisprme.py download --what genome --ref susScr11 --source ucsc
 
 ### Add an index (or build one)
 Bulge-enabled searches need a genome **index**.
-- **Download** a ready-made index from HuggingFace by name (e.g. `NRG_3_hg38`).
+- **Download** a ready-made index from HuggingFace by name (e.g. `20-NRR_3_hg38`, of the default PAM).
 - **Build locally** from an installed genome + PAM + bulge counts.
 - **Pre-build a variant-aware index**: pick a VCF dataset in the build panel and
   CRISPRme enriches the genome with the variants and indexes it ahead of time, so
@@ -94,7 +93,7 @@ Bulge-enabled searches need a genome **index**.
   combined samplesID list): per-sample analysis and the dataset's data type on the
   search form need them, and the index is self-complete for fast post-analysis. (CLI
   equivalent:
-  `crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --bDNA 2 --bRNA 2 --vcf VCFs/hg38_HGDP1kGP --samplesID samplesIDs.config.txt`.)
+  `crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRR-SpCas9.txt --bDNA 2 --bRNA 2 --vcf VCFs/hg38_HGDP1kGP --samplesID samplesIDs.config.txt`.)
   The tiers take memory: at panel scale ~150-180 GB a chromosome, by default up to 4
   chromosomes at once (`CRISPRME_TIER_WORKERS` in the container's environment sets how
   many). A worker that runs out sends the chromosomes left to one at a time. If one dies
@@ -129,16 +128,17 @@ Bulge-enabled searches need a genome **index**.
 ### Add a VCF dataset
 Variant datasets are large, so they are **fetched server-side** rather than
 uploaded from the browser: from HuggingFace, an existing server folder already on
-the machine (registered in place), or a chunked upload for a local file. An upload
-takes a dataset's `.vcf.gz` files and their `.tbi` or `.csi` index, into a dataset
-added by upload or download: a server folder registered as a dataset is read where
-it is, and nothing is uploaded into it (copy the file into that folder). Pick the
-reference genome the VCF is called against on the card first: the search form
-offers the dataset for that genome, whatever the dataset's name. Your VCF does
-**not** need special preparation — a single multi-chromosome `.vcf.gz` is
-**auto-split per chromosome** when you build an index from it (its `.tbi` is
-optional: CRISPRme indexes a bgzip or plain-gzip file itself), and a SNP-only VCF
-(no indels) builds a complete SNP variant index.
+the machine (registered in place, through a link the page makes in `VCFs/`, which it
+follows where `VCFs/` is writable by you alone: see below), or a chunked upload for a
+local file. An upload takes a dataset's `.vcf.gz` files and their `.tbi` or `.csi`
+index, into a dataset added by upload or download: a server folder registered as a
+dataset is read where it is, and nothing is uploaded into it (copy the file into
+that folder). Pick the reference genome the VCF is called against on the card
+first: the search form offers the dataset for that genome, whatever the dataset's
+name. Your VCF does **not** need special preparation — a single multi-chromosome
+`.vcf.gz` is **auto-split per chromosome** when you build an index from it (its
+`.tbi` is optional: CRISPRme indexes a bgzip or plain-gzip file itself), and a
+SNP-only VCF (no indels) builds a complete SNP variant index.
 
 A search reads the dataset's samples from `samplesIDs/<dataset>.samplesID.txt`
 (tab-separated `#SAMPLE_ID POPULATION_ID SUPERPOPULATION_ID SEX`). When the dataset
@@ -219,4 +219,23 @@ Run any subcommand with `--help` for its full option list.
 Downloads and index builds run in the background on a dedicated slot (so they
 never slow down searches) and report **live progress** in the Activity panel.
 When one finishes, the installed-data and storage panels update automatically and
-the new data is immediately available in the search form.
+the new data is immediately available in the search form. One that fails shows its
+log and a **Retry**, which runs it again with the command the server launched it with
+(a download resumes what it had fetched). The server keeps that command in memory, not
+in a file of `Settings/`, which others may be able to write (2.10.0): after a restart
+of the web app, start the operation again from its card. A job's folder in `Settings/`
+is writable by the web app's user alone, and the page follows no link another user put
+in `Settings/`, nor anywhere else in the data folder (2.10.0): before 2.10.0 the log
+panel showed what a link put at a job's log named, any file of yours, to anyone who could
+reach the web app, and a job wrote its log through one. An uploaded genome or
+personal-assembly bundle is unpacked in a folder the page makes for it in `Genomes/` or
+`Assemblies/` and uses through its descriptor alone: another user who renames that folder
+and puts a link to a folder of yours in its place gets nothing written there (before 2.10.0
+the upload was unpacked into that folder of yours). The concurrent searches setting is read
+and saved with no link followed (before 2.10.0 its Save copied a JSON file of yours that a
+link named into the data folder). In a data folder your group can write, the page does not
+follow your own links there either: a VCF dataset registered from a server folder, a genome
+linked to a shared copy or `Settings/` linked onto a volume is read only where the folder
+that holds the link is writable by you alone. The commands it starts still write through
+links in folders others can write: keep the data folder writable by you alone
+([Troubleshooting](TROUBLESHOOTING.md) §7).

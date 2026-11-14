@@ -123,8 +123,8 @@ for dataset in ("bgz", "pgz", "tbi", "srv"):
     check(stat.S_IMODE(os.stat(vdir).st_mode) == 0o777 & ~UMASK,
           f"{dataset}: the split folder has the umask's mode, not mkdtemp's 0700 "
           f"(got {oct(stat.S_IMODE(os.stat(vdir).st_mode))})")
-    check(os.path.isdir(os.path.join(D, "genome_library", f"NRG_2_toyg+{dataset}")),
-          f"{dataset}: the variant index is built")
+    check(os.path.isdir(os.path.join(D, "genome_library", f"20-NRG_2_toyg+{dataset}")),
+          f"{dataset}: the variant index is built (named for its 20-nt guide and 3' PAM)")
     split = sum(1 for line in subprocess.run(
         f"zcat {vdir}/*.chr*.vcf.gz | grep -v '^#'", shell=True, capture_output=True,
         text=True).stdout.splitlines())
@@ -144,6 +144,56 @@ check(rc == 1 and "Auto-splitting the VCF dataset into per-chromosome files fail
 check(tree(os.path.join(D, "VCFs", "uns")) == ["uns.vcf.gz"], "unsorted: left as it was")
 check(not [f for f in tree(os.path.join(D, "VCFs")) if f.startswith(".vcfsplit")],
       "unsorted: no scratch folder left in VCFs/")
+
+# chromosomes named without 'chr' (CHROM 1 on a chr1 genome; a contig such as Contig1 or
+# NC_000913.3): the enrichment takes a file's chromosome from the 'chr' token of its name,
+# so the split gave <base>.1.vcf.gz and the build failed on "cannot open .../.fa" (wset N2).
+# It fails before the split, saying why and what to do, and the folder is left as it was.
+RULE = ("the enrichment (crispritz add-variants) takes a VCF's chromosome from the part of "
+        "its file name that holds 'chr' (<name>.chr<N>.vcf.gz) and reads the genome's FASTA "
+        "file of that name. Rename them in the VCF to the names of the genome's sequences "
+        "(bcftools annotate --rename-chrs <old new file>, e.g. 1 to chr1), sequences named "
+        "with 'chr' too, then add it again")
+for dataset, rename, bad in (("numbered", {"chr1": "1", "chr2": "2", "chr3": "3"}, "1, 2, 3"),
+                             ("dotted", {"chr1": "NC_000913.3"}, "NC_000913.3")):
+    renamed = records
+    for old, new in rename.items():
+        renamed = renamed.replace(f"ID={old},", f"ID={new},").replace(f"\n{old}\t", f"\n{new}\t")
+    os.makedirs(os.path.join(D, "VCFs", dataset))
+    bgzip(renamed, os.path.join(D, "VCFs", dataset, f"{dataset}.vcf.gz"))
+    rc, out, err = build(dataset)
+    check(rc == 1 and err.strip().splitlines()[-1:] == [
+        f"Error: The VCF dataset cannot be enriched: {dataset}.vcf.gz holds the chromosome(s) "
+        f"{bad}, whose names do not hold 'chr': {RULE}"],
+          f"{dataset}: fails at once, saying why and what to do (rc {rc}; {err[-900:]!r})")
+# a file whose name holds 'chr' is taken for the file of that chromosome, which the genome
+# must have a FASTA file of: one named so by chance (nochr.vcf.gz, of three chromosomes), and
+# one of a chromosome another genome has (chr4 on a genome of chr1 to chr3)
+os.makedirs(os.path.join(D, "VCFs", "nochr"))
+bgzip(records, os.path.join(D, "VCFs", "nochr", "nochr.vcf.gz"))
+os.makedirs(os.path.join(D, "VCFs", "other"))
+bgzip(records.replace("\nchr1\t", "\nchr4\t").replace("ID=chr1,", "ID=chr4,"),
+      os.path.join(D, "VCFs", "other", "other.chr4.vcf.gz"))
+for dataset, name, chrom in (("nochr", "nochr.vcf.gz", "nochr"),
+                             ("other", "other.chr4.vcf.gz", "chr4")):
+    rc, out, err = build(dataset)
+    check(rc == 1 and err.strip().splitlines()[-1:] == [
+        f"Error: The VCF dataset cannot be enriched: the name of {name} makes it a VCF of "
+        f"chromosome {chrom} (the enrichment, crispritz add-variants, takes the last part of a "
+        f"VCF's file name that holds 'chr' for its chromosome), and the genome "
+        f"{os.path.join(D, 'Genomes', 'toyg')} has no {chrom}.fa. Name each VCF after the "
+        f"chromosome it holds (<name>.chr<N>.vcf.gz), as the genome's FASTA file of it is "
+        f"named, or build the index with the genome the dataset is of"],
+          f"{dataset}: fails at once, saying why and what to do (rc {rc}; {err[-900:]!r})")
+for dataset in ("numbered", "dotted", "nochr", "other"):
+    names = [f for f in tree(os.path.join(D, "VCFs", dataset)) if not f.endswith(".tbi")]
+    check(len(names) == 1 and names[0].startswith(dataset), f"{dataset}: left as it was")
+    check(not [n for n in os.listdir(os.path.join(D, "genome_library"))
+               if n.endswith(f"_toyg+{dataset}")], f"{dataset}: no variant index")
+    check(not os.path.isdir(os.path.join(D, "Genomes", f"toyg+{dataset}")),
+          f"{dataset}: no enriched genome")
+check(not [f for f in tree(os.path.join(D, "VCFs")) if f.startswith(".vcfsplit")],
+      "no chr: no scratch folder left in VCFs/")
 
 shutil.rmtree(D, ignore_errors=True)
 print(f"\n{'FAILED' if _fails else 'OK'}: {len(_fails)} failure(s)")

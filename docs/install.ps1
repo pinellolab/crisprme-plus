@@ -29,7 +29,7 @@ Write-Host "Docker found." -ForegroundColor Green
 try { docker info *> $null; if ($LASTEXITCODE -eq 0) { Write-Host "Fetching the CRISPRme engine image (~5 GB download, one time)..." -ForegroundColor Cyan; docker pull $Image } } catch {}
 
 # ---- 2. Config dir --------------------------------------------------------
-# The app stores its data (a ~45 GB download, ~98 GB once installed) in a folder the user
+# The app stores its data (a ~70 GB download, ~150 GB once installed) in a folder the user
 # picks on first run and remembers in $DataDir\.data_location (so a low-space home disk can
 # point the data at another drive). $DataDir itself only holds that tiny pointer file.
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
@@ -45,7 +45,7 @@ $ConfigDir = Join-Path $env:USERPROFILE 'CRISPRme'
 $LocFile   = Join-Path $ConfigDir '.data_location'
 $Image     = 'pinellolab/crisprme:latest'
 
-# Data (a ~45 GB download, ~98 GB once installed) lives in a user-chosen folder, remembered
+# Data (a ~70 GB download, ~150 GB once installed) lives in a user-chosen folder, remembered
 # across launches in .data_location (so a low-space home disk can point the data at another drive).
 function Get-DataDir { if (Test-Path $LocFile) { (Get-Content -Raw $LocFile).Trim() } else { Join-Path $ConfigDir 'crisprme-data' } }
 function Set-DataDir($p) { New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null; Set-Content -NoNewline -Encoding ascii -Path $LocFile -Value $p }
@@ -53,10 +53,10 @@ function Has-Stored { Test-Path $LocFile }
 # first run: let the user choose where the data lives (e.g. a big external drive)
 function Pick-DataDir {
   $def = Join-Path $ConfigDir 'crisprme-data'
-  $r = [System.Windows.Forms.MessageBox]::Show("Where should CRISPRme store its data (a ~45 GB download, ~98 GB once installed: pick a drive with ~150 GB free)?`n`nDefault: $def`n`nClick Yes to choose another drive/folder (if your home disk is low on space), or No to use the default.","CRISPRme+ - data location",'YesNo')
+  $r = [System.Windows.Forms.MessageBox]::Show("Where should CRISPRme store its data (a ~70 GB download, ~150 GB once installed: pick a drive with ~200 GB free)?`n`nDefault: $def`n`nClick Yes to choose another drive/folder (if your home disk is low on space), or No to use the default.","CRISPRme+ - data location",'YesNo')
   if ($r -eq 'Yes') {
     $fb = New-Object System.Windows.Forms.FolderBrowserDialog
-    $fb.Description = 'Select a folder for the CRISPRme data (~98 GB once installed; keep ~150 GB free)'
+    $fb.Description = 'Select a folder for the CRISPRme data (~150 GB once installed; keep ~200 GB free)'
     if ($fb.ShowDialog() -eq 'OK' -and $fb.SelectedPath) { $p = Join-Path $fb.SelectedPath 'crisprme-data' } else { $p = $def }
   } else { $p = $def }
   New-Item -ItemType Directory -Force -Path $p | Out-Null
@@ -65,7 +65,11 @@ function Pick-DataDir {
 }
 $Data = Get-DataDir
 
-function Has-Data { Test-Path (Join-Path $Data 'Genomes') }
+# The first-time setup marks the data folder until both of its downloads have ended well, so
+# a Start after one failed sets up again (download picks up what is there) instead of opening
+# the app on part of the data: Genomes/ is there from the first minutes of a download.
+function Setup-Mark { Join-Path $Data '.setup_unfinished' }
+function Has-Data { (Test-Path (Join-Path $Data 'Genomes')) -and -not (Test-Path (Setup-Mark)) }
 function Docker-Running { try { docker info *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false } }
 # a bind mount actually works (freshly-started Docker can report info OK while its
 # file-sharing is still initializing -> the download's makedirs fails with ENOENT)
@@ -114,17 +118,20 @@ Mk 'Start' 44 {
   if (Has-Data) {
     Invoke-Expression $run; Start-Sleep 3; Start-Process 'http://localhost:8080'
   } else {
-    $r = [System.Windows.Forms.MessageBox]::Show("First run: CRISPRme will download the reference genome + HGDP + 1000 Genomes variant data (~45 GB) into:`n$Data`n`nOnce only. A window shows progress, then your browser opens automatically.","CRISPRme+ - first-time setup",'OKCancel')
+    $first = if (Test-Path (Setup-Mark)) { 'The first-time setup did not finish: CRISPRme will download what is missing of' } else { 'First run: CRISPRme will download' }
+    $r = [System.Windows.Forms.MessageBox]::Show("$first the reference genome + HGDP + 1000 Genomes variant data (~70 GB) into:`n$Data`n`nOnce only. A window shows progress, then your browser opens automatically.","CRISPRme+ - first-time setup",'OKCancel')
     if ($r -eq 'OK') {
       $mnt = "-v `"${Data}:/DATA`" -w /DATA $Image"
-      Run-InConsole 'First-time setup - downloading ~45 GB, then starting CRISPRme' "docker run --rm $mnt crisprme.py download --what all --path /DATA; docker run --rm $mnt crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA; $run; Start-Sleep 3; Start-Process 'http://localhost:8080'"
+      $mark = Setup-Mark
+      New-Item -ItemType File -Force -Path $mark | Out-Null
+      Run-InConsole 'First-time setup - downloading ~70 GB, then starting CRISPRme' "docker run --rm $mnt crisprme.py download --what all --path /DATA; if (`$LASTEXITCODE -eq 0) { docker run --rm $mnt crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP --path /DATA }; if (`$LASTEXITCODE -eq 0) { Remove-Item -Force -LiteralPath `"$mark`"; $run; Start-Sleep 3; Start-Process 'http://localhost:8080' } else { Write-Host 'The download did not finish: see above, then click Start again to finish setting up.' -ForegroundColor Red }"
     }
   }
 }
 Mk 'Update' 120 { if (Ensure-Docker) { Run-InConsole 'Updating CRISPRme' "docker pull $Image" } }
 Mk 'Stop' 196 { try { docker rm -f crisprme } catch {}; [System.Windows.Forms.MessageBox]::Show('CRISPRme stopped.') }
 
-if (Has-Data) { $status.Text = 'Ready. Click Start to open CRISPRme.' } else { $status.Text = 'First run: Start will set everything up (a ~45 GB download, once).' }
+if (Has-Data) { $status.Text = 'Ready. Click Start to open CRISPRme.' } elseif (Test-Path (Setup-Mark)) { $status.Text = 'Setup did not finish: Start finishes it.' } else { $status.Text = 'First run: Start will set everything up (a ~70 GB download, once).' }
 [void]$form.ShowDialog()
 '@ | Set-Content -Encoding UTF8 $AppScript
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 from math import trunc
 from operator import index
+import itertools
 import sys
+import bisect
 import json
 import gzip
 import os
-import pickle
 import numpy as np
 import pandas as pd
 import time
@@ -32,6 +33,13 @@ except Exception:  # module absent in an old deploy -> no genotype tier
 # isolation). This module has no hard dependency on tier0_registry, so its import
 # cannot break the legacy path either.
 import simple_analysis_registry as _sar
+# One position's genotypes read against each ALT's own allele index (stdlib, pure).
+import site_alleles as _site
+# The phased indel genotype store's format and the merge of an indel it holds twice.
+import build_indel_genotypes as _big
+# The ambiguity budget: how many sequences a window spells (its bits), the hyperdense flag,
+# and the ambiguous columns an alignment rests on. Pure and stdlib-only, like _sar.
+import window_density as _wd
 # Position-aware CFD bulge penalty (2.8.0). Core dependency; if a very old deploy lacks
 # it, fall back to a trivial pass-through so scoring never breaks (bulges then revert to
 # the previous free-pass behaviour rather than raising).
@@ -73,6 +81,26 @@ except Exception:  # module absent in an old deploy -> legacy dict path only
     _obshap = None
     _phase_companion = None
     _snpsnp_companion = None
+# 2.10.0: a SNP row's carrier whose haplotype holding the row's SNPs also holds an indel
+# that changes the target's bases does not have the row's sequence there (the enriched
+# genome holds SNPs only, so the carriers come from SNP genotypes). In a per-sample
+# search such a carrier leaves the row, read on the phased indel genotype store the
+# indel post-analysis already reads (analisi_indels_NNN.py: the 2.8.1 rule for an indel
+# row's second indel). Guarded like the tiers above: without the module there is no
+# filter and the rows are those of 2.8.1.
+try:
+    import indel_snp_cis as _isc
+except Exception:  # module absent in an old deploy -> no filter
+    _isc = None
+# 2.10.0: the exact haplotype pre-check of a per-sample search and the K-skip of a capped
+# population-level one (haplotype_precheck: pure, stdlib), and the CRISPR-Bulge scoring of a
+# batch of rows, shared with the indel post-analysis and the merge of a post-analysis cut
+# into pieces (cbulge_rows).
+import haplotype_precheck as _hpc
+import cbulge_rows as _cbr
+import analysis_notes as _notes
+# and the dictionary copy a post-analysis in pieces reads (postproc_pool: stdlib)
+import postproc_pool as _pp
 
 # Two-pass POPULATION-LEVEL analysis (docs/DESIGN_2.5.1_two_pass_fast_mode.md) -- the
 # DEFAULT since 2.5.3. Driven by the internal CRISPRME_FAST_MODE env var ("1" = default
@@ -110,6 +138,11 @@ _SCORER_SELECT = os.environ.get("CRISPRME_SCORER_SELECT", "crispr-bulge").lower(
 # Set CRISPRME_LOSSLESS_DENSE=0 to opt OUT (sites-only reverts to greedy-representative-only).
 _env_ld = os.environ.get("CRISPRME_LOSSLESS_DENSE")
 _LOSSLESS_DENSE = True if _env_ld is None else bool(int(_env_ld or "0"))
+# The co-located union takes one alt of a column: one union per choice of alt at the
+# columns that hold two or three, while that makes at most this many unions a window (a
+# sites-only dataset's) or a sample (a PUTATIVE sample's above CRISPRME_IUPAC_CAP
+# variants, observed_haplotypes).
+_MAX_UNIONS = 16
 # Accumulator for the ADDITIVE phase-confirmation companion TSV (one row per emitted
 # dict-less variant off-target: identity columns + CONFIRMED/PUTATIVE). Populated ONLY
 # on the ``mygt is not None`` branch; dead/empty on every legacy install so the
@@ -135,18 +168,85 @@ _snp_snp_cooc_keys = set()
 # module body -- e.g. test_phased_haplotype's iupac_decomposition round-trip.
 myreg = None
 mygt = None
+# The indels of the phased indel genotype store near this chromosome's SNP targets
+# (_SnpRowIndels), read at run time in a per-sample search only; None (population-level,
+# no store, CRISPRME_INDEL_SNP=0, an old deploy, the unit-test harness): no SNP row loses
+# a carrier, as in 2.8.1. _dict_keys_read: the dictionary keys the run read (an absent
+# one of them is a position with no SNP); None when no dictionary was read.
+_snp_indels = None
+_dict_keys_read = None
+_snp_site_cache = {}
+_snp_indel_stats = {"targets": 0, "listings": 0, "gone": 0, "putative": 0, "kept": 0}
 # Registry-only install (Tier-0 registry present, NO per-sample dict, NO genotype
 # tier -- e.g. a `--no-genotypes` download). Computed once after tier detection;
 # when True the variant finalizer emits degraded off-target rows (empty Samples ->
 # "NA") instead of dropping the site (#136). Default False keeps every other mode
 # (legacy, registry+dict, dictless-with-genotypes) byte-identical.
 registry_only_mode = False
+# A registry-only install whose registry is a sites-only one (the mega's), read from its
+# VCF rather than from what the enrichment coded. Computed with registry_only_mode.
+_sites_only_registry = False
+
+# --max-degeneracy (complete-search sets CRISPRME_MAX_DEGENERACY; -1, its default, is none):
+# the ambiguous columns a reported SNP row may rest on (window_density.degeneracy). A
+# worst-case alignment is cut back to the strongest within it (twopass_emit.
+# cut_to_degeneracy); any other row resting on more is withheld, unless its carriers hold its
+# variants together on one phased haplotype. Counted for the note at the end.
+MAX_DEGENERACY = int(os.environ.get("CRISPRME_MAX_DEGENERACY", "-1") or "-1")
+_degeneracy_counts = {"cut": 0, "withheld": 0}
+# The windows the high-variant-density BED lists, one line each, by (start, end, guide):
+# those of every raw target whose letters spell more than 2^CRISPRME_IUPAC_CAP sequences, or
+# 2^HYPERDENSE_BITS or more, read from the raw target before the pre-check or the K-skip
+# below decide anything (_record_dense_window). And the four-allele positions (Q) of the
+# windows the search reported, 0-based, for <out>.four_allele_positions.bed. Both are
+# written at the end.
+_hvdr_records = {}
+_four_allele_positions = set()
+# 2.10.0, the exact haplotype pre-check (per-sample; haplotype_precheck): a raw target no
+# sample's genotypes can produce gives no variant row, so it is not expanded and only its
+# reference row is written. The K-skip (a population-level search with --max-degeneracy K)
+# skips the same way a raw target every row of which rests on more than K ambiguous
+# columns. CRISPRME_HAPLOTYPE_PRECHECK=0 (complete-search --no-haplotype-precheck) turns
+# both off (as do false, no and off, in any case: haplotype_precheck.switch_on). Counted for
+# the stdout note at the end.
+_PRECHECK = _hpc.switch_on(os.environ, "CRISPRME_HAPLOTYPE_PRECHECK")
+_precheck_stats = {"seen": 0, "skipped": 0, "kseen": 0, "kskipped": 0}
+# The samples of a run as bits of Python integers (haplotype_precheck.SampleBits), the
+# genotypes each variant column of a raw target reads, by (position, letter), and the
+# carriers of each dense window the BED lists, by (start, letters): every raw target of a
+# window reads the same ones.
+_sample_bits = _hpc.SampleBits()
+_column_cache = {}
+_window_carrier_cache = {}
+# 2.10.0, option P: a post-analysis cut into pieces (pool_post_analisi_snp.py) runs this
+# script once a piece, with CRISPRME_POSTPROC_PIECE=1. Its rows' CRISPR-Bulge scores are
+# then left to the merge of the pieces (merge_pieces.py), which scores them in exactly the
+# batches one process forms: the rows go to <out>.cbulge_rows.jsonl with their input line.
+_PIECE = os.environ.get("CRISPRME_POSTPROC_PIECE", "0") == "1"
+# A piece analyses the lines first..last (1-based, the header not counted) of the
+# chromosome's whole cluster file, CRISPRME_POSTPROC_RANGE="first:last", and starts up
+# exactly as one process does over the whole file (the spans of every line, the phased
+# indel store read around them, the dictionary keys they need), so that each of its lines
+# is analysed as one process analyses it. The dictionary keys are read from
+# CRISPRME_POSTPROC_DICT, a copy of the chromosome's dictionary holding only those keys
+# (and its phasing), which the pool writes once a chromosome by running this script with
+# CRISPRME_POSTPROC_PREPARE=<that copy>: it starts up, writes the copy and stops. The copy
+# is JSON (postproc_pool.write_dict_copy), which loads as data whoever wrote the file.
+_RANGE = None
+if os.environ.get("CRISPRME_POSTPROC_RANGE"):
+    _first, _last = os.environ["CRISPRME_POSTPROC_RANGE"].split(":")
+    _RANGE = (int(_first), int(_last))
+_PREPARE = os.environ.get("CRISPRME_POSTPROC_PREPARE") or None
+_DICT_COPY = os.environ.get("CRISPRME_POSTPROC_DICT") or None
 
 
 # For scoring of CFD And Doench
 tab = str.maketrans("ACTGRYSWMKHDBVactgryswmkhdbv", "TGACYRSWKMDHVBtgacyrswkmdhvb")
 
-iupac_nucleotides = set("RYSWKMBDHVryswkmbdhv")
+# The codes of a variant position in the enriched genome: the IUPAC ambiguity codes, and Q,
+# a position whose reference base and SNP ALTs hold all four bases (CRISPRitz 2.10.0; N
+# stays an assembly gap, which matches nothing and is never written for a variant).
+iupac_nucleotides = set("RYSWKMBDHVQryswkmbdhvq")
 iupac_code_set = {
     "R": {"A", "G"},
     "Y": {"C", "T"},
@@ -168,6 +268,8 @@ iupac_code_set = {
     "d": {"A", "G", "T"},
     "h": {"A", "C", "T"},
     "v": {"A", "C", "G"},
+    "Q": {"A", "C", "G", "T"},
+    "q": {"A", "C", "G", "T"},
     "A": {"A"},
     "T": {"T"},
     "C": {"C"},
@@ -201,6 +303,8 @@ iupac_code = {
     "d": ("A", "G", "T"),
     "h": ("A", "C", "T"),
     "v": ("A", "C", "G"),
+    "Q": ("A", "C", "G", "T"),
+    "q": ("A", "C", "G", "T"),
     "N": ("A", "T", "C", "G"),
 }
 
@@ -276,6 +380,41 @@ def _collect_variant_off_target(final_line):
     _variant_off_targets.append(rec)
 
 
+def _column_alleles(code, ref_base, alts, chr_pos=None):
+    """The alts of a position that the target's own column ``code`` stands for (#139).
+
+    The genotype sources return EVERY alt at a genomic position, but the column encodes
+    exactly the reference base and the alts CRISPRitz used for THIS off-target. At a
+    bulge boundary a position-keyed alt that the column does NOT permit would steer
+    the decomposition to the wrong allele and drop the real variant-bulge off-target,
+    so only alts representable by the code are kept. Where the alts are those the
+    enrichment coded -- the dictionary's, and the tiers compiled from it -- that is a
+    no-op at every non-bulge column. A sites-only registry is read from its VCF, every
+    record of it, so it lists alts the enrichment never coded: the legacy decomposition
+    takes all of them there, as up to 2.8.1, without this filter
+    (``_sites_only_registry``). A Q permits every base, so it says
+    nothing about which position it codes: its alts are kept only where the position
+    is one whose reference base and alts hold all four bases (the only position Q
+    codes), and none elsewhere. An ALT that no sample carries counts, as CRISPRitz
+    codes it: the dictionary lists it, and the Tier-0 registry, which holds no record
+    of it, lists the 0-based ``chr_pos`` as such a position itself
+    (``RegistryReader.four_base``). Q is the four bases, as every other code is the
+    bases it names: an ALT that is no base (the '*' of a spanning deletion, which the
+    dictionary of CRISPRitz 2.10.0 lists) is no allele of it. Never invents a carrier
+    -- only removes a target-inconsistent alt."""
+    if code in ("Q", "q"):
+        held = {str(ref_base).upper()} | {a.upper() for a in alts}
+        if {"A", "C", "G", "T"} <= held or (
+                myreg is not None and chr_pos is not None
+                and myreg.four_base(chr_pos + 1)):
+            return {a for a in alts if a in iupac_code_set[code]}
+        return set()
+    allowed = iupac_code_set.get(code)
+    if allowed is None:
+        return set(alts)
+    return {a for a in alts if a in allowed}
+
+
 def retrieveFromDict(chr_pos):
     """Return the 5-tuple (snp_list, sample_list, rsID_list, AF_list, snp_info_list)
     for a candidate off-target position.
@@ -327,6 +466,23 @@ def _aligned_mm(seq_prerevert, realTarget, guide_no_pam, revert):
     return mm
 
 
+def _aligned_pam_misses(seq_prerevert, realTarget, revert):
+    """Number of PAM positions of an ungapped, pre-revert candidate sequence whose base
+    the PAM does not allow, the sequence aligned as ``_aligned_mm`` aligns it (the
+    finalizer drops a candidate with any)."""
+    seq = (
+        reverse_complement_table("".join(seq_prerevert))
+        if revert
+        else "".join(seq_prerevert)
+    )
+    t = list(seq)
+    for pos, ch in enumerate(realTarget):
+        if ch == "-":
+            t.insert(pos, "-")
+    return sum(1 for i, ch in enumerate(t[pam_begin:pam_end])
+               if ch.upper() not in iupac_code_set[pam[i]])
+
+
 def _ref_with_bulges(refSeq_final, realTarget, guide_no_pam):
     """The REFERENCE alignment an alt row carries in its Reference column, built exactly
     as the legacy (dictionary-path) block of iupac_decomposition builds it: the strand-
@@ -349,6 +505,356 @@ def _ref_with_bulges(refSeq_final, realTarget, guide_no_pam):
             if guide_no_pam[position_t] != "-":
                 ref[pos_beg + position_t] = char_t.lower()
     return "".join(ref)
+
+
+def _aligned_target(seq_prerevert, realTarget, revert):
+    """A pre-revert candidate sequence as the finalizer aligns it: reverse-complemented on the
+    minus strand, with realTarget's bulge gaps ('-') re-inserted."""
+    seq = (
+        reverse_complement_table("".join(seq_prerevert))
+        if revert
+        else "".join(seq_prerevert)
+    )
+    t = list(seq)
+    for pos, ch in enumerate(realTarget):
+        if ch == "-":
+            t.insert(pos, "-")
+    return t
+
+
+def _decomposition_path(n_seq):
+    """Which decomposition iupac_decomposition runs on a raw target whose window spells
+    ``n_seq`` sequences: "observed" (the observed-haplotype enumeration: the dict-less tiers,
+    or a per-sample window over CRISPRME_IUPAC_CAP on the classic dictionaries), "dict" (the
+    dictionary lattice of every combination its carriers share), or "capped" (the
+    dictionary path's greedy worst-case alignment: a population-level search, or a window
+    over the cap with no observed path)."""
+    modules = _obshap is not None and _popsum is not None and _t0c is not None
+    if mygt is not None and modules:
+        return "observed"
+    if (not _FAST_MODE and not registry_only_mode and IUPAC_CAP >= 0 and modules
+            and _wd.over_cap(n_seq, IUPAC_CAP)):
+        return "observed"
+    return "capped" if (_FAST_MODE or _wd.over_cap(n_seq, IUPAC_CAP)) else "dict"
+
+
+def _column_genotypes(pos0, code):
+    """The ALTs the decomposition may put at the variant column of the forward-strand
+    position ``pos0`` whose letter is ``code``, as [(alt, listed, carriers)]: ``listed``
+    the mask (haplotype_precheck.SampleBits) of the samples its genotype source lists for
+    the ALT, ``carriers`` of those whose genotype read against the ALT's own allele index
+    holds it (a "1" token, as the observed path reads it). The ALTs are those the column's
+    letter stands for (_column_alleles, #139); on a sites-only registry every ALT of the
+    position, as the dictionary path takes them there. Read once a position and letter."""
+    key = (pos0, code.upper())
+    hit = _column_cache.get(key)
+    if hit is not None:
+        return hit
+    snps, samples, _rs, _af, _info = retrieveFromDict(pos0)
+    ref_base = genomeStr[pos0] if 0 <= pos0 < len(genomeStr) else "N"
+    admitted = (set(snps) if _sites_only_registry
+                else _column_alleles(code, ref_base, snps, pos0))
+    gt_maps = []
+    for i, elem in enumerate(snps):
+        gt_map = {}
+        for tok in samples[i]:
+            if ":" in tok:
+                sid, gt = tok.split(":", 1)
+            else:
+                sid, gt = tok, ""
+            gt_map[sid.strip()] = gt.strip()
+        gt_maps.append((elem, gt_map))
+    listed_maps = [dict(m) for _e, m in gt_maps]
+    gt_maps = _site.per_alt_entries(gt_maps)
+    parse = _popsum.parse_haplotypes if _popsum is not None else None
+    ploidy_of = _t0c.ploidy_of_for_chrom(current_chr) if _t0c is not None else None
+    out = []
+    for i, elem in enumerate(snps):
+        if elem not in admitted:
+            continue
+        listed = _sample_bits.mask(listed_maps[i])
+        if parse is not None and ploidy_of is not None:
+            held = [sid for sid, gt in gt_maps[i][1].items()
+                    if any(t == "1" for t in parse(gt, ploidy_of(sid, None)))]
+            carriers = _sample_bits.mask(held)
+        else:
+            carriers = listed
+        out.append((elem, listed, carriers))
+    if len(_column_cache) > 200000:
+        _column_cache.clear()
+    _column_cache[key] = out
+    return out
+
+
+def _variant_columns_of(split):
+    """(start, letters, refSeq, revert, [pos_c]) of a raw target: its forward-strand start,
+    letters (reverse-complemented on the minus strand), reference window, and the columns of
+    its letters the decompositions read: an IUPAC code inside the reference window (a window
+    cut at the chromosome's end has none past it)."""
+    start = int(split[4])
+    letters = split[2].replace("-", "")
+    refSeq = genomeStr[start: start + len(letters)].upper()
+    revert = split[6] == "-"
+    if revert:
+        letters = reverse_complement_table(letters)
+    cols = [pos_c for pos_c, c in enumerate(letters)
+            if c in iupac_code and pos_c < len(refSeq)]
+    return start, letters, refSeq, revert, cols
+
+
+def _record_dense_window(split):
+    """List the window of a raw target in <out>.high_variant_density_regions.bed when its
+    letters spell more than 2^CRISPRME_IUPAC_CAP sequences, or 2^HYPERDENSE_BITS or more:
+    one line a window (start, end, guide), read from the raw target itself before the
+    pre-check or the K-skip decide anything, so the file is the same with them on and off.
+
+    The line: its span, guide, variant columns (window_density.variant_columns: every letter
+    standing for two bases or more, a four-allele Q among them), the samples carrying an ALT
+    there (each genotype read against its own ALT's allele index; '.' for a dataset without
+    genotypes), full IUPAC protospacer (every variant column as its code, so a user can see
+    all its alleles and dig into its other alignments; resultIntegrator puts it in the
+    High_variant_density_region column), its bits (log2 of the sequences it spells), its
+    four-allele positions (Q), and whether its rows are a ``greedy`` worst-case alignment (a
+    population-level search, or the dictionary path over the cap; resultIntegrator's note then
+    says so), not its carriers' own haplotypes. A window several raw targets share (one per
+    alignment, or per strand) keeps the line resultIntegrator's lookup reads first, its
+    ``sorted(...)[0]``: the smallest (variants, letters, bits, greedy), its letters in the
+    case of one alignment (the engine writes a mismatching base in lower case)."""
+    letters_raw = split[2].replace("-", "")
+    n_seq = _wd.sequences(letters_raw)
+    if not (_wd.over_cap(n_seq, IUPAC_CAP) or _wd.hyperdense(n_seq)):
+        return
+    start, letters, _refSeq, _revert, cols = _variant_columns_of(split)
+    key = (start, start + len(letters), split[1].replace("-", ""))
+    path = _decomposition_path(n_seq)
+    if not cols:
+        greedy, samples = False, "."  # nothing could be read: no carrier, no greedy row
+    else:
+        greedy = _FAST_MODE if path == "observed" else path == "capped"
+        samples = _window_samples(start, letters, cols)
+    rep = ("%d" % _wd.variant_columns(letters), letters, "%.2f" % _wd.bits(n_seq),
+           bool(greedy))
+    old = _hvdr_records.get(key)
+    if old is None or rep < old[0]:
+        _hvdr_records[key] = (rep, samples, len(_wd.four_allele_offsets(letters)), n_seq)
+
+
+def _window_samples(start, letters, cols):
+    """The samples carrying an ALT at the variant columns ``cols`` of the window at
+    ``start`` with ``letters``, as the BED lists them (sorted, comma-joined, '.' for none)."""
+    key = (start, letters.upper())
+    hit = _window_carrier_cache.get(key)
+    if hit is not None:
+        return hit
+    mask = 0
+    for pos_c in cols:
+        for _alt, _listed, carriers in _column_genotypes(start + pos_c, letters[pos_c]):
+            mask |= carriers
+    samples = ",".join(sorted(_sample_bits.samples(mask))) if mask else "."
+    if len(_window_carrier_cache) > 50000:
+        _window_carrier_cache.clear()
+    _window_carrier_cache[key] = samples
+    return samples
+
+
+def _pam_admits(letter, base):
+    """The finalizer's PAM test: the PAM letter admits the base."""
+    return base in iupac_code_set[letter]
+
+
+def _column_analysis(split, guide_no_pam, use_masks):
+    """haplotype_precheck.snp_columns of a raw target, its variant columns read through
+    _column_genotypes: None where it cannot be read, else (base_mm, fixes, pam_needs,
+    blocked, window) with the fixing and PAM-admitted ALTs given as sample masks when
+    ``use_masks`` (the listed samples: a sample the dictionary path puts on a combination is
+    listed for each of its ALTs), else as ALTs; ``window`` the mask of every sample listed
+    for an ALT of the window."""
+    start, letters, refSeq, revert, cols = _variant_columns_of(split)
+    if len(refSeq) != len(letters):
+        return None
+    alts_of = {}
+    window = 0
+    columns = []
+    for pos_c in cols:
+        genos = _column_genotypes(start + pos_c, letters[pos_c])
+        alts_of[pos_c] = genos
+        columns.append((pos_c, [g[0] for g in genos]))
+        for g in genos:
+            window |= g[1]
+    res = _hpc.snp_columns(split[2], refSeq, revert, guide_no_pam, pam, pos_beg, pos_end,
+                           pam_begin, pam_end, columns, _pam_admits)
+    if res is None:
+        return None
+    base_mm, fixes, pam_needs, blocked = res
+    if use_masks:
+        def masks(pos_c, alts):
+            wanted = set(alts)
+            m = 0
+            for alt, listed, _carriers in alts_of[pos_c]:
+                if alt in wanted:
+                    m |= listed
+            return m
+        fixes = [masks(pc, alts) for pc, alts in fixes]
+        pam_needs = [masks(pc, alts) for pc, alts in pam_needs]
+    return base_mm, fixes, pam_needs, blocked, window
+
+
+def _filter_raw_target(split, guide_no_pam):
+    """None when the raw target ``split`` is to be decomposed, else the decomposition
+    path ("observed", "dict" or "capped") it would have taken, which gives it no variant row:
+
+    * per sample (the pre-check, CRISPRME_HAPLOTYPE_PRECHECK, on the observed path and the
+      uncapped dictionary path): no sample, free to put at each variant column the reference
+      base or any ALT its genotype source lists for it there, reaches the budget and the PAM
+      (haplotype_precheck.sample_can_produce). Every row either path writes is one of those
+      choices of one sample's (a phased slot, a PUTATIVE sample's alleles, a combination of
+      ALTs its carriers share), and the indel slot filter and --max-degeneracy only take rows
+      away, so none is lost. Never on a registry-only dataset, whose rows need no carrier;
+    * population-level with --max-degeneracy K (the K-skip): every row it would write rests on
+      at most K ambiguous columns, and every row within the budget and the PAM on at least
+      D_min of them (haplotype_precheck.degeneracy_floor); D_min > K, or no row possible.
+    """
+    n_seq = _wd.sequences(split[2].replace("-", ""))
+    path = _decomposition_path(n_seq)
+    if not _FAST_MODE:
+        if not _PRECHECK or registry_only_mode or path == "capped":
+            return None
+        _precheck_stats["seen"] += 1
+        res = _column_analysis(split, guide_no_pam, True)
+        if res is None:
+            return None
+        base_mm, fix_masks, pam_masks, blocked, window = res
+        need = base_mm - int(split[8]) - allowed_mms
+        if not blocked and _hpc.sample_can_produce(need, fix_masks, pam_masks, window):
+            return None
+        _precheck_stats["skipped"] += 1
+        return path
+    if MAX_DEGENERACY < 0 or not _PRECHECK:
+        return None
+    _precheck_stats["kseen"] += 1
+    res = _column_analysis(split, guide_no_pam, False)
+    if res is None:
+        return None
+    base_mm, fixes, pam_needs, blocked, _window = res
+    need = base_mm - int(split[8]) - allowed_mms
+    floor = _hpc.degeneracy_floor(need, fixes, pam_needs, blocked)
+    if floor is not None and floor <= MAX_DEGENERACY:
+        return None
+    _precheck_stats["kskipped"] += 1
+    return path
+
+
+def _emit_reference_only(split, guide_no_pam, path, cluster_to_save):
+    """The rows of a raw target _filter_raw_target skipped: its reference row, as the
+    observed path writes it (on the plus strand, within the budget and the PAM, when one of
+    its variant columns could be read); the dictionary paths write none of their own."""
+    if path != "observed":
+        return
+    _start, _letters, refSeq, revert, cols = _variant_columns_of(split)
+    if not cols:
+        return
+    realTarget = split[2]
+    refSeq_final = reverse_complement_table(refSeq) if revert else refSeq
+    refSeq_with_bulges = _ref_with_bulges(refSeq_final, realTarget, guide_no_pam)
+    _finalize_reference_entry(split, realTarget, refSeq_final, refSeq_with_bulges,
+                              guide_no_pam, revert, cluster_to_save)
+
+
+def _withheld_by_degeneracy(target_to_list, refSeq_with_bulges, guide_no_pam, confirmed):
+    """True, and counted, when --max-degeneracy withholds a finalized row: it rests on more
+    ambiguous columns than MAX_DEGENERACY (window_density.degeneracy of the aligned row
+    against its aligned reference) and its carriers do not confirm it (``confirmed``: they
+    hold its variants together on one phased haplotype)."""
+    if MAX_DEGENERACY < 0 or confirmed:
+        return False
+    if _wd.degeneracy(target_to_list, refSeq_with_bulges, guide_no_pam, pam, pos_beg,
+                      pos_end, pam_begin, pam_end) <= MAX_DEGENERACY:
+        return False
+    _degeneracy_counts["withheld"] += 1
+    return True
+
+
+def _cut_to_degeneracy(rep, columns, refSeq, realTarget, refSeq_with_bulges, guide_no_pam,
+                       revert, rank_fn):
+    """A greedy worst-case representative (twopass_emit's) cut back to the strongest
+    alignment resting on at most MAX_DEGENERACY ambiguous columns, ranked by ``rank_fn``
+    (lowest first); ``rep`` itself when --max-degeneracy is off or it is within it."""
+    if MAX_DEGENERACY < 0:
+        return rep
+
+    def _degeneracy_of(seq_list):
+        return _wd.degeneracy(_aligned_target(seq_list, realTarget, revert),
+                              refSeq_with_bulges, guide_no_pam, pam, pos_beg, pos_end,
+                              pam_begin, pam_end)
+
+    cut = _twopass_emit.cut_to_degeneracy(rep, columns, refSeq, MAX_DEGENERACY,
+                                          _degeneracy_of, rank_fn)
+    if cut is not rep:
+        _degeneracy_counts["cut"] += 1
+    if cut is None:
+        return {"seq": list(refSeq), "carriers": set(), "info": [],
+                "chosen": {col["pos_c"]: None for col in columns}}
+    return cut
+
+
+def _note_four_allele(split):
+    """Record the four-allele positions (Q) of a reported window, 0-based on the forward
+    strand (Q is its own complement, so a minus-strand window is only read backwards)."""
+    window = split[2].replace("-", "")
+    if split[6] == "-":
+        window = window[::-1]
+    start = int(split[4])
+    for offset in _wd.four_allele_offsets(window):
+        _four_allele_positions.add(start + offset)
+
+
+# The header of <out>.high_variant_density_regions.bed (resultIntegrator and the report read
+# its columns by place).
+HVDR_HEADER = ("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\tiupac_protospacer\tbits"
+               "\tfour_allele\tgreedy\n")
+
+
+def hvdr_line(chrom, key, record):
+    """One line of <out>.high_variant_density_regions.bed: the window ``key`` (start, end,
+    guide) and its _record_dense_window ``record``."""
+    (nvar, letters, bits, greedy), samples, four_allele, _n_seq = record
+    return "%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%d\t%d\n" % (
+        chrom, key[0], key[1], key[2], nvar, samples, letters, bits, four_allele, int(greedy))
+
+
+def _write_density_notes():
+    """<out>.high_variant_density_regions.bed (one line a dense window, sorted by start, end
+    and guide: _record_dense_window), <out>.four_allele_positions.bed (0-based BED of the
+    four-allele positions of the windows the search reported, written when there is one;
+    resultIntegrator flags the rows whose window holds one), and the notes at the end of the
+    chromosome (analysis_notes: those positions, the windows of the BED, the pre-check or the
+    K-skip, --max-degeneracy, the SNP rows' carriers an indel takes off; stdout only: any
+    stderr write fails the stage). A piece of a post-analysis cut into pieces writes no
+    note: it leaves its counts in <out>.piece.json, for the merge to write the chromosome's."""
+    with open(outputFile + ".high_variant_density_regions.bed", "w") as fh:
+        fh.write(HVDR_HEADER)
+        for key in sorted(_hvdr_records):
+            fh.write(hvdr_line(current_chr, key, _hvdr_records[key]))
+    if _four_allele_positions:
+        with open(outputFile + ".four_allele_positions.bed", "w") as fh:
+            fh.write("#chrom\tstart\tend\n")
+            for p in sorted(_four_allele_positions):
+                fh.write("%s\t%d\t%d\n" % (current_chr, p, p + 1))
+    if _PIECE:
+        return
+    n_over, n_hyper = _notes.dense_window_counts(
+        (r[0][1] for r in _hvdr_records.values()), IUPAC_CAP)
+    _notes.write(_notes.density_lines(current_chr, os.path.basename(outputFile),
+                                      len(_four_allele_positions), n_over, n_hyper,
+                                      IUPAC_CAP))
+    _notes.write(_notes.snp_lines(current_chr, _note_counts(), _PRECHECK, _FAST_MODE,
+                                  MAX_DEGENERACY))
+
+
+def _note_counts():
+    """The counts the notes at the end are written from (analysis_notes.snp_counts)."""
+    return {"precheck": dict(_precheck_stats), "degeneracy": dict(_degeneracy_counts),
+            "snp_indel": dict(_snp_indel_stats)}
 
 
 def _record_phase_confirmation(final_line, phase_state):
@@ -380,14 +886,18 @@ def _record_snp_snp_cooc(final_line, phase_state):
     joined for a multi-SNP haplotype); final_line[12] carries the carrier samples (or the
     "NA" sentinel on the registry-only path). We emit a row ONLY when >=2 DISTINCT SNP
     positions contribute -- a genuine SNP+SNP co-occurrence -- and report the min marginal
-    AF as the conservative joint-AF upper bound (see the companion module)."""
+    AF as the conservative joint-AF upper bound (see the companion module). Positions,
+    not variants: two alts of one position are no co-occurrence (one haplotype holds one
+    allele there)."""
     if myreg is None or _snpsnp_companion is None:
         return  # GATE: no registry -> not a 2.5.x variant install -> no companion
     try:
-        positions = str(final_line[17]).split(",")  # creating-SNP positions
+        positions = str(final_line[17]).split(",")  # creating SNPs, <chrom>_<pos>_<ref>_<alt>
         afs = str(final_line[16]).split(",")         # creating-SNP marginal AFs
-        # need >=2 DISTINCT, non-sentinel SNP positions to be a SNP+SNP co-occurrence
-        real_pos = [p for p in positions if p not in ("", "NA", ".", "n")]
+        # need >=2 DISTINCT, non-sentinel SNP positions to be a SNP+SNP co-occurrence; a
+        # token is split from the right, a contig name can hold '_'
+        real_pos = [p.rsplit("_", 3)[-3] if p.count("_") >= 3 else p
+                    for p in positions if p not in ("", "NA", ".", "n")]
         if len(set(real_pos)) < 2:
             return
         key = (final_line[3], final_line[4], final_line[6], final_line[1], final_line[2])
@@ -470,6 +980,9 @@ def _finalize_observed_entry(split, realTarget, refSeq_prerevert,
     if mm_new_t - int(split[8]) > allowed_mms:
         return
     if not pam_ok:
+        return
+    if _withheld_by_degeneracy(target_to_list, refSeq_with_bulges, guide_no_pam,
+                               phase_state == _obshap.CONFIRMED):
         return
 
     final_line[2] = "".join(target_to_list)
@@ -614,6 +1127,341 @@ def _finalize_reference_entry(split, realTarget, refSeq_prerevert,
     cluster_to_save.append(final_line)
 
 
+# ---------------------------------------------------------------------------------
+# 2.10.0: a SNP row's carrier whose haplotype also holds an indel inside the target
+# ---------------------------------------------------------------------------------
+# Verdicts on a carrier's haplotype, the values of observed_haplotypes.KEEP / DROP /
+# PUTATIVE (repeated here so the dictionary path needs no observed_haplotypes).
+_SLOT_KEEP, _SLOT_DROP, _SLOT_PUTATIVE = "KEEP", "DROP", "PUTATIVE"
+# How far around a SNP target the store's indels are read: a haplotype is read around
+# the target over its length and the bases its indels add or delete
+# (indel_snp_cis.snp_target_frame); one that needs more cannot be read.
+_SNP_INDEL_MARGIN = 500
+
+
+def _merge_spans(spans, margin):
+    """Sorted, disjoint (first, last) intervals covering every (lo, hi) of ``spans``
+    widened by ``margin`` on each side (0-based, inclusive)."""
+    out = []
+    for lo, hi in sorted(spans):
+        lo, hi = lo - margin, hi + margin
+        if out and lo <= out[-1][1] + 1:
+            out[-1][1] = max(out[-1][1], hi)
+        else:
+            out.append([lo, hi])
+    return [tuple(iv) for iv in out]
+
+
+class _SnpRowIndels(object):
+    """The indels of a phased indel genotype store (build_indel_genotypes: one line per
+    indel alt, '<POS>_<REF>_<ALT>' then 'sample:gt,...') whose REF meets a SNP target
+    span widened by ``margin``: only those a SNP row's carrier can hold inside, or
+    around, its target. Their carriers are parsed when first asked for."""
+
+    def __init__(self, store_path, spans, margin):
+        self.intervals = _merge_spans(spans, margin)
+        starts = [a for a, _b in self.intervals]
+        self.indels = []
+        self._tokens = {}
+        self._gts = {}
+        if self.intervals:
+            with (gzip.open(store_path, "rt") if store_path.endswith(".gz")
+                  else open(store_path)) as fh:
+                for line in fh:
+                    key, _tab, toks = line.partition("\t")
+                    pos, _u, rest = key.partition("_")
+                    ref, _u, alt = rest.partition("_")
+                    try:
+                        p0 = int(pos) - 1
+                    except ValueError:
+                        continue
+                    k = bisect.bisect_right(starts, p0 + len(ref) - 1) - 1
+                    if k < 0 or self.intervals[k][1] < p0:
+                        continue  # meets no target's surroundings
+                    # REF and ALT in upper case (build_indel_genotypes.store_key)
+                    rec = (p0 + 1, ref.upper(), alt.upper())
+                    toks = toks.rstrip("\n")
+                    if rec in self._tokens:
+                        # an indel the VCF writes on two lines, in one case or in two:
+                        # one allele, its carriers merged
+                        # (build_indel_genotypes.merge_store_carriers)
+                        self._tokens[rec] = _big.merge_store_carriers(self._tokens[rec], toks)
+                        continue
+                    self.indels.append(rec)
+                    self._tokens[rec] = toks
+        self.indels.sort()
+        self._starts = [p for p, _r, _a in self.indels]
+        self._ivstarts = starts
+        self._maxref = max((len(r) for _p, r, _a in self.indels), default=1)
+
+    def __len__(self):
+        return len(self.indels)
+
+    def near(self, first, last):
+        """The indels whose REF meets the reference positions first..last."""
+        k = bisect.bisect_left(self._starts, first - self._maxref + 1)
+        out = []
+        while k < len(self.indels) and self.indels[k][0] - 1 <= last:
+            p, r, _a = self.indels[k]
+            if p - 1 + len(r) > first:
+                out.append(self.indels[k])
+            k += 1
+        return out
+
+    def touching(self, lo, hi):
+        """The indels that change the reference bases lo..hi of a haplotype carrying
+        them (indel_snp_cis.changes_span): a deleted or replaced base inside, or bases
+        inserted between two of them. One whose deleted bases all lie outside (its
+        junction at or past the target's edge), or that inserts before the first base
+        or after the last, leaves them as they are."""
+        return [rec for rec in self.near(lo - 1, hi + 1)
+                if _isc.changes_span(rec[0], rec[1], rec[2], lo, hi)]
+
+    def covers(self, first, last):
+        """True iff the reference positions first..last were read whole."""
+        k = bisect.bisect_right(self._ivstarts, first) - 1
+        return k >= 0 and self.intervals[k][1] >= last
+
+    def carriers(self, rec):
+        """{sample: normalized genotype} of an indel (build_indel_genotypes)."""
+        gts = self._gts.get(rec)
+        if gts is None:
+            gts = {}
+            for tok in self._tokens.get(rec, "").split(","):
+                s, _c, g = tok.partition(":")
+                if s:
+                    gts[s] = g
+            self._gts[rec] = gts
+        return gts
+
+
+def _snp_site(pos0):
+    """{forward alt: {sample: genotype}} of the SNP records at ``pos0`` (0-based), each
+    genotype read against its own alt (indel_snp_cis.biallelic_site): from the
+    dictionary entries the run read, else the Tier-1 genotype store; {} at a position
+    with none; None where neither can say (a dictionary key the run did not read, and no
+    Tier-1 store)."""
+    if pos0 in _snp_site_cache:
+        return _snp_site_cache[pos0]
+    raw = {}
+    if _dict_keys_read is not None and (current_chr + "," + str(pos0 + 1)) in _dict_keys_read:
+        snps, samples, _rs, _af, _info = retrieveFromDict(pos0)
+        for alt, toks in zip(snps, samples):
+            if toks and len(alt) == 1:
+                raw[alt] = dict(t.split(":", 1) for t in toks if ":" in t)
+    elif mygt is not None:
+        for alt in mygt.alts_at(pos0 + 1):
+            if len(alt) == 1 and alt in "ACGT":
+                raw[alt] = dict(t.partition(":")[::2]
+                                for t in (mygt.carrier_tokens(pos0 + 1, alt) or []))
+    else:
+        raw = None
+    rec = None if raw is None else _isc.biallelic_site(raw)
+    if len(_snp_site_cache) > 200000:
+        _snp_site_cache.clear()
+    _snp_site_cache[pos0] = rec
+    return rec
+
+
+def _snp_slot_allele(sample, slot, lo, hi, row):
+    """source -> base on the haplotype of ``sample`` on ``slot`` (None: a candidate
+    haplotype of an unphased sample) that holds a SNP row's alleles ``row`` ({0-based
+    position: alt}) in its target lo..hi: an ALT base is itself; a position of the target
+    holds the row's allele; one outside it the haplotype's own SNP allele, else the
+    reference base. None where the genotypes cannot put an allele on the haplotype (an
+    unphased or missing call, two alts on one slot, a position no source read)."""
+    def allele(src):
+        if isinstance(src, str):
+            return src
+        if not 0 <= src < len(genomeStr):
+            return None
+        if lo <= src <= hi:
+            return row.get(src, genomeStr[src])
+        rec = _snp_site(src)
+        if rec is None:
+            return None
+        got = None
+        for alt, carriers in rec.items():
+            g = carriers.get(sample)
+            if g is None:
+                continue
+            toks, kind = _isc._gt_tokens(g)
+            if all(t == "1" for t in toks):
+                t = "1"  # homozygous (or haploid): the alt is on every slot
+            elif slot is not None and kind == "phased" and slot < len(toks):
+                t = toks[slot]
+            else:
+                return None
+            if t == "1":
+                if got is not None:
+                    return None
+                got = alt
+            elif t != "0":
+                return None
+        return got or genomeStr[src]
+    return allele
+
+
+def _snp_indel_on_slot(sample, slot, rec):
+    """True / False: whether the haplotype of ``sample`` on ``slot`` holds the store's
+    indel ``rec``; None where its genotype cannot put it on that haplotype (an unphased
+    heterozygous call, or a candidate haplotype of an unphased sample). A homozygous (or
+    haploid) carrier holds it on every haplotype."""
+    g = _snp_indels.carriers(rec).get(sample)
+    if g is None:
+        return False
+    toks, kind = _isc._gt_tokens(g)
+    if all(t == "1" for t in toks):
+        return True
+    if slot is not None and kind == "phased" and slot < len(toks):
+        return toks[slot] == "1"
+    return None if "1" in toks else False
+
+
+def _snp_slot_verdict(sample, slot, vset, lo, hi, touching, readings=None):
+    """KEEP, DROP or PUTATIVE: whether the haplotype of ``sample`` on ``slot`` (None: a
+    candidate haplotype of an unphased sample) holding the SNP alts ``vset`` ({(column,
+    alt)}, the column counted from lo) has the SNP row's target lo..hi, given the
+    store's indels that change its bases (``touching``).
+
+    It does when it holds none of them (KEEP). One it holds changes the target, unless
+    its own bases still read the target at its place, from the first base on or up to
+    the last, through the row's SNPs (a repeat unit gained or lost at the target's edge:
+    indel_snp_cis.snp_target_held), read with every indel of the store it holds there:
+    KEEP if they do, DROP if not, or if they cannot be read (an indel there whose slot
+    is unknown, two records of one base, a frame the store was not read over). An indel
+    whose slot is unknown (an unphased heterozygous call, or an unphased sample's
+    candidate haplotype) cannot be tied to the haplotype: if no other one is on it, the
+    carrier stays, PUTATIVE. An indel at the position of a SNP the row names is another
+    allele of that base (a haplotype holding both is one VCF record), so a slot phased
+    with both is a phasing artefact: it takes no carrier off the row, as for an indel
+    row's own position (2.8.1).
+
+    ``readings`` (a dict of the target's, or None) keeps each reading of the bases: it
+    depends on the haplotype only through the indels each way reads, the row's SNPs and
+    the haplotype's alleles at the frame's positions outside the target that hold a SNP
+    record, so the carriers of one common indel share a reading."""
+    row = {lo + pc: alt for pc, alt in vset}
+    mine, unknown = [], False
+    for rec in touching:
+        if rec[0] - 1 in row:
+            continue  # another allele of a row SNP's base: a phasing artefact
+        on = _snp_indel_on_slot(sample, slot, rec)
+        if on is None:
+            unknown = True
+        elif on:
+            mine.append(rec)
+    if not mine:
+        return _SLOT_PUTATIVE if unknown else _SLOT_KEEP
+    first, last = _isc.snp_target_frame(lo, hi, mine)
+    held = [list(mine), list(mine)]  # the indels each way reads
+    for rec in _snp_indels.near(first, last):
+        p, r, _a = rec
+        if rec in mine or p - 1 in row:
+            continue
+        reach = (p - 2 + len(r) >= lo, p - 1 <= hi)  # from the first base on, up to the last
+        if not any(reach):
+            continue
+        on = _snp_indel_on_slot(sample, slot, rec)
+        if on is False:
+            continue
+        for side in (0, 1):
+            if reach[side] and held[side] is not None:
+                held[side] = None if on is None else held[side] + [rec]
+    for side in (0, 1):
+        if held[side] is not None and not _snp_indels.covers(
+                *_isc.snp_target_frame(lo, hi, held[side])):
+            held[side] = None  # the store was not read that far
+    allele = _snp_slot_allele(sample, slot, lo, hi, row)
+    frames = [_isc.snp_target_frame(lo, hi, h) for h in held if h is not None]
+    if readings is None or not frames:
+        held_bases = _isc.snp_target_held(lo, hi, sorted(row), held, allele, genomeStr)
+    else:
+        first, last = min(f[0] for f in frames), max(f[1] for f in frames)
+        sites = readings.get((first, last))
+        if sites is None:  # the positions where one haplotype's allele can differ
+            sites = readings[(first, last)] = [
+                q for q in range(max(first, 0), min(last + 1, len(genomeStr)))
+                if not lo <= q <= hi and _snp_site(q)]
+        key = (tuple(None if h is None else tuple(h) for h in held), vset,
+               tuple(allele(q) for q in sites))
+        held_bases = readings.get(key)
+        if held_bases is None:
+            held_bases = readings[key] = _isc.snp_target_held(lo, hi, sorted(row), held,
+                                                              allele, genomeStr)
+    if held_bases:
+        _snp_indel_stats["kept"] += 1
+        return _SLOT_KEEP
+    return _SLOT_DROP
+
+
+def _snp_row_slot_filter(split):
+    """The slot filter (observed_haplotypes.enumerate_observed_haplotypes) of the SNP
+    target ``split`` in a per-sample search: _snp_slot_verdict for each haplotype a
+    carrier contributes, the dropped ones recorded in its ``dropped`` set of (sample,
+    variant set). None when no indel of the store changes the target's bases (or no
+    store was read): then every carrier stays, and the rows are those of 2.8.1."""
+    if _snp_indels is None or _isc is None or _FAST_MODE:
+        return None
+    lo, hi = _isc.snp_target_span(int(split[4]), len(split[2].replace("-", "")))
+    touching = _snp_indels.touching(lo, hi)
+    if not touching:
+        return None
+    holders = set().union(*(_snp_indels.carriers(rec) for rec in touching))
+    seen = {}
+    readings = {}
+    dropped = set()
+
+    def verdict(sample, slot, vset):
+        if sample not in holders:
+            return _SLOT_KEEP  # holds none of the indels that change the target
+        key = (sample, slot, vset)
+        v = seen.get(key)
+        if v is None:
+            v = seen[key] = _snp_slot_verdict(sample, slot, vset, lo, hi, touching,
+                                              readings)
+            if v == _SLOT_DROP:
+                dropped.add((sample, vset))
+            elif v == _SLOT_PUTATIVE:
+                _snp_indel_stats["putative"] += 1
+        return v
+    verdict.dropped = dropped
+    return verdict
+
+
+def _filter_snp_lattice(levels, slot, unphased, verdict, kept):
+    """Take off each SNP combination of a dictionary-path lattice (``levels``: {level:
+    {key: [sequence, carriers, info]}}, the carriers of haplotype slot ``slot``, None on
+    an unphased dataset) the carriers whose haplotype does not have its target
+    (``verdict``: _snp_row_slot_filter); a carrier with an unphased SNP call in the
+    window (``unphased``) is asked as an unphased sample's candidate. A combination's
+    key alternates (column, alt). ``kept`` ({variant set: carriers}) is filled in with
+    the carriers each combination keeps. Untouched carriers keep their set as it was."""
+    for level in levels:
+        for key, ent in levels[level].items():
+            vset = frozenset(zip(key[0::2], key[1::2]))
+            if ent[1]:
+                gone = {s for s in ent[1]
+                        if verdict(s, None if s in unphased else slot, vset) == _SLOT_DROP}
+                if gone:
+                    ent[1] = ent[1] - gone
+            kept.setdefault(vset, set()).update(ent[1])
+
+
+def _count_snp_row_drops(verdict, kept_sets):
+    """Add a target's dropped carrier listings to the stats: the (sample, variant set)
+    pairs its slot filter dropped whose sample is not on that set's row after all
+    (another of its haplotypes has it), and the sets left with no carrier. ``kept_sets``:
+    {variant set: its carriers} as emitted."""
+    if verdict is None or not verdict.dropped:
+        return
+    lost = [(s, v) for s, v in verdict.dropped if s not in kept_sets.get(v, ())]
+    if lost:
+        _snp_indel_stats["targets"] += 1
+        _snp_indel_stats["listings"] += len(lost)
+        _snp_indel_stats["gone"] += len({v for _s, v in lost if not kept_sets.get(v)})
+
+
 def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     """DICT-LESS observed-haplotype branch of iupac_decomposition.
 
@@ -654,19 +1502,12 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
         snpToReplace, sampleSet, rsID, AF_var, snpInfo = retrieveFromDict(
             pos_c + int(split[4])
         )
-        # #139: the dict-less registry returns EVERY alt at this genomic position
-        # (``alts_at``), but the target's own IUPAC column ``c`` encodes exactly the
-        # ref+alt CRISPRitz used for THIS off-target. At a bulge boundary a
-        # position-keyed alt that the target column does NOT permit would steer the
-        # enumerator to the wrong allele and drop the real variant-bulge off-target.
-        # Keep only alts representable by the column's IUPAC code (a no-op wherever the
-        # code already permits the alt, i.e. every non-bulge column). Never invents a
-        # carrier -- only removes a target-inconsistent alt.
-        _allowed = iupac_code_set.get(c)
-        alts, carrier_gts, alt_index, info, ps = [], [], [], [], None
+        # Every alt of the position, its carriers' genotypes read against its own
+        # allele index (a record listing several ALTs on one VCF line keeps its raw
+        # 1|2 under each; a Tier-1 store compiled by this release holds them read so
+        # already): "1" holds the alt.
+        gt_maps = []
         for i, elem in enumerate(snpToReplace):
-            if _allowed is not None and elem not in _allowed:
-                continue
             # tokens are "sampleID:gt"; split each on its FIRST ':' (never on '|').
             gt_map = {}
             for tok in sampleSet[i]:
@@ -675,15 +1516,17 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                 else:
                     sid, gt = tok, ""
                 gt_map[sid.strip()] = gt.strip()
+            gt_maps.append((elem, gt_map))
+        gt_maps = _site.per_alt_entries(gt_maps)
+        # #139: only the alts the target's own column stands for (_column_alleles).
+        _admitted = _column_alleles(c, refSeq[pos_c], snpToReplace, pos_c + int(split[4]))
+        alts, carrier_gts, alt_index, info, ps = [], [], [], [], None
+        for i, elem in enumerate(snpToReplace):
+            if elem not in _admitted:
+                continue
             alts.append(elem)
-            carrier_gts.append(gt_map)
-            # Resolve THIS (pos, alt) record's alt-index token (multiallelic-safe)
-            # from its own carrier genotypes. Ploidy 2 is a safe upper bound for the
-            # token scan (parse_haplotypes just returns more slots; the classification
-            # only cares which non-ref token the record's carriers share).
-            alt_index.append(
-                _obshap._alt_index_for_record(gt_map.values(), parse_haplotypes, 2)
-            )
+            carrier_gts.append(gt_maps[i][1])
+            alt_index.append("1")
             info.append([rsID[i], AF_var[i], snpInfo[i]])
         positions.append({
             "pos_c": pos_c,
@@ -743,6 +1586,12 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
             _columns, refSeq, realTarget, guide_no_pam, revert,
             pos_beg, pos_end, reverse_complement_table, pam_valid_fn=_pam_valid_fast,
         )
+        # --max-degeneracy: the fewest mismatches with a valid PAM within the budget
+        _rep = _cut_to_degeneracy(
+            _rep, _columns, refSeq, realTarget, refSeq_with_bulges, guide_no_pam, revert,
+            lambda _s: (0 if _pam_valid_fast(_s) else 1,
+                        _aligned_mm(_s, realTarget, guide_no_pam, revert)),
+        )
         if _rep["info"]:  # >=1 alt lowered/held the alignment vs the reference
             _finalize_observed_entry(
                 split, realTarget, refSeq_final, refSeq_with_bulges, guide_no_pam,
@@ -800,11 +1649,21 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                 for _i, _ch in enumerate(_tl[pam_begin:pam_end]):
                     if _ch.upper() not in iupac_code_set[pam[_i]]:
                         return False
+                # --max-degeneracy: the strongest alignment within the budget
+                if MAX_DEGENERACY >= 0 and _wd.degeneracy(
+                        _tl, refSeq_with_bulges, guide_no_pam, pam, pos_beg, pos_end,
+                        pam_begin, pam_end) > MAX_DEGENERACY:
+                    return False
                 return True
             _cfd_rep = _twopass_emit.greedy_max_score(
                 _columns, refSeq, realTarget, guide_no_pam, revert,
                 pos_beg, pos_end, reverse_complement_table, _cfd_fast,
                 valid_fn=_emittable_fast,
+            )
+            # a window too dense for greedy_max_score's exact search: cut the greedy one
+            _cfd_rep = _cut_to_degeneracy(
+                _cfd_rep, _columns, refSeq, realTarget, refSeq_with_bulges, guide_no_pam,
+                revert, lambda _s: (0 if _pam_valid_fast(_s) else 1, -_cfd_fast(_s)),
             )
             if _cfd_rep["info"] and _cfd_rep["seq"] != _rep["seq"]:
                 _finalize_observed_entry(
@@ -812,18 +1671,8 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                     revert, "".join(_cfd_rep["seq"]), sorted(_cfd_rep["carriers"]),
                     _cfd_rep["info"], _obshap.PUTATIVE, cluster_to_save,
                 )
-        # visibility: still log genuinely-dense windows to the shared BED (as the cap does)
-        if IUPAC_CAP >= 0 and len(positions) > IUPAC_CAP:
-            try:
-                _start = int(split[4])
-                hvdr_bed.write(
-                    "%s\t%d\t%d\t%s\t%d\t%s\t%s\n"
-                    % (split[3], _start, _start + len(replaceTarget),
-                       split[1].replace("-", ""), len(positions),
-                       ",".join(sorted(_rep["carriers"])) if _rep["carriers"] else ".",
-                       replaceTarget))
-            except Exception:
-                pass  # BED logging is best-effort; never break the run
+        # (a dense window is listed in the high-variant-density BED by the main loop,
+        # _record_dense_window, a greedy worst case standing for every window here)
         return
     # --- end fast mode ----------------------------------------------------------------
 
@@ -835,10 +1684,31 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     #    legacy embedded-refSeq/sentinel-33 representation, which is present on every
     #    IUPAC candidate). The ``enumerate_observed_haplotypes`` contract never yields
     #    the empty/reference haplotype, so the reference row is our responsibility here.
+    #    Past _MAX_UNIONS unions, a PUTATIVE sample's one union takes, at a column where it
+    #    carries two or three alts, the one nearest the guide: one the PAM allows, then the
+    #    one with the fewest mismatches, on a tie the smaller. A carrier's haplotype that
+    #    also holds an indel changing the target's bases does not have this sequence: the
+    #    slot filter takes it out (2.10.0; None, the 2.8.1 enumeration, when no indel of
+    #    the phased store changes the target).
+    _misses_alone = {}
+
+    def _nearest(pos_c, alts):
+        for alt in alts:
+            if (pos_c, alt) not in _misses_alone:
+                seq = list(refSeq)
+                seq[pos_c] = alt
+                _misses_alone[(pos_c, alt)] = (
+                    _aligned_pam_misses(seq, realTarget, revert),
+                    _aligned_mm(seq, realTarget, guide_no_pam, revert))
+        return min(alts, key=lambda alt: (_misses_alone[(pos_c, alt)], alt))
+
+    slot_filter = _snp_row_slot_filter(split)
     haplotypes = _obshap.enumerate_observed_haplotypes(
         positions, refSeq, parse_haplotypes, ploidy_of, current_chr,
-        max_putative=IUPAC_CAP,
+        max_putative=IUPAC_CAP, max_unions=_MAX_UNIONS, choose=_nearest,
+        slot_filter=slot_filter,
     )
+    _count_snp_row_drops(slot_filter, {h.variant_set: h.carriers for h in haplotypes})
 
     # 3) Build the reference-with-bulges row ONCE (mirrors the legacy block).
     refSeq_final = reverse_complement_table(refSeq) if revert else refSeq
@@ -876,25 +1746,11 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     # without fabricating a carrier-less worst case. The conservative worst-case rep
     # remains the correct behavior for POPULATION-LEVEL mode (the _FAST_MODE early-return
     # path above), which is unchanged.
-    if IUPAC_CAP >= 0 and len(positions) > IUPAC_CAP:
-        _samples = set()
-        for _h in haplotypes:
-            _samples |= _h.carriers
-        _start = int(split[4])
-        try:
-            # 7th field = the FULL IUPAC protospacer (every variant column as its
-            # ref+alt ambiguity code) so a user can see all alleles in the window and
-            # dig into the other possible alignments (resultIntegrator surfaces this
-            # + a "dense region" flag as an integrated_results column).
-            hvdr_bed.write(
-                "%s\t%d\t%d\t%s\t%d\t%s\t%s\n"
-                % (split[3], _start, _start + len(replaceTarget),
-                   split[1].replace("-", ""), len(positions),
-                   ",".join(sorted(_samples)) if _samples else ".",
-                   replaceTarget)
-            )
-        except Exception:
-            pass  # BED logging is best-effort; never break the run
+    #
+    # So no greedy worst case stands for the window, over the cap or hyperdense within it.
+    # (The main loop lists such a window in the high-variant-density BED,
+    # _record_dense_window, with the samples carrying an ALT there: those of these
+    # haplotypes, and those whose haplotype an indel took off the window's rows.)
 
     # 3b) Finalize each observed VARIANT haplotype through the shared finalizer (may be
     #     an empty loop when no productive observed haplotype exists).
@@ -916,6 +1772,19 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
             and _t0c is not None:
         _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save)
         return
+    # A per-sample window denser than CRISPRME_IUPAC_CAP on the classic dictionaries (an
+    # index without the dict-less tiers): up to 2.8.1 its greedy worst-case alignment, whose
+    # carriers were those of any allele it took, so that nobody need carry it (5 rows of
+    # the README guide on the self-test's NGG_2_hg38_chr22+hg38_1000G named 102 individuals
+    # 114 times). The dictionary holds the same genotypes the tiers do: enumerate the
+    # haplotypes the window's carriers have, as the tiers' path does.
+    if not _FAST_MODE and not registry_only_mode and IUPAC_CAP >= 0 and _obshap is not None \
+            and _popsum is not None and _t0c is not None:
+        # the sequences the window spells, counted as the code below counts them for its
+        # cap (window_density: in bits, a three-allele column log2 3, a Q 2)
+        if _wd.over_cap(_wd.sequences(split[2].replace("-", "")), IUPAC_CAP):
+            _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save)
+            return
 
     realTarget = split[2]
     replaceTarget = split[2].replace("-", "")
@@ -933,6 +1802,12 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
     if haplotype_check:
         totalDict[1] = dict()
         totalDict[1][0] = dict()
+    # 2.10.0 (per-sample): the carriers whose haplotype also holds an indel that changes
+    # the target leave its rows (None: no indel of the phased store changes it, or a
+    # population-level search: the 2.8.1 rows). snp_unphased: the carriers with an
+    # unphased SNP call in this window, whose slot is unknown.
+    snp_filter = _snp_row_slot_filter(split)
+    snp_unphased = set()
     countIUPAC = 0
     for pos_c, c in enumerate(replaceTarget):
         if c in iupac_code:
@@ -948,7 +1823,25 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
             snpToReplace, sampleSet, rsID, AF_var, snpInfo = retrieveFromDict(
                 pos_c + int(split[4])
             )
+            # #139, as the observed path: only the alts the target's own column stands
+            # for, so the two paths agree (the dictionary lists the alts the enrichment
+            # coded at the position, and one the column does not hold is no allele of
+            # this off-target). Not on a sites-only registry: it lists every record of
+            # its VCF, the earlier records of a split site that an index built by
+            # CRISPRitz 2.9.1 or earlier never coded and non-PASS records included, each
+            # the panel's own allele at its own position, and this path substitutes
+            # every one, as up to 2.8.1 (the finalizer's budget and PAM gates decide the
+            # row). Filtered, a search of the published mega index lost them: on chr22,
+            # for five guides, the highest CFD of 114 sites fell (TRAC's
+            # chr22:22,900,049 from 0.524 to 0.127).
+            if _sites_only_registry:
+                _admitted = set(snpToReplace)
+            else:
+                _admitted = _column_alleles(c, refSeq[pos_c], snpToReplace,
+                                            pos_c + int(split[4]))
             for i, elem in enumerate(snpToReplace):
+                if elem not in _admitted:
+                    continue
                 listReplaceTarget = list(refSeq)
                 listReplaceTarget[pos_c] = elem
                 listInfo = [[rsID[i], AF_var[i], snpInfo[i]]]
@@ -957,9 +1850,14 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                     for count, sample in enumerate(sampleSet[i]):
                         sampleInfo = sample.split(":")
                         gt_alleles = sampleInfo[1].split("|")
+                        if snp_filter is not None and len(gt_alleles) < 2:
+                            snp_unphased.add(sampleInfo[0])  # its slot is unknown
                         for haplo in totalDict:
                             allele = gt_alleles[haplo] if len(gt_alleles) > haplo else gt_alleles[0]  # haploid guard
-                            if allele != "0":
+                            # a missing allele ('.') carries nothing (METHODS section 4), as
+                            # the Tier-1 path reads it: up to 2.10.0 a '.|1' carrier was put
+                            # on both slots, and listed on the other slot's target too
+                            if allele not in ("0", "."):
                                 haploSamples[haplo].append(sampleInfo[0])
                     totalDict[0][0][(pos_c, elem)] = [
                         listReplaceTarget,
@@ -982,40 +1880,23 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                     ]
 
     if countIUPAC > 0:  # if found valid alternative targets
-        # High-variant-density cap: above IUPAC_CAP ambiguity codes the multi-SNP
-        # combination below would enumerate up to 2^countIUPAC sequences. Instead
-        # report a single GREEDY representative per haplotype -- at each ambiguity
-        # position pick the min-mismatch allele (preferring an alt on ties, which
+        # High-variant-density cap: a window spelling more than 2^IUPAC_CAP sequences
+        # (window_density.sequences) would have the multi-SNP combination below enumerate
+        # as many. Instead report a single GREEDY representative per haplotype -- at each
+        # ambiguity position pick the min-mismatch allele (preferring an alt on ties, which
         # keeps PAM-region variant alleles so PAM-creation is preserved). This is the
         # exact min-mismatch / max-CFD haplotype (mismatch is additive per position,
         # so the greedy equals the argmin over all 2^k combinations) without the
         # blow-up. The region is logged to <out>.high_variant_density_regions.bed.
         # FAST MODE forces the greedy representative for EVERY window (never enumerate the
-        # 2^k lattice); otherwise it triggers only above IUPAC_CAP ambiguity codes. The
-        # greedy rep is the exact min-mismatch / max-CFD haplotype either way.
-        capped = _FAST_MODE or (IUPAC_CAP >= 0 and countIUPAC > IUPAC_CAP)
+        # 2^k lattice); otherwise it triggers only above the cap. The greedy rep is the
+        # exact min-mismatch / max-CFD haplotype either way.
+        _n_seq = _wd.sequences(replaceTarget)
+        capped = _FAST_MODE or _wd.over_cap(_n_seq, IUPAC_CAP)
+        # (Only GENUINELY-dense windows are listed in the BED, over the cap or hyperdense
+        # whatever the cap is, by the main loop: _record_dense_window. In fast mode
+        # ``capped`` is forced for every window, which the BED does not follow.)
         if capped:
-            # Log only GENUINELY-dense windows to the BED (in fast mode ``capped`` is forced
-            # for every window, but the high-variant-density BED must still list only the
-            # hypervariable ones -- byte-identical to the non-fast BED contents).
-            if IUPAC_CAP >= 0 and countIUPAC > IUPAC_CAP:
-                _samples = set()
-                for _cnt in totalDict:
-                    for _v in totalDict[_cnt][0].values():
-                        _samples |= _v[1]
-                _start = int(split[4])
-                hvdr_bed.write(
-                    "%s\t%d\t%d\t%s\t%d\t%s\t%s\n"
-                    % (
-                        split[3],
-                        _start,
-                        _start + len(replaceTarget),
-                        split[1].replace("-", ""),
-                        countIUPAC,
-                        ",".join(sorted(_samples)) if _samples else ".",
-                        replaceTarget,  # full IUPAC protospacer (dig-in aid)
-                    )
-                )
             # PAM-validity of a candidate (mirrors the finalizer's pam_ok gate); consumed
             # by the fast-mode greedy so a PAM-region variant is not decided by lex order
             # (which drops ~half the PAM-creation off-targets).
@@ -1030,6 +1911,14 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                         return False
                 return True
 
+            # --max-degeneracy counts the ambiguous columns of an alignment against its
+            # aligned reference, which the finalization below builds the same way
+            _ref_aln = (
+                _ref_with_bulges(reverse_complement_table(refSeq) if revert else refSeq,
+                                 realTarget, guide_no_pam)
+                if MAX_DEGENERACY >= 0 else None
+            )
+
             # Build the greedy representative per haplotype and REPLACE the per-SNP
             # level-0 entries with that single entry, so the finalization below scores
             # exactly one row (bulges/PAM/creation/CFD via the existing code path).
@@ -1038,18 +1927,20 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                 by_pos = {}
                 for (pos_c, elem), v in totalDict[count][0].items():
                     by_pos.setdefault(pos_c, []).append((elem, v))
+                # the window's variant columns as twopass_emit takes them. v[1] is the
+                # carrier set; v[2] a one-element [[rsID, AF, snp]] list (per-SNP level-0
+                # entry).
+                _cols = [
+                    {"pos_c": _pc,
+                     "candidates": [{"alt": _elem, "carriers": _v[1], "info": _v[2][0]}
+                                    for _elem, _v in _cands]}
+                    for _pc, _cands in by_pos.items()
+                ]
                 if _FAST_MODE and _twopass_emit is not None:
                     # FAST MODE: the PAM-aware, multi-pass + brute-force greedy
                     # (twopass_emit.greedy_worst_case) -- lossless, prefers PAM-creating
                     # alleles so a PAM-region variant off-target is not silently dropped
-                    # (the real-data 141-miss fix). v[1] is the carrier set; v[2] a
-                    # one-element [[rsID, AF, snp]] list (per-SNP level-0 entry).
-                    _cols = [
-                        {"pos_c": _pc,
-                         "candidates": [{"alt": _elem, "carriers": _v[1], "info": _v[2][0]}
-                                        for _elem, _v in _cands]}
-                        for _pc, _cands in by_pos.items()
-                    ]
+                    # (the real-data 141-miss fix).
                     _rep = _twopass_emit.greedy_worst_case(
                         _cols, refSeq, realTarget, guide_no_pam, revert,
                         pos_beg, pos_end, reverse_complement_table, pam_valid_fn=_pam_ok_leg)
@@ -1080,14 +1971,36 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             greedy_seq[pos_c] = best_elem
                             greedy_samples |= best_v[1]
                             greedy_info.extend(best_v[2])
+                    _rep = {"seq": greedy_seq, "carriers": greedy_samples,
+                            "info": greedy_info,
+                            "chosen": {_col["pos_c"]: next(
+                                (_c for _c in _col["candidates"]
+                                 if greedy_seq[_col["pos_c"]] != refSeq[_col["pos_c"]]
+                                 and _c["alt"] == greedy_seq[_col["pos_c"]]), None)
+                                for _col in _cols}}
+                # --max-degeneracy: the fewest mismatches with a valid PAM within it
+                _cut = _cut_to_degeneracy(
+                    _rep, _cols, refSeq, realTarget, _ref_aln, guide_no_pam, revert,
+                    lambda _s: (0 if _pam_ok_leg(_s) else 1,
+                                _aligned_mm(_s, realTarget, guide_no_pam, revert)),
+                )
+                if _cut is not _rep:
+                    greedy_seq = list(_cut["seq"])
+                    greedy_samples = set(_cut["carriers"])
+                    greedy_info = list(_cut["info"])
                 if not greedy_info:  # no allele changed anything: document the region anyway
                     any_v = next(iter(totalDict[count][0].values()), None)
                     if any_v is not None:
                         greedy_info = list(any_v[2])
                         greedy_samples = set(any_v[1])
-                totalDict[count][0] = {
-                    ("greedy", 0): [greedy_seq, greedy_samples, greedy_info]
-                }
+                # No column of the window admitted an alt (each code a neighbouring
+                # position's, #139): no variant row, as without the cap. On a
+                # registry-only install, where a row needs no carrier, an entry naming no
+                # variant stopped the post-analysis (IndexError below).
+                totalDict[count][0] = (
+                    {("greedy", 0): [greedy_seq, greedy_samples, greedy_info]}
+                    if greedy_info else {}
+                )
                 # WORST-CASE CFD representative (mirrors the observed fast path,
                 # new_simple_analysis.py:700). The min-mismatch greedy above does NOT
                 # maximize CFD (CFD is a position-WEIGHTED product -- a seed mismatch
@@ -1157,12 +2070,23 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                         for _i, _ch in enumerate(_tl[pam_begin:pam_end]):
                             if _ch.upper() not in iupac_code_set[pam[_i]]:
                                 return False
+                        # --max-degeneracy: the strongest alignment within the budget
+                        if MAX_DEGENERACY >= 0 and _wd.degeneracy(
+                                _tl, _ref_aln, guide_no_pam, pam, pos_beg, pos_end,
+                                pam_begin, pam_end) > MAX_DEGENERACY:
+                            return False
                         return True
 
                     _cfd_rep = _twopass_emit.greedy_max_score(
                         _cols, refSeq, realTarget, guide_no_pam, revert,
                         pos_beg, pos_end, reverse_complement_table, _cfd_fast_leg,
                         valid_fn=_emittable_leg,
+                    )
+                    # a window too dense for greedy_max_score's exact search: cut the
+                    # greedy one
+                    _cfd_rep = _cut_to_degeneracy(
+                        _cfd_rep, _cols, refSeq, realTarget, _ref_aln, guide_no_pam, revert,
+                        lambda _s: (0 if _pam_ok_leg(_s) else 1, -_cfd_fast_leg(_s)),
                     )
                     if _cfd_rep["info"] and list(_cfd_rep["seq"]) != list(greedy_seq):
                         totalDict[count][0][("greedy_cfd", 1)] = [
@@ -1181,18 +2105,35 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                 # lossless via the observed enumerator, and a per-sample union would risk
                 # phantom (trans-as-cis) haplotypes. Default OFF -> byte-identical.
                 if _LOSSLESS_DENSE and registry_only_mode:
-                    _union_seq = list(refSeq)
-                    _union_info = []
-                    for _pc, _cands in by_pos.items():
-                        for _elem, _v in _cands:
+                    # A haplotype holds one allele of a position: one union per choice of
+                    # alt at the columns holding two or three (CRISPRitz 2.10.0 codes every
+                    # ALT) while there are at most _MAX_UNIONS of them; past that, one
+                    # union with the alt the greedy representative took at each such
+                    # column (else the column's first).
+                    _cols = sorted(by_pos)
+                    _choices = [list(by_pos[_pc]) for _pc in _cols]
+                    _n = 1
+                    for _ch in _choices:
+                        _n *= len(_ch)
+                    if _n > _MAX_UNIONS:
+                        for _k, _pc in enumerate(_cols):
+                            if len(_choices[_k]) > 1:
+                                _took = [_cv for _cv in _choices[_k]
+                                         if _cv[0] == greedy_seq[_pc]]
+                                _choices[_k] = _took or _choices[_k][:1]
+                    for _u, _pick in enumerate(itertools.product(*_choices)):
+                        _union_seq = list(refSeq)
+                        _union_info = []
+                        for _pc, (_elem, _v) in zip(_cols, _pick):
                             _union_seq[_pc] = _elem
                             _union_info.extend(_v[2])
-                    if _union_seq != list(greedy_seq):
-                        totalDict[count][0][("lossless_hap", 2)] = [
-                            _union_seq, set(), _union_info
-                        ]
+                        if _union_seq != list(greedy_seq):
+                            totalDict[count][0][("lossless_hap", 2 + _u)] = [
+                                _union_seq, set(), _union_info
+                            ]
         if revert:
             refSeq = reverse_complement_table(refSeq)
+        snp_kept = {}  # variant set -> the carriers its combinations keep (2.10.0)
         for count in totalDict:
             createdNewLayer = True
             # capped -> range(0): the single greedy entry is already in level 0
@@ -1277,6 +2218,13 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                                         totalDict[count][lo][lk][1] - hv[1]
                                     )
 
+            # 2.10.0 (per-sample, not the capped worst case): a carrier whose haplotype
+            # also holds an indel that changes the target's bases leaves the combination
+            # it is on (its slot here, ``count``, on a phased dataset).
+            if snp_filter is not None and not capped:
+                _filter_snp_lattice(totalDict[count], count if haplotype_check else None,
+                                    snp_unphased, snp_filter, snp_kept)
+
             refSeq_with_bulges = list(refSeq)
             for pos, char in enumerate(realTarget):
                 if char == "-":
@@ -1345,7 +2293,13 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                         # value of mm and bulges is over allowed threshold, discard target
                         if mm_new_t - int(split[8]) > allowed_mms:
                             continue
-                        elif pam_ok:
+                        # --max-degeneracy: a row the phased lattice built is carried by
+                        # its carriers on one haplotype; any other resting on more
+                        # ambiguous columns than the budget is withheld
+                        elif pam_ok and not _withheld_by_degeneracy(
+                            target_to_list, refSeq_with_bulges, guide_no_pam,
+                            haplotype_check and not capped,
+                        ):
                             final_line[2] = "".join(target_to_list)
                             final_line[7] = str(mm_new_t - int(final_line[8]))
                             # total differences between targets and guide (mismatches + bulges)
@@ -1394,6 +2348,8 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             # This reads ONLY final_line columns and never mutates it,
                             # so the bestMerge output is byte-identical.
                             _collect_variant_off_target(final_line)
+        if snp_filter is not None and not capped:
+            _count_snp_row_drops(snp_filter, snp_kept)
 
 
 def _cfd_from_alignment(aligned_crrna, aligned_proto):
@@ -1437,96 +2393,10 @@ def preprocess_CFD_score(target):
 
 
 def preprocess_CRISPR_BULGE_score(cluster_targets):
-    """CRISPR-Bulge scoring (analogue of the retired legacy-scorer preprocessing path).
-
-    Same output contract (target[-2] marker -> score, plus an appended score), same
-    alt/ref two-pass + null semantics, so the write loop + report are unchanged. The
-    ONLY differences vs CRISPR-Bulge: (1) the model needs just the aligned (sgRNA, off-target)
-    pair -- NO 29-nt genomic window -- and (2) scoring runs in the dedicated `cbulge`
-    conda env via the scorer-runner (persistent worker). The runner degrades gracefully
-    to -1.0 if the env/model is absent, so a run never breaks.
-
-    CRISPR-Bulge's encoder requires per-row len(sg)==len(off); for rows we cannot score
-    (N in the aligned DNA, or a length mismatch) we substitute an equal-length dummy so
-    the batch stays valid, then null them by index afterwards (mirrors the CRISPR-Bulge path,
-    which substitutes 'A'*29).
-    """
-    import scorer_runner  # lazy: only when CRISPR-Bulge is selected
-
-    cluster_scored = list()
-    index_to_null = list()
-
-    if not do_scores:
-        for target in cluster_targets:
-            t = target.copy()
-            t[-2] = "{:.6g}".format(-1)
-            t.append("{:.6g}".format(-1))
-            cluster_scored.append(t)
-        return cluster_scored
-
-    # This CRISPR-Bulge ensemble faithfully scores a protospacer+PAM alignment with AT MOST
-    # ONE 1-bp bulge (model input seq_len=24). We deliberately score ONLY what the model can
-    # represent and NULL (-1) everything else, so a value in the column is always trustworthy:
-    #   * N in the aligned off-target, or sg/off length mismatch  -> null
-    #   * >1 gap column (>=2 bulges, OR a single >=2-bp bulge)     -> null
-    #   * over-length (> 24)                                        -> null
-    # Nulled rows fall back to CFD (the PRIMARY score) + mismatches/bulges, which still flag
-    # them. We deliberately do NOT collapse/reduce a multi-bulge alignment to a single bulge:
-    # an adversarial review showed the naive reduction corrupts the alignment (deletes real
-    # bases; mis-counts a 2-bp bulge as two events) and its "conservative" error direction is
-    # unprovable for a non-monotonic GRU -- an unacceptable silent under-flag risk in a clinical
-    # tool. Multi-bulge off-targets are the rare, heavily-disrupted (low-activity) tail; CFD +
-    # edit distance carry them. A scoreable equal-length dummy is substituted for nulled rows so
-    # one bad row can't fail the whole batch. CFD (the primary score) is unaffected.
-    _MAXLEN = 24
-    _SG_DUMMY = "A" * 20 + "NGG"
-    _OFF_DUMMY = "A" * 20 + "AGG"
-
-    def _pair(target, off_field, index):
-        sg = str(target[1])[: len(str(target[1])) - 3] + "NGG"
-        off = str(off_field)
-        total_gaps = sg.count("-") + off.count("-")
-        if (("N" in off) or ("n" in off) or (len(off) != len(sg))
-                or total_gaps > 1 or len(sg) > _MAXLEN):
-            index_to_null.append(index)
-            return _SG_DUMMY, _OFF_DUMMY
-        return sg, off
-
-    # ALT pass: aligned off-target = target[2]
-    pairs_alt = [_pair(t, t[2], i) for i, t in enumerate(cluster_targets)]
-    scores_alt = scorer_runner.CRISPR_BULGE_predict_list(
-        [p[0] for p in pairs_alt], [p[1] for p in pairs_alt])
-
-    # REF pass: aligned off-target = Reference_target (target[-3]) unless it carries an 'n'
-    pairs_ref = []
-    for i, target in enumerate(cluster_targets):
-        ref = str(target[-3]) if "n" not in str(target[-3]) else str(target[2])
-        pairs_ref.append(_pair(target, ref, i))
-    scores_ref = scorer_runner.CRISPR_BULGE_predict_list(
-        [p[0] for p in pairs_ref], [p[1] for p in pairs_ref])
-
-    # CRISPR-Bulge scores are written at FULL precision ("{:.6g}"), NOT 3 decimals:
-    # the sensitive operating point (cb_operating_point, 95%-recall default 1.9e-4) is
-    # below the old 3-decimal floor (5e-4), so rounding would make it unreachable and
-    # silently drop ~7% of validated off-targets from the sensitive tier.
-    for index, target in enumerate(cluster_targets):
-        t = target.copy()
-        if index in index_to_null:
-            s = -1
-            t[-2] = "{:.6g}".format(s)
-            t.append("{:.6g}".format(s))
-        else:
-            # mirror the CRISPR-Bulge marker convention exactly (55 = ref row, 33 = alt row)
-            if t[-2] == 55:
-                t[-2] = "{:.6g}".format(scores_alt[index])
-                t.append("{:.6g}".format(scores_alt[index]))
-            if t[-2] == 33:
-                t[-2] = "{:.6g}".format(scores_ref[index])
-                t.append("{:.6g}".format(scores_alt[index]))
-        cluster_scored.append(t)
-
-    return cluster_scored
-
+    """CRISPR-Bulge scores of one batch of rows: cbulge_rows.score_rows (one body, shared
+    with the indel post-analysis and with the merge of a post-analysis cut into pieces,
+    merge_pieces.py, which scores the pieces' rows in the batches one process forms)."""
+    return _cbr.score_rows(cluster_targets, do_scores)
 
 def calculate_scores(cluster_to_save):
     # function to calculate score for each input target
@@ -1595,15 +2465,21 @@ def calculate_scores(cluster_to_save):
     return [cluster_with_CFD_score, cluster_with_CRISPR_BULGE_score]
 
 
-def _collect_needed_dict_keys(cluster_path, chrom):
+def _collect_needed_dict_keys(cluster_path, chrom, spans=None):
     """Return the SNP-dictionary keys ('<chrom>,<1-based pos>') this chromosome's
     targets will query. iupac_decomposition() calls retrieveFromDict() for each
     genomic position spanned by a target that contains an IUPAC code, so we take the
     full span of every such target -- a SUPERSET of the exact query set, so no
     queried position is ever missed. This lets us load only these entries instead of
     the whole per-chromosome dictionary (a 1000G+HGDP chr2 dict is ~13 GB on disk,
-    ~26 GB via json.load; loading only the queried positions keeps peak RAM small)."""
+    ~26 GB via json.load; loading only the queried positions keeps peak RAM small).
+    ``spans`` (a list), when given, gets the (first, last) reference positions (0-based,
+    inclusive) of such targets, each span once (2.10.0: a dense window has a hundred raw
+    targets or more, one per alignment, and every reader of the spans reads a set of them:
+    read once each, the SNP-row indel-store start-up took 227 s on chr22 and an hour on
+    IGH, nearly all of it for repeats)."""
     needed = set()
+    seen = set()
     try:
         with open(cluster_path) as fh:
             fh.readline()  # skip header
@@ -1619,11 +2495,48 @@ def _collect_needed_dict_keys(cluster_path, chrom):
                 except (ValueError, IndexError):
                     continue
                 span = len(target.replace("-", ""))
+                if (start, span) in seen:
+                    continue
+                seen.add((start, span))
                 for p in range(start, start + span):
                     needed.add(chrom + "," + str(p + 1))
+                if spans is not None:
+                    spans.append((start, start + span - 1))
     except OSError:
         pass
     return needed
+
+
+def _resolve_indel_genotype_path(dict_path, chrom):
+    """The phased indel genotype store of ``chrom`` (build_indel_genotypes) from the SNP
+    dict path: ``<...>/Dictionaries/indel_genotypes_<vcf>/gt_indel_<chrom>.tsv.gz``, the
+    one analisi_indels_NNN.py reads, or None when absent. MIRRORS
+    ``_resolve_genotype_paths``."""
+    dict_dir = os.path.dirname(dict_path)
+    name = os.path.basename(dict_dir)
+    suffix = name[len("dictionaries_"):] if name.startswith("dictionaries_") else name
+    path = os.path.join(os.path.dirname(dict_dir), "indel_genotypes_" + suffix,
+                        "gt_indel_" + str(chrom) + ".tsv.gz")
+    return path if os.path.isfile(path) else None
+
+
+def _snp_indel_frame_keys(store, spans, chrom):
+    """The dictionary keys a haplotype is read over around each SNP target an indel of
+    ``store`` (_SnpRowIndels) changes (indel_snp_cis.snp_target_frame, with every
+    indel of the store there): positions outside the target the dictionary path needs
+    the alleles of, besides the target's own."""
+    keys = set()
+    for lo, hi in spans:
+        touching = store.touching(lo, hi)
+        if not touching:
+            continue
+        # a reading's frame is sized by the target's indels a haplotype holds and the
+        # store's indels it reaches there: twice widened, these keys hold any of them
+        first, last = _isc.snp_target_frame(lo, hi, store.near(lo - 1, hi + 1))
+        first, last = _isc.snp_target_frame(lo, hi, store.near(first, last))
+        for p in range(max(first, 0), last + 1):
+            keys.add(chrom + "," + str(p + 1))
+    return keys
 
 
 def _load_dict_targeted(dict_path, needed_keys):
@@ -1908,20 +2821,28 @@ cfd_best.write(header + "\tCFD\n")  # Write header
 mmblg_best = open(outputFile + ".bestmmblg.txt", "w+")
 mmblg_best.write(header + "\tCFD\n")  # Write header
 
-# file with best CRISPR-Bulge targets
-crispr_bulge_best = open(outputFile + ".bestCRISPR_BULGE.txt", "w+")
-crispr_bulge_best.write(header + "\tCFD\n")  # Write header
+# file with best CRISPR-Bulge targets; in a piece of a post-analysis cut into pieces
+# (CRISPRME_POSTPROC_PIECE=1), its rows unscored with their input line, for the merge
+# (merge_pieces.py) to score them in the batches one process forms
+if _PIECE:
+    crispr_bulge_best = None
+    cbulge_rows_out = open(outputFile + ".cbulge_rows.jsonl", "w")
+else:
+    crispr_bulge_best = open(outputFile + ".bestCRISPR_BULGE.txt", "w+")
+    crispr_bulge_best.write(header + "\tCFD\n")  # Write header
+    cbulge_rows_out = None
 
-# High-variant-density cap: a protospacer window overlapping many ambiguity codes
-# (dense/hypervariable regions, e.g. MHC, and unbounded for unphased VCFs) would
-# otherwise enumerate up to 2^k haplotype sequences. Above CRISPRME_IUPAC_CAP codes
-# we report only the single-variant targets (k rows, not 2^k) and log the region,
-# so a real off-target risk is still surfaced without the combinatorial blow-up.
-IUPAC_CAP = int(os.environ.get("CRISPRME_IUPAC_CAP", "10"))
-hvdr_bed = open(outputFile + ".high_variant_density_regions.bed", "w")
-hvdr_bed.write(
-    "#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\tiupac_protospacer\n"
-)
+# High-variant-density cap, in bits: a protospacer window overlapping many ambiguity codes
+# (dense/hypervariable regions, e.g. MHC and the immunoglobulin loci, and unbounded for
+# unphased VCFs) spells up to 2^bits sequences (window_density.sequences: 2 for each of
+# R/Y/S/W/K/M, 3 for each of B/D/H/V, 4 for each Q), and the dictionary path would enumerate
+# as many combinations of its alleles. Above 2^CRISPRME_IUPAC_CAP it reports the window by its
+# greedy worst-case alignment instead; every path lists such a window, and any spelling
+# 2^HYPERDENSE_BITS sequences or more whatever the cap, in this BED (with its bits, its
+# four-allele positions, and whether a greedy worst case stands for it), so a real
+# off-target risk is still surfaced without the combinatorial blow-up. Up to 2.8.1 the cap
+# counted ambiguous positions: the same number where each holds one ALT. -1 disables it.
+IUPAC_CAP = int(os.environ.get("CRISPRME_IUPAC_CAP", str(_wd.DEFAULT_IUPAC_CAP)))
 
 # Load ONLY the SNP-dictionary entries this chromosome's targets actually query,
 # streaming the (up to ~26 GB) per-chromosome dict so peak RAM stays proportional to
@@ -1933,16 +2854,70 @@ mydict = {}
 dict_tier_present = False  # True once a per-sample dict FILE loads (mode 1); stays
 #                            False on a dict-less install (modes 2/3) -- the reliable
 #                            "dict absent" signal for the registry-only guard (#136).
+
+def _read_snp_row_indels(spans, needed_keys):
+    """In a per-sample search, read the indels of the phased indel genotype store near
+    this chromosome's SNP targets ``spans`` (see _snp_row_slot_filter), and add to
+    ``needed_keys`` the dictionary keys a haplotype is read over around a target one of
+    them changes. None (no SNP row loses a carrier) in a population-level search, with
+    CRISPRME_INDEL_SNP=0, with no store, or when it cannot be read."""
+    if (_isc is None or _FAST_MODE or not spans
+            or os.environ.get("CRISPRME_INDEL_SNP", "1") not in ("1", "true", "True", "yes")):
+        return None
+    try:
+        path = _resolve_indel_genotype_path(sys.argv[2], current_chr)
+        if path is None:
+            return None
+        t0 = time.time()
+        store = _SnpRowIndels(path, spans, _SNP_INDEL_MARGIN)
+        needed_keys |= _snp_indel_frame_keys(store, spans, current_chr)
+        print(f"Read {len(store)} indel(s) of the phased indel genotype store near "
+              f"{current_chr}'s SNP targets in {time.time() - t0:.1f}s")
+        return store
+    except Exception as err:  # never break the SNP post-analysis on the store
+        print("No phased indel genotype store (or unreadable) for", current_chr, "-", err)
+        return None
+
+
+_iupac_spans = []
+_dict_copy = None
+if _DICT_COPY is not None:
+    # a piece: the dictionary keys of the whole chromosome, read once by the pool
+    # (CRISPRME_POSTPROC_PREPARE below); never silently without them (a file that is not
+    # such a copy stops the piece). A file of the run's output folder: it is read as JSON,
+    # which runs no code whoever wrote it.
+    _dict_copy = _pp.read_dict_copy(_DICT_COPY)
 try:
-    _needed_keys = _collect_needed_dict_keys(sys.argv[3], current_chr)
-    mydict, haplotype_check = _load_dict_targeted(sys.argv[2], _needed_keys)
+    _needed_keys = _collect_needed_dict_keys(sys.argv[3], current_chr, _iupac_spans)
+    # 2.10.0: read before the dictionary, which then also reads the alleles around a
+    # target an indel of the store changes
+    _snp_indels = _read_snp_row_indels(_iupac_spans, _needed_keys)
+    if _dict_copy is not None:
+        haplotype_check, _copied = _dict_copy
+        mydict = {k: v for k, v in _copied.items() if k in _needed_keys}
+    else:
+        mydict, haplotype_check = _load_dict_targeted(sys.argv[2], _needed_keys)
+    _dict_keys_read = _needed_keys
     dict_tier_present = True
     print(
         f"Loaded {len(mydict)} SNP dictionary entr(y/ies) for {current_chr} "
         f"(only the positions its targets span); haplotype processing {haplotype_check}"
     )
+    if _PREPARE is not None:
+        try:
+            _pp.write_dict_copy(_PREPARE, haplotype_check, mydict)
+        except (TypeError, ValueError, OSError) as _copy_err:
+            # no copy: each piece then reads the dictionary itself, as one process does
+            print(f"No dictionary copy for the pieces of {current_chr} (each reads the "
+                  f"dictionary itself): {_copy_err}")
 except Exception as _dict_err:  # keep going with no SNP annotation, never crash here
     print("No dict found (or unreadable) for", current_chr, "-", _dict_err)
+if _PREPARE is not None:
+    # the pool's once-a-chromosome start-up: the dictionary copy is written (where there
+    # is a dictionary); the pieces analyse the lines
+    print(f"Prepared the dictionary keys of {current_chr} for the pieces of its post-analysis: "
+          f"{os.path.exists(_PREPARE)}")
+    sys.exit(0)
 
 # ADDITIVE Tier-0 registry detection (dictless redesign). If a registry exists for
 # this chromosome (alongside the dict), open a module-level RegistryReader that
@@ -2014,18 +2989,23 @@ if registry_only_mode:
         f"with degraded (NA) Samples -- no genotype tier to resolve carriers"
         f"{' (aggregate info_af registry; sample-less dict ignored)' if _aggregate_registry else ''}."
     )
+_sites_only_registry = registry_only_mode and (
+    _aggregate_registry or getattr(myreg, "manifest", {}).get("data_type") == "sites-only"
+)
 # A sites-only dataset has no genotypes for a per-sample search to resolve: its rows are
 # the population-level path's whatever the search's mode (each dataset of a search has a
 # post-analysis of its own). On the enumeration of the per-sample path, which joins
 # variants only through shared carriers, it lost its multi-variant worst cases: whole
 # sites and higher scores, in a search beside a genotyped dataset, where the mode is
 # per-sample by default, too.
-if registry_only_mode and _twopass_emit is not None and (
-    _aggregate_registry or getattr(myreg, "manifest", {}).get("data_type") == "sites-only"
-):
+if _sites_only_registry and _twopass_emit is not None:
     if not _FAST_MODE:
         print(f"Sites-only dataset on {current_chr}: population-level post-analysis.")
     _FAST_MODE = True
+# 2.10.0: no carrier to take off a SNP row without genotypes, nor in a population-level
+# post-analysis (its rows are worst-case composites)
+if registry_only_mode or _FAST_MODE:
+    _snp_indels = None
 
 # check PAM position and relative coordinates on targets
 pam_at_beginning = False
@@ -2074,10 +3054,54 @@ if len_pam != 3 or guide_len != 20 or pam_at_beginning:
 # skip header
 inTarget.readline()
 
+_BEST_HEADER = (
+    "#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches"
+    "\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF"
+    "\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster")
+
+
+def _write_scored(rows, lines):
+    """Score a batch of rows and write them: CFD to the CFD and fewest-edits files,
+    CRISPR-Bulge to its own; in a piece, the CRISPR-Bulge rows go unscored to
+    <out>.cbulge_rows.jsonl, each with its input line (``lines``), for the merge."""
+    if _PIECE:
+        for target in rows:
+            t = preprocess_CFD_score(target.copy())
+            # remove count of tmp_mms
+            t.pop(-2)
+            cfd_best.write("\t".join(t) + "\t" + str(0) + "\n")
+            mmblg_best.write("\t".join(t) + "\t" + str(0) + "\n")
+        for ln, target in zip(lines, rows):
+            cbulge_rows_out.write(json.dumps([ln, target]) + "\n")
+        return
+    clusters_with_scores = calculate_scores(rows)
+    for count, cluster in enumerate(clusters_with_scores):
+        for target in cluster:
+            if count == 0:  # CFD target
+                # remove count of tmp_mms
+                target.pop(-2)
+                # save CFD targets
+                cfd_best.write("\t".join(target) + "\t" + str(0) + "\n")
+                # save mm-bul targets
+                mmblg_best.write("\t".join(target) + "\t" + str(0) + "\n")
+            if count == 1:  # CRISPR-Bulge target
+                # remove count of tmp_mms
+                target.pop(-2)
+                # save CRISPR-Bulge targets
+                crispr_bulge_best.write("\t".join(target) + "\t" + str(0) + "\n")
+
+
 # list with clusterized targets in list format (contains ref seq and all other alternative targets)
 cluster_to_save = list()
+# the input line of each of its rows (a piece hands it to the merge with the row)
+cluster_lines = list()
+line_no = 0
 # read lines from target file
 for line in inTarget:
+    line_no += 1
+    if _RANGE is not None and not _RANGE[0] <= line_no <= _RANGE[1]:
+        continue  # another piece's line
+    rows_before = len(cluster_to_save)
     # split target into list
     split = line.strip().split("\t")
     # sgRNA sequence (with bulges and PAM)
@@ -2086,10 +3110,22 @@ for line in inTarget:
     target = split[2]
     guide_no_bulge = split[1].replace("-", "")
     guide_no_pam = guide[pos_beg:pos_end]
+    # a four-allele position (Q) in the window: listed for the rows' flag
+    four_allele = "Q" in target or "q" in target
+    if four_allele:
+        _note_four_allele(split)
 
     # check if targets cointains IUPAC nucleotide
-    if any((c in iupac_nucleotides) for c in target):
-        iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save)
+    decomposed = any((c in iupac_nucleotides) for c in target)
+    if decomposed:
+        # the high-variant-density BED reads the raw target's letters, before the
+        # pre-check or the K-skip decide anything
+        _record_dense_window(split)
+        _skipped_path = _filter_raw_target(split, guide_no_pam)
+        if _skipped_path is None:
+            iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save)
+        else:
+            _emit_reference_only(split, guide_no_pam, _skipped_path, cluster_to_save)
     else:
         # process_iupac = False
         # append to respect file format for post analysis
@@ -2100,107 +3136,52 @@ for line in inTarget:
         # count of mm_bul for ref sequence in case of alternative target
         split.append(0)
         cluster_to_save.append(split)
+    cluster_lines.extend([line_no] * (len(cluster_to_save) - rows_before))
 
-    if len(cluster_to_save) >= 100000:
+    if len(cluster_to_save) >= _cbr.BATCH_ROWS:
         # after reading 100k lines from file and creating the cluster, start processing it
-        clusters_with_scores = calculate_scores(cluster_to_save)
-
-        for count, cluster in enumerate(clusters_with_scores):
-            for target in cluster:
-                if count == 0:  # CFD target
-                    # remove count of tmp_mms
-                    target.pop(-2)
-                    # save CFD targets
-                    cfd_best.write("\t".join(target) + "\t" + str(0) + "\n")
-                    # save mm-bul targets
-                    mmblg_best.write("\t".join(target) + "\t" + str(0) + "\n")
-                if count == 1:  # CRISPR-Bulge target
-                    # remove count of tmp_mms
-                    target.pop(-2)
-                    # save CRISPR-Bulge targets
-                    crispr_bulge_best.write("\t".join(target) + "\t" + str(0) + "\n")
+        _write_scored(cluster_to_save, cluster_lines)
         cluster_to_save = list()
+        cluster_lines = list()
 
-
+# the rest of the rows (none: nothing to score)
 if len(cluster_to_save):
-    pass
-else:
-    # if cluster to save is empty, skip processing
-    # close all files
-    cfd_best.close()
-    mmblg_best.close()
-    crispr_bulge_best.close()
-    hvdr_bed.close()
-    # rewrite header file
-    os.system(
-        "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
-        + outputFile
-        + ".bestCFD.txt"
-    )
-    os.system(
-        "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
-        + outputFile
-        + ".bestmmblg.txt"
-    )
-    os.system(
-        "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
-        + outputFile
-        + ".bestCRISPR_BULGE.txt"
-    )
-    # cfd dataframe write
-    cfd_dataframe = pd.DataFrame.from_dict(cfd_for_graph)
-    cfd_dataframe.to_csv(outputFile + ".CFDGraph.txt", sep="\t", index=False)
-    # ADDITIVE + guarded + gated-on-myreg: companion population-summary TSV.
-    _write_population_summary_companion()
-    # ADDITIVE + guarded + gated-on-mygt: dict-less phase-confirmation companion TSV.
-    _write_phase_confirmation_companion()
-    # ADDITIVE + guarded + gated-on-myreg: SNP+SNP co-occurrence companion TSV.
-    _write_snp_snp_cooc_companion()
-    # print complete and exit with no error
-    print("ANALYSIS COMPLETE IN", time.time() - global_start)
-    exit(0)
-
-# process cluster of targets if less then 1mln rows total
-clusters_with_scores = calculate_scores(cluster_to_save)
-
-for count, cluster in enumerate(clusters_with_scores):
-    for target in cluster:
-        # print(target)
-        if count == 0:  # CFD target
-            # remove count of tmp_mms
-            target.pop(-2)
-            # save CFD targets
-            cfd_best.write("\t".join(target) + "\t" + str(0) + "\n")
-            # save mm-bul targets
-            mmblg_best.write("\t".join(target) + "\t" + str(0) + "\n")
-        if count == 1:  # CRISPR-Bulge target
-            # remove count of tmp_mms
-            target.pop(-2)
-            # save CRISPR-Bulge targets
-            crispr_bulge_best.write("\t".join(target) + "\t" + str(0) + "\n")
+    _write_scored(cluster_to_save, cluster_lines)
 
 cfd_best.close()
 mmblg_best.close()
-crispr_bulge_best.close()
-hvdr_bed.close()
+if crispr_bulge_best is not None:
+    crispr_bulge_best.close()
+if cbulge_rows_out is not None:
+    cbulge_rows_out.close()
 
+# rewrite header file
 os.system(
-    "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
+    "sed -i '1s/.*/" + _BEST_HEADER + "/' "
     + outputFile
     + ".bestCFD.txt"
 )
 os.system(
-    "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
+    "sed -i '1s/.*/" + _BEST_HEADER + "/' "
     + outputFile
     + ".bestmmblg.txt"
 )
-os.system(
-    "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
-    + outputFile
-    + ".bestCRISPR_BULGE.txt"
-)
+if not _PIECE:
+    os.system(
+        "sed -i '1s/.*/" + _BEST_HEADER + "/' "
+        + outputFile
+        + ".bestCRISPR_BULGE.txt"
+    )
+else:
+    # the merge's: how to score the CRISPR-Bulge rows, and what the notes at the end of the
+    # chromosome are written from
+    with open(outputFile + ".piece.json", "w") as _fh:
+        json.dump({"do_scores": do_scores, "lines": line_no, "chrom": current_chr,
+                   "notes": {"counts": _note_counts(), "precheck_on": _PRECHECK,
+                             "fast_mode": _FAST_MODE, "max_degeneracy": MAX_DEGENERACY,
+                             "iupac_cap": IUPAC_CAP}}, _fh)
 
-
+# cfd dataframe write
 cfd_dataframe = pd.DataFrame.from_dict(cfd_for_graph)
 cfd_dataframe.to_csv(outputFile + ".CFDGraph.txt", sep="\t", index=False)
 
@@ -2210,5 +3191,8 @@ _write_population_summary_companion()
 _write_phase_confirmation_companion()
 # ADDITIVE + guarded + gated-on-myreg: SNP+SNP co-occurrence companion TSV.
 _write_snp_snp_cooc_companion()
+# the high-variant-density BED, the four-allele positions, and the notes on dense windows,
+# the pre-check or the K-skip, and --max-degeneracy
+_write_density_notes()
 
 print("ANALYSIS COMPLETE IN", time.time() - global_start)

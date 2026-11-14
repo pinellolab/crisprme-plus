@@ -51,8 +51,10 @@ def _chrom_of(vcf):
 
 def store(vcf_dir, store_dir, scratch_dir, threads):
     """Write into ``store_dir`` the phased indel genotype store of each VCF of ``vcf_dir``
-    that lacks a complete one, as build-index-only does. Written in ``scratch_dir`` and
-    moved in once whole, so a run stopped meanwhile leaves no part of it. Every sample of
+    that lacks a complete one written under the FILTER rule of 2.10.0
+    (build_indel_genotypes.store_is_current), as build-index-only does. Written in
+    ``scratch_dir`` and moved in once whole, so a run stopped meanwhile leaves no part of
+    it. Every sample of
     the VCF is kept, as the indel log lists them. Guarded as build-index-only's is: a
     chromosome that fails is skipped with a WARNING, as the store is optional (its
     carriers are then PUTATIVE), and only a full disk or quota, an I/O error or no memory
@@ -64,7 +66,7 @@ def store(vcf_dir, store_dir, scratch_dir, threads):
         if chrom is None:
             continue
         name = f"gt_indel_{chrom}.tsv.gz"
-        if not build_indel_genotypes.store_is_complete(os.path.join(store_dir, name)):
+        if not build_indel_genotypes.store_is_current(os.path.join(store_dir, name)):
             jobs.append((vcf, os.path.join(scratch_dir, name), None))
     if not jobs:
         return
@@ -97,6 +99,10 @@ def main(argv):
                 "and an INDELS index built from it would miss every target that needs a SNP beside "
                 "an indel. Make that folder writable, or install an index that holds its INDELS "
                 "index\n")
+            return 1
+        except overlay_indel_snps.NotItsLog as err:  # (the search checks first: indel_window)
+            sys.stderr.write(f"ERROR: {err}. Install the dataset's enrichment and its "
+                             f"dictionaries from one build or one download\n")
             return 1
     elif len(argv) == 6 and argv[1] == "store":
         store(argv[2], argv[3], argv[4], int(argv[5]))

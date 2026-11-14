@@ -7,26 +7,35 @@ from itertools import product
 from Bio.Seq import Seq
 
 import subprocess
+import tempfile
+import sys
 import re
 import os
 
+# PostProcess/ (beside pages/), for safe_files, as pages_utils puts it on sys.path
+_POSTPROCESS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "PostProcess")
+if _POSTPROCESS not in sys.path:
+    sys.path.insert(0, _POSTPROCESS)
+import safe_files  # noqa: E402  (no link another user put in the data folder is followed)
+
 GETFASTA = "bedtools getfasta"
 PAMDICT = {
-    "A": "ARWMDHV",
-    "C": "CYSMBHV",
-    "G": "GRSKBDV",
-    "T": "TYWKBDH",
-    "R": "ARWMDHVSKBG",
-    "Y": "CYSMBHVWKDT",
-    "S": "CYSMBHVKDRG",
-    "W": "ARWMDHVYKBT",
-    "K": "GRSKBDVYWHT",
-    "M": "ARWMDHVYSBC",
-    "B": "CYSMBHVRKDGWT",
-    "D": "ARWMDHVSKBGYT",
-    "H": "ARWMDHVYSBCKT",
-    "V": "ARWMDHVYSBCKG",
-    "N": "ACGTRYSWKMBDHV",
+    "A": "ARWMDHVQ",
+    "C": "CYSMBHVQ",
+    "G": "GRSKBDVQ",
+    "T": "TYWKBDHQ",
+    "R": "ARWMDHVSKBGQ",
+    "Y": "CYSMBHVWKDTQ",
+    "S": "CYSMBHVKDRGQ",
+    "W": "ARWMDHVYKBTQ",
+    "K": "GRSKBDVYWHTQ",
+    "M": "ARWMDHVYSBCQ",
+    "B": "CYSMBHVRKDGWTQ",
+    "D": "ARWMDHVSKBGYTQ",
+    "H": "ARWMDHVYSBCKTQ",
+    "V": "ARWMDHVYSBCKGQ",
+    "N": "ACGTRYSWKMBDHVQ",
 }
 GENOMES_DIR = "Genomes"
 
@@ -64,7 +73,8 @@ def retrieve_coordinates(input_range: str) -> Tuple[str, int, int]:
     return chrom, start, stop
 
 
-def write_mock_bed(seqname: str, chrom: str, start: int, stop: int) -> str:
+def write_mock_bed(seqname: str, chrom: str, start: int, stop: int,
+                   folder: str = "") -> str:
     """Write a mock BED file.
 
     This function creates a temporary BED file containing a single interval
@@ -82,8 +92,9 @@ def write_mock_bed(seqname: str, chrom: str, start: int, stop: int) -> str:
     Raises:
         IOError: If an error occurs while writing the BED file.
     """
-    # define mock bed file name
-    bedfname = os.path.join(os.getcwd(), f"{seqname}.bed")
+    # define mock bed file name (in ``folder``, a temporary folder of the caller's own:
+    # extract_sequence; the working directory by default, as before)
+    bedfname = os.path.join(folder or os.getcwd(), f"{seqname}.bed")
     try:
         with open(bedfname, mode="w") as outfile:
             outfile.write(f"{chrom}\t{start}\t{stop}\n")
@@ -120,7 +131,7 @@ def retrieve_chromosomes_fasta(genome: str) -> List[str]:
     ]
 
 
-def getfasta(bedfname: str, chromfasta: str) -> str:
+def getfasta(bedfname: str, chromfasta: str, pass_fds: Tuple[int, ...] = ()) -> str:
     """Extract sequence from FASTA using bedtools getfasta.
 
     This function extracts a sequence from a FASTA file based on coordinates
@@ -135,7 +146,7 @@ def getfasta(bedfname: str, chromfasta: str) -> str:
     """
     # extract sequence from input coordinates (no shell: each path is one argument)
     sequence = subprocess.check_output(
-        GETFASTA.split() + ["-fi", chromfasta, "-bed", bedfname]
+        GETFASTA.split() + ["-fi", chromfasta, "-bed", bedfname], pass_fds=pass_fds
     ).decode("utf-8")
     return sequence.split("\n")[1].strip()  # remove header
 
@@ -161,8 +172,6 @@ def extract_sequence(seqname: str, input_range: str, genome: str) -> str:
     seqname = "_".join(seqname.replace(">", "").split())
     # retrieve genomic coordinates
     chrom, start, stop = retrieve_coordinates(input_range)
-    # write mock bed to extract sequances
-    bedfname = write_mock_bed(seqname, chrom, start, stop)
     chromosomes_fasta = retrieve_chromosomes_fasta(genome)  # retrieve chromosomes fasta
     # extract sequence
     chromfasta = None
@@ -171,9 +180,20 @@ def extract_sequence(seqname: str, input_range: str, genome: str) -> str:
             chromfasta = os.path.join(os.getcwd(), GENOMES_DIR, genome, c)
     if chromfasta is None or not os.path.isfile(chromfasta):
         raise FileNotFoundError(f"Fasta file not found for chromosome {chrom}")
-    sequence = getfasta(bedfname, chromfasta)  # recover sequence
-    os.remove(f"{chromfasta}.fai")  # remove fasta index
-    os.remove(bedfname)  # remove mock bed
+    # The mock BED and a link to the FASTA in a temporary folder of this call's own, where
+    # bedtools writes the FASTA's index: they were written in the data folder, the index
+    # beside the FASTA, through a link another user put there under its name. The FASTA is
+    # opened as safe_files opens a genome's file (a link another user put is not followed)
+    # and read through its descriptor (as seq_script/extract_seq.py does).
+    fd = safe_files.open_fd(chromfasta, os.getcwd())
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            bedfname = write_mock_bed(seqname, chrom, start, stop, tmp)
+            link = os.path.join(tmp, os.path.basename(chromfasta))
+            os.symlink(safe_files.fd_path(fd), link)
+            sequence = getfasta(bedfname, link, pass_fds=(fd,))  # recover sequence
+    finally:
+        os.close(fd)
     return sequence
 
 

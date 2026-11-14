@@ -23,6 +23,7 @@ PP = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, PP)
 
 import observed_haplotypes as oh
+import site_alleles
 from population_summary import parse_haplotypes
 
 
@@ -53,10 +54,10 @@ def _col(pos_c, alts, carrier_gts, alt_index=None, info=None, ps=None):
 REF = "AAAAA"  # 5-nt reference window; ambiguity columns applied per test
 
 
-def _enumerate(positions, max_putative=-1):
+def _enumerate(positions, max_putative=-1, **caps):
     return oh.enumerate_observed_haplotypes(
         positions, REF, parse_haplotypes, _ploidy_diploid, "chrT",
-        max_putative=max_putative,
+        max_putative=max_putative, **caps
     )
 
 
@@ -258,14 +259,117 @@ class MultiallelicAltIndex(unittest.TestCase):
         self.assertEqual(haps[frozenset({(0, "G")})].carriers, {"X"})
         self.assertEqual(haps[frozenset({(0, "T")})].carriers, {"X"})
 
-    def test_alt_index_resolution_helper(self):
-        # The resolver picks the shared non-ref token of a record's carriers.
-        # Biallelic default -> "1".
-        self.assertEqual(
-            oh._alt_index_for_record(["1|0", "0|1", "0/1"], parse_haplotypes, 2), "1")
-        # A record whose carriers all show "2" (altB of a multiallelic) -> "2".
-        self.assertEqual(
-            oh._alt_index_for_record(["1|2", "2|0", "0/2"], parse_haplotypes, 2), "2")
+    def test_each_alt_read_against_its_own_index_among_the_position_s_alts(self):
+        # The resolver new_simple_analysis hands the enumerator (site_alleles): an alt's
+        # index is the token its carriers share, narrowed by what the position's other
+        # alts need. altA's two carriers both hold 1 and 2 (1|2, 2|1): the most frequent
+        # token of altA's own carriers (_alt_index_for_record, removed) ties and took 2,
+        # putting altA on altB's slots; altB's 0|2 carrier says 2 is altB's.
+        site = [("G", {"X": "1|2", "Y": "2|1"}),
+                ("T", {"X": "1|2", "Y": "2|1", "Z": "0|2"})]
+        self.assertEqual(site_alleles.alt_tokens(site), ["1", "2"])
+        got = dict(site_alleles.per_alt_entries(site))
+        self.assertEqual(got["G"], {"X": "1|0", "Y": "0|1"})
+        self.assertEqual(got["T"], {"X": "0|1", "Y": "1|0", "Z": "0|1"})
+        positions = [_col(0, ["G", "T"], [got["G"], got["T"]])]
+        haps = _by_set(_enumerate(positions))
+        self.assertEqual(haps[frozenset({(0, "G")})].carriers, {"X", "Y"})
+        self.assertEqual(haps[frozenset({(0, "T")})].carriers, {"X", "Y", "Z"})
+        for h in haps.values():
+            self.assertEqual(h.phase_state, oh.CONFIRMED)
+
+
+class TwoAltsOfOnePosition(unittest.TestCase):
+    """CRISPRitz 2.10.0 codes every ALT of a split site, and the panel's split records
+    were phased one by one: NA18869 is 0|1 under G and 0|1 under T at chr22:10,661,629
+    (672 such sample-positions on chr22 of HGDP + 1000 Genomes). Up to 2.8.1 the slot
+    became one CONFIRMED set holding both alts: a row naming two alleles at one position,
+    as confirmed cis, and the sample a carrier of neither single-alt set."""
+
+    def _row(self, g_gt, t_gt, extra=None):
+        cols = [_col(1, ["G", "T"], [{"S": g_gt, "O": "1|0"}, {"S": t_gt}])]
+        if extra is not None:
+            cols.append(_col(3, ["C"], [extra]))
+        return _by_set(_enumerate(cols))
+
+    def _no_set_with_two_alts_of_a_column(self, haps):
+        for vset in haps:
+            cols = [pos_c for pos_c, _alt in vset]
+            self.assertEqual(len(cols), len(set(cols)), sorted(vset))
+
+    def test_two_alts_on_one_slot_make_the_sample_putative_under_each(self):
+        for g_gt, t_gt in (("0|1", "0|1"), ("1|0", "1|0"), ("1|1", "0|1")):
+            with self.subTest(g=g_gt, t=t_gt):
+                haps = self._row(g_gt, t_gt)
+                self._no_set_with_two_alts_of_a_column(haps)
+                self.assertIn("S", haps[frozenset({(1, "G")})].carriers)
+                self.assertIn("S", haps[frozenset({(1, "T")})].carriers)
+                # {G} is shared with O (1|0, CONFIRMED): the label is per set
+                self.assertEqual(haps[frozenset({(1, "G")})].phase_state, oh.PUTATIVE)
+                self.assertEqual(haps[frozenset({(1, "T")})].phase_state, oh.PUTATIVE)
+
+    def test_three_alts_on_one_slot(self):
+        cols = [_col(1, ["C", "G", "T"], [{"S": "1|0"}, {"S": "1|0"}, {"S": "1|0"}])]
+        haps = _by_set(_enumerate(cols))
+        self.assertEqual(set(haps), {frozenset({(1, a)}) for a in "CGT"})
+        for h in haps.values():
+            self.assertEqual((h.carriers, h.phase_state), ({"S"}, oh.PUTATIVE))
+
+    def test_a_second_column_on_the_conflicting_slot(self):
+        haps = self._row("0|1", "0|1", extra={"S": "0|1"})
+        self._no_set_with_two_alts_of_a_column(haps)
+        for vset in ({(1, "G"), (3, "C")}, {(1, "T"), (3, "C")}, {(3, "C")}):
+            self.assertIn("S", haps[frozenset(vset)].carriers)
+            self.assertEqual(haps[frozenset(vset)].phase_state, oh.PUTATIVE)
+
+    def test_alts_on_different_slots_stay_confirmed(self):
+        haps = self._row("1|0", "0|1", extra={"S": "0|1"})
+        self.assertEqual(set(haps), {frozenset({(1, "G")}),
+                                     frozenset({(1, "T"), (3, "C")})})
+        for h in haps.values():
+            self.assertEqual(h.phase_state, oh.CONFIRMED)
+        self.assertEqual(haps[frozenset({(1, "G")})].carriers, {"S", "O"})
+
+    def test_an_unphased_heterozygote_of_two_alts_takes_one_alt_a_set(self):
+        # a 1/2 heterozygote, split into 1/0 under A and 0/1 under C
+        cols = [_col(3, ["A", "C"], [{"U": "1/0"}, {"U": "0/1"}]),
+                _col(4, ["G"], [{"U": "0/1"}])]
+        haps = _by_set(_enumerate(cols))
+        self.assertEqual(set(haps), {
+            frozenset({(3, "A")}), frozenset({(3, "C")}), frozenset({(4, "G")}),
+            frozenset({(3, "A"), (4, "G")}), frozenset({(3, "C"), (4, "G")})})
+
+    def test_the_union_above_the_cap_is_one_per_choice_of_alt(self):
+        cols = [_col(1, ["A", "C"], [{"U": "1/0"}, {"U": "0/1"}]),
+                _col(2, ["G"], [{"U": "0/1"}]),
+                _col(3, ["G"], [{"U": "0/1"}])]
+        haps = _by_set(_enumerate(cols, max_putative=2))
+        self.assertEqual(set(haps), {
+            frozenset({(1, "A"), (2, "G"), (3, "G")}),
+            frozenset({(1, "C"), (2, "G"), (3, "G")})})
+
+    def test_the_unions_above_the_cap_are_at_most_max_unions(self):
+        """A sample PUTATIVE in a window (here a phased slot holding two alts at column
+        0) that carries two alts at k columns: one union per choice of alt made 2^k of
+        them (NA19042 carries two or three at 16 positions of one 26-bp IGL window of
+        chr22: 8.5 million sets and 90 GB). They stay while there are at most max_unions (16);
+        past that there is one, with each column's first alt, or the one ``choose``
+        picks (new_simple_analysis: the alt nearest the guide)."""
+        def cols(k):
+            return [_col(c, ["A", "T"], [{"S": "0|1"}, {"S": "1|0" if c else "0|1"}])
+                    for c in range(k)]
+        haps = _enumerate(cols(4), max_putative=2)
+        self.assertEqual(len(haps), 16)
+        self.assertEqual({h.phase_state for h in haps}, {oh.PUTATIVE})
+        haps = _enumerate(cols(14), max_putative=2)
+        self.assertEqual([h.variant_set for h in haps],
+                         [frozenset((c, "A") for c in range(14))])
+        self.assertEqual((haps[0].carriers, haps[0].phase_state), ({"S"}, oh.PUTATIVE))
+        haps = _enumerate(cols(14), max_putative=2, choose=lambda c, alts: alts[c % 2])
+        self.assertEqual([h.variant_set for h in haps],
+                         [frozenset((c, "AT"[c % 2]) for c in range(14))])
+        haps = _enumerate(cols(5), max_putative=2, max_unions=32)
+        self.assertEqual(len(haps), 32)
 
 
 class HomozygousAndBoundary(unittest.TestCase):

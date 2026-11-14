@@ -22,8 +22,12 @@ Attributes:
 """
 
 import concurrent.futures
+import atexit
+import shutil
+import stat
 import sys
 import os
+import tempfile
 
 try:
     from flask_caching import Cache
@@ -44,8 +48,10 @@ except ImportError as e:
 # define website address -> DEPRECATED <-
 WEBADDRESS = "http://crisprme.di.univr.it"
 
-# define server IP address (local deployment)
-IPADDRESS = "127.0.0.1:8080"
+# define server IP address (local deployment): port 8080, or the one `crisprme.py
+# web-interface --port` gives the server it starts (C19)
+PORTLOCAL = os.environ.get("CRISPRME_PORT") or "8080"
+IPADDRESS = f"127.0.0.1:{PORTLOCAL}"
 
 # define server URL
 URL = ""
@@ -170,14 +176,57 @@ MAINTAINER_MODE = bool(
 # Guardrail for the small-file (annotation) browser uploads; large genomes/VCFs
 # never go through an in-memory upload (server-side fetch / chunked upload only).
 app.server.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB
+
+
+def _private_cache_dir():
+    """A folder of this server's own for the tables' cache, in the temporary folder
+    (CRISPRME_TMPDIR, else the system's): made by mkdtemp (0700, a name no one else could
+    make first), removed when the server exits. None when that folder is one another user
+    can put a folder in and is not sticky, where they could rename this one away and put
+    theirs in its place.
+
+    The cache's files are pickles, which Flask-Caching loads, and they were kept in Cache/
+    of the data folder, which the data folder's group can write under a umask of 002: a
+    member of that group could put a pickle there for the web app to load, running code as
+    its user, or a link there for it to write through."""
+    parent = os.environ.get("CRISPRME_TMPDIR") or tempfile.gettempdir()
+    try:
+        st = os.stat(parent)
+    except OSError:
+        return None
+    if st.st_uid not in (os.geteuid(), 0) or (
+            st.st_mode & 0o022 and not st.st_mode & stat.S_ISVTX):
+        return None
+    try:
+        folder = tempfile.mkdtemp(prefix="crisprme-web-cache-", dir=parent)
+    except OSError:
+        return None
+    atexit.register(shutil.rmtree, folder, True)  # (a pool's worker exits without it)
+    return folder
+
+
 # configure caching
-CACHE_CONFIG = {
-    # "FileSystemCache" (a Flask-Caching backend class name) if you don't want to
-    # set up redis. NB: use the class name, not the legacy lowercase "filesystem"
-    # short-name -- Flask-Caching >=2.0 dropped the old short-name aliases, so
-    # "filesystem" raises ImportStringError on the modernized web stack.
-    "CACHE_TYPE": "FileSystemCache",
-    "CACHE_DIR": ("Cache"),  # os.environ.get('REDIS_URL', 'localhost:6379')
-}
+CACHE_DIR = _private_cache_dir()
+CACHE_CONFIG = (
+    {
+        # "FileSystemCache" (a Flask-Caching backend class name) if you don't want to
+        # set up redis. NB: use the class name, not the legacy lowercase "filesystem"
+        # short-name -- Flask-Caching >=2.0 dropped the old short-name aliases, so
+        # "filesystem" raises ImportStringError on the modernized web stack.
+        "CACHE_TYPE": "FileSystemCache",
+        "CACHE_DIR": CACHE_DIR,  # (a folder of this server's own: _private_cache_dir)
+    }
+    if CACHE_DIR
+    # (in memory, a few tables at a time: no file another user could put in its place)
+    else {"CACHE_TYPE": "SimpleCache", "CACHE_THRESHOLD": 16}
+)
+if not CACHE_DIR:
+    # (on stderr, which the server's log is: stdout is the search pool's notes, above)
+    print(
+        "NOTE: the temporary folder "
+        f"({os.environ.get('CRISPRME_TMPDIR') or tempfile.gettempdir()!a}) is not one only "
+        "you can write, nor sticky: the web app keeps its tables' cache in memory",
+        file=sys.stderr, flush=True,
+    )
 cache = Cache()  # initialize cache
 cache.init_app(app.server, config=CACHE_CONFIG)  # start web-app

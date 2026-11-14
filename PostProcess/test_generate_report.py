@@ -49,6 +49,7 @@ import glob
 import gzip
 import inspect
 import io
+import json
 import os
 import re
 import sys
@@ -230,6 +231,49 @@ class TestGenerateReport(unittest.TestCase):
         if name == "report.html":
             return os.path.join(extract, name)
         return os.path.join(extract, "data", name)
+
+    def test_a_run_with_no_score_says_so_in_place_of_its_score_tables(self):
+        """A Cas12a search (a 5' PAM): neither CFD nor CRISPR-Bulge is computed, every score
+        is the -1 sentinel. The risk card printed its CFD bands, 0 each, and Section 4 its
+        CFD tiers, 0 each, and the CRISPR-Bulge and CFD prose of the recommended panel, read
+        as "no site at risk", though the panel was chosen by edit distance alone (cli5
+        D6). Each says that neither score is computed, in place of its tables; a scored
+        run is reported as before."""
+        scored = [_HEADER.index(c) for c in _HEADER if "CFD_score" in c
+                  or "CRISPR_BULGE_score" in c]
+        with open(self.tsv, "w") as handle:
+            handle.write("\t".join(_HEADER) + "\n")
+            for row in _ROWS:
+                handle.write("\t".join("-1" if i in scored else v for i, v in enumerate(row))
+                             + "\n")
+        _, _, extract = self._build_and_extract(
+            params_override={"Nuclease": "Cas12a", "Pam": "TTTV"})
+        html = self._read(self._dpath(extract, "report.html"))
+        card = re.search(r'<div class="risk-card">.*?</div></div>', html, flags=re.S).group(0)
+        note = ("CFD and CRISPR-Bulge are defined for a 20-nt spacer with a 3&prime; "
+                "SpCas9-family PAM: neither is computed for this nuclease, so no site is scored, "
+                "and the validation panel is chosen by mismatches and bulges alone.")
+        self.assertIn(note, card)
+        self.assertNotIn("CFD ≥ 0.5", card)
+        self.assertEqual(html.count(note), 3)  # the card, Section 4's bridge and its table
+        for absent in ("<th>CFD threshold</th>", "Recommended default panel:</strong> validate "
+                       "every", "of those with CFD", "by worst-case severity across",
+                       'href="#risk-card-modal"'):
+            self.assertNotIn(absent, html)
+        self.assertIn("then fill up to 100 by fewest mismatches+bulges", html)
+        self.assertIn("With no score computed, every off-target with mismatches+bulges", html)
+        # the fixture as it is, scored: as before
+        with open(self.tsv, "w") as handle:
+            handle.write("\t".join(_HEADER) + "\n")
+            for row in _ROWS:
+                handle.write("\t".join(row) + "\n")
+        __import__("shutil").rmtree(os.path.join(self.tmp, "extracted"))
+        _, _, extract = self._build_and_extract()
+        html = self._read(self._dpath(extract, "report.html"))
+        self.assertNotIn("neither is computed", html)
+        for present in ("<th>CFD threshold</th>", "Recommended default panel:</strong> validate "
+                        "every", "by worst-case severity across", "CFD ≥ 0.5"):
+            self.assertIn(present, html)
 
     def test_build_report_drop_maf_removes_maf_column(self):
         # Regression (crisprme.py generate-report --no-maf): the top-level CLI
@@ -599,19 +643,21 @@ class TestGenerateReport(unittest.TestCase):
         for says in (
                 "the full list is in the integrated results in the result folder (its rows "
                 "whose <code>Not_found_in_REF</code> is <code>y</code>; "
-                "<code>--report-full</code> bundles them as <code>variant_created.tsv</code>, "
-                "gzipped when large).",
+                "<code>--report-full</code>, or Include the full report on the web form, "
+                "bundles them as <code>variant_created.tsv</code>, gzipped when large).",
                 "The full threshold table above and the per-threshold subset files (bundled "
                 "downloads), with the complete raw integrated results in the result folder "
-                "(<code>--report-full</code> bundles them too), let the panel be reviewed or "
-                "expanded for any assay budget.",
+                "(<code>--report-full</code>, or Include the full report on the web form, "
+                "bundles them too), let the panel be reviewed or expanded for any assay "
+                "budget.",
                 "Per-threshold subsets (CFD and mismatch+bulge tiers) are bundled as "
                 "curated-column TSVs so the panel can be expanded to any tier for review. "
-                "<code>--report-full</code> adds the variant-created subset.",
+                "<code>--report-full</code>, or Include the full report on the web form, "
+                "adds the variant-created subset.",
                 "the full variant set for each window is in the "
                 "<code>*high_variant_density_regions.bed</code> files of the result folder, "
-                "which <code>--report-full</code> bundles for the windows near the top-ranked "
-                "sites)."):
+                "which <code>--report-full</code>, or Include the full report on the web "
+                "form, bundles for the windows near the top-ranked sites)."):
             with self.subTest(slim_says=says[:60]):
                 self.assertIn(says, slim)
         for says in (
@@ -631,6 +677,62 @@ class TestGenerateReport(unittest.TestCase):
             with self.subTest(full_says=says[:60]):
                 self.assertIn(says, full)
         self.assertNotIn("adds the variant-created subset", full)
+
+    def test_every_flag_the_report_tells_the_reader_to_pass_names_the_web_forms_option(self):
+        """A search sent from the web form passes no flag, and its own report told the
+        reader to run --per-sample (the caption of a population-level search's variant
+        combinations) and that --report-full bundles what the slim zip leaves out (the
+        variant-created list and subset, the complete raw integrated results, the windows
+        near the top-ranked sites), naming the flag alone (FV :342). In the slim report of a
+        search with dense windows near its top-ranked sites, of a population-level one, of
+        one whose observed-haplotypes companion the zip leaves out, and of one with no
+        score, every such sentence names the web form's option beside the flag."""
+        rd = self._dense_window_run("advice_run")
+        reports = {"dense windows": gr.build_report(
+            result_dir=rd, samplesid_dir=self.sid_dir,
+            out_zip=os.path.join(self.tmp, "advice_dense.zip"))}
+        rd, itsv = self._oh_e2e_result_dir()
+        reports["population-level"] = self._oh_build(rd, itsv)[1]
+        with _env("CRISPRME_OH_SLIM_MAX_MB", "0.0000001"):
+            reports["companion left out"] = self._oh_build(rd, itsv)[1]
+        scored = [_HEADER.index(c) for c in _HEADER
+                  if "CFD_score" in c or "CRISPR_BULGE_score" in c]
+        with open(self.tsv, "w") as handle:
+            handle.write("\t".join(_HEADER) + "\n")
+            for row in _ROWS:
+                handle.write("\t".join("-1" if i in scored else v
+                                       for i, v in enumerate(row)) + "\n")
+        reports["no score"] = self._build_and_extract(
+            params_override={"Nuclease": "Cas12a", "Pam": "TTTV"})[0]
+        said = {"--report-full": 0, "--per-sample": 0}
+        for what, report in reports.items():
+            if report.endswith(".zip"):
+                with zipfile.ZipFile(report) as zf:
+                    report = zf.read("report.html").decode("utf-8")
+            for at in re.finditer(r"<code>--report-full</code>", report):
+                said["--report-full"] += 1
+                with self.subTest(report=what, at=report[max(0, at.start() - 80):at.end()]):
+                    self.assertRegex(report[at.end():at.end() + 60],
+                                     r"^, or (with )?Include the full report on the web form,")
+            for at in re.finditer(r"<code>--per-sample</code>", report):
+                # its sentence (the report holds a megabyte of data URIs: no regex of two
+                # unbounded runs over all of it)
+                opens = max(report.rfind(stop, 0, at.start()) for stop in ".;")
+                closes = [p for p in (report.find(stop, at.end()) for stop in ".;")
+                          if p >= 0] or [len(report)]
+                advice = report[opens + 1:min(closes)]
+                # (a sentence that says to run the search with it; the others say what it
+                # gives)
+                if not re.search(r"\brun\b", advice):
+                    continue
+                said["--per-sample"] += 1
+                with self.subTest(report=what, advice=advice):
+                    self.assertIn("<code>--per-sample</code>, or Per-sample as the analysis "
+                                  "on the web form", advice)
+        # (each report gave some advice: four of --report-full in the first, the Search mode
+        # row in each and the caption in the two population-level ones)
+        self.assertGreaterEqual(said["--report-full"], 6, said)
+        self.assertGreaterEqual(said["--per-sample"], 4, said)
 
     def test_the_example_report_says_where_its_files_are(self):
         """The website's example report (docs/example-report.html, the slim report of a
@@ -1025,6 +1127,10 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("Population-level", html_pop)
         self.assertIn("NOT computed", html_pop)         # the carrier caveat
         self.assertIn("--per-sample", html_pop)          # points to the exact mode
+        # and to the web form's, for a search sent from there (it named the flag alone,
+        # which a web user cannot pass: FV :342)
+        self.assertIn("re-run the search per-sample (<code>--per-sample</code>, or Per-sample "
+                      "as the analysis on the web form)", html_pop)
         html_ps = gr.render_inputs_criteria({**base, "search_mode": "per-sample"})
         self.assertIn("observed haplotypes", html_ps)
         self.assertNotIn("NOT computed", html_ps)        # no caveat in per-sample mode
@@ -1089,9 +1195,10 @@ class TestGenerateReport(unittest.TestCase):
             "<code>High_complexity_region</code> "
             "(<code>High_variant_density_region</code> in the integrated results), whose listed "
             "carriers need not carry every variant in it. To get the tiers, rebuild the index "
-            "with <code>build-index-only --samplesID</code>, or download a prebuilt one "
-            "(<code>crisprme.py download --what index --index-name "
-            "NRG_3_hg38+hg38_HGDP1kGP</code>).")
+            "with <code>build-index-only --samplesID</code>, or with Build an index locally in "
+            "the web's Settings, or download a prebuilt one (<code>crisprme.py download --what "
+            "index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index "
+            "in Settings).")
         two = row({**base, "untiered": ["hg38_1000G", "hg38_<x>"]})
         for said in ("named carrier samples only for <code>hg38_1000G</code>, "
                      "<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers",
@@ -1283,9 +1390,10 @@ class TestGenerateReport(unittest.TestCase):
             "give as 0, or not at all, has no frequency); where its variants are dense, it can "
             "still report a window by its greedy worst-case alignment, whose listed carriers "
             "need not carry every variant in it. To get the "
-            "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or "
-            "download a prebuilt one (<code>crisprme.py download --what index --index-name "
-            "NRG_3_hg38+hg38_HGDP1kGP</code>). ")))
+            "tiers, rebuild the index with <code>build-index-only --samplesID</code>, or with "
+            "Build an index locally in the web's Settings, or download a prebuilt one "
+            "(<code>crisprme.py download --what index --index-name "
+            "20-NRR_3_hg38+hg38_HGDP1kGP</code>, or Download a prebuilt index in Settings). ")))
         plural = cell({**base, "untiered": two}, "Search mode")
         for said in ("<code>hg38_&lt;x&gt;</code>, which have no dict-less tiers",
                      "in either mode their variants' allele frequencies",
@@ -1333,8 +1441,10 @@ class TestGenerateReport(unittest.TestCase):
                              r'</p>', html, re.S).group(1)
 
         said = caption()
-        self.assertTrue(said.endswith("run <code>--per-sample</code> to resolve the true cis "
-                                      "haplotypes and carriers."), said)
+        # (the web form's option beside the flag, which a web search cannot pass: FV :342)
+        self.assertTrue(said.endswith(
+            "re-run the search per-sample (<code>--per-sample</code>, or Per-sample as the "
+            "analysis on the web form) to resolve the true cis haplotypes and carriers."), said)
         self.assertEqual(caption(untiered=[]), said)
         self.assertEqual(caption(untiered=one), said + (
             " On " + named + ", <code>--per-sample</code> can still report a dense window by "
@@ -1489,6 +1599,112 @@ class TestGenerateReport(unittest.TestCase):
         for name in tsvs:
             self.assertEqual(unknown[name], tiered[name], name)
 
+    def test_a_search_since_2_10_0_has_no_greedy_row(self):
+        """Since 2.10.0 a per-sample search gives a window denser than CRISPRME_IUPAC_CAP on
+        the classic dictionaries as the haplotypes its carriers have, as on the dict-less
+        tiers (new_simple_analysis.py), and its pipeline writes the carrier gate's sidecar
+        (.carrier_gate.json), whatever the gate did. So in its report the flagged two-SNP row
+        of a search without the tiers reads "2 cis carriers", and no text says that a dense
+        window can be reported by a greedy alignment: not the inputs card, nor the legend's
+        High_complexity_region entry, nor the --report-full callout of the dense windows
+        near the top-ranked sites (they said so of a per-sample search on the tiers too).
+        Both say how such a window is reported, and that a flagged row that names no carrier,
+        a sites-only dataset's, is still its window's greedy worst-case alignment."""
+        self.since_2_10_0((".carrier_gate.json", '{"status": "per-sample"}'))
+
+    def test_nor_one_whose_carrier_gate_failed_or_whose_record_was_lost(self):
+        """The report took results without .carrier_gate.json for a search before 2.10.0, and
+        the search removed it when the carrier gate failed: a per-sample report of datasets
+        without the tiers then said that a dense window can be reported by its greedy
+        worst-case alignment, which no search since 2.10.0 does (stage-1 review R3-N6). A
+        failed gate's sidecar now says it failed, and the inputs card says so; with none, the
+        run's .version.txt, of 2.10.0 or later, says the same. Results of an earlier release
+        (no sidecar; a .version.txt before 2.10.0, or none) read as before. (A copy of the
+        folder by a glob loses every dot file, the run's mode and datasets with these: it reads
+        as a population-level search, which none of these texts concerns.)"""
+        html = self.since_2_10_0((".carrier_gate.json",
+                                  '{"status": "failed", "companion": null}'), job="failed")
+        self.assertTrue("The carrier gate failed in this search" in html)
+        for version in ("2.10.0", "2.10.1", "2.11.0rc1"):
+            self.since_2_10_0((".version.txt", f"crisprme_version\t{version}\n"),
+                              job=f"lost_{version}")
+        for version in ("2.8.1", "2.9.1", None):
+            html = self.since_2_10_0(
+                *(((".version.txt", f"crisprme_version\t{version}\n"),) if version else ()),
+                job=f"earlier_{version}", greedy=True)
+            self.assertFalse("The carrier gate" in html, version)
+
+    def since_2_10_0(self, *records, job="job", greedy=False):
+        """The report of a per-sample search of a dataset without the tiers, whose results
+        hold ``records`` (name, text) beside the rest: none of its texts says a dense window
+        can be reported by a greedy alignment (its report.html, returned), or, ``greedy``,
+        it reads as one of a search before 2.10.0, which could."""
+        rd = os.path.join(self.tmp, "Results", job)
+        os.makedirs(rd)
+        dense = ("high_variant_density (12 variants): the haplotypes its carriers have are "
+                 "reported here")
+        with open(self.tsv) as src:
+            lines = src.read().splitlines()
+
+        def results(no_carrier=()):
+            with open(os.path.join(rd, os.path.basename(self.tsv)), "w") as dst:
+                for i, line in enumerate(lines):
+                    fields = line.split("\t")
+                    if fields[1] in no_carrier:
+                        fields[_HEADER.index("Variant_samples_(highest_CFD)")] = ""
+                    flag = ("High_variant_density_region" if i == 0
+                            else dense if fields[1] in ("chr5", "chr7") else "NA")
+                    dst.write("\t".join(fields + [flag]) + "\n")
+            out = gr.build_report(result_dir=rd, samplesid_dir=self.sid_dir, report_full=True,
+                                  out_zip=os.path.join(self.tmp, f"since290_{job}_report.zip"))
+            with zipfile.ZipFile(out) as zf:
+                return {n: zf.read(n).decode("utf-8") for n in zf.namelist()
+                        if n.endswith((".html", ".tsv"))}
+
+        for name, text in ((".search_mode", "per-sample"),
+                           (".untiered_datasets", "hg38_1000G_HGDP\n"),
+                           (".variant_datasets", "hg38_1000G_HGDP\n"),
+                           *records,
+                           ("job_chr5.high_variant_density_regions.bed",
+                            "#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\t"
+                            "iupac_protospacer\n"
+                            "chr5\t390\t413\tGUIDE\t12\tHG00096,HGDP00001\t"
+                            "ACGTNNNNACGTACGTACGTNGG\n")):
+            with open(os.path.join(rd, name), "w") as h:
+                h.write(text)
+        files = results()
+        top = [line.split("\t") for line in files["data/top1000.tsv"].splitlines()]
+        observed = top[0].index("Observed")
+        # (the rows' own notes say their window is reported by its carriers' haplotypes)
+        self.assertEqual({r[observed] for r in top[1:] if r[1] in ("chr5", "chr7")},
+                         {"2 cis carriers"}, job)
+        html = files["report.html"]
+        if greedy:
+            self.assertTrue("a window can still be reported by its greedy worst-case "
+                            "alignment" in html, job)
+            return html
+        # (no assertIn/assertNotIn on the page: their message would print all of it)
+        self.assertEqual(re.findall(r".{0,80}(?:poss\. chimera|greed).{0,80}", html,
+                                    re.I | re.S), [], job)
+        for said in ("named carrier samples only for",
+                     "Highly complex (high-variant-density) regions:</strong> 1 window(s) "
+                     "overlapping the top-ranked reported off-targets carry so many "
+                     "overlapping variants that they are flagged in the "
+                     "<code>High_complexity_region</code> column of the table; under "
+                     "<code>--per-sample</code> each is reported, as any other window, by the "
+                     "haplotypes its carriers have. ",
+                     "Under <code>--per-sample</code> such a window is reported, as any other, "
+                     "by the haplotypes its carriers have (the full variant set for each "
+                     "window is in the"):
+            self.assertTrue(said in html, said)
+        # a flagged row that names no carrier: a sites-only dataset's, the population-level
+        # analysis's
+        page = results(no_carrier=("chr7",))["report.html"]
+        self.assertEqual(page.count("; a flagged row that names no carrier, a sites-only "
+                                    "dataset's, is its window's greedy worst-case alignment, "
+                                    "as in a population-level search."), 2, job)
+        return html
+
     def test_variant_contributed_prose_tracks_whether_file_is_bundled(self):
         """The 'Variant-contributed sites' row must not claim variant_created.tsv is
         bundled when it is not (the slim default report skips that tier -> no
@@ -1515,8 +1731,9 @@ class TestGenerateReport(unittest.TestCase):
                           gr.render_inputs_criteria({**base}, n_variant=3)):
             self.assertIn("the full list is in the integrated results in the result folder "
                           "(its rows whose <code>Not_found_in_REF</code> is <code>y</code>; "
-                          "<code>--report-full</code> bundles them as "
-                          "<code>variant_created.tsv</code>, gzipped when large).", html_slim)
+                          "<code>--report-full</code>, or Include the full report on the web "
+                          "form, bundles them as <code>variant_created.tsv</code>, gzipped "
+                          "when large).", html_slim)
             self.assertNotIn("bundled as <code>variant_created.tsv</code>", html_slim)
             self.assertNotIn("written to <code>variant_created.tsv</code>", html_slim)
         # full (bundled): the "bundled as" claim is correct
@@ -2205,41 +2422,108 @@ class TestGenerateReport(unittest.TestCase):
         self.assertNotIn("paper-style", html)
         self.assertIn("the same ref/alt scatter as for the cfd score", html.lower())
 
-    def _integrated_mafs(self, rows):
-        """Each criterion's ``Variant_MAF``, in the rows' order, that the REAL
-        resultIntegrator.py writes for bestMerge rows given as (variant field, AF field): the
-        AF column of a variant row as the merge step hands it on. Skips without GNU cut."""
+    def _integrate(self, blocks, files=None, env=None, intervaltree=None):
+        """The rows the REAL resultIntegrator.py integrates from bestMerge rows of
+        ``blocks`` (one 24-column block each, the row's three criteria alike), with ``files``
+        ({name: text}) in its folder, ``env`` in its environment and ``intervaltree`` the
+        module it imports (the stub of no interval by default). Skips without GNU cut."""
         import csv
         import subprocess
-        from test_seed_counts_dna_bulge import INTERVALTREE_STUB, SPACER_3P, _block, _gnu_cut
+        from test_seed_counts_dna_bulge import INTERVALTREE_STUB, SPACER_3P, _gnu_cut
         if not _gnu_cut():
             self.skipTest("resultIntegrator.py needs GNU cut --complement")
         pp = os.path.dirname(os.path.abspath(__file__))
-        d = tempfile.mkdtemp(prefix="maf_", dir=self.tmp)
-        with open(os.path.join(d, "intervaltree.py"), "w") as fh:
-            fh.write(INTERVALTREE_STUB)
+        d = tempfile.mkdtemp(prefix="integrated_", dir=self.tmp)
+        files = dict(files or {}, **{"intervaltree.py": intervaltree or INTERVALTREE_STUB,
+                                     "job.found.bed": "NA\n" * len(blocks),
+                                     "dummy.txt": "", "guides.txt": SPACER_3P + "\n"})
+        for name, text in files.items():
+            with open(os.path.join(d, name), "w") as fh:
+                fh.write(text)
         best = os.path.join(d, "job.bestMerge.txt")
         with open(best, "w") as fh:
-            for snp, af in rows:
-                block = _block("X", SPACER_3P, SPACER_3P, "CTAACtGTTGCTTTTATCACTGG",
-                               "CTAACtGTTGCTTTTATCgCTGG", 1, 0, "HG00001", snp)
-                block[17] = af
+            for block in blocks:
                 fh.write("\t".join(block * 3) + "\n")
-        with open(os.path.join(d, "job.found.bed"), "w") as fh:
-            fh.write("NA\n" * len(rows))
-        open(os.path.join(d, "dummy.txt"), "w").close()
-        with open(os.path.join(d, "guides.txt"), "w") as fh:
-            fh.write(SPACER_3P + "\n")
         res = subprocess.run(
             [sys.executable, os.path.join(pp, "resultIntegrator.py"), best,
              os.path.join(d, "dummy.txt"), os.path.join(d, "job.found.bed"),
              os.path.join(d, "guides.txt"), d + "/", "true", "hg38", "vuota", "1", "0", "none"],
-            cwd=pp, env=dict(os.environ, PYTHONPATH=d), capture_output=True, text=True)
+            cwd=pp, env=dict(os.environ, PYTHONPATH=d, **(env or {})), capture_output=True,
+            text=True)
         self.assertEqual((res.returncode, res.stderr), (0, ""))
         with open(best + ".integrated_results.tsv", newline="") as fh:
-            integrated = list(csv.DictReader(fh, delimiter="\t"))
+            return list(csv.DictReader(fh, delimiter="\t"))
+
+    def _integrated_mafs(self, rows):
+        """Each criterion's ``Variant_MAF``, in the rows' order, that the REAL
+        resultIntegrator.py writes for bestMerge rows given as (variant field, AF field): the
+        AF column of a variant row as the merge step hands it on. Skips without GNU cut."""
+        from test_seed_counts_dna_bulge import SPACER_3P, _block
+        blocks = []
+        for snp, af in rows:
+            block = _block("X", SPACER_3P, SPACER_3P, "CTAACtGTTGCTTTTATCACTGG",
+                           "CTAACtGTTGCTTTTATCgCTGG", 1, 0, "HG00001", snp)
+            block[17] = af
+            blocks.append(block)
+        integrated = self._integrate(blocks)
         return {criterion: [r["Variant_MAF_(%s)" % criterion] for r in integrated]
                 for criterion in ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")}
+
+    def test_the_dense_window_note_says_how_the_search_reported_it(self):
+        """resultIntegrator.py's High_variant_density_region note said of every row in a
+        window of the search's high_variant_density_regions.bed that a greedy worst-case
+        alignment is reported there. So it is in a population-level search, but under
+        --per-sample a genotyped dataset's dense window is the haplotypes its carriers have
+        (on the dict-less tiers since 2.7.10, on the classic dictionaries since 2.10.0): its
+        rows, and the window's reference row, say that now. A row that names no carrier, a
+        sites-only dataset's, is the population-level analysis's in either mode. Since 2.10.0
+        the window's BED line says whether a greedy worst case stands for it (its greedy
+        column: 1 in a population-level search, 0 in a per-sample one), and gives its bits;
+        a BED of 2.8.1, which has neither, keeps what 2.8.1 said of every window."""
+        from test_seed_counts_dna_bulge import SPACER_3P, _block
+        # a stand-in that holds the bed's interval (the light CI env has no intervaltree)
+        tree = (
+            "class _Interval:\n"
+            "    def __init__(self, begin, end, data):\n"
+            "        self.begin, self.end, self.data = begin, end, data\n"
+            "    def __lt__(self, other):\n"
+            "        return (self.begin, self.end) < (other.begin, other.end)\n"
+            "class IntervalTree:\n"
+            "    def __init__(self):\n"
+            "        self.items = []\n"
+            "    def __setitem__(self, key, value):\n"
+            "        self.items.append(_Interval(key.start, key.stop, value))\n"
+            "    def __getitem__(self, point):\n"
+            "        return {i for i in self.items if i.begin <= point < i.end}\n")
+        def bed(greedy=None):
+            # as the post-analysis writes it (new_simple_analysis.py); None: a BED of 2.8.1
+            if greedy is None:
+                return ("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\t"
+                        "iupac_protospacer\n"
+                        "chrT\t990\t1013\tGUIDE\t12\tHG00001\tCTAACWGTTGCTTTTATCRCTGG\n")
+            return ("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\t"
+                    "iupac_protospacer\tbits\tfour_allele\tgreedy\n"
+                    "chrT\t990\t1013\tGUIDE\t12\tHG00001\tCTAACWGTTGCTTTTATCRCTGG\t12.00\t0"
+                    "\t%d\n" % greedy)
+        blocks = [_block("X", SPACER_3P, SPACER_3P, "CTAACtGTTGCTTTTATCACTGG",
+                         "CTAACtGTTGCTTTTATCgCTGG", 1, 0, samples, snp)
+                  for samples, snp in (("HG00001", "chrT_1005_A_T"), ("", "chrT_1005_A_T"),
+                                       ("NA", "NA"))]
+        greedy = ("high_variant_density (12 variants, 2^12.00 sequences): a greedy worst-case "
+                  "alignment is reported here; additional haplotype alignments may exist; "
+                  "full_IUPAC=CTAACWGTTGCTTTTATCRCTGG")
+        carriers = ("high_variant_density (12 variants, 2^12.00 sequences): the haplotypes its "
+                    "carriers have are reported here; full_IUPAC=CTAACWGTTGCTTTTATCRCTGG")
+        old_greedy = ("high_variant_density (12 variants): a greedy worst-case alignment is "
+                      "reported here; additional haplotype alignments may exist; "
+                      "full_IUPAC=CTAACWGTTGCTTTTATCRCTGG")
+        for mode, text, notes in (("1", bed(1), [greedy, greedy, greedy]),
+                                  ("0", bed(0), [carriers, greedy, carriers]),
+                                  ("0", bed(), [old_greedy, old_greedy, old_greedy])):
+            with self.subTest(CRISPRME_FAST_MODE=mode, bed_of_2_8_1=text == bed()):
+                rows = self._integrate(blocks, {"job.high_variant_density_regions.bed": text},
+                                       {"CRISPRME_FAST_MODE": mode}, tree)
+                self.assertEqual([r["High_variant_density_region"] for r in rows], notes)
 
     def test_the_maf_texts_say_what_the_integrator_writes(self):
         """The MAF note under the top-1000 tables and the legend's MAF entry said that a
@@ -2456,12 +2740,13 @@ class TestGenerateReport(unittest.TestCase):
                       "VCF's `INFO/AF` (§3), and §8 gives when they hold none.", methods)
 
     def test_no_text_ties_an_indels_or_snps_frequency_to_what_its_vcf_gives(self):
-        """A known limit, to be fixed in the next CRISPRitz release (METHODS section 8): CRISPRitz
-        add-variants, which writes the index's indel log and classic per-sample dictionaries,
-        looks for the AF key in the VCF's first record only and reads every record's AF at that
-        place in INFO (enricher.py _af_value, enricher.cpp afValue), so a record that has it
-        elsewhere gets none. A VCF merged with seq_script/merge_panels/merge_vcf_panels.sh has
-        such records, a site of one source having fewer keys before AF than a site of two: the
+        """A known limit of CRISPRitz up to 2.9.1, and of every index it built (METHODS section
+        8): its add-variants, which writes the index's indel log and classic per-sample
+        dictionaries, looks for the AF key in the VCF's first record only and reads every
+        record's AF at that place in INFO (enricher.py _af_value, enricher.cpp afValue), so a
+        record that has it elsewhere gets none. A VCF merged with
+        seq_script/merge_panels/merge_vcf_panels.sh has such records, a site of one source
+        having fewer keys before AF than a site of two: the
         retired NRG_3_hg38+hg38_1000G2021_HGDP index, built from such a merge, has no AF for
         14,567,429 of its 15,583,931 indels; of the shipped indexes, HPRC's chrY log has none
         for 91,950 of its 102,665; and the mega's VCF has no INFO/AF at all. So these texts said
@@ -2486,8 +2771,10 @@ class TestGenerateReport(unittest.TestCase):
         which sorted a row whose AF is empty by its REF score, and told no HPRC user to run the
         search again; the text fragment's notes for the merge change the three. And the limit's
         headline said that every variant of such a record has no frequency, a SNP too on an
-        index with the tiers. When CRISPRitz is fixed and the logs rebuilt, this test changes
-        with METHODS."""
+        index with the tiers. CRISPRitz 2.10.0 finds each record's AF by its key, and every
+        index is rebuilt with it for this release: the texts said the limit "will be fixed in
+        the next CRISPRitz release", and now say it is that of CRISPRitz 2.9.1 and earlier, and
+        of the indexes it built, the ones published until the rebuild."""
         import glob
         import html as htmlmod
         import shutil
@@ -2671,39 +2958,56 @@ class TestGenerateReport(unittest.TestCase):
             ("seq_script", "merge_panels", "merge_vcf_panels.sh"),
             ("seq_script", "merge_panels", "README.md"), ("docs", "INPUT_FORMATS.md"),
             ("seq_script", "merge_panels", "merge_mega_sites.sh")))
-        self.assertIn("**`INFO/AF`** — a **numeric** allele frequency, at **one place in `INFO` "
-                      "in every record**: CRISPRitz `add-variants` reads each record's `AF` where "
-                      "the first record has it, so a record that has it elsewhere gets none",
-                      formats)
-        self.assertIn("`add-variants` looks for `AF` in the VCF's first record only and reads "
-                      "every record's at that place in `INFO`, so a record that has it elsewhere "
-                      "gets none: its indel has no frequency on any index, nor its SNP on an "
-                      "index without the tiers. Of the shipped indexes this affects only HPRC's "
-                      "chrY;", readme)
+        # (the limit of CRISPRitz up to 2.9.1, and of every index it built, the published ones
+        # until the rebuild for 2.10.0: CRISPRitz 2.10.0 finds each record's AF by its key)
+        self.assertIn("**`INFO/AF`** — a **numeric** allele frequency. CRISPRitz 2.10.0, which "
+                      "CRISPRme 2.10.0 installs, finds each record's `AF` by its key. Up to 2.9.1 "
+                      "`add-variants` reads each record's `AF` where the first record has it, so "
+                      "on an index such a CRISPRitz built a record that has it elsewhere gets "
+                      "none", formats)
+        self.assertIn("`add-variants` up to CRISPRitz 2.9.1 looks for `AF` in the VCF's first "
+                      "record only and reads every record's at that place in `INFO`, so a record "
+                      "that has it elsewhere gets none: its indel has no frequency on any index "
+                      "such a CRISPRitz built, nor its SNP on one without the tiers. Of the "
+                      "indexes published until the rebuild for 2.10.0 this affects only HPRC's "
+                      "chrY", readme)
+        self.assertIn("CRISPRitz 2.10.0 finds each record's `AF` by its key.", readme)
         self.assertIn("it names the carrier samples only, with the `AF` of the classic per-sample "
                       "dictionaries (an indel's, of the index's indel log), which CRISPRitz "
                       "`add-variants` copied from the VCF (see the MAF column below)", readme)
-        self.assertIn("`add-variants` also looks for the `AF` key in the VCF's first record "
-                      "only, and reads every record's `AF` at that place in `INFO`: a record that "
-                      "has it at another place gets none, in the index's indel log and in its "
-                      "classic per-sample dictionaries.", methods)
+        self.assertIn("`add-variants` up to CRISPRitz 2.9.1 also looks for the `AF` key in the "
+                      "VCF's first record only, and reads every record's `AF` at that place in "
+                      "`INFO`: a record that has it at another place gets none, in the index's "
+                      "indel log and in its classic per-sample dictionaries.", methods)
         for said in ("has no `AF` for 14,567,429 of its 15,583,931 indels (224,981 of the "
-                     "232,384 of chr22). Of the shipped indexes only HPRC's chrY is affected,",
+                     "232,384 of chr22). Of the indexes published until the rebuild only HPRC's "
+                     "chrY is affected,",
                      "its log has none for 91,950 of its 102,665 indels.",
-                     "2.8.0 behaves the same; it will be fixed in the next CRISPRitz release "
-                     "(HPRC's chrY log needs rebuilding with it)."):
+                     "CRISPRitz 2.10.0 finds each record's `AF` by its key, so an index it "
+                     "builds, as every one rebuilt for CRISPRme 2.10.0, has the `AF` of each "
+                     "record that has one."):
             self.assertIn(said, methods)
+        # (2.8.1 said it "will be fixed in the next CRISPRitz release": 2.10.0 is that one)
+        for name, text in (("README.md", readme), ("METHODS.md", methods),
+                           ("docs/INPUT_FORMATS.md", formats), ("merge_vcf_panels.sh", recipe),
+                           ("merge_mega_sites.sh", mega_recipe)):
+            self.assertNotIn("next CRISPRitz release", text, name)
         # (a SNP has the same limit only where the dictionaries give its frequency: METHODS
         # section 3, and the report's texts for datasets without the tiers)
         self.assertIn("a SNP has the `AF` of the classic per-sample dictionaries, which "
                       "`add-variants` also copied from the VCF's `INFO/AF`, as rounded there, "
                       "with the same limit as an indel's (§8).", methods)
         self.assertNotIn("it reads INFO/AF by EXACT key, so it selects the pooled AF", recipe)
-        self.assertIn("BUT it looks for that key in the VCF's FIRST record only, and reads every "
-                      "later record's AF at the same place in INFO; a record whose INFO has AF at "
-                      "another place gets NO AF", recipe)
-        self.assertIn("But `add-variants` looks for the key in the VCF's first record only and "
-                      "reads every record's `AF` at that place in `INFO`", recipe_doc)
+        self.assertIn("BUT up to CRISPRitz 2.9.1 it looks for that key in the VCF's FIRST record "
+                      "only, and reads every later record's AF at the same place in INFO; a "
+                      "record whose INFO has AF at another place gets NO AF", recipe)
+        self.assertIn("A known limit (METHODS section 8) of CRISPRitz 2.9.1 and earlier: 2.10.0 "
+                      "finds each record's AF by its key.", recipe)
+        self.assertIn("But `add-variants` up to CRISPRitz 2.9.1 looks for the key in the VCF's "
+                      "first record only and reads every record's `AF` at that place in `INFO`",
+                      recipe_doc)
+        self.assertIn("CRISPRitz 2.10.0 finds each record's `AF` by its key, so an index it "
+                      "builds from this merge has the pooled `AF` of every record.", recipe_doc)
         # merge_mega_sites.sh writes AF after the site's AF_<src> keys and AF_max, so its
         # place moves with the number of sources at the site: its plain AF reaches only the
         # indels whose site has as many sources as the first record's
@@ -2717,27 +3021,29 @@ class TestGenerateReport(unittest.TestCase):
                       "indel's site has as many sources as the VCF's first record: CRISPRitz "
                       "`add-variants` reads each record's `AF` at the place in `INFO` where the "
                       "first record has it (a known limit, METHODS section 8)", design)
+        self.assertIn("That is CRISPRitz 2.9.1 and earlier: 2.10.0 finds each record's `AF` by "
+                      "its key, so on an index it builds every indel would get it.", design)
         self.assertIn("`mega_gw_merge.sh` (read by `mega_build_indels.sh`), writes only "
                       "`AF_<src>` and `AF_max`, with no plain `INFO/AF`, so the shipped mega's "
                       "indel logs hold no AF", design)
         self.assertNotIn("so INDEL off-targets carry the global AF_max through the existing path",
                          mega_recipe)
-        self.assertIn("BUT add-variants looks for the AF key in the VCF's FIRST record only, and "
-                      "reads every later record's AF at the same place in INFO. Here AF comes "
+        self.assertIn("BUT up to CRISPRitz 2.9.1 add-variants looks for the AF key in the VCF's "
+                      "FIRST record only, and reads every later record's AF at the same place in "
+                      "INFO. Here AF comes "
                       "after the site's AF_<src> keys and AF_max, and the number of AF_<src> keys "
                       "is the number of sources that hold the site, so only an indel whose site "
                       "has as many sources as the first record's gets the global AF_max through "
                       "that path; every other one gets NO AF in the log", mega_recipe)
 
-    def test_a_rows_rsids_and_mafs_come_in_the_merges_order_not_its_variants(self):
-        """A known limit, to be fixed in the next release (METHODS section 8): the post-
-        analysis writes a row's variant, rsID and AF lists one to one, in the variants' order,
-        and the merge of a cluster's rows (remove_contiguous_samples.get_best_targets) sorts
-        each list on its own, as text, and keeps each value once. So in the results the n-th
-        rsID or AF need not be the n-th variant's, two variants of one AF show it once, and
-        the report's Variant cell gives the rsIDs in the list's order. The report's MAF, the
-        lowest AF of the list, does not change. When the next release keeps the lists
-        together, this test changes with METHODS."""
+    def test_a_rows_rsids_and_mafs_follow_its_variants(self):
+        """The post-analysis writes a row's variant, rsID and AF lists one to one, in the
+        variants' order, and the merge of a cluster's rows
+        (remove_contiguous_samples.get_best_targets) keeps each variant with its own rsID and
+        AF. Up to 2.8.1 it sorted each list on its own, as text, and kept each value once:
+        the n-th rsID or AF need not have been the n-th variant's, two variants of one AF
+        showed it once, and the report's Variant cell gave the rsIDs in the list's order.
+        The report's MAF, the lowest AF of the list, is the same either way."""
         import subprocess
         import test_representative_tiebreak as rtb
         pp = os.path.dirname(os.path.abspath(__file__))
@@ -2761,26 +3067,22 @@ class TestGenerateReport(unittest.TestCase):
         with open(outfile) as fh:
             merged = [line.rstrip("\n").split("\t") for line in fh.readlines()[1:]]
         self.assertEqual([(m[rtb.SNP_COL], m[16], m[17]) for m in merged], [
-            ("chr1_1003_G_T,chr1_1006_C_A", "rs1,rs9", "0.003,0.3"),  # not rs9 then rs1
-            ("chr1_5003_A_G,chr1_5009_T_C", ".", "0.2"),              # one of each
+            ("chr1_1003_G_T,chr1_1006_C_A", "rs9,rs1", "0.3,0.003"),
+            ("chr1_5003_A_G,chr1_5009_T_C", ".,.", "0.2,0.2"),
         ])
         cols = {"var_genome": "g", "rsid": "r", "maf": "m"}
         cells = [{"g": m[rtb.SNP_COL], "r": m[16], "m": m[17]} for m in merged]
         self.assertEqual(gr._curated_cell("variant", cells[0], cols),
-                         "chr1;1003;G;T,chr1;1006;C;A (rs1,rs9)")
-        # the lowest AF of the variants, whatever the order of the list
+                         "chr1;1003;G;T,chr1;1006;C;A (rs9,rs1)")
+        # the lowest AF of the variants
         self.assertEqual([gr._curated_cell("maf", c, cols) for c in cells],
                          ["3.00e-03", "2.00e-01"])
         methods = self._read(os.path.join(os.path.dirname(pp), "METHODS.md"))
         limits = " ".join(methods[methods.index("## 8. "):methods.index("## 9. ")].split())
-        for said in ("On a row of several variants, the `Variant_rsID` and `Variant_MAF` lists "
-                     "of the results tables are not in the order of its `Variant_info_genome`",
-                     # of the 293, 267 hold one SNP beside the indel, 22 two and 4 three
-                     "953 of 1,967 rows of two or more SNPs and 118 of 293 rows of an indel and "
-                     "one or more SNPs list their rsIDs in another order than their variants",
-                     "are in the list's order. 2.8.0 behaves the same, and it will be fixed in "
-                     "the next release."):
-            self.assertIn(said, limits)
+        self.assertIn("On a row of several variants, the `Variant_rsID` and `Variant_MAF` lists "
+                      "of the results tables are in the order of its `Variant_info_genome`",
+                      limits)
+        self.assertNotIn("are not in the order of its `Variant_info_genome`", limits)
 
     def test_registry_variant_count_idx_and_sidecar(self):
         """Cheap variant count + genotyped sample counts from the Tier-0 registry
@@ -2980,16 +3282,17 @@ class TestGenerateReport(unittest.TestCase):
 
     def test_pipeline_no_readonly_or_bare_relative_writes(self):
         """Regression guard for the read-only-container bug: the search pipeline must
-        not write a bare-relative dummy.txt nor append to $6 without a writability
-        guard (both crashed a reference-only run under Apptainer)."""
+        not write a bare-relative dummy.txt nor append to $6 (both crashed a
+        reference-only run under Apptainer; since 2.10.0 the script reads a copy of $6)."""
         p = os.path.join(os.path.dirname(__file__),
                          "submit_job_automated_new_multiple_vcfs.sh")
         src = open(p).read()
         # the fixed bare-relative dummy.txt write must be gone
         self.assertNotIn("echo -e \"dummy_file\" >dummy.txt", src)
         self.assertNotIn(">dummy.txt", src.replace('"${output_folder}/dummy.txt"', ""))
-        # appending to the samplefile $6 must be writability-guarded
-        self.assertIn('[ -w "$6" ]', src)
+        # the samplefile $6 is never written
+        self.assertNotIn("echo >>$6", src)
+        self.assertNotIn('truncate -s -1 "$6"', src)
 
     def test_persona_audit_report_additions(self):
         """Scores/columns legend (CFD/CRISPR-Bulge + citations + alignment notation),
@@ -3817,7 +4120,9 @@ class TestGenerateReport(unittest.TestCase):
             'href="data/observed_haplotypes.tsv"', html)
         # the modal shows the short degrade note in place of the download button
         self.assertIn("omitted from this slim report", html)
-        self.assertIn("--report-full", html)
+        # with what a web search does to bundle it too, which can pass no flag (FV :342)
+        self.assertIn("re-run with <code>--report-full</code>, or with Include the full "
+                      "report on the web form, or read it from the result directory.", html)
         # (d) the full companion STILL exists in the result dir
         self.assertTrue(
             os.path.isfile(os.path.join(rd, "observed_haplotypes.tsv")))
@@ -3976,27 +4281,40 @@ class TestGenerateReport(unittest.TestCase):
                           dict(self._PARAMS)),
             # an older folder with no .Params.txt: decided from the file name alone
             "ref_noparams": (ro_tsv, None),
+            # one haplotype of assembly-search: a search of a personal genome, as
+            # complete-search names its haplotype_genome_view, with no variant dataset. Its
+            # report said "reference genome only", and "Sites in the reference genome"
+            # (RV1-F2)
+            "ref_haplotype": (
+                f"{_GUIDE}+NRG_HG01255_paternal_5aeb0fc6+__6+3_integrated_results.tsv",
+                {**self._PARAMS, "Genome_selected": "HG01255_paternal_5aeb0fc6",
+                 "Genome_ref": "HG01255_paternal_5aeb0fc6",
+                 "Genome_idx": "NRG_4_HG01255_paternal_5aeb0fc6"}),
         }
         for name, (tsv_name, params) in cases.items():
             with self.subTest(name):
                 html, manifest, keys = self._job_report(
                     self._install_job(name, tsv_name, params))
+                genome = "HG01255_paternal_5aeb0fc6" if name == "ref_haplotype" else "hg38"
                 self.assertEqual(keys, ["Variant database(s)", "Off-target search criteria"])
                 for present in (
                     # the header row and the inputs card
-                    '<td class="k">Variant dataset(s)</td><td>none (reference genome only)<',
-                    '<td class="k">Variant database(s)</td><td>none (reference genome only)<',
-                    "Sites in the reference genome that differ from the guide by up to 6 "
-                    "mismatches",
+                    '<td class="k">Variant dataset(s)</td><td>none (no variant dataset '
+                    'searched)<',
+                    '<td class="k">Variant database(s)</td><td>none (no variant dataset '
+                    'searched)<',
+                    f"Sites in the genome searched ({genome}) that differ from the guide by "
+                    "up to 6 mismatches",
                     # every MAF is blank; the note says why instead of naming a panel
-                    "This search used the reference genome only",
+                    "This search used no variant dataset, so every MAF is blank.",
                 ):
                     self.assertTrue(present in html, f"{present!r} not in the {name} report")
                 for absent in ("Search mode", "Population-level", "NOT computed",
                                "Variants included", "Panel:", "all searched",
                                "Allele-frequency basis", "union panel",
                                "Variant-contributed sites", "accounting for human genetic",
-                               "NRG_4_hg38", "NRG_3_hg38", "NRG+hg38", "reference only<"):
+                               "NRG_4_hg38", "NRG_3_hg38", "NRG+hg38", "reference only<",
+                               "reference genome only", "Sites in the reference genome"):
                     self.assertFalse(absent in html, f"{absent!r} in the {name} report")
                 self.assertIsNone(manifest["variant_datasets"])
                 self.assertIsNone(manifest["database"])  # not the installed registry
@@ -4020,6 +4338,37 @@ class TestGenerateReport(unittest.TestCase):
         self.assertFalse("reference genome only" in html)
         self.assertEqual(manifest["variant_datasets"], "1000G")
         self.assertEqual(manifest["database"]["databases"], {"1000G": 2548})
+        # the copy of the --vcf list the search reads in the result folder names it alone:
+        # the same report
+        with open(os.path.join(rd, ".vcf_list_searched.txt"), "w") as fh:
+            fh.write("hg38_1000G\n")
+        self.assertEqual(self._job_report(rd)[1]["database"], manifest["database"])
+
+    def test_a_search_of_two_datasets_names_both(self):
+        """A search of two datasets (a --vcf list of two) names its results file after the
+        last one alone, and its report named that one, with its registry's panel and counts
+        (RV1-F1). The copy of the --vcf list the search reads in the result folder names
+        both: the report names both, as the manifest does, and credits neither registry,
+        each the panel of its own dataset's rows."""
+        self._install_registry("hg38_hgdpx", 4624, 383, {"hgdpx": 500})
+        rd = self._install_job(
+            "two", f"{_GUIDE}+NRG_hg38+hg38_hgdpx_6+3_integrated_results.tsv",
+            {**self._PARAMS, "Genome_idx": "NRG_4_hg38+hg38_1000G,NRG_4_hg38+hg38_hgdpx",
+             "Ref_comp": "True"}, variant_rows=True)
+        with open(os.path.join(rd, ".vcf_list_searched.txt"), "w") as fh:
+            fh.write("hg38_1000G\nhg38_hgdpx/\n")  # (a line may end in /)
+        html, manifest, _keys = self._job_report(rd)
+        for present in ('<td class="k">Variant dataset(s)</td><td>1000G, hgdpx<',
+                        '<td class="k">Variant database(s)</td><td>1000G, hgdpx<',
+                        "Minor/alternate allele frequency over the panel of the dataset each "
+                        "variant comes from, each of 1000G, hgdpx searched with its own",
+                        "here that of the dataset the variant comes from, each of 1000G, "
+                        "hgdpx searched with its own"):
+            self.assertTrue(present in html, f"{present!r} not in the report")
+        for absent in ("<td>hgdpx<", "4,624", "31,130", "all searched", "union panel"):
+            self.assertFalse(absent in html, f"{absent!r} in the report")
+        self.assertEqual(manifest["variant_datasets"], "1000G, hgdpx")
+        self.assertIsNone(manifest["database"])
 
     def test_variant_rows_are_never_reference_only(self):
         """No Params and a file name that gives no dataset: a table with a variant-created
@@ -4501,3 +4850,100 @@ class TestAssemblyExportSchemaIsUniform(unittest.TestCase):
         staged_at = src.index("_combined_validation_panel_html(")
         self.assertLess(set_at, staged_at, "drop set must be set before exports are staged")
         self.assertLess(schema_at, staged_at, "schema must be decided before exports are staged")
+
+
+@unittest.skipUnless(_HAVE_DEPS, _SKIP_REASON)
+class TestTheReportSaysWhatTheDensityGuardWithheld(unittest.TestCase):
+    """(2.10.0, review r2 of lane M, M-R2-N2.) The sites-only density guard
+    (sites_only_guard.py) writes a BED a chromosome and side of a sites-only dataset's
+    search, saying in its second line how many candidates it withheld of how many, and one
+    line a region of them. The report reads them all (load_density_guard), bundles their
+    regions as one file (data/sites_only_density_guard.bed) and says in the inputs card
+    what the guard withheld, of which dataset, and where the regions are listed
+    (render_guard_row); a sites-only search run with the guard turned off says so, and a
+    search with no sites-only dataset has no such row. The BEDs here are the guard's own,
+    written by sites_only_guard.run on raw targets of windows of 2^20 and 2^24 sequences."""
+
+    setUp = TestGenerateReport.setUp
+    _build_and_extract = TestGenerateReport._build_and_extract
+    _read = staticmethod(TestGenerateReport._read)
+    _dpath = staticmethod(TestGenerateReport._dpath)
+
+    DENSE = "QQQQQQQQQQACGTACGTACGTA"     # 4^10 = 2^20 sequences: withheld at 20 bits
+    DENSER = "QQQQQQQQQQQQACGTACGTACG"    # 4^12 = 2^24
+    PLAIN = "CTAACAGTTGCTTTTATCACAGG"
+
+    def _guard_beds(self):
+        """The guard's BEDs of chr22 (two candidates of three withheld, one region) and chr7
+        (one of two, one region), SNP side, in the run's result folder."""
+        import sites_only_guard as sog
+        dicts = os.path.join(self.tmp, "Dictionaries")
+        reg = os.path.join(dicts, "registry_hg38_mega")
+        os.makedirs(reg)
+        with open(os.path.join(reg, "reg_chr22.idx"), "w") as fh:
+            json.dump({"aggregation": "info_af", "data_type": "sites-only"}, fh)
+
+        def raw(dna, chrom, pos):
+            return "\t".join(["X", _GUIDE + "NNN", dna, chrom, str(pos), str(pos), "+",
+                              "3", "0", "3"]) + "\n"
+
+        beds = []
+        for chrom, lines in (("chr22", [raw(self.DENSE, "chr22", 100),
+                                        raw(self.DENSER, "chr22", 104),
+                                        raw(self.PLAIN, "chr22", 900)]),
+                             ("chr7", [raw(self.DENSE, "chr7", 5000),
+                                       raw(self.PLAIN, "chr7", 7000)])):
+            targets = os.path.join(self.tmp, f"targets.{chrom}.txt")
+            with open(targets, "w") as fh:
+                fh.writelines(lines)
+            bed = os.path.join(self.tmp, f"hg38+hg38_mega_NRG_g_4_1_1_{chrom}.snp"
+                               + gr.GUARD_SUFFIX)
+            sog.run("snp", targets, dicts, "hg38_mega", chrom, bed, bits=20)
+            beds.append(bed)
+        return beds
+
+    def test_the_guard_is_read_bundled_and_shown(self):
+        beds = self._guard_beds()
+        guard = gr.load_density_guard(self.tmp)
+        self.assertEqual((guard["bits"], guard["datasets"], guard["regions"]),
+                         (20, {"hg38_mega": {"snp": [5, 3]}}, 2))
+        regions = [ln for bed in beds for ln in self._read(bed).splitlines(True)
+                   if not ln.startswith("#")]
+        self.assertEqual(sorted(guard["lines"]), sorted(regions))
+        _zip, names, extract = self._build_and_extract()
+        self.assertIn("data/sites_only_density_guard.bed", names)
+        bundled = self._read(self._dpath(extract, "sites_only_density_guard.bed")).splitlines(True)
+        self.assertEqual(bundled[:2], [
+            "## CRISPRme sites-only density guard: the regions of the candidates withheld "
+            "(windows of 2^20 sequences or more)\n",
+            "#chrom\tstart\tend\tguide\tcandidates_withheld\tmax_bits\n"])
+        self.assertEqual(sorted(bundled[2:]), sorted(regions))
+        html = self._read(self._dpath(extract, "report.html"))
+        row = re.search(r'<tr><td class="k">Sites-only density guard</td><td>(.*?)</td></tr>',
+                        html, flags=re.S)
+        self.assertIsNotNone(row)
+        self.assertIn("of <code>hg38_mega</code>, 3 of 5 SNP candidates", row.group(1))
+        self.assertIn("Their 2 region(s) are listed in", row.group(1))
+        self.assertIn('href="data/sites_only_density_guard.bed"', row.group(1))
+
+    def test_the_row_of_a_search_the_guard_did_not_touch(self):
+        # no BED: the guard turned off in a search of a sites-only dataset (.Params.txt
+        # Sites_only_density_guard -1, the gate's sidecar frequency_bound), or no
+        # sites-only dataset at all
+        self.assertIsNone(gr.load_density_guard(self.tmp))
+        off = gr.render_guard_row(None, None, {"frequency_bound": True}, "-1")
+        self.assertEqual(off[0], "Sites-only density guard")
+        self.assertTrue(off[1].startswith(
+            "Turned off for this search (<code>--no-sites-only-density-guard</code>)"))
+        for gate, bits in (({"frequency_bound": True}, "20"), ({"frequency_bound": False}, "-1"),
+                           (None, "-1"), (None, None)):
+            with self.subTest(gate=gate, bits=bits):
+                self.assertIsNone(gr.render_guard_row(None, None, gate, bits))
+        # a BED whose second line is not the guard's counts is not read
+        with open(os.path.join(self.tmp, "x" + gr.GUARD_SUFFIX), "w") as fh:
+            fh.write("#chrom\tstart\tend\n" "chr22\t1\t2\n")
+        self.assertIsNone(gr.load_density_guard(self.tmp))
+        _zip, names, extract = self._build_and_extract()
+        self.assertNotIn("data/sites_only_density_guard.bed", names)
+        self.assertNotIn("Sites-only density guard",
+                         self._read(self._dpath(extract, "report.html")))

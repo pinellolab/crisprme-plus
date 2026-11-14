@@ -87,10 +87,11 @@ VCF_HGDP_URL_TEMPLATE: str = (
     "/production/hgdp/hgdp_wgs.20190516/hgdp_wgs.20190516.full.{chrom}.vcf.gz"
 )
 
+# (with no "/" at its end: each URL adds its own, and GitHub answered a "//" with a 307)
 TEST_DATA_BASE_URL: str = os.environ.get(
     "CRISPRME_TESTDATA_URL",
-    "https://raw.githubusercontent.com/pinellolab/crisprme-plus/refs/heads/main/test/data/",
-)
+    "https://raw.githubusercontent.com/pinellolab/crisprme-plus/refs/heads/main/test/data",
+).rstrip("/")
 
 # ==============================================================================
 # PAM file definitions
@@ -109,16 +110,17 @@ PAM_DEFINITIONS: Dict[str, Tuple[str, int]] = {
     "20bp-NGG-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNGG", 3),
     "20bp-NGC-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNGC", 3),
     "20bp-NGK-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNGNK", 3),  # K = G/T
-    "20bp-NRG-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNRG", 3),  # R = A/G, i.e. NAG+NGG (SpCas9 broad recognition; the default)
+    "20bp-NRG-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNRG", 3),  # R = A/G, i.e. NAG+NGG (SpCas9 broad recognition; the default before 2.10.0)
+    "20bp-NRR-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNRR", 3),  # NAA, NAG, NGA, NGG (the default since 2.10.0)
     "20bp-NRCH-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNRCH", 4),  # NRCH (xCas9)
     "20bp-NNGT-SpCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNNNGT", 4),  # NNGT (SpCas9-NG)
     # ---- iSpyMacCas9
     "20bp-NAA-iSpyMacCas9.txt": ("NNNNNNNNNNNNNNNNNNNNNAA", 3),
     # ---- SaCas9
     "22bp-NNGRRN-SaCas9.txt": (
-        "NNNNNNNNNNNNNNNNNNNNNNNNNGRRN",
+        "NNNNNNNNNNNNNNNNNNNNNNNNGRRN",
         6,
-    ),  # 22 nt guide + NNGRRN
+    ),  # 22 nt guide + NNGRRN (as the shipped PAMs/ file, which the index set builds from)
     # ---- CasX
     "TTCN-20bp-CasX.txt": ("TTCNNNNNNNNNNNNNNNNNNNNNN", -4),  # 5′ PAM (TTCN)
     # ---- Cas12a (Cpf1) variants
