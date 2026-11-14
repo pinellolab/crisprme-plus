@@ -97,7 +97,7 @@ The list, with how each archive is built and published, is the index set,
 ## Layout
 
 ```
-crisprme-indexes-format2/
+crisprme_plus_indices/
 ├── indexes/
 │   ├── 20-NRR_3_hg38.tar.gz                           # a reference index: the index alone
 │   ├── 20-NRR_3_hg38+hg38_HGDP1kGP.tar.gz             # a variant index: it and its _INDELS index

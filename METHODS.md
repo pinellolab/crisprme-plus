@@ -26,7 +26,7 @@ CRISPRme 2.10.z asks for `crispritz >=2.10.0,<2.11`, and that of CRISPRitz 2.10.
 `run_constrained: crisprme >=2.10.0`, so that conda installs it beside no earlier CRISPRme,
 none of which reads index format 2. The default PAM and index are SpCas9 NRR's (`NAA`, `NAG`,
 `NGA`, `NGG`; `20-NRR_3_hg38+hg38_HGDP1kGP`), and the default bulge budget is 1 DNA + 1 RNA
-bulge (§5). The indexes of 2.10.0 are published in `lucapinello/crisprme-indexes-format2`
+bulge (§5). The indexes of 2.10.0 are published in `lucapinello/crisprme_plus_indices`
 (those of 2.8.1 stay in `lucapinello/crisprme-data` and
 `lucapinello/crisprme-data-general-index`, §9); the reference indexes and those of HGDP + 1000
 Genomes are built on all 455 contigs of hg38, those of HPRC and mega on its 24 chromosomes
@@ -486,7 +486,7 @@ Dictionaries/registry encode the *variants*, not the nuclease. Only the CRISPRit
 PAM-independent **enriched-genome kit** for the flagship datasets, so a user targeting a different
 nuclease (NGG, NNGRRT, TTTN, …) rebuilds *only* the index off the published enriched genome rather
 than re-deriving the variants: since 2.10.0 under `build-inputs/<dataset>.tar.gz` in
-`lucapinello/crisprme-indexes-format2`, beside the indexes built from them (HGDP + 1000 Genomes,
+`lucapinello/crisprme_plus_indices`, beside the indexes built from them (HGDP + 1000 Genomes,
 HPRC and mega; `download --what build-inputs` fetches them there). The kits of 2.8.1, in
 `lucapinello/crisprme-data`, were enriched by CRISPRitz 2.9.1 (one allele of a site, narrower
 fake-indel windows) and do not match 2.10.0's Dictionaries.
@@ -3410,7 +3410,7 @@ so they serve no 5′ PAM: a Cas12a search needs a dedicated index. Up to 2.8.1 
 a flank wider than 3 nt, which a release before `--prune-pam` misreads, was published in a
 repository of its own (`lucapinello/crisprme-data-general-index`), apart from the others; since
 2.10.0 every index, the general one among them, is published in
-`lucapinello/crisprme-indexes-format2`, the repository of index format 2, which no release before
+`lucapinello/crisprme_plus_indices`, the repository of index format 2, which no release before
 2.10.0 reads (`docs/PRECOMPUTED_INDEXES.md`).
 
 

@@ -781,7 +781,7 @@ class TheDocsSayWhatItReads(unittest.TestCase):
         self.assertIn(f"a search with no bulges scans it in place of the index {whole} (as a "
                       "`build-index-only` of all of hg38 leaves it; the kit holds chr1-22, X and "
                       "Y alone), a build of an index from it reads it, and each refuses it", notes)
-        card = _flat(_read("docs", "hf", "crisprme-indexes-format2_README.md"))
+        card = _flat(_read("docs", "hf", "crisprme_plus_indices_README.md"))
         self.assertIn(f"A search with no bulges scans it in place of the index {whole} (as "
                       "2.8.1's build of all of hg38 left it; its kits hold chr1-22, X and Y "
                       "alone), and a build of an index reads it", card)

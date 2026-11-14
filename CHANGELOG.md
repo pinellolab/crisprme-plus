@@ -24,7 +24,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
   set of 2.10.0 lists them (Added; the general index serves the searches of `NNN_3`, which is not
   built again), under a name that gives the guide length and the side of the PAM
   (`20-NRR_3_hg38+hg38_HGDP1kGP`), in a Hugging Face repo of their own,
-  `lucapinello/crisprme-indexes-format2`. The archives of 2.8.1 stay where they are. The HPRC
+  `lucapinello/crisprme_plus_indices`. The archives of 2.8.1 stay where they are. The HPRC
   panel is built from HPRC release 2's Minigraph-Cactus graph v2.1, where 2.8.1's was built from
   v2.0 (Changed).
 - **The defaults.** SpCas9 NRR is the default PAM and index (it was NRG), and a search given no
@@ -99,7 +99,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
   Dictionaries and genotype store are published and fetched once.**
   - **The location.** Every index of index format 2, which CRISPRme 2.8.1 refuses and 2.8.0
     aborts on, or named for its guide length and side, goes to and comes from
-    `lucapinello/crisprme-indexes-format2` (`crisprme_hf.FORMAT2_HF_REPO`), which no earlier
+    `lucapinello/crisprme_plus_indices` (`crisprme_hf.FORMAT2_HF_REPO`), which no earlier
     release points at: `publish-index` routes it there by itself, by the format its `.bin` files
     are in, and refuses to publish one in `lucapinello/crisprme-data` or
     `lucapinello/crisprme-data-general-index`, the repos 2.8.1 reads, even when named; `download`
@@ -256,7 +256,10 @@ major.minor version (Changed). The main changes, each told in its entry below:
   it was written with (the cluster's, or its working directory's), each build first copying its PAM
   file from the repository's `PAMs/` into its working directory's, `crisprme.py`, `hf` and `pigz`
   run in the release image (`$RUN`), each command in its own panel's working directory, with the
-  variables the README lists, each read by a command; every upload to the format-2 repo, no token
+  variables the README lists, each read by a command; every upload to the format-2 repo, which
+  every publish command names (`hf upload <repo>`, `publish-index --hf-repo <repo>`: the image the
+  indexes were built with, of CRISPRme `db50986`, which the publish runs in too, routes an index of
+  format 2 by its own code to the name the plan had given the repo, which is no repo's), no token
   in a command, and every variant index published `--dictless`, so that a panel's indexes name one
   Dictionaries bundle. `--commands build` and `--commands publish` print the rebuild's two halves,
   a script each: the build half publishes nothing, and the publish half, which builds nothing, is
@@ -2972,7 +2975,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
   pruned to the PAM where only such a one serves it, and builds one from the genome where none
   does (it said that it builds one). On chr22 with HGDP + 1000 Genomes, both refusals of a search of
   1 + 1 bulge under an empty `--index-path` name `20-NRR_3_hg38`, the reference index of the
-  index set that the rebuild for 2.10.0 publishes in `lucapinello/crisprme-indexes-format2`
+  index set that the rebuild for 2.10.0 publishes in `lucapinello/crisprme_plus_indices`
   (2.8.1's of N = 3, `NRR_3_hg38`, is in `lucapinello/crisprme-data`); no repo holds an
   `NRR_2_hg38` (`download` stops on it), nor an `NGCG_3_hg38`. Covered by
   `PostProcess/test_index_resolution.py` and `test_bulge_cap.py`.

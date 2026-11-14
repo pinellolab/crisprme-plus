@@ -35,7 +35,7 @@ import crisprme_hf as hf
 
 DEFAULT = hf.DEFAULT_HF_REPO
 GENERAL = hf.GENERAL_INDEX_HF_REPO
-FORMAT2 = getattr(hf, "FORMAT2_HF_REPO", "lucapinello/crisprme-indexes-format2")
+FORMAT2 = getattr(hf, "FORMAT2_HF_REPO", "lucapinello/crisprme_plus_indices")
 
 # The index archives in lucapinello/crisprme-data/indexes/ as listed by
 # `scripts/hf_sha256sums.py lucapinello/crisprme-data` on 2026-10-30.

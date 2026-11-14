@@ -19,7 +19,7 @@
 > index, and a search into one it builds (the published 8-nt-flank archives have none).
 > Up to 2.8.1 `NNN_3` was published in `lucapinello/crisprme-data` and the 8-nt-flank indexes
 > in `lucapinello/crisprme-data-general-index`, where 2.8.1's archives stay; 2.10.0 publishes
-> every index in `lucapinello/crisprme-indexes-format2`, the general index `20-NNNNNNNN_3`
+> every index in `lucapinello/crisprme_plus_indices`, the general index `20-NNNNNNNN_3`
 > among them, and does not build `NNN_3` again. The design below is kept for the record, each
 > part that 2.10.0 does not ship as designed said so where it stands: no index records minimum
 > versions, and the web reads no sidecar. What ships is described in
@@ -79,7 +79,7 @@ New code's resolver knows both; `publish-index` targets that repo only for width
 index format 1.
 
 Since 2.10.0 the same isolation holds by index format: every index of format 2 (CRISPRitz 2.10.0),
-which 2.8.1 refuses and 2.8.0 aborts on, is published in `lucapinello/crisprme-indexes-format2`,
+which 2.8.1 refuses and 2.8.0 aborts on, is published in `lucapinello/crisprme_plus_indices`,
 whatever its flank width, the general index `20-NNNNNNNN_3_*` included; no release
 before 2.10.0 points at it, and `publish-index` refuses an index of format 2 in the two repos above
 (`crisprme_hf.resolve_index_repo`, `docs/PRECOMPUTED_INDEXES.md`).
@@ -162,7 +162,7 @@ index's name and `.pam_build`, not a sidecar.
 
 ## 6. NNN index publish plan (*superseded*)
 2.10.0 does not build `NNN_3` again: the general index `20-NNNNNNNN_3_*` (format 2, in
-`lucapinello/crisprme-indexes-format2`, with its `.index_meta.json` record) serves every search
+`lucapinello/crisprme_plus_indices`, with its `.index_meta.json` record) serves every search
 `NNN_3` served at the same speed (a 3-nt and an 8-nt PAM-less index cost the same: every position
 is a site), and a download of 2.8.1's `NNN_3_*` names it (`seq_script/rebuild/index_set_2.10.0.tsv`).
 2.8.1 publishes `NNN_3` in `lucapinello/crisprme-data` and the 8-nt-flank indexes in
@@ -174,7 +174,7 @@ instead, and the wider flanks to `lucapinello/crisprme-data-general-index` (Laye
 ## 7. CHANGELOG / README wording (both repos)
 Said where each index lives: the card of `lucapinello/crisprme-data-general-index` gives the
 minimum versions of its 8-nt-flank archives (CRISPRme+ 2.8.1, CRISPRitz 2.9.1), and that of
-`lucapinello/crisprme-indexes-format2` the versions of 2.10.0 (`docs/hf/`); the README says which
+`lucapinello/crisprme_plus_indices` the versions of 2.10.0 (`docs/hf/`); the README says which
 release reads which index.
 
 ## 8. Web PAM picker (2.10.0, with the differences below)

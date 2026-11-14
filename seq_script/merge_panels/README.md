@@ -29,7 +29,7 @@ default is the re-phased HGDP + 1000 Genomes panel, `20-NRR_3_hg38+hg38_HGDP1kGP
 `hgdp1kgp_build.sh`, not this Mode-1 2019/2021 recipe). The rebuild for 2.10.0 runs these
 recipes once per PAM of a panel, every one in the panel's one working directory, as the index set
 [`../rebuild/index_set_2.10.0.tsv`](../rebuild/index_set_2.10.0.tsv) lists them, and publishes
-them in `lucapinello/crisprme-indexes-format2` ([`../rebuild/README.md`](../rebuild/README.md)).
+them in `lucapinello/crisprme_plus_indices` ([`../rebuild/README.md`](../rebuild/README.md)).
 
 > **Mode-1 SOURCES caveat.** The `merge_vcf_panels.sh` `SOURCES` + `build_combined_panel.sh`
 > defaults committed here target the **2019** 1000G Phase-3 callset (`hg38_1000G`, glob
@@ -107,7 +107,7 @@ off-targets, 855 SNP+indel and 140 SNP+SNP co-occurring rows, with named cis car
 ground-truth-verified against the source GTs (e.g. HG03579 carries chr10:12896898 `TG>T` +
 chr10:12896900 `T>A` in cis; joint AF 1/464). Published since: `NRG_3_hg38+hg38_HPRC` and
 `NRR_3_hg38+hg38_HPRC` are 2.8.1's archives in `lucapinello/crisprme-data`, and
-`20-NRR_3_hg38+hg38_HPRC` is 2.10.0's, in `lucapinello/crisprme-indexes-format2`, built by this
+`20-NRR_3_hg38+hg38_HPRC` is 2.10.0's, in `lucapinello/crisprme_plus_indices`, built by this
 script for each PAM of the panel (`../rebuild/index_set_2.10.0.tsv`).
 
 ## Source provenance (versions + access)

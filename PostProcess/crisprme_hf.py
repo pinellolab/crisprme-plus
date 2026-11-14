@@ -77,7 +77,7 @@ _COMPAT_FLANK_WIDTH = 3
 # The 2.10.0 set is seq_script/rebuild/index_set_2.10.0.tsv (INDEX_SET, below). The repos
 # above keep the archives of 2.8.1 (index format 1, the older names), which a download still
 # fetches by their own names.
-FORMAT2_HF_REPO = "lucapinello/crisprme-indexes-format2"
+FORMAT2_HF_REPO = "lucapinello/crisprme_plus_indices"
 
 # The archives of a panel (a variant dataset) that every index of it shares, published and
 # fetched once per panel beside its indexes under indexes/ (_publish_companion,

@@ -11,7 +11,7 @@ push them to Hugging Face as part of the release:
 
 | File | Hugging Face dataset |
 |---|---|
-| `crisprme-indexes-format2_README.md` | [`lucapinello/crisprme-indexes-format2`](https://huggingface.co/datasets/lucapinello/crisprme-indexes-format2): the indexes of CRISPRme 2.10.0 and later (index format 2), each panel's Dictionaries bundle and genotype store once, the enriched-genome kits with their member lists, and HPRC's normalised VCFs (decision C2) |
+| `crisprme_plus_indices_README.md` | [`lucapinello/crisprme_plus_indices`](https://huggingface.co/datasets/lucapinello/crisprme_plus_indices): the indexes of CRISPRme 2.10.0 and later (index format 2), each panel's Dictionaries bundle and genotype store once, the enriched-genome kits with their member lists, and HPRC's normalised VCFs (decision C2) |
 | `crisprme-data_README.md` | [`lucapinello/crisprme-data`](https://huggingface.co/datasets/lucapinello/crisprme-data): the reference data of every release, and the index archives of 2.8.1 (index format 1) |
 | `crisprme-data-general-index_README.md` | [`lucapinello/crisprme-data-general-index`](https://huggingface.co/datasets/lucapinello/crisprme-data-general-index): the general (8-nt flank) index archives of 2.8.1 |
 
@@ -27,8 +27,8 @@ HF_HUB_DISABLE_IMPLICIT_TOKEN=0` (Docker), as the rebuild's publish half does
 (`seq_script/rebuild/README.md`, "The publish"):
 
 ```bash
-hf upload lucapinello/crisprme-indexes-format2 \
-  docs/hf/crisprme-indexes-format2_README.md README.md --repo-type dataset
+hf upload lucapinello/crisprme_plus_indices \
+  docs/hf/crisprme_plus_indices_README.md README.md --repo-type dataset
 hf upload lucapinello/crisprme-data \
   docs/hf/crisprme-data_README.md README.md --repo-type dataset
 hf upload lucapinello/crisprme-data-general-index \
@@ -41,7 +41,7 @@ inconsistency (`RELEASE_CHECKLIST.md` → "nothing on HF that is undocumented").
 
 ## The location of 2.10.0's indexes, and what it holds
 
-`lucapinello/crisprme-indexes-format2` holds the index set of 2.10.0,
+`lucapinello/crisprme_plus_indices` holds the index set of 2.10.0,
 [`seq_script/rebuild/index_set_2.10.0.tsv`](../../seq_script/rebuild/index_set_2.10.0.tsv): every
 archive of it (a companion with its record, `indexes/<name>.json`), what the publish puts beside
 them (`indexes/SHA256SUMS`, each kit's `.SHA256SUMS` and member list,
@@ -49,7 +49,10 @@ them (`indexes/SHA256SUMS`, each kit's `.SHA256SUMS` and member list,
 nothing else (`seq_script/rebuild/check_index_set.py` checks the set against the code;
 `seq_script/rebuild/README.md` says how the rebuild follows it). `publish-index` routes an index
 of format 2, or one named for its guide length and side, there by itself, and refuses
-to publish an index of format 2 in the two repos of 2.8.1, which 2.8.1 reads. 2.10.0's `download`
+to publish an index of format 2 in the two repos of 2.8.1, which 2.8.1 reads; the rebuild's
+publish rows name it all the same (`--hf-repo`), as they run in the image of `db50986`, whose
+code gives that route the name the plan had given the repo, which is no repo's
+(`seq_script/rebuild/README.md`, "The publish"). 2.10.0's `download`
 and its Settings catalog read it by default; an archive of 2.8.1 is still fetched by its own
 name from the repos of 2.8.1.
 
@@ -72,12 +75,12 @@ byte-for-byte what was validated. For a repo that does not exist yet, the staged
 file alone is the whole list (`LC_ALL=C sort -k2 staged.sha256`, the order the
 script writes). The rebuild of 2.10.0's indexes publishes them with `publish-index`, which
 packs each archive, uploads it and deletes it, so there is nothing staged to hash:
-`lucapinello/crisprme-indexes-format2`'s list is written from the Hub after the upload
+`lucapinello/crisprme_plus_indices`'s list is written from the Hub after the upload
 (`seq_script/rebuild/README.md`, rule 3).
 
 ## Each panel's Dictionaries and genotype store, once (2.10.0)
 
-In `lucapinello/crisprme-indexes-format2` a variant archive holds the index, its `_INDELS`
+In `lucapinello/crisprme_plus_indices` a variant archive holds the index, its `_INDELS`
 index and `manifest.json` only. The panel's Dictionaries (`registry_`, `log_indels_`,
 `indel_genotypes_`, mega's `indel_af_`, a classic publish's `dictionaries_`) and its samplesID
 lists go once into `dictionaries-bundle_<vcf>.tar.gz`, its Tier-1 genotype store into

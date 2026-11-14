@@ -11,7 +11,7 @@ again from the same files is another tarball. Its SHA256SUMS (build-inputs/<data
 proves that a download is the published file; this list proves what the kit holds, the same for
 any packing of the same files, and checks a kit once unpacked (md5sum -c, in the folder it was
 unpacked in). It goes beside the kit, build-inputs/<dataset>.members.md5 of
-lucapinello/crisprme-indexes-format2, and its own SHA-256 in docs/INDEX_PROVENANCE.md
+lucapinello/crisprme_plus_indices, and its own SHA-256 in docs/INDEX_PROVENANCE.md
 (docs/RELEASE_CHECKLIST.md: the kits; seq_script/rebuild/README.md: The publish).
 
     python scripts/kit_members.py <working directory> <dataset>     # from the folders the kit packs:

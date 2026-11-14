@@ -2,7 +2,7 @@
 
 > **The indexes of CRISPRme 2.10.0.** Since 2.10.0 the precomputed indexes are built by
 > CRISPRitz 2.10.0 in **index format 2** and published in their own dataset repo,
-> **[`lucapinello/crisprme-indexes-format2`](https://huggingface.co/datasets/lucapinello/crisprme-indexes-format2)**,
+> **[`lucapinello/crisprme_plus_indices`](https://huggingface.co/datasets/lucapinello/crisprme_plus_indices)**,
 > which no earlier release reads (CRISPRme 2.8.1 refuses an index of format 2, and 2.8.0 aborts
 > on one). Each is named for its guide length and the side of its PAM, in the order
 > of the target on the strand (`20-NRR_3_hg38` for a 20-nt guide and a 3′ PAM, `TTTN-23_3_hg38`
@@ -138,7 +138,7 @@ the genotyped-vs-sites-only distinction and §4 for how each is scanned.
 
 ## Layout on HuggingFace
 
-The indexes of 2.10.0 are under `indexes/` in **`lucapinello/crisprme-indexes-format2`**
+The indexes of 2.10.0 are under `indexes/` in **`lucapinello/crisprme_plus_indices`**
 (`download` and `publish-index` route there by themselves, an explicit `--hf-repo` or
 `CRISPRME_HF_REPO` aside), and the enriched-genome kits they were built from under
 `build-inputs/`:
@@ -286,7 +286,7 @@ from one of format 1.
 > `download` and `publish-index` route an index of format 1 by the flank width in its name, so
 > a wide-flank index cannot be published to the default repo by accident. Since 2.10.0 an index
 > of format 2, or one named for its guide length and side, routes to
-> `lucapinello/crisprme-indexes-format2` whatever its flank (no client that cannot read format 2
+> `lucapinello/crisprme_plus_indices` whatever its flank (no client that cannot read format 2
 > reads that repo), is never published in these two, and the Settings catalog lists that
 > repo's indexes. An explicit `--hf-repo` or `CRISPRME_HF_REPO` overrides the routing.
 
@@ -439,7 +439,7 @@ Two things the build handles for you, which matter as new merged panels are adde
 # your write token, in the shell only
 export HF_TOKEN=hf_...
 crisprme.py publish-index --index genome_library/20-NRR_3_hg38+hg38_HGDP1kGP --dictless
-# -> lucapinello/crisprme-indexes-format2 (an index of format 2 goes there by itself):
+# -> lucapinello/crisprme_plus_indices (an index of format 2 goes there by itself):
 #    indexes/dictionaries-bundle_hg38_HGDP1kGP.tar.gz (+ .json)  the Dictionaries of the panel (registry (+ variant_count.json),
 #                                                               indel logs, indel genotypes) + samplesIDs, once per panel
 #    indexes/genotypes_hg38_HGDP1kGP.tar.gz (+ .json)            the Tier-1 genotype store, once per panel
@@ -567,7 +567,7 @@ Only the genome index itself is PAM-specific; everything derived from the varian
 > genome, so it alone can't build a different PAM. The PAM-independent **enriched-genome kit** is
 > published separately under **`build-inputs/<dataset>.tar.gz`**: 2.10.0's, the genome its
 > indexes and Dictionaries bundle were built from (every allele of a site coded, its
-> fake-indel windows), in `lucapinello/crisprme-indexes-format2`. (2.8.1's kits, in
+> fake-indel windows), in `lucapinello/crisprme_plus_indices`. (2.8.1's kits, in
 > `lucapinello/crisprme-data`, were enriched by CRISPRitz 2.9.1: an index built from one does
 > not match 2.10.0's Dictionaries.) Download it and you skip straight to indexing the new PAM.
 > If instead you want to **reproduce the kit** (or build one for a **different VCF**), the full
@@ -626,7 +626,7 @@ printf 'NNNNNNNNNNNNNNNNNNNNNGA 3\n' > PAMs/20bp-NGA-custom.txt
 # the kit of 2.10.0, its SHA-256 checked
 crisprme.py download --what build-inputs --dataset hg38_HGDP1kGP --path .
 # or by hand:
-hf download lucapinello/crisprme-indexes-format2 build-inputs/hg38_HGDP1kGP.tar.gz \
+hf download lucapinello/crisprme_plus_indices build-inputs/hg38_HGDP1kGP.tar.gz \
   --repo-type dataset --local-dir .
 tar xzf build-inputs/hg38_HGDP1kGP.tar.gz
 #  -> Genomes/hg38+hg38_HGDP1kGP/         (SNP-enriched, hg38 + IUPAC overlay)
@@ -883,7 +883,7 @@ crisprme.py build-index-only \
 # -> genome_library/20-NRR_3_hg38/  (since 2.10.0 the name says the guide length and the side)
 
 crisprme.py publish-index --index genome_library/20-NRR_3_hg38
-# -> lucapinello/crisprme-indexes-format2: indexes/20-NRR_3_hg38.tar.gz
+# -> lucapinello/crisprme_plus_indices: indexes/20-NRR_3_hg38.tar.gz
 
 crisprme.py download --what index --index-name 20-NRR_3_hg38 --path "$CRISPRME_DIR"
 ```

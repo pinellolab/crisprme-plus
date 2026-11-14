@@ -1,7 +1,7 @@
 # The rebuild of the published indexes for CRISPRme 2.10.0
 
 `index_set_2.10.0.tsv` is the **rebuild manifest**: every archive the rebuild for 2.10.0 builds
-and publishes in [`lucapinello/crisprme-indexes-format2`](../../docs/hf/crisprme-indexes-format2_README.md),
+and publishes in [`lucapinello/crisprme_plus_indices`](../../docs/hf/crisprme_plus_indices_README.md),
 the location of index format 2 that no release before 2.10.0 reads (decision C2), one line each,
 with its panel, PAM file, PAM, side, spacer (guide) length, bMax (N, the name's), the build's
 `--bDNA`/`--bRNA`, the archives of 2.8.1 it replaces, its build and publish commands, and a note.
@@ -76,14 +76,15 @@ it serves for its own guide length (`index_fit.fits`).
    (`hprc_build.sh`), into the image: their working directories and inputs lie there, and `$RUN`
    binds the working directories and the repository's checkout (mega's recipe runs the
    repository's `PostProcess/` in the image).
-3. **Publish each panel as a unit** into `lucapinello/crisprme-indexes-format2` (the publish
-   half, on each node for the working directories it holds: The publish, below), which must exist
+3. **Publish each panel as a unit** into `lucapinello/crisprme_plus_indices` (the publish
+   half, on each node for the working directories it holds, each of its commands naming that
+   repo: The publish, below), which must exist
    first: `publish-index` creates no repo, so
    its owner creates the dataset repo, and pushes its card,
-   `docs/hf/crisprme-indexes-format2_README.md` (`docs/hf/README.md`), before the first
+   `docs/hf/crisprme_plus_indices_README.md` (`docs/hf/README.md`), before the first
    publish. Then write `indexes/SHA256SUMS` from the Hub's own
    checksums once its uploads are done, `python scripts/hf_sha256sums.py
-   lucapinello/crisprme-indexes-format2 > SHA256SUMS`, and upload it as `indexes/SHA256SUMS`
+   lucapinello/crisprme_plus_indices > SHA256SUMS`, and upload it as `indexes/SHA256SUMS`
    (`docs/hf/README.md`). `publish-index` packs each archive, uploads it and deletes it, so no
    archive is left to hash before its upload, and `--staged staged.sha256`, which checks that
    the Hub holds what was hashed where it was built, has nothing to read: this list lets a user
@@ -194,7 +195,7 @@ ml008, each needing only the working directories it names. The two publish every
 set once, in either order: `publish-index` uploads a panel's companions with its first index, and
 nothing of one node's panels waits for the other's. The publish half uploads with the image's own
 `hf` and `crisprme.py` (`$RUN`: the rebuild's image, rule 2), with a token given in the
-environment, `HF_TOKEN`, a write token of `lucapinello/crisprme-indexes-format2` (a fine-grained
+environment, `HF_TOKEN`, a write token of `lucapinello/crisprme_plus_indices` (a fine-grained
 token lists the repo, which its owner adds once the repo exists), never on a command line, which
 `ps` shows. The image sets
 `HF_HUB_DISABLE_IMPLICIT_TOKEN=1`, so its `hf upload` sends no token unless that is overridden in
@@ -209,18 +210,30 @@ the image would not send it; the `hf` that `$RUN` runs is not the one installed 
 with a clean `PATH`); the token does not authenticate (`hf auth whoami`); or the repo is not
 there (`hf datasets info`: its owner creates it, with its card, first; `hf upload` would create
 a repo that is not there, under the token's account). The kits go up as the manifest gives it,
-`$RUN hf upload lucapinello/crisprme-indexes-format2 <kit> build-inputs/<kit> --repo-type dataset`,
-the command of `hf` in `huggingface_hub` 2.4.0, the image's. On each node, from the repository's
-root:
+`$RUN hf upload lucapinello/crisprme_plus_indices <kit> build-inputs/<kit> --repo-type dataset`,
+the command of `hf` in `huggingface_hub` 2.4.0, the image's. Each index goes up as `$RUN
+crisprme.py publish-index --index <its folder> [--dictless] --hf-repo
+lucapinello/crisprme_plus_indices`: the image's `crisprme.py`, of `db50986`, routes an index of
+format 2 by its own code to the name the plan had given the repo, which is no repo's, so a row
+that names none stops at its first call to the Hub, exit 1, on ml008 with its archive packed and
+left beside the index (the HF repo review, round 1, ran the rows so against a stand-in Hub); the
+repo `--hf-repo` names wins over that code, for the index, its panel's companions and their
+records. So print the publish half from a checkout of `feat/2.10.0` (or the release's tag), whose
+index rows name it so, not from the tree the build was staged from (`db50986`, which has no
+publish half, and whose one script of the audit named no repo for an index): each index row of
+the printed script names the repo, 7 on ml007 and 9 on ml008, as `grep -c` counts below (0 for a
+script of an older tree, which is not run). On each node, from the repository's root:
 
 ```bash
 read -rs HF_TOKEN && export HF_TOKEN     # typed, not echoed; or read from a file only you can read
 # ml007: HGDP + 1000 Genomes
 python seq_script/rebuild/check_index_set.py --commands publish --panels HGDP > publish.sh
+grep -c -- '--hf-repo lucapinello/crisprme_plus_indices' publish.sh    # 7: each index row names the repo
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HGDP=... \
   RUN="apptainer exec --bind /srv/local $SIF /usr/local/bin/_entrypoint.sh" bash publish.sh
 # ml008: the reference indexes, HPRC and mega
 python seq_script/rebuild/check_index_set.py --commands publish --panels REF,HPRC,MEGA > publish.sh
+grep -c -- '--hf-repo lucapinello/crisprme_plus_indices' publish.sh    # 9
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin REF=... HPRC=... MEGA=... \
   RUN="apptainer exec --bind /srv/local $SIF /usr/local/bin/_entrypoint.sh" bash publish.sh
 unset HF_TOKEN
@@ -258,9 +271,12 @@ working directory, with no `cd` outside `( )` and no repository path after one; 
 calls is the repository's, and given every input it would otherwise read from a path it was written
 with (one of the cluster's, or its working directory's: HGDP + 1000 Genomes' `RP=${RP:-$B}`); each
 build copies its PAM file and reads that one; `crisprme.py`, `hf` and `pigz` run through `$RUN`;
-every upload goes to the format-2 repo and no command passes a token (`HF_TOKEN` holds it); no
-build command publishes, and no publish command builds; and every variant index is published
-`--dictless`, so that each of a panel's indexes names one Dictionaries bundle. Then the check runs
+every upload goes to the format-2 repo, which every publish command names, each `--hf-repo` it
+gives included (a `publish-index` that gives none, or gives it as one word, `--hf-repo=<repo>`,
+which `crisprme.py` does not read, goes where the image's own code routes it: The publish); no
+command passes a token (`HF_TOKEN` holds it); no build command publishes, and no publish command
+builds; and every variant index is published `--dictless`, so that each of a panel's indexes names
+one Dictionaries bundle. Then the check runs
 the two halves dry, the build half, then the publish half: every program they call stubbed
 (`crisprme.py`, `hf`, `pigz`, `tar`, `sha256sum`, a recipe; `apptainer` called directly fails),
 from a copy of the repository's root made of links, in temporary working directories that hold
@@ -268,28 +284,33 @@ from a copy of the repository's root made of links, in temporary working directo
 and Y for HPRC and mega, and mega's merged VCFs of those) and what the builds leave. Each must run
 to its end, which it does only where every script it calls is there, every PAM file a build reads
 is in place, every path a command hands a program or a recipe is there, and every index of the set
-is published from its working directory, by the publish half alone; and neither may write into
-the repository's root. Run again, each must do nothing again; and the build half, with the marks
-of the kits gone, must build nothing (A re-run).
+is published from its working directory, by the publish half alone, each upload and
+`publish-index` into the format-2 repo its command names (the stubs log the repo each is given);
+and neither may write into the repository's root. Run again, each must do nothing again; and the
+build half, with the marks of the kits gone, must build nothing (A re-run).
 `PostProcess/test_index_set.py` runs the check and the dry run in the unit tests, mutates the set
 and its commands, and checks that each mutation is found: by the check and by the dry run where
 both can see it (a recipe called after a `cd`, a PAM file not copied, a kit packed after a `cd`
 that moves the next commands, a program of the image run on the host, a script the repository does
-not have, a text the script cannot hold), by the dry run alone (a kit uploaded from the
-repository's root, or packed into it; a half that does again what it did on a re-run), and by
-the check alone where
+not have, a text the script cannot hold, an upload to another repo, a `publish-index` that names
+no repo, or another one first), by the dry run alone (a kit uploaded from the repository's root,
+or packed into it; a half that does again what it did on a re-run), and by the check alone where
 the dry run cannot see it (an input left to a recipe's default, a variable the rebuild does not
 set, or one no command reads, another panel's working directory, a pending script the tree holds,
-an upload to another repo, a token, a variant index published with its per-sample dictionaries,
-and the set's own errors), and by both (a build command that publishes); it runs the build half,
+another repo named after the format-2 one, which `crisprme.py` does not read, a token, a variant
+index published with its per-sample dictionaries, and the set's own errors), and by both (a build
+command that publishes); it runs the build half,
 and each node's part of it (`--panels`), on genome folders that are not as rule 1 says, which stops
 before its first command, and a part without `$REF`, which asks for it; and on a `$MEGA`
 that holds every part mega's recipe makes, as a build that failed its checks leaves it, whose line
 runs the recipe, which refuses it, unless mega's mark is there (`PostProcess/test_mega_rebuild.py`
 runs the recipe with checks that fail, then that line); it runs the publish half without a token,
 which stops with exit 2, under a trace, which writes no token, and with `--panels` on the working
-directories of each node alone, the two publishing the set once; and it checks that the build
-half's lines are the 19 the rebuild ran.
+directories of each node alone, the two publishing the set once; it runs each index row the
+publish half prints through `publish_index` with the routing of the rebuild's image (the name the
+plan had given the repo), against a hub without a repo of that name: every index, companion and
+record goes to `lucapinello/crisprme_plus_indices`; and it checks that the build half's lines
+are the 19 the rebuild ran.
 `PostProcess/test_panel_recipes.py` runs the HGDP + 1000 Genomes and HPRC recipes on stubs: each
 stops, with a non-zero status, at a step that fails (the samples, a chromosome's VCF, the build),
 and a chromosome of the genome folder without its source stops it; on a test genome of chr22, or

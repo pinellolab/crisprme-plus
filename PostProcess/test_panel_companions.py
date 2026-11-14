@@ -43,7 +43,7 @@ from unittest import mock
 import crisprme_hf as hf
 
 # (read so, the tests run, and each fails, on a crisprme_hf that predates the location)
-FMT2 = getattr(hf, "FORMAT2_HF_REPO", "lucapinello/crisprme-indexes-format2")
+FMT2 = getattr(hf, "FORMAT2_HF_REPO", "lucapinello/crisprme_plus_indices")
 DEFAULT = hf.DEFAULT_HF_REPO
 GENERAL = hf.GENERAL_INDEX_HF_REPO
 VCF = "hg38_HGDP1kGP"

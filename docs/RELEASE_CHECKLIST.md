@@ -19,11 +19,11 @@ A living, run-every-release gate. It has two halves:
 
 ### A. Release-surface consistency (the invariant)
 Every user-facing surface must agree on **version · default index · scorer · licence · analysis-mode · data-layout**. The surfaces:
-`README.md` · `METHODS.md` · everything under `docs/` **including the GitHub-Pages website `docs/index.html`** and the `.md` pages it links · installation (`README` Conda/Docker/source, `docs/DOCKER_QUICKSTART.md`, `install_from_source.sh`, `Dockerfile`, `environment.yml`, the Bioconda recipe) · **the Hugging Face dataset cards** (`docs/hf/`: `lucapinello/crisprme-indexes-format2`, the location of this release's indexes, and `lucapinello/crisprme-data` and `lucapinello/crisprme-data-general-index`, whose index archives are 2.8.1's).
+`README.md` · `METHODS.md` · everything under `docs/` **including the GitHub-Pages website `docs/index.html`** and the `.md` pages it links · installation (`README` Conda/Docker/source, `docs/DOCKER_QUICKSTART.md`, `install_from_source.sh`, `Dockerfile`, `environment.yml`, the Bioconda recipe) · **the Hugging Face dataset cards** (`docs/hf/`: `lucapinello/crisprme_plus_indices`, the location of this release's indexes, and `lucapinello/crisprme-data` and `lucapinello/crisprme-data-general-index`, whose index archives are 2.8.1's).
 
 - [ ] **Version sweep** — `crisprme.py` `version`, the tag/image `vX.Y.Z`, and every CRISPRme version string in README + `docs/` read the SAME `X.Y.Z`. The `Dockerfile` pins no CRISPRme version (its header comment names the release: bump it with the rest, as `scripts/prepare_release.py` leaves it); its `ARG crispritz_ref` is the CRISPRitz pin, the exact CRISPRitz tag the release was tested with, of the release's own major.minor (v2.10.0 for 2.10.0: [`RELEASING.md`](RELEASING.md#version-policy)'s version policy), and must equal `install_from_source.sh`'s `CRISPRITZ_REF` default and the CRISPRitz version the docs name. The Bioconda recipe's bounded pin is `crispritz >=X.Y.0,<X.(Y+1)`; its lower bound moves up only to a CRISPRitz patch that fixes something CRISPRme depends on (decision D5), so it may be below `crispritz_ref`, never above it. Grep gate: no stale string of an earlier release lingers outside historical/CHANGELOG/archived-doc context: `2.5.x` to `2.7.x`, and the previous release's above all (`2.8.0`, `2.8.1` and the image tags `v2.8.x` for 2.10.0: the docs name 2.10.0's indexes, which 2.8.1 cannot fetch or read); an image tag in a runnable command is `:latest` or the release's own `vX.Y.Z` (T-24).
 - [ ] **The engine pin of a pull request's CI goes** — before CRISPRitz's tag exists, the PR build job of `.github/workflows/docker-multiarch.yml` (`build-args: crispritz_ref=<commit>`) and `.github/workflows/web-e2e.yml`'s image build (`docker build --build-arg crispritz_ref=<commit> ...`) pass the commit of the CRISPRitz branch the release is tested with (2.10.0: CRISPRitz `feat/2.10.0` commit 4ded5e6; the branch's later commits change its docs only), each under a comment `(remove at release)`. Once CRISPRitz's tag (v2.10.0) is pushed, delete both lines and their comments (web-e2e's step back to `docker build -t crisprme:web .`): every build then reads the Dockerfile's `ARG crispritz_ref`, the tag, which its `git fetch` of a tag or a commit takes alike. `grep -n 'crispritz_ref=' .github/workflows/*.yml` prints nothing.
-- [ ] **Default index** — every surface names `20-NRR_3_hg38+hg38_HGDP1kGP` (SpCas9 NRR, the default PAM since 2.10.0, for a 20-nt guide, in `lucapinello/crisprme-indexes-format2`; SHAPEIT5 re-phased, 4,091 = 925 HGDP + 3,166 1000 Genomes) as the recommended **variant** default, and `20bp-NRR-SpCas9` as the default PAM (the web form's, Load Example's, the README's and the website's commands); `20-NRR_3_hg38` is the reference-only default (`download --what all` fetches it). The older names (`NRR_3_hg38+hg38_HGDP1kGP`, `NRR_3_hg38`, ...) appear only as 2.8.1's archives. NRG and NGG (`20-NRG_3_*`, `20-NGG_3_*`; NRG the default before 2.10.0) stay published and supported, named as alternatives; the index set (`seq_script/rebuild/index_set_2.10.0.tsv`, `check_index_set.py`) and every surface's list of indexes agree. No surface proposes a retired/alternative index as *the* default.
+- [ ] **Default index** — every surface names `20-NRR_3_hg38+hg38_HGDP1kGP` (SpCas9 NRR, the default PAM since 2.10.0, for a 20-nt guide, in `lucapinello/crisprme_plus_indices`; SHAPEIT5 re-phased, 4,091 = 925 HGDP + 3,166 1000 Genomes) as the recommended **variant** default, and `20bp-NRR-SpCas9` as the default PAM (the web form's, Load Example's, the README's and the website's commands); `20-NRR_3_hg38` is the reference-only default (`download --what all` fetches it). The older names (`NRR_3_hg38+hg38_HGDP1kGP`, `NRR_3_hg38`, ...) appear only as 2.8.1's archives. NRG and NGG (`20-NRG_3_*`, `20-NGG_3_*`; NRG the default before 2.10.0) stay published and supported, named as alternatives; the index set (`seq_script/rebuild/index_set_2.10.0.tsv`, `check_index_set.py`) and every surface's list of indexes agree. No surface proposes a retired/alternative index as *the* default.
 - [ ] **No retired index advertised** — grep the whole repo (code help strings, scripts, tests, docs) + the HF card for retired names; they may appear ONLY in a past-tense/retirement note. Retired set: `NRG_3_hg38+hg38_1000G2021` (+ `genotypes_hg38_1000G2021`, superseded by the HGDP1kGP default), `NRG_3_hg38+hg38_1000G2021_HGDP` (hybrid), any `*-dictless*`, `genotypes_hg38_1000G_HGDP`. (`NGG_3_hg38` was retired once and **re-published 2026-10-25**: it is the shared reference index that `download --what index` co-fetches for `NGG_3_hg38+hg38_HGDP1kGP`, so it is live and must stay documented.)
 - [ ] **Scorer** — CFD + CRISPR-Bulge everywhere; zero mentions of CRISTA or azimuth (removed).
 - [ ] **Licence** — MGBOA 1.0 everywhere (README, METHODS, `LICENSE`, HF card frontmatter `license: other` + `license_name`/`license_link`, report footer). The migration table states commercial use needs a separate licence for **both** CRISPRme+ and stock CRISPRme.
@@ -33,7 +33,7 @@ Every user-facing surface must agree on **version · default index · scorer · 
   whether an older client can read it) and whether the current CRISPRitz builder would
   reproduce its content. A new archive, or a CRISPRitz change touching `mainParallel.cpp`
   or `pamGenerator.cpp`, means re-running that comparison. `SHA256SUMS` present under
-  `indexes/` in the three dataset repos: the two of 2.8.1 and `lucapinello/crisprme-indexes-format2`,
+  `indexes/` in the three dataset repos: the two of 2.8.1 and `lucapinello/crisprme_plus_indices`,
   whose list is written from the Hub once its uploads are done (E, below). For 2.10.0, its section
   of `INDEX_PROVENANCE.md` (the build image, the image route; the threads; the inputs) has, before
   the publish, each row's wall time and peak memory filled in from the build's logs, and each
@@ -44,7 +44,7 @@ Every user-facing surface must agree on **version · default index · scorer · 
   deletes it once uploaded, so no log of the build holds them.
 - [ ] **Every published variant archive can find indels — checked in the ARCHIVE** (T-40). For
   the format-2 repo (2.10.0), stream each archive from its resolve URL over plain HTTPS
-  (`curl -sfL https://huggingface.co/datasets/lucapinello/crisprme-indexes-format2/resolve/main/indexes/<name>.tar.gz`,
+  (`curl -sfL https://huggingface.co/datasets/lucapinello/crisprme_plus_indices/resolve/main/indexes/<name>.tar.gz`,
   not through the Hub client's Xet transfer), and on that stream: its SHA-256 equals its line of
   `indexes/SHA256SUMS`; list its members and read its `manifest.json`. A variant archive of format 2
   holds its index, its `_INDELS` index and `manifest.json`, and **no `Dictionaries/`**: its panel's
@@ -77,8 +77,8 @@ Every user-facing surface must agree on **version · default index · scorer · 
   gzip header's 4-byte MTIME (bytes 4-7); compare those with that field masked, and treat any
   other difference as a failure. Applies to both repos of 2.8.1 — the K = 8 archive replaces the
   same `Dictionaries/` folders as the NRG index it sits beside.
-- [ ] **HF catalog matches reality** — `crisprme_hf.list_available_downloads` / the Settings dropdowns / the docs list EXACTLY the indexes present in `lucapinello/crisprme-indexes-format2` (`list_repo_files`), which are EXACTLY the index set `seq_script/rebuild/index_set_2.10.0.tsv` (indexes, each panel's `dictionaries-bundle_`, `genotypes_` and `indel_genotypes_` companions with their `.json` records, and the `build-inputs/` kits): `python seq_script/rebuild/check_index_set.py` passes (it reads the code, not the Hub), and `list_repo_files` of the repo holds every archive it lists and nothing else (T-40's list). Nothing listed that 404s; nothing on HF that is undocumented; each of the repos of 2.8.1 (`lucapinello/crisprme-data`, `lucapinello/crisprme-data-general-index`) still holds its archives unchanged, its card saying newer indexes exist, and no archive of index format 2. A download of a second index of a panel fetches its own archive (and its PAM's reference index where that is not installed), not its bundle and store again (installed already).
-- [ ] **The location of the release's indexes exists, with its card** — `lucapinello/crisprme-indexes-format2` (2.10.0's indexes, index format 2) is a dataset repo on Hugging Face before the rebuild publishes into it: its owner creates it (`publish-index` creates no repo, and fails on one that is not there), with the licence frontmatter of `docs/hf/crisprme-indexes-format2_README.md`, which is pushed as its card (`docs/hf/README.md` has the commands); the cards of the two repos of 2.8.1 say that newer indexes exist and where. After the uploads, re-read the three live cards against `docs/hf/` and `list_repo_files` (`docs/hf/README.md`, Gate).
+- [ ] **HF catalog matches reality** — `crisprme_hf.list_available_downloads` / the Settings dropdowns / the docs list EXACTLY the indexes present in `lucapinello/crisprme_plus_indices` (`list_repo_files`), which are EXACTLY the index set `seq_script/rebuild/index_set_2.10.0.tsv` (indexes, each panel's `dictionaries-bundle_`, `genotypes_` and `indel_genotypes_` companions with their `.json` records, and the `build-inputs/` kits): `python seq_script/rebuild/check_index_set.py` passes (it reads the code, not the Hub), and `list_repo_files` of the repo holds every archive it lists and nothing else (T-40's list). Nothing listed that 404s; nothing on HF that is undocumented; each of the repos of 2.8.1 (`lucapinello/crisprme-data`, `lucapinello/crisprme-data-general-index`) still holds its archives unchanged, its card saying newer indexes exist, and no archive of index format 2. A download of a second index of a panel fetches its own archive (and its PAM's reference index where that is not installed), not its bundle and store again (installed already).
+- [ ] **The location of the release's indexes exists, with its card** — `lucapinello/crisprme_plus_indices` (2.10.0's indexes, index format 2) is a dataset repo on Hugging Face before the rebuild publishes into it: its owner creates it (`publish-index` creates no repo, and fails on one that is not there), with the licence frontmatter of `docs/hf/crisprme_plus_indices_README.md`, which is pushed as its card (`docs/hf/README.md` has the commands); the cards of the two repos of 2.8.1 say that newer indexes exist and where. After the uploads, re-read the three live cards against `docs/hf/` and `list_repo_files` (`docs/hf/README.md`, Gate).
 - [ ] **The PAM files of the index set are in the data repo's `pams/`** — `download --what pams` (and `--what all`) installs the data repo's `pams/` and, of the shipped files, the default `20bp-NRR-SpCas9.txt` alone, and the web lists only the working directory's `PAMs/`: so upload to `lucapinello/crisprme-data` `pams/` every PAM file the index set builds from (its `pam_file` column) and the search PAMs its indexes serve (`22bp-NNGRRT-SaCas9.txt`, `21bp-NNGRRT-SaCas9.txt`, `20bp-TTTV-Cas12a.txt`, `23bp-TTTV-Cas12a.txt`), the files `PAMs/` ships, update the `pams/` line of that repo's card (`docs/hf/crisprme-data_README.md`), then check that `download --what pams` into an empty folder brings each of them (`PostProcess/test_index_set.py` checks that they ship).
 - [ ] **Every documented `download --what X` example resolves on HF** — for each `download --what {genome,index,vcf,annotations,pams,samples,assembly,all}` command shown in ANY doc (README, DOCKER_QUICKSTART, index.html, DATA_LAYOUT, SETTINGS, web guide, legacy setup), confirm the HF path it fetches actually exists (`list_repo_files`). A documented command that targets unhosted data is a broken step (see trap T-21: `--what vcf --dataset 1000G|HGDP` pointed at a `vcfs/` folder that was never uploaded).
 
@@ -433,30 +433,34 @@ before go #2.
    equivalence gate, G5 (D), the docs' figures (D), and Gate B's local gate on the RC, amd64 and
    arm64, with the web walkthrough.
 2. **Luca's go #1**: to publish.
-3. **The repo and its card**: Luca creates `lucapinello/crisprme-indexes-format2` with his own token
-   (`hf repos create lucapinello/crisprme-indexes-format2 --repo-type dataset --public`, or the web
+3. **The repo and its card**: Luca creates `lucapinello/crisprme_plus_indices` with his own token
+   (`hf repos create lucapinello/crisprme_plus_indices --repo-type dataset --public`, or the web
    UI), gives the publishing token write access to it (a fine-grained token lists the repo), and
-   pushes its card, `docs/hf/crisprme-indexes-format2_README.md` (`docs/hf/README.md`), which lists
+   pushes its card, `docs/hf/crisprme_plus_indices_README.md` (`docs/hf/README.md`), which lists
    everything steps 4 and 5 upload into it: the indexes and companions, `indexes/SHA256SUMS`, the
    kits with their `.SHA256SUMS` and `.members.md5`, and HPRC's normalised VCFs,
    `build-inputs/hg38_HPRC/`.
 4. **The publish**: the rebuild's publish half, run on each node for the working directories it
    holds, each row from its own (`seq_script/rebuild/README.md`, "The publish"):
    `check_index_set.py --commands publish --panels HGDP` on ml007, and `--panels REF,HPRC,MEGA` on
-   ml008; then, with its environment (`HF_TOKEN` exported,
-   `APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0`, `PYTHONNOUSERSITE=1`, a clean `PATH`), each kit's
-   member list, on the node of its working directory (HGDP + 1000 Genomes' on ml007, HPRC's and
-   mega's on ml008), and HPRC's normalised VCFs, on ml008:
-   `$RUN hf upload lucapinello/crisprme-indexes-format2 $HGDP/hg38_HGDP1kGP.members.md5
+   ml008, printed from a checkout of `feat/2.10.0` (or the release's tag), whose index rows each
+   name the repo, `--hf-repo lucapinello/crisprme_plus_indices` (`grep -c` of it in the printed
+   script gives 7 on ml007 and 9 on ml008): the image the rebuild runs them in, of `db50986`,
+   routes an index of format 2 by its own code to the name the plan had given the repo, which is
+   no repo's, and a row that names none stops there; then, with its environment (`HF_TOKEN`
+   exported, `APPTAINERENV_HF_HUB_DISABLE_IMPLICIT_TOKEN=0`, `PYTHONNOUSERSITE=1`, a clean `PATH`),
+   each kit's member list, on the node of its working directory (HGDP + 1000 Genomes' on ml007,
+   HPRC's and mega's on ml008), and HPRC's normalised VCFs, on ml008:
+   `$RUN hf upload lucapinello/crisprme_plus_indices $HGDP/hg38_HGDP1kGP.members.md5
    build-inputs/hg38_HGDP1kGP.members.md5 --repo-type dataset` (and HPRC's and mega's alike);
    `(cd $HPRC/VCFs/hg38_HPRC && sha256sum hprc.*.norm.vcf.gz hprc.*.norm.vcf.gz.tbi >
-   SHA256SUMS)`, then `$RUN hf upload lucapinello/crisprme-indexes-format2 $HPRC/VCFs/hg38_HPRC
+   SHA256SUMS)`, then `$RUN hf upload lucapinello/crisprme_plus_indices $HPRC/VCFs/hg38_HPRC
    build-inputs/hg38_HPRC --repo-type dataset --include 'hprc.*.norm.vcf.gz' --include
    'hprc.*.norm.vcf.gz.tbi' --include SHA256SUMS`; and the PAM files of the set to
    `lucapinello/crisprme-data` `pams/` (Gate A; PP-6: the 9 files `PAMs/` holds that the data repo's
    `pams/` does not), their git-blob oids checked against the repository's.
 5. **`indexes/SHA256SUMS`**: `python3 -I scripts/hf_sha256sums.py
-   lucapinello/crisprme-indexes-format2 > SHA256SUMS` (23 lines), uploaded as
+   lucapinello/crisprme_plus_indices > SHA256SUMS` (23 lines), uploaded as
    `indexes/SHA256SUMS`; run again and diffed (empty); `--path build-inputs` gives each kit's
    `.SHA256SUMS`. Then fill in `docs/INDEX_PROVENANCE.md`'s size and SHA-256 of the 16 indexes and
    7 companions (2.10.0, each archive): each SHA-256 from this list, each size from the Hub's
