@@ -2800,20 +2800,41 @@ def _budget_of(name):
     return int(m.group(1)) if m else None
 
 
+# The layout of each variant-genome FASTA read (fasta_layout), by its path, size and time
+_FASTA_LAYOUT = {}
+
+
+def fasta_layout(path):
+    """(the header line's bytes, the sequence lines' width, their end of line's bytes) of the
+    FASTA of one sequence at ``path``, read once a file: CRISPRitz writes each enriched
+    chromosome on one line, which reading the width again for every position read whole
+    (IR2A-R2-3 of 2.10.0's integration review: 0.16 s a call on chr22, a call a lower-case
+    SNV). Kept by the file's path, size and modification time, so a file written again is
+    read again. An OSError where it cannot be read."""
+    st = os.stat(path)
+    key = (os.path.abspath(path), st.st_size, st.st_mtime_ns)
+    got = _FASTA_LAYOUT.get(key)
+    if got is None:
+        with open(path, "rb") as fh:
+            header = fh.readline()
+            first = fh.readline()
+        width = len(first.rstrip(b"\r\n"))
+        got = _FASTA_LAYOUT[key] = (len(header), width, len(first) - width)
+    return got
+
+
 def enriched_bases(path, q):
     """The bases the code of the variant genome at ``path`` (a FASTA of one sequence) holds
     at the 0-based position ``q`` (its IUPAC letter's; Q, CRISPRitz 2.10.0's four-allele
     symbol: all four), or None where it cannot be read or tells no base: an N, which a
-    reference N stays whatever the records there (CRISPRitz 2.10.0)."""
+    reference N stays whatever the records there (CRISPRitz 2.10.0). The file's layout is
+    read once (fasta_layout), then each position by a seek."""
     try:
+        header, width, eol = fasta_layout(path)
+        if width <= 0 or q < 0:
+            return None
         with open(path, "rb") as fh:
-            header = fh.readline()
-            first = fh.readline()
-            width = len(first.rstrip(b"\r\n"))
-            eol = len(first) - width
-            if width <= 0 or q < 0:
-                return None
-            fh.seek(len(header) + (q // width) * (width + eol) + q % width)
+            fh.seek(header + (q // width) * (width + eol) + q % width)
             code = fh.read(1).decode("ascii", "replace").upper()
     except OSError:
         return None
@@ -2827,18 +2848,16 @@ def _enriched_reads_all(path, sites):
     """Whether the variant genome at ``path`` (a FASTA of one sequence) codes every allele
     of the split SNP sites ``sites`` (split_sites): True where a site's code holds an
     earlier line's ALT beside the last line's, False where every site's holds the last
-    line's alone, None where no site tells them apart."""
+    line's alone, None where no site tells them apart. The file's layout is read once
+    (fasta_layout), then each site by a seek."""
     try:
+        header, width, eol = fasta_layout(path)
+        if width <= 0:
+            return None
         with open(path, "rb") as fh:
-            header = fh.readline()
-            first = fh.readline()
-            width = len(first.rstrip(b"\r\n"))
-            eol = len(first) - width
-            if width <= 0:
-                return None
             verdict = None
             for q, ref, alts, last in sites:
-                fh.seek(len(header) + (q // width) * (width + eol) + q % width)
+                fh.seek(header + (q // width) * (width + eol) + q % width)
                 code = fh.read(1).decode("ascii", "replace").upper()
                 got = set(IUPAC.get(code, code)) if code != "Q" else set("ACGT")
                 earlier = alts - last

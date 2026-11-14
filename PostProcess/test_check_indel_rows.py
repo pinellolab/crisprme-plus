@@ -6745,6 +6745,68 @@ class SplitFormDictionary(Base):
 # --------------------------------------------------------------------------- #
 # CRISPRitz 2.10.0 reads REF and ALT in upper case (C3 of wave 1c-b)
 # --------------------------------------------------------------------------- #
+class TheGenomesLayoutIsReadOnce(unittest.TestCase):
+    """C.enriched_bases read the variant genome's first sequence line on every call, to know its
+    width: CRISPRitz writes each enriched chromosome on one line, so each lower-case SNV the
+    checker looked at cost a read of the whole chromosome (0.16 s a call on a 50.8-Mbp FASTA;
+    IR2A-R2-3 of 2.10.0's integration review). The layout is read once a file now, and each
+    position by a seek; a file written again is read again."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="chk_layout_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.fasta = os.path.join(self.tmp, "chr21.enriched.fa")
+        self.seq = ("ACGTRYKM" * 125_000)   # one line of a megabase, as CRISPRitz writes one
+        with open(self.fasta, "w") as fh:
+            fh.write(">chr21\n%s\n" % self.seq)
+
+    def counted(self):
+        """An open() that counts the bytes read through it, and the count."""
+        read = [0]
+        real = open
+
+        class Counting:
+            def __init__(self, fh):
+                self.fh = fh
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.fh.close()
+
+            def readline(self, *a):
+                got = self.fh.readline(*a)
+                read[0] += len(got)
+                return got
+
+            def read(self, *a):
+                got = self.fh.read(*a)
+                read[0] += len(got)
+                return got
+
+            def seek(self, *a):
+                return self.fh.seek(*a)
+
+        return (lambda *a, **k: Counting(real(*a, **k))), read
+
+    def test_a_thousand_positions_read_the_line_once_and_a_file_written_again_anew(self):
+        opener, read = self.counted()
+        with mock.patch.object(C, "open", opener, create=True):
+            got = [C.enriched_bases(self.fasta, q) for q in range(0, 1_000_000, 1000)]
+            self.assertEqual(got[:2], [{"A"}, {"A"}])
+            self.assertEqual(C.enriched_bases(self.fasta, 4), {"A", "G"})        # R
+            self.assertEqual(C.enriched_bases(self.fasta, 999_998), {"G", "T"})  # K, near its end
+            self.assertLess(read[0], 2 * len(self.seq), "the line read once, then a byte a "
+                                                        "position")
+            # a file written again is read again (another width, another code at 9)
+            with open(self.fasta, "w") as fh:
+                fh.write(">chr21\nAAAA\nTGTG\nAAAA\n")
+            os.utime(self.fasta, ns=(1, 1))
+            self.assertEqual(C.enriched_bases(self.fasta, 9), {"A"})
+            self.assertEqual(C.enriched_bases(self.fasta, 5), {"G"})
+
+
 class LowerCaseSnvByGenome(Base):
     """CRISPRitz 2.10.0's enricher reads REF and every ALT in upper case, as VCF 4.x does
     (its docs/MULTIALLELIC_ENRICHMENT.md sections 2.1 and 2.9): an SNV ALT written in lower
