@@ -2247,6 +2247,29 @@ major.minor version (Changed). The main changes, each told in its entry below:
   (about 4 s on chr22, 27 s on IGH).
 
 ### Fixed
+- **A PUTATIVE carrier is listed for its strongest target where two of the reference-first
+  choices score a CFD of 0** (indel and MNV rows, both modes; `indel_snp_cis.worst_case_bases`).
+  - A carrier whose genotypes cannot put an allele on the indel's haplotype gets the strongest
+    target its own alleles allow (METHODS section 4): the guide's base where it carries it, else
+    the bases of the highest CFD. The choice started from the reference-first bases and changed
+    one column at a time, keeping a change where the CFD rose. Where two of those bases scored a
+    factor of 0 (a G against the guide's C at position 14, a DNA bulge's T at position 5), every
+    single change still scored 0, nothing changed, and the carrier was listed for a target of
+    CFD 0 that its alleles beat.
+  - The release gate's TRAC search (B5: NRG, per sample, 4 + 1 + 1, HGDP + 1000 Genomes) listed
+    HG04076 so at chr14:105,863,798 (+), in IGH. Its slot of chr14_105863799_G_GC holds two or
+    three ALTs at 14 of the target's positions (split records, each 0|1), so it is resolved
+    PUTATIVE. On `CTCT-CAGCTGGTACACGGCANNN` it was listed for `CTCTACcGgTGGTcgACGGC-GAG` (CFD 0)
+    where its alleles give `CTCTCCgGaTGGTgtACGGC-GAG` (CFD 0.0009), and on a second alignment for
+    CFD 0 against 0.0002. The real-data checker found it: 6 gating `carrier-not-strongest`
+    findings in one row block (and 36 at IGH with 4 + 2 + 2, on 2026-11-09).
+  - CFD is a product of one factor per column (`bulge_cfd_penalty.column_factor`), so each column
+    is now chosen on its own, where every other factor a choice can change is above 0: the other
+    columns paired with a guide base hold that base, and the DNA-bulge columns and the PAM are
+    chosen first, together. Where no choice scores above 0 they all tie and the reference-first
+    order decides, as before; wherever the old passes reached a CFD above 0, the choice is theirs.
+    Covered by `test_indel_haplotype_resolution` (B5's alleles, a minimal case and a brute force
+    over 600 random targets; 3 of the 4 tests fail on the code before).
 - **A search on a host whose coreutils are uutils' writes its results tables right.** The search
   joined its three lists of each site's best alignment (by CFD, by fewest mismatches and bulges, by
   CRISPR-Bulge) line by line into `*.bestMerge.txt` and `*.altMerge.txt` with `pr -m -t -J`

@@ -933,6 +933,173 @@ class MultiAllelicRecordsOnOneLine(unittest.TestCase):
         self.assertIn(rows[0]["seq"][5], "ct")
 
 
+class TheStrongestPastFactorsOfZero(unittest.TestCase):
+    """indel_snp_cis.worst_case_bases (2.10.0, gate B5): a PUTATIVE carrier gets the
+    strongest target its own alleles allow, the CFD's maximum, even where the
+    reference-first picks score 0 at two columns. CFD factors per column, so each column
+    is chosen alone where the others' factors are above 0. Up to 72c2c8e the columns were
+    changed one at a time from those picks: with two of them at 0 every trial scored 0,
+    and the carrier kept a target of CFD 0 (B5, TRAC on HGDP + 1000 Genomes,
+    chr14:105,863,798 (+) in IGH, HG04076, whose split records put two or three ALTs of
+    one position on the insertion's slot). Each test fails at 72c2c8e."""
+
+    # a guide whose C at position 14 and A at position 16 the CFD table scores 0 against
+    # a G (rC:dC,14) and a T (rA:dA,16); against a T and a G it scores 0.733 and 0.192
+    G14 = "ACTGAAATCTGTACGAAGGC"
+
+    def test_two_reference_picks_of_cfd_zero(self):
+        """An unphased carrier of the indel and of both SNP alts (the reference stays
+        possible beside one ALT copy): its strongest target holds both alts."""
+        guide = self.G14 + "NNN"
+        target = self.G14[:13] + "K" + self.G14[14] + "K" + self.G14[16:] + "TGG"
+        cols = [_col(13, "G", {"T": {"S": "0/1"}}, "K"),
+                _col(15, "T", {"G": {"S": "0/1"}}, "K")]
+        rows = _resolve(guide, target, cols, {"S": "0/1"})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["phase"], isc.PUTATIVE)
+        self.assertEqual(rows[0]["bases"], ("T", "G"))
+        self.assertEqual(rows[0]["seq"][13] + rows[0]["seq"][15], "tg")
+        self.assertGreater(_cfd(guide, rows[0]["seq"]), 0.1)
+        # the reference-first picks the old passes kept score 0
+        self.assertEqual(_cfd(guide, isc.realize(target, guide, cols, ("G", "T"))), 0.0)
+
+    def test_every_choice_of_cfd_zero_keeps_the_reference_first(self):
+        """Where no choice scores above 0 (the guide's G at position 15 left as an RNA
+        bulge, which the table scores 0: rG:d-,15), every choice ties and the
+        reference-first order decides, as before."""
+        g = self.G14
+        guide = g + "NNN"
+        target = g[:13] + "K" + "-" + "K" + g[16:] + "TGG"
+        cols = [_col(13, "G", {"T": {"S": "0/1"}}, "K"),
+                _col(15, "T", {"G": {"S": "0/1"}}, "K")]
+        motif_at = isc.pam_columns(len(target), "NRG")
+
+        def score(bases):
+            return _cfd(guide, isc.realize(target, guide, cols, bases))
+
+        cands = (frozenset("GT"), frozenset("GT"))
+        self.assertEqual(max(score(b) for b in itertools.product("GT", "GT")), 0.0)
+        self.assertEqual(isc.worst_case_bases(cols, cands, guide, motif_at, score),
+                         ("G", "T"))
+        rows = _resolve(guide, target, cols, {"S": "0/1"}, bulges=1)
+        self.assertEqual([r["bases"] for r in rows], [("G", "T")])
+
+    def test_hg04076_at_igh(self):
+        """B5's row block, HG04076's alleles from the HGDP + 1000 Genomes VCF (two or
+        three ALTs of one position on the slot of chr14_105863799_G_GC, so the reference
+        is out there; one ALT at 105,863,807 and at 105,863,816): on the alignment
+        CTCT-CAGCTGGTACACGGCANNN / CTCTACcGgTGGTcgACGGC-GAG CRISPRme listed it for the
+        target of CFD 0 the reference-first order gives (A at the DNA bulge, then C, G, C,
+        G), while its alleles give C, G, A, G, T (CFD 0.0009); METHODS section 4 lists it
+        for that one."""
+        guide = "CTCT-CAGCTGGTACACGGCANNN"
+        target = "CTCTACcGgTGGTcgACGGC-GAG"
+        ref = {801: "G", 802: "G", 803: "T", 804: "G", 805: "A", 807: "G", 808: "A",
+               809: "C", 810: "T", 811: "C", 812: "A", 813: "C", 814: "C", 815: "T",
+               816: "G", 817: "A", 818: "G", 819: "G", 820: "A", 821: "G"}
+        alleles = {801: "ACT", 802: "ACT", 803: "ACG", 804: "ACT", 805: "CGT", 807: "AG",
+                   808: "CGT", 809: "GT", 810: "ACG", 811: "AGT", 812: "CGT", 813: "GT",
+                   814: "AGT", 815: "ACG", 816: "CG", 817: "CGT", 818: "ACT", 819: "G",
+                   820: "A", 821: "G"}
+        # the target's bases in + order: the inserted C, then 105,863,800 to 105,863,821
+        tcols = [j for j, ch in enumerate(target) if ch != "-"]
+        cols, cands = [], []
+        for i, j in enumerate(tcols[1:], start=1):
+            p = 799 + i
+            if p in ref:
+                cols.append(isc.SnpColumn(j, 105863000 + p - 1, ref[p], {}, "N", "+"))
+                cands.append(frozenset(alleles[p]))
+        motif_at = isc.pam_columns(len(target), "NRG")
+
+        def score(bases):
+            return _cfd(guide, isc.realize(target, guide, cols, bases))
+
+        got = isc.worst_case_bases(cols, tuple(cands), guide, motif_at, score)
+        by_pos = {c.pos1 - 105863000: b for c, b in zip(cols, got)}
+        self.assertEqual([by_pos[p] for p in (803, 805, 807, 812, 813)],
+                         ["C", "G", "A", "G", "T"])
+        self.assertEqual(isc.realize(target, guide, cols, got), "CTCTCCgGaTGGTgtACGGC-GAG")
+        # the brute force over the five columns where the guide's base is not an allele
+        free = [k for k, c in enumerate(cols) if c.col not in motif_at
+                and guide[c.col].upper() not in cands[k]]
+        best = 0.0
+        for combo in itertools.product(*[sorted(cands[k]) for k in free]):
+            bases = list(got)
+            for k, b in zip(free, combo):
+                bases[k] = b
+            best = max(best, score(tuple(bases)))
+        self.assertAlmostEqual(score(got), best, places=15)
+        self.assertGreater(score(got), 0.0)
+        old = list(got)
+        for k, b in zip(free, ("A", "C", "G", "C", "G")):
+            old[k] = b
+        self.assertEqual(isc.realize(target, guide, cols, tuple(old)), target)
+        self.assertEqual(score(tuple(old)), 0.0)
+
+    def test_the_strongest_against_a_brute_force(self):
+        """Random guides with codes on the columns the CFD table can score 0 (positions 14
+        and 16, a DNA bulge), and elsewhere: the PUTATIVE worst case (no genotypes, the
+        code's alleles) reaches the brute force's highest CFD, and where that is 0 keeps
+        the reference-first order. The draw holds cases the old passes missed."""
+        rng = random.Random(2100)
+        zero14 = {"C": "G", "T": "G"}            # rC:dC,14 and rU:dC,14
+        zero16 = {"A": "TC", "G": "TC"}          # rA:dA/dG,16 and rG:dA/dG,16
+        trapped = checked = 0
+        for _ in range(600):
+            g = [rng.choice("ACGT") for _ in range(20)]
+            g[13] = rng.choice("CT")
+            g[15] = rng.choice("AG")
+            t = list(g)
+            refs = {13: zero14[g[13]], 15: rng.choice(zero16[g[15]])}
+            for j in rng.sample([j for j in range(20) if j not in refs], rng.randint(0, 3)):
+                refs[j] = rng.choice([b for b in "ACGT" if b != g[j]])
+            for j, b in refs.items():
+                t[j] = b
+            gs, ts = "".join(g), "".join(t) + rng.choice("ACGT") + "GG"
+            bulge = rng.random() < 0.4
+            if bulge:
+                at = rng.randint(2, 12)
+                gs = gs[:at] + "-" + gs[at:]
+                ts = ts[:at] + rng.choice("ACGT") + ts[at:]
+                refs = {(j + 1 if j >= at else j): b for j, b in refs.items()}
+                refs[at] = ts[at]
+            guide = gs + "NNN"
+            code_at = sorted(refs)
+            codes = {}
+            for j in code_at:
+                others = rng.sample([b for b in "ACGT" if b != ts[j]], rng.randint(1, 2))
+                codes[j] = next(c for c, bs in MOTIF_BASES.items()
+                                if set(bs) == {ts[j]} | set(others) and len(c) == 1
+                                and c not in "ACGT")
+            target = "".join(codes.get(j, ch) for j, ch in enumerate(ts))
+            cols = [_col(j, ts[j], None, codes[j], known=False) for j in code_at]
+            rows = _resolve(guide, target, cols, None, max_mm=20)
+            motif = isc.pam_columns(len(target), "NRG")
+            best, first = 0.0, None
+            for combo in itertools.product(*[MOTIF_BASES[codes[j]] for j in code_at]):
+                seq = isc.realize(target, guide, cols, combo)
+                if not isc.pam_satisfied(seq, motif):
+                    continue
+                best = max(best, _cfd(guide, seq))
+            # the guide's base where it is an allele, else the reference first, then A,
+            # C, G, T: the choice every tie keeps
+            order = tuple(guide[j] if guide[j] in MOTIF_BASES[codes[j]] else
+                          sorted(MOTIF_BASES[codes[j]],
+                                 key=lambda b, r=ts[j]: (b != r, "ACGT".find(b)))[0]
+                          for j in code_at)
+            if best > 0 and _cfd(guide, isc.realize(target, guide, cols, order)) == 0.0:
+                trapped += 1
+            self.assertEqual(len(rows), 1, (guide, target))
+            if best > 0:
+                self.assertAlmostEqual(_cfd(guide, rows[0]["seq"]), best, places=12,
+                                       msg=(guide, target))
+            else:
+                self.assertEqual(rows[0]["bases"], order, (guide, target))
+            checked += 1
+        self.assertGreater(checked, 500)
+        self.assertGreater(trapped, 50)
+
+
 # --------------------------------------------------------------------------- #
 # (c) the analyzer routes every overlaid target through the resolver
 # --------------------------------------------------------------------------- #

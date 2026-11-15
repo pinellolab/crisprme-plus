@@ -1223,39 +1223,51 @@ def worst_case_bases(columns, candidates, guide_seq, motif_at, score_fn=None):
                 free.append((k, cand))
     if score_fn is None or (not free and not pam_ks):
         return tuple(picks)
-    # CFD is a product of one factor per spacer column times a joint factor of the
-    # PAM's last two bases, so the PAM columns are chosen together and each spacer
-    # column alone. A factor of 0 elsewhere (a PAM CFD scores 0, as NRR's AA) hides
-    # every choice, so the passes repeat until neither changes anything.
-    for _ in range(len(free) + 2):
-        changed = False
-        if pam_ks:
-            best = None
-            for combo in itertools.product(*[ok for _k, ok in pam_ks]):
-                trial = list(picks)
-                for (k, _ok), b in zip(pam_ks, combo):
-                    trial[k] = b
-                s = score_fn(tuple(trial))
-                if best is None or s > best[0]:
-                    best = (s, combo)
-            for (k, _ok), b in zip(pam_ks, best[1]):
-                if picks[k] != b:
-                    picks[k] = b
-                    changed = True
-        for k, cand in free:
-            best = None
-            for b in cand:
-                trial = list(picks)
+    # CFD is a product of one factor per spacer column (a DNA bulge's base included)
+    # and one of the PAM's last two bases (bulge_cfd_penalty.column_factor), so the
+    # strongest choice is each spacer column's own best and the PAM's best. Each is
+    # scored where every other factor a choice can change is above 0: the other spacer
+    # columns that pair with a guide base hold that base (a match, a factor of 1); the
+    # DNA-bulge columns, where no base is neutral, are chosen first, together with the
+    # PAM. Up to 2.10.0 the columns were changed one at a time from the reference-first
+    # picks: where two of those picks scored 0 (a DNA bulge's T at position 5, a G
+    # against the guide's C at 14) every trial scored 0, nothing changed, and the
+    # carrier was listed for a target of CFD 0 that its alleles beat (TRAC's
+    # chr14:105,863,798 (+) in IGH, HG04076). Where every choice scores 0 they all tie,
+    # and the order decides, as without a score_fn.
+    paired = []  # (column index, candidates): spacer columns paired with a guide base
+    joint = []   # (column index, candidates) chosen together: DNA bulges and the PAM
+    for k, cand in free:
+        g = guide_seq[columns[k].col].upper()
+        (paired if g in _BASE_ORDER else joint).append((k, cand))
+    joint.extend(pam_ks)
+    probe = list(picks)
+    for k, _cand in paired:
+        probe[k] = guide_seq[columns[k].col].upper()
+    if joint:
+        best = None
+        for combo in itertools.product(*[cand for _k, cand in joint]):
+            trial = list(probe)
+            for (k, _cand), b in zip(joint, combo):
                 trial[k] = b
-                s = score_fn(tuple(trial))
-                if best is None or s > best[0]:
-                    best = (s, b)
-            if best[1] != picks[k]:
-                picks[k] = best[1]
-                changed = True
-        if not changed:
-            break
-    return tuple(picks)
+            s = score_fn(tuple(trial))
+            if best is None or s > best[0]:
+                best = (s, combo)
+        for (k, _cand), b in zip(joint, best[1]):
+            probe[k] = b
+    chosen = list(probe)
+    for k, cand in paired:
+        best = None
+        for b in cand:
+            trial = list(probe)
+            trial[k] = b
+            s = score_fn(tuple(trial))
+            if best is None or s > best[0]:
+                best = (s, b)
+        chosen[k] = best[1]
+    if not score_fn(tuple(chosen)) > 0:
+        return tuple(picks)
+    return tuple(chosen)
 
 
 def realize(target_seq, guide_seq, columns, bases):
