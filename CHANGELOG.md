@@ -2270,6 +2270,22 @@ major.minor version (Changed). The main changes, each told in its entry below:
     order decides, as before; wherever the old passes reached a CFD above 0, the choice is theirs.
     Covered by `test_indel_haplotype_resolution` (B5's alleles, a minimal case and a brute force
     over 600 random targets; 3 of the 4 tests fail on the code before).
+- **The real-data checker reads a slot's haplotype past a long deletion**
+  (`scripts/check_indel_rows.py`). It wrote a haplotype over the target and 2 x its length + 60
+  bases either side, and a soundness unit read the VCF over its rows and 1,046 bases either side,
+  so a deletion (or any record) whose REF ran past either end cut the haplotype at its junction,
+  and a target read through it lacked the bases after it. The release gate's HPRC v2.1 searches
+  (B6 and B7: the README guide, NRR, 4 + 1 + 1, both modes) failed so at chr21:37,942,668 (+).
+  NA18879's slot of the row's insertion chr21_37942670_T_TAACAGTAGTTTCTCAC also holds a
+  2,284-bp deletion (the same graph bubble) from under the target's last base, the PAM's last G,
+  and the base after the deletion is a G too: rebuilt from the VCF, the haplotype holds the row's
+  23 bases at the row's place, with its 4 mismatches and its DNA and RNA bulge, and METHODS
+  section 4 lists such a carrier (a second indel that leaves the bases as they are keeps the
+  row, and no row names two indel-path records). The checker found it off its row: 3 gating
+  `variant-missing` findings in each search. The window now reaches as far past such a REF as
+  past the target, a soundness unit reads past it as completeness did, and the deletions a
+  reading from the target's start can lose are counted as before. Covered by
+  `test_check_indel_rows` (`ReadPastALongDeletion`; each test fails on the code before).
 - **A search on a host whose coreutils are uutils' writes its results tables right.** The search
   joined its three lists of each site's best alignment (by CFD, by fewest mismatches and bulges, by
   CRISPR-Bulge) line by line into `*.bestMerge.txt` and `*.altMerge.txt` with `pr -m -t -J`
