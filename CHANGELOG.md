@@ -660,9 +660,23 @@ major.minor version (Changed). The main changes, each told in its entry below:
     alleles of one slot whose REF spans meet give
     no sequence; where every allele that meets the record's REF is one METHODS section 4
     reads the slot without (another allele at the record's own position, an allele only on
-    bases it deletes, an MNV) the slot is read without them, and a listed carrier must hold
-    the target there (`overlap-reading-agrees`, a note, when it does); any other overlap of
-    the record leaves the slot no reading, and two other alleles of the slot that overlap
+    bases it deletes or replaces, an MNV, an indel at another position that changes none of
+    the reference bases the target covers: the record's whole REF and the target's flank
+    bases) the slot is read without them, and a listed carrier must hold the target there
+    (`overlap-reading-agrees`, a note, when it does); any other overlap of the record (an
+    indel at another position that changes one of those bases, which METHODS takes off
+    whatever its bases, or a SNP at another position) leaves the slot no reading. The release
+    gate's run of the check on HPRC v2.1 genome-wide (the README guide at 4 mismatches and 1
+    DNA and 1 RNA bulge, per sample and population-level) failed 213 and 69 lines, 27 and 23
+    row blocks of 40 complex records at 11 positions (REF or ALT of 464 bases to 95 kb), on a
+    sentence of METHODS section 4 that took every such indel off the target's rows "whatever
+    its bases", where CRISPRme takes one off only when it changes those bases
+    (`analisi_indels_NNN._other_indels`, `indel_snp_cis.changes_span`): the slots held an
+    insertion or deletion anchored on the complex record's last REF base, or a repeat's
+    deletion left-aligned onto its last bases, and each listed carrier's haplotype, rebuilt
+    from the VCF, holds its row's target at its start, 111 bases to 76 kb from the overlap.
+    METHODS now says what CRISPRme does, and the check reads such a slot by it. Two other
+    alleles of the slot that overlap
     each other are tried on every reading that can change what it says of the target. A slot
     with no reading gives no truth, so METHODS' rules are the only model there: a listed
     carrier they take off the target for a documented cause fails (`carrier-off-by-rule`),
@@ -1021,7 +1035,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
     variant bases than the SNP they carry (chr22:11333697 (−), chr22_11333716_T_G: HG00271,
     HG00318, HG00369, HG00379, HG00864, NA06991, NA06993, NA18547), where the HGDP + 1000
     Genomes run alone lists them on an alignment that holds it (report-only).
-  - Wired in: `PostProcess/test_check_indel_rows.py` (253 unit and mutation tests: a right
+  - Wired in: `PostProcess/test_check_indel_rows.py` (260 unit and mutation tests: a right
     row raises nothing gating, each corruption of it is caught, each documented limit and
     overlapping slot comes out under its own class, the checker's coverage gaps under
     theirs; the refusals; each release's reading of the data, told from a run's records; a
