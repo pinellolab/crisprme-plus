@@ -938,11 +938,13 @@ def target_pairs(window_hap, hap, first, last, through=(), avoid=()):
     a stretch whose bases are those of the window). ``through``: more places the stretch
     must hold, the bases of the SNPs a SNP row names (snp_target_held). ``avoid``: the
     records (VCF POS, REF, ALT) the haplotype could not be written with (a call that
-    cannot be put on its slot, two records of one base: _breaking_slots); a stretch that
-    reaches a base of one's REF -- the reference positions its bases stand at or follow,
-    from its first to its last, take one in -- cannot be read, and one that ends before
-    them or starts past them is read as it is: they change none of its bases. Always
-    two, in that order: a target the window written out does not hold has neither."""
+    cannot be put on its slot, two records of one base: _breaking_slots). A way reads the
+    reference positions its stretch's bases stand at or follow, from its first to its
+    last, and those of the target's bases on the window, which holds_target_bases reads
+    with the slot's own alleles; one that reaches a base of such a record's REF cannot be
+    read, and one that ends before them or starts past them is read as it is: they
+    change none of the bases it compares. Always two, in that order: a target the window
+    written out does not hold has neither."""
     keys = [k for k, _s in window_hap]
     try:
         i, j = keys.index(first), keys.index(last)
@@ -961,7 +963,11 @@ def target_pairs(window_hap, hap, first, last, through=(), avoid=()):
             ways.append(None)  # past the bases written out, or not through the indel
             continue
         if avoid:
-            lo, hi = hkeys[a][0], hkeys[a + n - 1][0]  # places run in order on a haplotype
+            # the reference positions read: the stretch's on the haplotype and the target's on
+            # the window, whose bases holds_target_bases reads with the slot's own alleles
+            # (places run in order on a haplotype)
+            lo = min(hkeys[a][0], keys[i][0])
+            hi = max(hkeys[a + n - 1][0], keys[j][0])
             if any(p1 - 1 <= hi and p1 - 2 + len(ref) >= lo for p1, ref, _alt in avoid):
                 ways.append(None)  # it reaches a record the slot cannot be read with
                 continue

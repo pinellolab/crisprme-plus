@@ -1183,8 +1183,9 @@ def _breaking_slots(found, offsets, span, ipos, iref, ialt, istart, carriers):
     one POS among them, even a duplication and the deletion of the same bases; or a SNP
     alt on a base of a second indel's REF: a VCF writes a haplotype holding both as one
     record, so the slot has no one sequence there, a phasing artefact). A way meets such
-    a variant when its stretch reaches a base of the variant's REF: one past the
-    stretch's last base, or before its first, changes none of the bases read and does
+    a variant when it reaches a base of the variant's REF: a base of its stretch on the
+    slot, or of the target on the window, whose bases it reads with the slot's own
+    alleles. One past both, or before both, changes none of the bases compared and does
     not stop it (indel_snp_cis.target_pairs' ``avoid``). Before 2.10.0's gate B such a
     variant anywhere in the frame on the way's side stopped it, and a carrier whose slot
     holds the target's bases was left off for an artefact its target never reaches
@@ -1223,9 +1224,10 @@ def _breaking_slots(found, offsets, span, ipos, iref, ialt, istart, carriers):
     # that base; the one read up to its last base none that starts past it. So each way
     # reads only the slot's indels it can reach, and one it cannot reach (an artefact or an
     # unphased call upstream of the target, say) does not stop it. Nor does one on its own
-    # side that the stretch, read on the slot's other indels, ends before or starts past:
-    # the slot is written without the indels it cannot be written with, and the way is
-    # read unless its stretch reaches a base of one of their REFs (target_pairs' avoid).
+    # side that the stretch, read on the slot's other indels, and the target on the window
+    # end before or start past: the slot is written without the indels it cannot be
+    # written with, and the way is read unless it reaches a base of one of their REFs
+    # (target_pairs' avoid).
     for (s, h), keys in mine.items():
         itoks, ikind, _islots = parsed[s]
         allele = _slot_allele(s, h, ikind, len(itoks))

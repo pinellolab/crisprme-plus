@@ -1172,7 +1172,8 @@ class AVariantPastTheStretch(unittest.TestCase):
     read it, from the target's first base on or up to its last, each way reading the
     slot's variants it can reach (METHODS section 4). A variant a way cannot read -- two
     records of one base, a SNP alt on a base of an indel's REF, a call that cannot be put
-    on the slot -- stops it only where its stretch reaches a base of that variant's REF.
+    on the slot -- stops it only where its stretch on the slot, or the target's bases on
+    the window (read with the slot's own alleles), reach a base of that variant's REF.
     Up to a640d92 one anywhere in the frame on the way's side stopped it: on the gate's
     B10 (VEGFA site 3, per sample, HGDP + 1000 Genomes) six carriers whose slot holds the
     target's bases at the row's start were left off (39 gating carrier-missing findings).
@@ -1191,7 +1192,7 @@ class AVariantPastTheStretch(unittest.TestCase):
     NAMES = ("_store_indels", "_other_indels", "_on_slot", "_slot_allele", "_frame",
              "_breaking_slots", "_cache_put")
 
-    def _analyzer(self, records, snps=None):
+    def _analyzer(self, records, snps=None, seq=None, at=None):
         import ast
         path = os.path.join(HERE, "analisi_indels_NNN.py")
         with open(path) as fh:
@@ -1202,7 +1203,7 @@ class AVariantPastTheStretch(unittest.TestCase):
         ns = {"bisect": __import__("bisect"), "_isc": isc, "_jgt_cache": {},
               "_cache_held": {}, "_CACHE_CARRIERS": 1000000, "_indel_index": None,
               "_indel_starts": [], "_indel_maxref": 0, "_indelgt": _Store(records),
-              "genomeStr": _Reference(self.AT, self.SEQ),
+              "genomeStr": _Reference(at or self.AT, seq or self.SEQ),
               "_snp_record": lambda pos1: snps.get(pos1, {})}
         exec(compile(ast.Module(body=body, type_ignores=[]), path, "exec"), ns)
         return ns
@@ -1251,6 +1252,31 @@ class AVariantPastTheStretch(unittest.TestCase):
         snp = {146361281: {"G": {"HG03120": "0|1"}}}
         self.assertFalse(self._kept([], snps=snp))
         self.assertFalse(self._kept([(146361262, "GT", "G"), (146361262, "GTGT", "G")]))
+
+    def test_a_variant_on_the_targets_own_bases_still_stops_it(self):
+        """HGDP01092 on chr1:7,231,326 of 7,231,327 ATG>A (B10, hg38 bases): its slot's
+        7,231,348 T>TGA puts GA into the target, so the stretch read from the first base on
+        ends at 7,231,348; the slot also holds 7,231,350 T>A and T>TGTGTGTGTGA, two records
+        of one base past that stretch but on the target's own bases on the window, where
+        the bases compared are the slot's alleles: no one sequence there, so the slot stays
+        off, as at a640d92 (the stretch alone, as at d7a1eadf, kept it, listed for the SNP
+        T>A that its own target does not hold)."""
+        seq = ("ACTGCGTGACCCCAGCATTCATCACATACTGGCTTAATGTGTGTGTGTGTGTGTGTGTGTGAGAGAGAGAGAGAG"
+               "AGAGAGAGGTTTTATTTTTTTTGAAAGAGTCTCGCTCTGTCGCCCAGGCTGGAGT")
+        at, sample, gt = 7231290, "HGDP01092", "0|1"
+        window, second, third = (7231327, "ATG", "A"), (7231348, "T", "TGA"), \
+            (7231350, "T", "TGTGTGTGTGA")
+        for p, r, _a in (window, second, third):
+            self.assertEqual(seq[p - 1 - at:p - 1 - at + len(r)], r)
+        records = {window: {sample: gt}, second: {sample: gt}, third: {sample: gt}}
+        snps = {7231350: {"A": {sample: gt}}}
+        ns = self._analyzer(records, snps, seq=seq, at=at)
+        offsets, span = (30, 52), (7231326, 7231350)  # the target on the window, as B10 had it
+        found = ns["_other_indels"](span[0], span[1], *window)
+        self.assertEqual(sorted(k for k, _g, _o in found), [second, third])
+        out = ns["_breaking_slots"](found, offsets, span, window[0], window[1], window[2],
+                                    window[0] - 1 - 30, isc.IndelCarriers({sample: gt}))
+        self.assertEqual({k: g for k, g, _o in out}, {second: {sample: gt}, third: {sample: gt}})
 
     def test_overlapping_records(self):
         self.assertEqual(isc.overlapping_records(self.PAIR), set(self.PAIR))
