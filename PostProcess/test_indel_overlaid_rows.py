@@ -370,6 +370,23 @@ class World(object):
                     {"S01": "1|0", "S02": "1|0", "S03": "1|0", "S04": "1|0"})
         self._indel("XT2", xt + 2, g[1], g[1:4], {"S02": "1|0", "S03": "1|0"})
         self._indel("XT3", xt + 2, g[1:4], g[1], {"S02": "1|0", "S04": "1|0"})
+        # AF (+): TL's shape (the next TGG unit puts the PAM back on S01-S04's slot), and
+        # past the target, which no stretch read from its first base reaches, a variant the
+        # slot cannot be written with: two insertions at one POS (S01), a SNP alt on a base
+        # a deletion's REF holds (S02). Both stay listed (the gate's B10, HG03120 and
+        # HGDP00478: at a640d92 they were taken off). S03's unphased deletion is in the
+        # stretch read (the second TGG unit): it stays off. S05 holds AF alone.
+        af = 5850
+        self._put(af, g[:10] + "C" + g[10:] + "TGG" + "TGG" + "ACTTCAGACTAGCATTGCACTGGTCA")
+        self._indel("AF", af + 10, g[9] + "C", g[9],
+                    {"S01": "1|0", "S02": "1|0", "S03": "1|0", "S04": "1|0", "S05": "1|0"})
+        self._indel("AF2", af + 21, g[19] + "TGG", g[19],
+                    {"S01": "1|0", "S02": "1|0", "S03": "1|0", "S04": "1|0"})
+        self._indel("AF3", af + 38, "A", "AT", {"S01": "1|0"})
+        self._indel("AF4", af + 38, "A", "ATT", {"S01": "1|0"})
+        self._indel("AF5", af + 43, "TGC", "T", {"S02": "1|0"})
+        self._snp("AF", af + 44, "G", "A", {"S02": "1|0"})
+        self._indel("AF6", af + 25, "TG", "T", {"S03": "0/1"})
         self.ref = "".join(self.seq)
 
     def _put(self, start0, s):
@@ -811,6 +828,20 @@ class FullTiers(_Base):
                                    places=3)
             self.assertEqual(r["mm"], sum(1 for c in r["dna"][:20] if c.islower()))
             self.assertEqual(r["total"], r["mm"])  # the fixture's targets have no bulge
+
+    def test_a_variant_past_the_stretch_read_does_not_stop_it(self):
+        """AF: S01's slot holds two insertions at one POS past the target, S02's a SNP alt
+        on a base a deletion's REF holds there; neither is in the stretch read from the
+        target's first base, which holds the target's bases (the next TGG unit puts the PAM
+        back), so both stay listed; S03's unphased deletion is in that stretch: it stays
+        off. At a640d92 S01 and S02 were taken off (gate B10: HG03120, HGDP00478,
+        HGDP01255, HGDP00973, HGDP00290 and HG02006, 39 gating findings)."""
+        fx = self.run_analyzer()
+        site = self.by_site(fx.rows())
+        best = max(site["AF"], key=lambda r: r["cfd"])
+        self.assertEqual((best["dna"], best["samples"], best["cfd"]),
+                         (GUIDE + "TGG", "S01,S02,S04,S05", 1.0))
+        self.assertFalse([r for r in site["AF"] if "S03" in r["samples"].split(",")])
 
     def test_the_cooccurrence_companion(self):
         fx = self.run_analyzer()

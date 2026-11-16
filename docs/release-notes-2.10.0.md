@@ -118,7 +118,9 @@ lift the first two.
   there, or `--max-total-edits` 3 or less.
 - **Two indels on one haplotype.** A fake-indel window holds one indel, so a carrier whose second
   indel moves a SNP the row names out of its target is listed all the same (one carrier in seven
-  guides on 1000 Genomes chr22, at 2 + 2 bulges).
+  guides on 1000 Genomes chr22, at 2 + 2 bulges), and one whose own target, through a second
+  deletion in a repeat, starts a repeat unit away is listed on the row of its bases (two carriers
+  of VEGFA site 3 genome-wide on HGDP + 1000 Genomes).
 - **A target wholly inside a tandem repeat** can be split over two rows or written twice (in a
   model of microsatellites; no search of real data checked has one). A fix is planned for 2.10.1.
 - **An unphased call of two ALTs at one position** is listed, PUTATIVE, on a row that needs the

@@ -1138,6 +1138,190 @@ class TheStrongestPastFactorsOfZero(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 # (c) the analyzer routes every overlaid target through the resolver
 # --------------------------------------------------------------------------- #
+class _Reference(object):
+    """A chromosome's bases from ``at`` on (0-based), "N" elsewhere, as genomeStr reads."""
+
+    def __init__(self, at, seq, length=250000000):
+        self.at, self.seq, self.length = at, seq, length
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, q):
+        i = q - self.at
+        return self.seq[i] if 0 <= i < len(self.seq) else "N"
+
+
+class _Store(object):
+    """The phased indel store's reader (build_indel_genotypes.IndelGenotypeReader):
+    {(POS, REF, ALT): {sample: genotype}}."""
+
+    def __init__(self, records):
+        self.records = records
+
+    def indels(self):
+        return sorted(self.records)
+
+    def carriers_dict(self, pos, ref, alt):
+        return dict(self.records.get((pos, ref, alt), {}))
+
+
+class AVariantPastTheStretch(unittest.TestCase):
+    """analisi_indels_NNN._breaking_slots, run as the analyzer defines it: a slot carrying
+    the window's indel and a second one inside the target keeps the target when its bases
+    read it, from the target's first base on or up to its last, each way reading the
+    slot's variants it can reach (METHODS section 4). A variant a way cannot read -- two
+    records of one base, a SNP alt on a base of an indel's REF, a call that cannot be put
+    on the slot -- stops it only where its stretch on the slot, or the target's bases on
+    the window (read with the slot's own alleles), reach a base of that variant's REF.
+    Up to a640d92 one anywhere in the frame on the way's side stopped it: on the gate's
+    B10 (VEGFA site 3, per sample, HGDP + 1000 Genomes) six carriers whose slot holds the
+    target's bases at the row's start were left off (39 gating carrier-missing findings).
+    HG03120 on chr5:146,361,254 (+), hg38 bases: GGTGT>G at 146,361,255 makes the target
+    (GGTGtGTGtGTGTGaGtGTGTGAG, a DNA bulge), the slot's A>AGTGT at 146,361,281 inserts
+    GTGT at its last base, which reads only the first of those bases, the G the repeat
+    goes on with, and the slot holds 146,361,314 GGGA>G and 146,361,315 GGA>G, two
+    records of one base 33 bases past the target's last base. Each "kept" fails at
+    a640d92."""
+
+    SEQ = ("CTGGATCTTTCTTGTATAGACCAAAGGGTAGAAATCCATGGCATTGGAGTACAGGGTGTGTGTGTGTGTGTGAGTGTGTG"
+           "AGTGTGTGTGTGTGTGAAAGAGAGAGAAAGAGGGGGAGAGAGAGAGAGAGAGAGAGAGAG")
+    AT = 146361200
+    WINDOW = (146361255, "GGTGT", "G")
+    SECOND = (146361281, "A", "AGTGT")
+    PAIR = [(146361314, "GGGA", "G"), (146361315, "GGA", "G")]
+    NAMES = ("_store_indels", "_other_indels", "_on_slot", "_slot_allele", "_frame",
+             "_breaking_slots", "_cache_put")
+
+    def _analyzer(self, records, snps=None, seq=None, at=None):
+        import ast
+        path = os.path.join(HERE, "analisi_indels_NNN.py")
+        with open(path) as fh:
+            tree = ast.parse(fh.read())
+        body = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in self.NAMES]
+        self.assertEqual(sorted(n.name for n in body), sorted(self.NAMES))
+        snps = snps or {}
+        ns = {"bisect": __import__("bisect"), "_isc": isc, "_jgt_cache": {},
+              "_cache_held": {}, "_CACHE_CARRIERS": 1000000, "_indel_index": None,
+              "_indel_starts": [], "_indel_maxref": 0, "_indelgt": _Store(records),
+              "genomeStr": _Reference(at or self.AT, seq or self.SEQ),
+              "_snp_record": lambda pos1: snps.get(pos1, {})}
+        exec(compile(ast.Module(body=body, type_ignores=[]), path, "exec"), ns)
+        return ns
+
+    def _kept(self, slot_records, sample="HG03120", gt="0|1", snps=None):
+        """Whether the slot of ``sample`` holding the window's indel and ``slot_records``
+        (each on the same slot as the window's, ``gt``; a record given with a genotype of
+        its own keeps it) keeps the row's target: _breaking_slots takes the slot out of
+        the second indel's carriers when it does."""
+        for (p, r, _a) in [self.WINDOW, self.SECOND] + [x[:3] for x in slot_records]:
+            self.assertEqual(self.SEQ[p - 1 - self.AT:p - 1 - self.AT + len(r)], r)
+        records = {self.WINDOW: {sample: gt}, self.SECOND: {sample: gt}}
+        for x in slot_records:
+            records[x[:3]] = {sample: x[3] if len(x) > 3 else gt}
+        ns = self._analyzer(records, snps)
+        ipos, iref, ialt = self.WINDOW
+        istart = ipos - 1 - 30
+        offsets, span = (30, 53), (146361254, 146361281)  # the row's target on the window
+        found = ns["_other_indels"](span[0], span[1], ipos, iref, ialt)
+        self.assertIn(self.SECOND, [k for k, _g, _o in found])
+        out = ns["_breaking_slots"](found, offsets, span, ipos, iref, ialt, istart,
+                                    isc.IndelCarriers({sample: gt}))
+        left = dict((k, g) for k, g, _o in out)[self.SECOND]
+        return sample not in left
+
+    def test_two_records_of_one_base_past_the_target(self):
+        """HG03120: kept (at a640d92 the pair made the way from the first base on
+        unreadable, and the way up to the last base does not find the target's bases
+        through the indel)."""
+        self.assertTrue(self._kept(self.PAIR))
+
+    def test_a_snp_alt_on_a_base_of_an_indel_past_the_target(self):
+        """The shape of chr11:127,948,555 (+) and chr10:63,652,969 (-): an indel past the
+        target whose REF holds a SNP alt of the slot (two records of one base)."""
+        snp = {146361317: {"C": {"HG03120": "0|1"}}}  # an A>C on GGGA>G's last base
+        self.assertTrue(self._kept(self.PAIR[:1], snps=snp))
+
+    def test_an_unphased_indel_past_the_target(self):
+        self.assertTrue(self._kept([self.PAIR[0] + ("0/1",)]))
+
+    def test_without_them(self):
+        self.assertTrue(self._kept([]))
+
+    def test_a_variant_the_stretch_reaches_still_stops_it(self):
+        """A SNP alt on the second indel's own anchor, which the stretch reads (as
+        METHODS section 4 has it); and the same pair moved into the target."""
+        snp = {146361281: {"G": {"HG03120": "0|1"}}}
+        self.assertFalse(self._kept([], snps=snp))
+        self.assertFalse(self._kept([(146361262, "GT", "G"), (146361262, "GTGT", "G")]))
+
+    def test_a_variant_on_the_targets_own_bases_still_stops_it(self):
+        """HGDP01092 on chr1:7,231,326 of 7,231,327 ATG>A (B10, hg38 bases): its slot's
+        7,231,348 T>TGA puts GA into the target, so the stretch read from the first base on
+        ends at 7,231,348; the slot also holds 7,231,350 T>A and T>TGTGTGTGTGA, two records
+        of one base past that stretch but on the target's own bases on the window, where
+        the bases compared are the slot's alleles: no one sequence there, so the slot stays
+        off, as at a640d92 (the stretch alone, as at d7a1eadf, kept it, listed for the SNP
+        T>A that its own target does not hold)."""
+        seq = ("ACTGCGTGACCCCAGCATTCATCACATACTGGCTTAATGTGTGTGTGTGTGTGTGTGTGTGAGAGAGAGAGAGAG"
+               "AGAGAGAGGTTTTATTTTTTTTGAAAGAGTCTCGCTCTGTCGCCCAGGCTGGAGT")
+        at, sample, gt = 7231290, "HGDP01092", "0|1"
+        window, second, third = (7231327, "ATG", "A"), (7231348, "T", "TGA"), \
+            (7231350, "T", "TGTGTGTGTGA")
+        for p, r, _a in (window, second, third):
+            self.assertEqual(seq[p - 1 - at:p - 1 - at + len(r)], r)
+        records = {window: {sample: gt}, second: {sample: gt}, third: {sample: gt}}
+        snps = {7231350: {"A": {sample: gt}}}
+        ns = self._analyzer(records, snps, seq=seq, at=at)
+        offsets, span = (30, 52), (7231326, 7231350)  # the target on the window, as B10 had it
+        found = ns["_other_indels"](span[0], span[1], *window)
+        self.assertEqual(sorted(k for k, _g, _o in found), [second, third])
+        out = ns["_breaking_slots"](found, offsets, span, window[0], window[1], window[2],
+                                    window[0] - 1 - 30, isc.IndelCarriers({sample: gt}))
+        self.assertEqual({k: g for k, g, _o in out}, {second: {sample: gt}, third: {sample: gt}})
+
+    def test_a_long_deletion_inside_the_target_as_the_second_indel(self):
+        """HGDP00478 on chr5:141,655,179 (-) of 141,655,182 TAC>T (B10, hg38 bases; the
+        target tGTGtGTGtGTGTGTGtGT-AGG, CCTACACACACACACACACACA on the + strand). The slot's
+        second indel there is no repeat unit at the target's edge: it is 141,655,188's
+        deletion of 37 bases, (AC)13 and the linker CCTGATGGCCT (which the reference also
+        holds at 141,655,172 to 182, whose last three bases are the target's first), which
+        starts after the target's seventh base on the + strand, runs past its reference end
+        and joins two AC runs, so the slot holds the window's bases. The slot also holds
+        141,655,259 C>CA and C>CACACACA, two records of one base 19 bases past the target's
+        last base on it. Kept; at a640d92 the way from the first base on met those two, and
+        the way up to the last base does not find the target's bases through the indel, so
+        the slot was taken off."""
+        seq = ("TCTCTCTGTCCTGTCCCTCTCCCTCTCCCTTTTCCTCGCTCTCCCTCTCTCTCTCTCACACACACACACACCCTGATGGC"
+               "CTACACACACACACACACACACACACACACACACCCTGATGGCCTACACACACACACACACACACACACACACACACACC"
+               "CCCTGATGGCCTACATGAGGAAAACAGCACACCCGGGGCT")
+        at, sample, gt = 141655100, "HGDP00478", "0|1"
+        window = (141655182, "TAC", "T")
+        second = (141655188, "C" + "AC" * 13 + "CCTGATGGCCT", "C")
+        pair = [(141655259, "C", "CA"), (141655259, "C", "CACACACA")]
+        for p, r, _a in [window, second] + pair:
+            self.assertEqual(seq[p - 1 - at:p - 1 - at + len(r)], r)
+        self.assertEqual(seq[141655172 - 1 - at:141655183 - 1 - at], "CCTGATGGCCT")
+        records = {window: {sample: gt}, second: {sample: gt}}
+        records.update((x, {sample: gt}) for x in pair)
+        ns = self._analyzer(records, seq=seq, at=at)
+        offsets, span = (28, 49), (141655179, 141655202)  # the target on the window, as B10 had it
+        found = ns["_other_indels"](span[0], span[1], *window)
+        self.assertEqual([k for k, _g, _o in found], [second])
+        out = ns["_breaking_slots"](found, offsets, span, window[0], window[1], window[2],
+                                    window[0] - 1 - 30, isc.IndelCarriers({sample: gt}))
+        self.assertEqual({k: g for k, g, _o in out}, {second: {}})
+
+    def test_overlapping_records(self):
+        self.assertEqual(isc.overlapping_records(self.PAIR), set(self.PAIR))
+        self.assertEqual(isc.overlapping_records([self.PAIR[0], self.SECOND]), set())
+        two = [(110, "A", "AC"), (110, "A", "ACC")]  # two insertions at one point
+        self.assertEqual(isc.overlapping_records(two + [(130, "TG", "T")]), set(two))
+        # a record left unnormalized (TCA>TCAG) and an insertion on its last base
+        self.assertEqual(isc.overlapping_records([(110, "TCA", "TCAG"), (112, "A", "AT")]),
+                         {(110, "TCA", "TCAG"), (112, "A", "AT")})
+
+
 class TheAnalyzerUsesIt(unittest.TestCase):
     def _src(self, name):
         with open(os.path.join(HERE, name)) as fh:

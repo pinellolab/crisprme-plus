@@ -1182,9 +1182,17 @@ def _breaking_slots(found, offsets, span, ipos, iref, ialt, istart, carriers):
     or two of its variants that overlap (two indels whose REFs share a base, any two at
     one POS among them, even a duplication and the deletion of the same bases; or a SNP
     alt on a base of a second indel's REF: a VCF writes a haplotype holding both as one
-    record, so the slot has no one sequence there, a phasing artefact). So do the slots
-    that hold a complex allele (a record overlapping the window's) or a SNP alt on a base
-    the indel keeps past its POS (_ref_snps)."""
+    record, so the slot has no one sequence there, a phasing artefact). A way meets such
+    a variant when it reaches a base of the variant's REF: a base of its stretch on the
+    slot, or of the target on the window, whose bases it reads with the slot's own
+    alleles. One past both, or before both, changes none of the bases compared and does
+    not stop it (indel_snp_cis.target_pairs' ``avoid``). Before 2.10.0's gate B such a
+    variant anywhere in the frame on the way's side stopped it, and a carrier whose slot
+    holds the target's bases was left off for an artefact its target never reaches
+    (HG03120 on chr5:146,361,254 (+) of VEGFA site 3, whose slot also holds
+    146,361,314 GGGA>G and 146,361,315 GGA>G, two records of one base past the target).
+    So do the slots that hold a complex allele (a record overlapping the window's) or a
+    SNP alt on a base the indel keeps past its POS (_ref_snps)."""
     if carriers is None or not carriers.phase_known:
         return found
     parsed = carriers.parsed
@@ -1209,16 +1217,22 @@ def _breaking_slots(found, offsets, span, ipos, iref, ialt, istart, carriers):
     near = [(key, gts) for key, gts, _overlapping in _store_indels(
         lo, hi, ipos, iref, ialt, lambda _p, _r, _a, overlapping: not overlapping)]
     on_window = _isc.local_haplotype(lo, hi, window)
-    ways = {}  # (way, the slot's indels it reads) -> that way's indel_snp_cis.target_pairs
+    # (way, the slot's indels it writes, those it cannot) -> that way's target_pairs
+    ways = {}
     keep = set()
     # The stretch read from the target's first base on reaches no variant that ends before
     # that base; the one read up to its last base none that starts past it. So each way
     # reads only the slot's indels it can reach, and one it cannot reach (an artefact or an
-    # unphased call upstream of the target, say) does not stop it.
+    # unphased call upstream of the target, say) does not stop it. Nor does one on its own
+    # side that the stretch, read on the slot's other indels, and the target on the window
+    # end before or start past: the slot is written without the indels it cannot be
+    # written with, and the way is read unless it reaches a base of one of their REFs
+    # (target_pairs' avoid).
     for (s, h), keys in mine.items():
         itoks, ikind, _islots = parsed[s]
         allele = _slot_allele(s, h, ikind, len(itoks))
         held = [set(keys), set(keys)]  # from the first base on, up to the last base
+        unread = [set(), set()]        # the indels each way can reach and not put on the slot
         for key, gts in near:
             if key in keys:
                 continue
@@ -1228,21 +1242,26 @@ def _breaking_slots(found, offsets, span, ipos, iref, ialt, istart, carriers):
                 continue
             on = _on_slot(s, h, itoks, ikind, gts)
             for side in (0, 1):
-                if reach[side] and held[side] is not None and on is not False:
+                if reach[side] and on is not False:
                     # an indel this stretch can reach that cannot be put on a slot: unread
-                    held[side] = None if on is None else held[side] | {key}
+                    (unread[side] if on is None else held[side]).add(key)
         for side in (0, 1):
-            if held[side] is None:
-                continue
-            got = tuple(sorted(held[side]))
-            if any(allele(q) != genomeStr[q] for (p, r, _a) in got
-                   for q in range(max(p - 1, 0), min(p - 1 + len(r), len(genomeStr)))):
-                continue  # a SNP alt on a base of a second indel's REF: two records of one base
-            if (side, got) not in ways:
+            # the indels the slot cannot be written with: a call that cannot be put on it,
+            # a SNP alt (or an allele its calls leave unknown) on a base of the REF, two
+            # records of one base (_isc.overlapping_records)
+            bad = unread[side] | {
+                (p, r, a) for (p, r, a) in held[side]
+                if any(allele(q) != genomeStr[q]
+                       for q in range(max(p - 1, 0), min(p - 1 + len(r), len(genomeStr))))}
+            bad |= _isc.overlapping_records(held[side])
+            got = tuple(sorted(held[side] - bad))
+            avoid = tuple(sorted(bad))
+            if (side, got, avoid) not in ways:
                 hap = _isc.local_haplotype(lo, hi, window, got)
-                ways[(side, got)] = (None if hap is None else
-                                     _isc.target_pairs(on_window, hap, first, last)[side])
-            if _isc.holds_target_bases([ways[(side, got)]], allele):
+                ways[(side, got, avoid)] = (
+                    None if hap is None else
+                    _isc.target_pairs(on_window, hap, first, last, avoid=avoid)[side])
+            if _isc.holds_target_bases([ways[(side, got, avoid)]], allele):
                 keep.add((s, h))
                 break
     if not keep:
