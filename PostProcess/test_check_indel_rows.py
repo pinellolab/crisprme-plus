@@ -1071,6 +1071,57 @@ class SnpRowsReport(Base):
                 want.add(("snp-row-indel-carrier", "S02"))
             self.assertEqual(got, want, (with_ins, found))
 
+    def test_a_variant_past_the_stretch_read_does_not_take_the_snp_row_carrier_off(self):
+        """2.10.0's release gates: the rule read a SNP row's slot as it read an indel row's
+        (gate B10), so a variant the slot cannot be written with anywhere in the frame on a
+        way's side stopped that way. In the GA run of the test above, S02's slot of the SNP
+        loses the run's first unit and is read from the next base on, a stretch that ends
+        two bases past the target. Past that stretch, at the run's last base, it also holds
+        an unphased insertion (or two records of one base): the reading does not reach it,
+        and CRISPRme keeps S02 -- listing it is right, and leaving it off misses it. The
+        same variant on the stretch's last base leaves the slot unreadable, as before."""
+        lo = len(PRE) + 1
+        run = list("GA" * 14)
+        run[10] = "T"                        # the reference breaks the run; the SNP mends it
+        seq = PRE + "T" + "".join(run) + POST
+        g = "GA" * 10
+        snp = (lo + 11, "T", "G")
+        dele = (lo, "TGA", "T")
+        t = "GA" * 11 + "G"
+        s0 = lo
+        hi = s0 + len(t) - 1
+        for name, at, kind, keeps in (("past, unphased", hi + 5, "unphased", True),
+                                      ("past, two records", hi + 5, "two", True),
+                                      ("on the stretch", hi + 2, "unphased", False)):
+            if kind == "unphased":
+                extra = [(at + 1, seq[at], seq[at] + "TT", {"S02": "0/1"})]
+            else:
+                extra = [(at + 1, seq[at:at + 2], seq[at], {"S02": "1|0"}),
+                         (at + 1, seq[at], seq[at] + "TT", {"S02": "1|0"})]
+            recs = [dele + ({"S02": "1|0"},),
+                    snp + ({"S01": "1|0", "S02": "1|0", "S03": "0|1"},)] + extra
+            recs.sort(key=lambda r: (r[0], len(r[1]), r[2]))
+            row = row_fields("chr21", s0, "+", g + "NNN", seq[s0:s0 + 23], t, t[-3:], 0,
+                             0, "X", tok("chr21", snp), "S01,S02", spacer=g + "NNN")
+            tmp = os.path.join(self.tmp, name.replace(", ", "_").replace(" ", "_"))
+            os.makedirs(tmp)
+            case = Case(tmp, seq, recs, [row])
+            win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(case.vcf)])
+            self.assertEqual(C.snp_row_keeps(win, "S02", 0, s0, t, [win.by_key[snp][0]],
+                                             win.lines_in(0, len(seq))), keeps, name)
+            rc, found = case.run(guide=g, extra=("--snp-rows", "report"))
+            want = {("carrier-missing", "S03")}
+            if not keeps:
+                want.add(("snp-row-indel-carrier", "S02"))
+            self.assertEqual({(f[1], x) for f in found for x in f[3].split(",")}, want,
+                             (name, found))
+            write_results(case.res, [set_field(row, samples="S01")])
+            rc, found = case.run(guide=g, extra=("--snp-rows", "report"))
+            want = {("carrier-missing", "S03")} | ({("carrier-missing", "S02")} if keeps
+                                                    else set())
+            self.assertEqual({(f[1], x) for f in found for x in f[3].split(",")}, want,
+                             (name, found))
+
     def test_a_snp_row_naming_a_variant_outside_its_target_is_reported(self):
         """R9-F5 (the review's adv_r9a): the report runs the variant-outside-target check
         of an indel row: a SNP row naming an SNV 10 bases past its PAM, its carrier holding

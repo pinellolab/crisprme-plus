@@ -4640,10 +4640,16 @@ def snp_row_keeps(win, sample, h, start, probe, named, lids):
     leaves them), the base of every named SNP in the stretch: written with every store
     indel on the slot that reaches the stretch read, over the target's length either side
     and the bases those indels add or lose, and with the slot's own SNP alleles outside
-    the target (the row's inside it). A way that meets an indel whose call cannot be tied
-    to the slot, two records of one base (two indels whose REFs share a base, a SNP of the
-    slot on a base of an indel's REF), or a base whose allele the slot's calls leave
-    unknown, reads nothing; with neither way holding, the carrier leaves the row."""
+    the target (the row's inside it). The slot is written without the indels it cannot be
+    written with: one whose call cannot be tied to the slot, two records of one base (two
+    indels whose REFs share a base, or that insert at one point), one with a SNP of the
+    slot (or an allele its calls leave unknown) on a base of its REF. A way that reaches a
+    base of one of their REFs -- a base of its stretch, or of the target's span -- reads
+    nothing, and so does one that meets a base whose allele the slot's calls leave unknown;
+    one that ends before them or starts past them is read as it is (since 2.10.0's release
+    gates; up to them such an indel anywhere in the frame on a way's side stopped it, as
+    for an indel row: indel_snp_cis.snp_target_held). With neither way holding, the
+    carrier leaves the row."""
     n = len(probe)
     lo, hi = start, start + n - 1
     row = {a.lo: a.body for a in named}
@@ -4681,7 +4687,7 @@ def snp_row_keeps(win, sample, h, start, probe, named, lids):
         return got or win.refseq[q]
 
     for side in (0, 1):
-        held, bad = list(mine), False
+        held, bad = list(mine), []
         for a in store:
             if a in mine or not (a.hi > first and a.lo <= last):
                 continue
@@ -4689,19 +4695,28 @@ def snp_row_keeps(win, sample, h, start, probe, named, lids):
                 continue   # a way reads the indels that reach its stretch
             o = snp_slot_on(win, a, sample, h, False)
             if o is None:
-                bad = True
-                break
-            if o:
+                bad.append(a)   # a call that cannot be tied to the slot
+            elif o:
                 held.append(a)
-        if bad:
-            continue
-        if any(value(q) != win.refseq[q] for a in held for q in range(a.lo, a.hi)):
-            continue   # a SNP allele on a base of an indel's REF: two records of one base
-        spans = sorted((a.lo, a.hi) for a in held)
-        if any(y[0] < x[1] for x, y in zip(spans, spans[1:])):
-            continue   # two indels whose REFs share a base
+        # the indels the slot cannot be written with: a SNP allele (or an unknown one) on a
+        # base of the REF, and two records of one base (REFs that share a base, or two
+        # insertions at one point)
+        bad.extend(a for a in held
+                   if any(value(q) != win.refseq[q] for q in range(a.lo, a.hi)))
+        spans = sorted(held, key=lambda a: (a.lo, a.hi))
+        for i, x in enumerate(spans):
+            for y in spans[i + 1:]:
+                if y.lo >= x.hi:
+                    break
+                bad.extend((x, y))
+        points = defaultdict(list)
+        for a in held:
+            if not a.edit_hi > a.edit_lo:
+                points[a.edit_lo].append(a)   # it inserts and replaces nothing
+        bad.extend(a for at in points.values() if len(at) > 1 for a in at)
+        got = [a for a in held if not any(a is b for b in bad)]
         m2 = n + sum(abs((a.hi - a.lo) - len(a.key[2])) for a in held)
-        hap = make_hap(win.refseq, held, max(0, lo - m2), hi + m2 + 1)
+        hap = make_hap(win.refseq, got, max(0, lo - m2), hi + m2 + 1)
         if side == 0:
             a0 = bisect.bisect_left(hap.place, (lo, 0))
         else:
@@ -4709,6 +4724,10 @@ def snp_row_keeps(win, sample, h, start, probe, named, lids):
         if a0 < 0 or a0 + n > len(hap.place):
             continue
         places = hap.place[a0:a0 + n]
+        # the reference positions it reads: those of its stretch, and the target's span
+        rlo, rhi = min(places[0][0], lo), max(places[-1][0], hi)
+        if any(b.lo <= rhi and b.hi - 1 >= rlo for b in bad):
+            continue   # it reaches a base of a record the slot cannot be written with
         if not all((q, 0) in places for q in row):
             continue   # a named SNP pushed out of the stretch, or its base deleted
         good = True
