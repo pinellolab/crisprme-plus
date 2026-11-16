@@ -1035,7 +1035,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
     variant bases than the SNP they carry (chr22:11333697 (−), chr22_11333716_T_G: HG00271,
     HG00318, HG00369, HG00379, HG00864, NA06991, NA06993, NA18547), where the HGDP + 1000
     Genomes run alone lists them on an alignment that holds it (report-only).
-  - Wired in: `PostProcess/test_check_indel_rows.py` (264 unit and mutation tests: a right
+  - Wired in: `PostProcess/test_check_indel_rows.py` (266 unit and mutation tests: a right
     row raises nothing gating, each corruption of it is caught, each documented limit and
     overlapping slot comes out under its own class, the checker's coverage gaps under
     theirs; the refusals; each release's reading of the data, told from a run's records; a
@@ -2316,6 +2316,71 @@ major.minor version (Changed). The main changes, each told in its entry below:
   3,870 and 208: in each, gate B's lines of a carrier listed on a slot whose MNV changes the
   target, and no other. Covered by `test_check_indel_rows` (`ReadPastALongDeletion`; each test
   fails on the code before).
+- **A carrier whose haplotype holds an indel target is no longer left off it for a variant past
+  the target** (indel rows, both modes; `analisi_indels_NNN._breaking_slots`,
+  `indel_snp_cis.target_pairs`).
+  - A carrier whose slot also holds a second indel inside an indel target is listed when the
+    target's bases are on the slot, read from the target's first base on or up to its last,
+    through the indel (METHODS section 4); a way that meets two records of one base, a SNP alt on
+    an indel's REF or a call that cannot be put on the slot cannot be read. Each way's slot was
+    written over the whole frame with every indel of the way's side, so such a variant anywhere
+    there, past the target too, made the way unreadable, though the stretch it reads never
+    reaches it.
+  - The release gate's genome-wide search of the three repeat-rich guides (B10: VEGFA site 3,
+    EMX1 and VEGFA site 1, NRG, 4 + 1 + 1, per sample, HGDP + 1000 Genomes) left 6 carriers so
+    off VEGFA site 3's rows, on 6 row blocks in CA/GT repeats: the real-data checker's 39 gating
+    `carrier-missing` findings (chr10:63,652,969 (−) HG02006, chr10:132,881,999 (+) HGDP00290,
+    chr11:127,948,555 (+) HGDP01255 and HGDP00973, chr5:141,655,179 and 141,655,180 (−)
+    HGDP00478, chr5:146,361,254 (+) HG03120). Rebuilt from the VCF, each slot holds its row's
+    target at the row's start, through a repeat unit gained or lost at the target's edge, and
+    the way from the first base on met two records of one base 2 to 41 bases past the target
+    (for HG03120, 146,361,314 GGGA>G and 146,361,315 GGA>G on its slot).
+  - The slot is now written without the variants it cannot be written with, and a way is
+    unreadable only where it reaches a base of one's REF: a base of its stretch on the slot, or
+    of the target on the window, whose bases it reads with the slot's own alleles. A way that
+    read before reads the same, so the change only keeps carriers; one whose target holds such
+    a variant on the window stays off (HGDP01092 on chr1:7,231,326 (+): 7,231,350 T>A and
+    T>TGTGTGTGTGA on its slot). Covered by `test_indel_haplotype_resolution`
+    (`AVariantPastTheStretch`, the analyzer's own `_breaking_slots` on HG03120's and
+    HGDP01092's slots) and `test_indel_overlaid_rows` (site AF, end to end); 6 of their 9 new
+    tests fail on the code before.
+  - On the release gate (each search it touches run again at a640d92 and with the change, in
+    gate B's sandbox and install; a640d92's runs give gate B's tables byte for byte): B10 lists
+    9 more carriers on 34 alignments of VEGFA site 3 at 8 sites, the 6 above and HG03765,
+    HG00881 and SS6004469, each rebuilt from the VCF holding the alignment's target at its
+    start; with the checker's change below its genome-wide check counts 590,939 findings, none
+    gating (45 before). Around them the tables move as they do for any change of a site's
+    rows, and no carrier leaves a site's listing: two alignments of one allele fold into one
+    entry or stop doing so as their carrier sets meet or part (chr13:72,892,782 (−));
+    SS6004469's alignment takes the fewest-mismatches and CRISPR-Bulge columns of a row from a
+    SNP's, whose carriers the row and the alternative alignments still list (chr2:186,127,481
+    (−)); and CRISPR-Bulge scores of chr2's other rows, read in another batch, move in their
+    fifth or sixth digit, which swaps two near-ties of the highest-CRISPR-Bulge column (EMX1 at
+    chr2:231,580,553 (+), VEGFA site 3 at chr2:222,776,092 (−)). B11, the same guides
+    population-level (no alternative alignments), changes in those chr2 rows alone, and its
+    checks pass as before (14,124 findings, one more non-gating). B6 and B7 (HPRC v2.1) list
+    HG02015 on one more row, chrY:22,614,199 (−) of chrY_22614210_ACTGTGGCT_A: its slot also
+    holds MNVs inside the target, which no store CRISPRme reads holds (22,614,202 GGCTG>ACTGT),
+    and the checker counts the listing in its MNV class, 3 more gating lines in each (291 and
+    211). The rest of the gate (B1 to B5, B8, B9, B12a, B12d, B13, B14, E2, E5) calls the rule
+    86,538 times with the same result each time, so their tables are a640d92's.
+- **The real-data checker reads a slot up to where the target's last base stood when a second
+  indel deletes it** (`scripts/check_indel_rows.py`, `reading_holds`). CRISPRme reads a slot
+  that holds a second indel inside the target from the place of the target's first base on, or
+  up to the place of its last base, and where the slot's own second indel deletes the base at
+  that place, from where the base stood on or up to where it stood
+  (`indel_snp_cis.target_pairs`). The checker's reading of that rule looked for the base itself,
+  found no way, took the rule to leave the carrier off, and failed the listing. B10 lists
+  HGDP00655 on chr1:21,194,250 and 21,194,251 (+) of 21,194,271 GTGT>G, whose slot also holds
+  21,194,269 GT>G inside the target and 21,194,275 GGT>G, which deletes its last base (HG01432
+  likewise on chr16:74,355,612 and 74,355,613 (+)): rebuilt from the VCF, the slot holds the
+  row's bases two bases before the row, through both deletions, so its own target needs two
+  indel-path records and the carrier is the known limit of two indels on one haplotype
+  (METHODS section 10). The checker counted 6 gating `variant-missing` findings; it now counts
+  them `limit-two-indels`. Run on the 88 checks of gate B's searches, the change alone gives
+  the same findings, line for line, but those 6 (B10: 590,981 findings, 39 gating). Covered by
+  `test_check_indel_rows` (`ReadUpToWhereTheLastBaseStood`; both tests fail on the code
+  before).
 - **A search on a host whose coreutils are uutils' writes its results tables right.** The search
   joined its three lists of each site's best alignment (by CFD, by fewest mismatches and bulges, by
   CRISPR-Bulge) line by line into `*.bestMerge.txt` and `*.altMerge.txt` with `pr -m -t -J`

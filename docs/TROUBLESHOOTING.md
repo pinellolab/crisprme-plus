@@ -550,8 +550,11 @@ scale where it was measured, and §4 gives the rules behind them.
   whose haplotype holds a second indel that pushes one of the row's named SNPs out of the
   target's bases is listed on the row all the same. On 1000 Genomes chr22, a per-sample search of
   seven guides at 4 mismatches + 2 DNA + 2 RNA bulges lists one such carrier (NA20515, at VEGFA
-  site 1), and none of the 17 gate searches of 2.10.0 does. The haplotype scan planned for
-  2.10.1 reads each carrier's own bases.
+  site 1), and none of the 17 gate searches of 2.10.0 does. Such a carrier's own target can also
+  start a repeat unit away from the row: the genome-wide gate search of VEGFA site 3 per sample
+  lists two carriers so (HGDP00655 and HG01432 of HGDP + 1000 Genomes, in GT repeats), their
+  bases the row's, through a second deletion. The haplotype scan planned for 2.10.1 reads each
+  carrier's own bases.
 - **One target written as two rows, or twice, in a microsatellite.** In a tandem repeat that
   holds a whole target, the merge places each row by its own bases, and the target's
   alignments can fit different places of the repeat: they can then go to two rows, or the
