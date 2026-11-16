@@ -900,7 +900,31 @@ def _same_base(x, y, value):
     return bx is not None and bx == by
 
 
-def target_pairs(window_hap, hap, first, last, through=()):
+def overlapping_records(records):
+    """The records (VCF POS, REF, ALT) of ``records`` that no one haplotype holds beside
+    another of them, as local_haplotype reads them: two whose REFs share a base (two
+    records at one POS always do), and two that insert their bases at one point. A slot
+    phased with such a pair has no one sequence there (a phasing artefact, or one complex
+    allele split into records); local_haplotype gives None for any set holding one."""
+    out = set()
+    spans = sorted((p1 - 1, p1 - 1 + len(ref), (p1, ref, alt)) for p1, ref, alt in records)
+    for i, (_s0, e0, r0) in enumerate(spans):
+        for s1, _e1, r1 in spans[i + 1:]:
+            if s1 >= e0:
+                break
+            out.update((r0, r1))
+    points = {}
+    for p1, ref, alt in records:
+        c, t = kept_bases(ref, alt), shared_tail(ref, alt)
+        if c == len(ref) - t:  # it deletes or replaces nothing: an insertion
+            points.setdefault(p1 - 1 + c, []).append((p1, ref, alt))
+    for at in points.values():
+        if len(at) > 1:
+            out.update(at)
+    return out
+
+
+def target_pairs(window_hap, hap, first, last, through=(), avoid=()):
     """The ways ``hap`` can hold the bases ``window_hap`` holds at places first..last
     (the target's first and last base on the window; local_haplotype), at the target's
     own place: one from the place of its first base on, one up to the place of its last
@@ -912,8 +936,13 @@ def target_pairs(window_hap, hap, first, last, through=()):
     bases through that indel, as the row names it, not only in a stretch that another of
     its variants has lengthened (a repeat unit gained upstream can push the indel out of
     a stretch whose bases are those of the window). ``through``: more places the stretch
-    must hold, the bases of the SNPs a SNP row names (snp_target_held). Always two, in
-    that order: a target the window written out does not hold has neither."""
+    must hold, the bases of the SNPs a SNP row names (snp_target_held). ``avoid``: the
+    records (VCF POS, REF, ALT) the haplotype could not be written with (a call that
+    cannot be put on its slot, two records of one base: _breaking_slots); a stretch that
+    reaches a base of one's REF -- the reference positions its bases stand at or follow,
+    from its first to its last, take one in -- cannot be read, and one that ends before
+    them or starts past them is read as it is: they change none of its bases. Always
+    two, in that order: a target the window written out does not hold has neither."""
     keys = [k for k, _s in window_hap]
     try:
         i, j = keys.index(first), keys.index(last)
@@ -931,6 +960,11 @@ def target_pairs(window_hap, hap, first, last, through=()):
         if a < 0 or a + n > len(hap) or not core <= set(hkeys[a:a + n]):
             ways.append(None)  # past the bases written out, or not through the indel
             continue
+        if avoid:
+            lo, hi = hkeys[a][0], hkeys[a + n - 1][0]  # places run in order on a haplotype
+            if any(p1 - 1 <= hi and p1 - 2 + len(ref) >= lo for p1, ref, _alt in avoid):
+                ways.append(None)  # it reaches a record the slot cannot be read with
+                continue
         pairs = []
         for x, (_k, y) in zip(want, hap[a:a + n]):
             if x == y:
