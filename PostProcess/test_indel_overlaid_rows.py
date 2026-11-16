@@ -376,7 +376,7 @@ class World(object):
         # a deletion's REF holds (S02). Both stay listed (the gate's B10, HG03120 and
         # HGDP00478: at a640d92 they were taken off). S03's unphased deletion is in the
         # stretch read (the second TGG unit): it stays off. S05 holds AF alone.
-        af = 5600
+        af = 5850
         self._put(af, g[:10] + "C" + g[10:] + "TGG" + "TGG" + "ACTTCAGACTAGCATTGCACTGGTCA")
         self._indel("AF", af + 10, g[9] + "C", g[9],
                     {"S01": "1|0", "S02": "1|0", "S03": "1|0", "S04": "1|0", "S05": "1|0"})
