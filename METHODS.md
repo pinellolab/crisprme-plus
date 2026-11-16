@@ -933,7 +933,7 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   deletes or replaces is not in the window's sequence and changes nothing, and neither does a
   second indel anchored on the first's last REF base, whose change lies past a target inside the
   ALT. On HPRC v2.1, the README guide's search at 4 mismatches and 1 DNA and 1 RNA bulge, per
-  sample, lists carriers so 159 times (92 samples) on 27 row blocks, of 40 records at 11 positions
+  sample, lists carriers so 220 times (131 samples) on 27 row blocks, of 40 records at 11 positions
   whose REF or ALT is 464 bases to 95 kb long (chr15:52,876,508 TATGTAT replaced by 2,375 bases,
   beside 52,876,514 T>TAAAAAAA on the same slot; chr6:112,819,048's 95,320 bases replaced by
   95,309, beside 112,914,365 CT>C): each haplotype, rebuilt from the VCF, holds its row's target at
@@ -2704,9 +2704,9 @@ another position that changes one of those bases, which §4 takes off whatever i
 at another position, which §4 does not cover) leaves the slot no reading. Up to the release gate of
 2.10.0 the check took every indel at another position as one §4 takes off, and so failed 213 lines
 of HPRC v2.1's genome-wide gate run per sample (the README guide at 4 mismatches and 1 DNA and 1
-RNA bulge) and 69 of its population-level run, whose 159 and 54 carrier listings are of slots
-holding such an indel at the end of a complex allele: each haplotype, rebuilt from the VCF, holds
-its row's target (§4). Two other alleles
+RNA bulge) and 69 of its population-level run, whose 220 and 95 carrier listings (131 and 72
+samples) are of slots holding such an indel at the end of a complex allele: each haplotype,
+rebuilt from the VCF, holds its row's target (§4). Two other alleles
 of the slot whose REFs meet (an overlap zone) leave it no sequence only where they can change what
 it says of the target — one of them is named, or changes a base read from the target's start —:
 every reading of such zones (any of their alleles no two of which meet, none included) is tried, and
