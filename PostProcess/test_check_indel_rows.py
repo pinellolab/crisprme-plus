@@ -2212,19 +2212,50 @@ class ReviewRound4(Base):
                          "TGG", 0, 0, "X", tok("chr21", dele), listed)
         return Case(self.tmp, seq, [dele, rec2], [row])
 
-    def test_a_carrier_listed_for_a_sequence_its_mnv_changes_is_caught(self):
-        """R4-F2: S01 carries the deletion that makes the target and, phased on the same
-        slot, an MNV on two of its bases. CRISPRme reads no MNV beside the record, but
-        nothing documents listing S01 for the sequence without it: gating, as for an
-        SNV there (the review found it passing as the two-indel limit)."""
-        for second in ("mnv", "snv"):
-            rc, found = self._mnv_world(second, "S01,S02").run(mode="soundness")
-            self.assertEqual(rc, 1, (second, found))
-            self.assertEqual({(f[1], f[3]) for f in gating(found)},
-                             {("variant-missing", "S01")}, (second, found))
-            self.assertNotIn("limit-two-indels", classes(found), found)
-            if second == "mnv":
-                self.assertIn("an MNV on their slot changes the target", found[0][2])
+    def test_a_carrier_listed_for_a_sequence_its_mnv_changes_is_the_known_limit(self):
+        """R4-F2, and gate B of 2.10.0: S01 carries the deletion that makes the target and,
+        phased on the same slot, an MNV on two of its bases. No store CRISPRme reads holds
+        an MNV, so it lists S01 for the sequence its slot would hold without it: a known
+        limit of 2.10.0 (METHODS section 10), counted, non-gating (limit-indel-row-mnv), as
+        a SNP row's carrier with such an MNV is (limit-snp-row-mnv). It gated as
+        variant-missing up to the gates, whose genome-wide check of HPRC v2.1 met it at 93
+        sites. An SNV there is read, so listing S01 without it still gates. Neither passes
+        as the two-indel limit (the review found the MNV passing so)."""
+        rc, found = self._mnv_world("mnv", "S01,S02").run(mode="soundness")
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        limit = [f for f in found if f[1] == "limit-indel-row-mnv"]  # one per row block
+        self.assertEqual({f[3] for f in limit}, {"S01"}, found)
+        self.assertIn("an MNV on their slot changes the target", limit[0][2])
+        self.assertIn("METHODS section 10", limit[0][2])
+        self.assertNotIn("variant-missing", classes(found), found)
+        self.assertNotIn("limit-two-indels", classes(found), found)
+        rc, found = self._mnv_world("snv", "S01,S02").run(mode="soundness")
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)},
+                         {("variant-missing", "S01")}, found)
+        self.assertNotIn("limit-indel-row-mnv", classes(found), found)
+        self.assertNotIn("limit-two-indels", classes(found), found)
+
+    def test_a_carrier_off_the_slot_of_its_mnv_is_listed_and_one_on_both_is_the_limit(self):
+        """Gate B of 2.10.0 (HPRC v2.1, chr6:45110551 and the like): the limit covers a
+        listed carrier only where every slot the row lists it for holds the MNV. S02 holds
+        the deletion on its slot 1 and the MNV on its slot 0 only: its slot 1 has the
+        target, and its listing agrees. S01 holds the deletion on both slots and the MNV on
+        slot 0 only: slot 1 has the target, so its listing agrees too. Listing S03, which
+        holds both on one slot and nothing else, is the limit."""
+        seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+        dele = (len(PRE) + 10, GUIDE[9] + "C", GUIDE[9],
+                {"S01": "1|1", "S02": "0|1", "S03": "1|0"})
+        p2 = len(PRE) + 1 + 14 + 1
+        r2 = seq[p2 - 1:p2 + 1]
+        mnv = (p2, r2, other(r2[0]) + other(r2[1]), {"S01": "1|0", "S02": "1|0", "S03": "1|0"})
+        s = len(PRE)
+        row = row_fields("chr21", s, "+", GUIDE + "NNN", seq[s:s + 23], GUIDE + "TGG",
+                         "TGG", 0, 0, "X", tok("chr21", dele), "S01,S02,S03")
+        rc, found = Case(self.tmp, seq, [dele, mnv], [row]).run(mode="soundness")
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertEqual({(f[1], f[3]) for f in found}, {("limit-indel-row-mnv", "S03")},
+                         found)
 
     def test_a_target_that_needs_the_mnv_is_the_two_indel_limit(self):
         """R4-F2: the target S01's slot holds, with the MNV, needs two indel-path records

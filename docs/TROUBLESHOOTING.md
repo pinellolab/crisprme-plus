@@ -552,6 +552,13 @@ scale where it was measured, and §4 gives the rules behind them.
   seven guides at 4 mismatches + 2 DNA + 2 RNA bulges lists one such carrier (NA20515, at VEGFA
   site 1), and none of the 17 gate searches of 2.10.0 does. The haplotype scan planned for
   2.10.1 reads each carrier's own bases.
+- **On HPRC, a carrier listed on an indel row whose haplotype holds an MNV there.** No store
+  CRISPRme reads holds an MNV (a record of two or more bases replaced by as many), so a carrier
+  whose haplotype holding the row's indel also holds an MNV inside the target is listed for the
+  target that haplotype would hold without the MNV. Of the published panels only HPRC v2.1 has
+  MNVs: the README guide's genome-wide search lists 1,162 such carriers at 93 sites per sample,
+  each row at a CFD of 0.084 or less. To check a carrier, read its genotypes in the dataset's
+  VCF over the row's target.
 - **One target written as two rows, or twice, in a microsatellite.** In a tandem repeat that
   holds a whole target, the merge places each row by its own bases, and the target's
   alignments can fit different places of the repeat: they can then go to two rows, or the

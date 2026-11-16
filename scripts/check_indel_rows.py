@@ -191,9 +191,11 @@ limit (counted and listed under its own class, non-gating) or not (gating):
     where the rule ties the target with another and the row leaves the carrier off);
   * an MNV beside the record on the slot is in neither store CRISPRme reads (the phased
     indel store keeps records whose REF and ALT lengths differ, the SNP tiers SNVs): a
-    target that needs it needs two indel-path records (limit-two-indels), but a carrier
-    listed for a sequence such an MNV changes is listed for a sequence it does not have,
-    which nothing documents (variant-missing, gating).
+    target that needs it needs two indel-path records (limit-two-indels), and a carrier
+    listed for a sequence such an MNV changes, the target its slot would hold without the
+    MNV, is listed for a sequence it does not have, a known limit of 2.10.0
+    (limit-indel-row-mnv; it gated, as variant-missing, up to the real-data gates of
+    2.10.0, which met it on HPRC v2.1 only).
   A disagreement no documented rule explains gates (unexplained-disagreement: a defect of
   CRISPRme or of this checker).
 
@@ -396,11 +398,12 @@ the merge of ``remove_contiguous_samples.py``).
 
 LIMITS (non-gating, counted per class, one TSV line per row block or per (record,
 target)): limit-last-alt-wins, limit-two-indels, limit-overlapping-records,
-limit-putative-carrier (all above), limit-window-reach (in completeness, per record: the
-carriers of a target in budget that runs past its fake-indel window, or whose site's guide
-region does, held by no index), limit-window-edge (the same, of a target whose site an
-INDELS index of format 1 does not hold, at the window's edge), limit-max-degeneracy (a
-cluster reached only through a SNP row over the run's --max-degeneracy),
+limit-putative-carrier, limit-indel-row-mnv (all above), limit-window-reach (in
+completeness, per record: the carriers of a target in budget that runs past its fake-indel
+window, or whose site's guide region does, held by no index), limit-window-edge (the same,
+of a target whose site an INDELS index of format 1 does not hold, at the window's edge),
+limit-max-degeneracy (a cluster reached only through a SNP row over the run's
+--max-degeneracy),
 limit-density-guard (a cluster reached only through a sites-only dataset's row whose window
 spells 2^bits sequences or more, which the run's sites-only density guard withheld),
 limit-insertion-site (a population-level target whose rows within --merge bp are not as good
@@ -4217,13 +4220,22 @@ CARRIER_TEXT = {
     "limit-putative-carrier": "are carriers of %s that CRISPRme resolves PUTATIVE (an MNV, "
                               "an untied multi-ALT alt, an unphased call) while their "
                               "haplotype says otherwise",
+    "limit-indel-row-mnv": "listed, and their slot of %s holds an MNV inside the target the "
+                           "row does not name, which CRISPRme does not read",
 }
 
 
+# A carrier listed for the target its slot would hold without an MNV beside the record: no
+# store CRISPRme reads holds an MNV (its phased indel store keeps records whose REF and ALT
+# lengths differ, its SNP tiers SNVs), so the search reads the slot without it and lists the
+# carrier for a sequence the slot does not have. A known limit of 2.10.0 (METHODS section
+# 10), counted and non-gating (limit-indel-row-mnv), as a SNP row's carrier whose slot holds
+# such an MNV is (limit-snp-row-mnv); the real-data gates of 2.10.0 met it on HPRC v2.1 only
+# (HGDP + 1000 Genomes and hg38_mega hold no MNV). Up to them it gated (variant-missing).
 MNV_UNSEEN = ("an MNV on their slot changes the target; CRISPRme reads no MNV beside the "
               "record (its phased indel store keeps records whose REF and ALT lengths "
-              "differ, its SNP tiers SNVs), and no documented rule lists a carrier for a "
-              "sequence it does not have")
+              "differ, its SNP tiers SNVs), so it lists the carrier for the target the slot "
+              "would hold without the MNV: a known limit of 2.10.0 (METHODS section 10)")
 
 
 def carrier_verdict(win, ctx, tgt, sample, listed, lids):
@@ -4253,7 +4265,7 @@ def carrier_verdict(win, ctx, tgt, sample, listed, lids):
             return unexplained_or(causes)
         if verdict in ("lists", "maybe"):
             if "mnv-unseen" in causes:
-                return True, "variant-missing", MNV_UNSEEN
+                return False, "limit-indel-row-mnv", MNV_UNSEEN
             return unexplained_or(causes)
         if "complex" in causes:
             return True, "carrier-off-by-rule"
@@ -4297,7 +4309,7 @@ def carrier_verdict(win, ctx, tgt, sample, listed, lids):
         verdict, causes = documented(win, ctx, tgt, sample, lids)
         if verdict in ("lists", "maybe"):
             if "mnv-unseen" in causes:
-                return True, "variant-missing", MNV_UNSEEN
+                return False, "limit-indel-row-mnv", MNV_UNSEEN
             return unexplained_or(causes)
         return True, ("carrier-without-allele" if not allowed else "carrier-not-strongest")
     if not (strong and determined):

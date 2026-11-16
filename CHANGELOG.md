@@ -878,9 +878,9 @@ major.minor version (Changed). The main changes, each told in its entry below:
     `missing-locus`, `origin-not-alt`, `alt-without-variant`, `row-unreadable`,
     `row-not-checked`, `variant-filtered`, `variant-not-in-dataset`, ...); non-gating ones,
     each listed with its samples, are CRISPRme's documented limits (`limit-last-alt-wins`,
-    `limit-two-indels`, `limit-putative-carrier`, `limit-overlapping-records`,
-    `limit-capped-window`, `limit-contig-end`, `limit-n-bases`, `limit-no-genotypes`,
-    `limit-filtered-record`, `limit-window-reach`, `limit-window-edge`,
+    `limit-two-indels`, `limit-putative-carrier`, `limit-indel-row-mnv`,
+    `limit-overlapping-records`, `limit-capped-window`, `limit-contig-end`, `limit-n-bases`,
+    `limit-no-genotypes`, `limit-filtered-record`, `limit-window-reach`, `limit-window-edge`,
     `limit-max-degeneracy`, `limit-density-guard`, `limit-insertion-site`, and in the SNP-row
     report `limit-snp-row-mnv` and `limit-snp-row-unphased`), the notes
     `variant-shadowed`, `overlap-reading-agrees` and
@@ -1789,6 +1789,14 @@ major.minor version (Changed). The main changes, each told in its entry below:
     such carrier (NA20515 on chr22:50,299,296 (+) of VEGFA site 1); no row of the 17 chr22 gate
     runs of this release lists one. The haplotype scan planned for 2.10.1 is to read each
     carrier's own bases there.
+  - **An MNV beside an indel on one haplotype.** No store the search reads holds an MNV, so a
+    carrier whose haplotype holding a row's indel also holds an MNV that changes the target is
+    listed for the target that haplotype would hold without it. Of the published panels only HPRC
+    v2.1 has MNVs (702,193 of its 49,547,631 records); its genome-wide search of the README guide
+    at 4 + 1 + 1 lists 1,162 such carriers at 93 sites per sample and 557 at 72 sites at
+    population level, each row at a CFD of 0.084 or less. The real-data check counts them as
+    `limit-indel-row-mnv` (they gated as `variant-missing` until its genome-wide run on HPRC). A
+    fix needs the MNVs' phased genotypes in a store built with the panel's Dictionaries.
   - **A target wholly inside a tandem repeat.** The merge reads a row's place on the haplotype
     from its own bases, and in a microsatellite that holds a whole target the target's
     alignments can fit different places: the target can then be split over two rows, or written

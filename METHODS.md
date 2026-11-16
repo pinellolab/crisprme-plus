@@ -918,14 +918,17 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   inside the target has an unphased call cannot be tied to a haplotype, so it stays listed,
   PUTATIVE, as every carrier on an unphased panel is; this holds even when another, phased second
   indel on its indel haplotype changes the target, so such a carrier is listed for a row its indel
-  haplotype does not have (§8, residuals). On the same phased slot, an indel overlapping the first
-  at another position (one complex allele the VCF splits into overlapping records; the window keeps
-  the reference there) takes the haplotype off the target's rows whatever its bases. A variant only
-  on bases the indel deletes is not in the window's sequence and changes nothing. Another allele at
-  the indel's own position, an indel or a SNP, is an alternative to it (a haplotype holding both
-  would be one record), so a slot phased with both is a phasing artefact. And an unphased carrier of
-  two overlapping records is a multi-allelic heterozygote, one allele per haplotype. These three
-  stay listed;
+  haplotype does not have (§8, residuals). An MNV is in no store the search reads (the phased
+  indel store keeps records whose REF and ALT differ in length, the SNP tiers SNVs), so a carrier
+  whose indel haplotype also holds an MNV that changes the target is listed for the target that
+  haplotype would hold without it, a sequence it does not have: a known limit of 2.10.0 (§10).
+  On the same phased slot, an indel overlapping the first at another position (one complex allele
+  the VCF splits into overlapping records; the window keeps the reference there) takes the
+  haplotype off the target's rows whatever its bases. A variant only on bases the indel deletes is
+  not in the window's sequence and changes nothing. Another allele at the indel's own position, an
+  indel or a SNP, is an alternative to it (a haplotype holding both would be one record), so a slot
+  phased with both is a phasing artefact. And an unphased carrier of two overlapping records is a
+  multi-allelic heterozygote, one allele per haplotype. These three stay listed;
 - a target of the window that holds **no base of the indel** — none the ALT adds or replaces,
   and not the two bases on either side of the deleted ones — lies wholly in a flank and gives
   **no indel row**, with or without a code: its sequence is reference (or SNP) sequence, which
@@ -2545,21 +2548,23 @@ index (chr22) has for its 64,528 indels and 993,880 SNPs; the mega's VCF has no 
 builds, as every one rebuilt for CRISPRme 2.10.0, has the `AF` of each record that has one. The
 phased indel genotype store leaves out equal-length multi-base records (MNVs), so their carriers are
 resolved with the phase unknown, PUTATIVE (§4): the HGDP + 1000 Genomes index has none, HPRC's chr22
-has 9,079 among its 195,813 indel-search records. Since 2.10.0 it holds only the indels of records
-whose FILTER is `PASS` or `.`, the records CRISPRitz's enricher reads (no other is in a fake-indel
-window, a dictionary or a tier); up to 2.8.1 it held every indel of the VCF, so on a VCF with
-records of another FILTER a carrier was taken off an indel row, for a second indel in its target, or
-off a SNP row, for an indel no window holds. A store written so is written again by
+has 9,079 among its 195,813 indel-search records in v2.0 of its graph (2.8.1's input), 24,656 among
+222,499 in v2.1 (2.10.0's; 699,719 among 12,361,907 genome-wide). Since 2.10.0 it holds only the
+indels of records whose FILTER is `PASS` or `.`, the records CRISPRitz's enricher reads (no other is
+in a fake-indel window, a dictionary or a tier); up to 2.8.1 it held every indel of the VCF, so on a
+VCF with records of another FILTER a carrier was taken off an indel row, for a second indel in its
+target, or off a SNP row, for an indel no window holds. A store written so is written again by
 `build-index-only` where its VCFs are (its `.done` marker does not record the FILTER rule), and a
 search that reads one says so in its `log_verbose.txt`; the panels published hold no such record.
 Since 2.10.0 a per-sample SNP row does not list a carrier whose haplotype holding its SNPs also
 holds an indel that changes the target's bases (§4); up to 2.8.1 it did, and so it does with
 `CRISPRME_INDEL_SNP=0`. What remains: an MNV inside the target, which the phased indel store does
-not hold (the HGDP + 1000 Genomes index has none); a carrier whose indel call or SNP call is
-unphased, which stays listed, PUTATIVE; and the population-level analysis, whose rows are worst-case
-composites (the carrier gate ranks a combination no haplotype carries after the others, §5). On a
-row of several variants, the `Variant_rsID` and `Variant_MAF` lists of the results tables are in the
-order of its `Variant_info_genome`, one rsID and one AF a variant, and two variants of one frequency
+not hold, on a SNP row as on an indel row (§10; the HGDP + 1000 Genomes index and `hg38_mega` have
+none); a carrier whose indel call or SNP call is unphased, which stays listed, PUTATIVE; and the
+population-level analysis, whose rows are worst-case composites (the carrier gate ranks a
+combination no haplotype carries after the others, §5). On a row of several variants, the
+`Variant_rsID` and `Variant_MAF` lists of the results tables are in the order of its
+`Variant_info_genome`, one rsID and one AF a variant, and two variants of one frequency
 give it each: the merge of a cluster's rows (`remove_contiguous_samples.py`) keeps each variant with
 its own rsID and AF. A variant that two datasets of a search give with two rsIDs or frequencies
 lists both pairs, one after the other; an rsID field holding two IDs (a VCF ID `rs1;rs2`) reads
@@ -2818,9 +2823,10 @@ by §4's rule — over the dictionary's alts of one character at the position, a
 hold no index but 0 and 1 settling none —, the last record of a split site) is re-implemented from
 this text only to classify a disagreement as a documented limit (counted, non-gating, a PUTATIVE tie
 included) or a failure. An MNV beside the record is in no store CRISPRme reads (§4): a target that
-needs it needs two indel-path records (the two-indel limit), while a carrier listed for a sequence
-such an MNV on its slot changes is listed for a sequence it does not have, which nothing documents,
-and fails. It runs two ways:
+needs it needs two indel-path records (the two-indel limit), and a carrier listed for the sequence
+its slot would hold without such an MNV is listed for a sequence it does not have, the known limit
+of §10, counted as `limit-indel-row-mnv` as a SNP row's carrier is as `limit-snp-row-mnv` (up to
+the real-data gates of 2.10.0 it failed). It runs two ways:
 
 - **Soundness.** Every row block of the integrated results (the highest-CFD, fewest mm+b
   and highest-CRISPR-Bulge blocks) and of the alternative alignments whose variant list
@@ -3435,6 +3441,24 @@ indels on one haplotype, and the searches above 1 DNA + 1 RNA bulge in dense reg
   the row's 50,299,316 T>G out of its target. No row of the 17 chr22 gate runs of this release
   lists such a carrier. The real-data check counts it as `limit-two-indels` (§8). The haplotype
   scan of 2.10.1 is to read each carrier's own bases there.
+- **An MNV beside an indel on one haplotype.** No store the search reads holds an MNV (the phased
+  indel store keeps records whose REF and ALT differ in length, the SNP tiers SNVs, and the indel
+  log lists an MNV's carriers with no phase), so a carrier whose haplotype holding a row's indel
+  also holds an MNV that changes the target is listed on the indel row for the target that
+  haplotype would hold without the MNV, a sequence it does not have (§4); a SNP row keeps such a
+  carrier too (§8, residuals). Of the published panels only HPRC v2.1 has MNVs: 702,193 of the
+  49,547,631 records of its VCFs (699,719 of the 12,361,907 records of its indel log); HGDP + 1000
+  Genomes (127,666,429 SNVs and 17,192,381 indels) and `hg38_mega` have none. HPRC's genome-wide
+  search of the README guide at 4 mismatches + 1 DNA + 1 RNA bulge (NRR) lists 1,162 such carriers
+  at 93 sites per sample (73 rows and 25 alternative alignments) and 557 at 72 sites at population
+  level, each row at a CFD of 0.084 or less (0 in 160 of the 192 CFD blocks); at 991 of the 1,162
+  the carrier's haplotype holds no target within the search's budget there. The real-data check
+  counts them as `limit-indel-row-mnv` (§8). The indel log cannot settle it: taking off the row
+  every carrier it lists for such an MNV, whatever the slot, would also take off 94 listings of
+  that per-sample search (34 at population level) whose haplotype holding the indel does not hold
+  the MNV. A fix needs the MNVs' phased genotypes in a store built with the panel's Dictionaries, which
+  the haplotype scan planned for 2.10.1 does not read either: it reads the stores the search
+  reads.
 - **A target wholly inside a tandem repeat.** The merge reads each row's place on the haplotype
   from its own bases, the first place they fit (§4). In a microsatellite that holds a whole
   target, the target's alignments, each with its own bases, can fit different places, so they
