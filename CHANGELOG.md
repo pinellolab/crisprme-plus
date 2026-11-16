@@ -2275,7 +2275,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
     three ALTs at 15 of the target's positions (split records, each 0|1), so it is resolved
     PUTATIVE. On `CTCT-CAGCTGGTACACGGCANNN` it was listed for `CTCTACcGgTGGTcgACGGC-GAG` (CFD 0)
     where its alleles give `CTCTCCgGaTGGTgtACGGC-GAG` (CFD 0.0009), and on a second alignment for
-    CFD 0 against 0.0002. The real-data checker found it: 6 gating `carrier-not-strongest`
+    CFD 0 against 0.0003. The real-data checker found it: 6 gating `carrier-not-strongest`
     findings in one row block (and 36 at IGH with 4 + 2 + 2, on 2026-11-09).
   - CFD is a product of one factor per column (`bulge_cfd_penalty.column_factor`), so each column
     is now chosen on its own, where every other factor a choice can change is above 0: the other
