@@ -4253,9 +4253,10 @@ def documented(win, ctx, tgt, sample, lids):
             continue
         verdicts.append((ok, mnv_here))
     # 'mnv-unseen': the rules list the carrier only through slots read without an MNV
-    # that changes the target there -- a sequence the carrier does not have, which no
-    # documented rule lists (gating); a slot the rules leave off whose MNV changes the
-    # target needs a second indel-path record for it (the two-indel limit)
+    # that changes the target there -- a sequence the carrier does not have, the known
+    # limit of 2.10.0 limit-indel-row-mnv (METHODS section 10; non-gating since the MNV
+    # merge, gating as variant-missing before); a slot the rules leave off whose MNV
+    # changes the target needs a second indel-path record for it (the two-indel limit)
     if putative is not None:
         # a slot the rules keep has a call of unknown phase in the target: PUTATIVE
         causes.add(putative)
