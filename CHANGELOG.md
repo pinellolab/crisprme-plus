@@ -1035,7 +1035,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
     variant bases than the SNP they carry (chr22:11333697 (−), chr22_11333716_T_G: HG00271,
     HG00318, HG00369, HG00379, HG00864, NA06991, NA06993, NA18547), where the HGDP + 1000
     Genomes run alone lists them on an alignment that holds it (report-only).
-  - Wired in: `PostProcess/test_check_indel_rows.py` (260 unit and mutation tests: a right
+  - Wired in: `PostProcess/test_check_indel_rows.py` (264 unit and mutation tests: a right
     row raises nothing gating, each corruption of it is caught, each documented limit and
     overlapping slot comes out under its own class, the checker's coverage gaps under
     theirs; the refusals; each release's reading of the data, told from a run's records; a
@@ -2261,6 +2261,61 @@ major.minor version (Changed). The main changes, each told in its entry below:
   (about 4 s on chr22, 27 s on IGH).
 
 ### Fixed
+- **A PUTATIVE carrier is listed for its strongest target where two of the reference-first
+  choices score a CFD of 0** (indel and MNV rows, both modes; `indel_snp_cis.worst_case_bases`).
+  - A carrier whose genotypes cannot put an allele on the indel's haplotype gets the strongest
+    target its own alleles allow (METHODS section 4): the guide's base where it carries it, else
+    the bases of the highest CFD. The choice started from the reference-first bases and changed
+    one column at a time, keeping a change where the CFD rose. Where two of those bases scored a
+    factor of 0 (a G against the guide's C at position 14, a DNA bulge's T at position 5), every
+    single change still scored 0, nothing changed, and the carrier was listed for a target of
+    CFD 0 that its alleles beat.
+  - The release gate's TRAC search (B5: NRG, per sample, 4 + 1 + 1, HGDP + 1000 Genomes) listed
+    HG04076 so at chr14:105,863,798 (+), in IGH. Its slot of chr14_105863799_G_GC holds two or
+    three ALTs at 15 of the target's positions (split records, each 0|1), so it is resolved
+    PUTATIVE. On `CTCT-CAGCTGGTACACGGCANNN` it was listed for `CTCTACcGgTGGTcgACGGC-GAG` (CFD 0)
+    where its alleles give `CTCTCCgGaTGGTgtACGGC-GAG` (CFD 0.0009), and on a second alignment for
+    CFD 0 against 0.0002. The real-data checker found it: 6 gating `carrier-not-strongest`
+    findings in one row block (and 36 at IGH with 4 + 2 + 2, on 2026-11-09).
+  - CFD is a product of one factor per column (`bulge_cfd_penalty.column_factor`), so each column
+    is now chosen on its own, where every other factor a choice can change is above 0: the other
+    columns paired with a guide base hold that base, and the DNA-bulge columns and the PAM are
+    chosen first, together. Where no choice scores above 0 they all tie and the reference-first
+    order decides, as before; wherever the old passes reached a CFD above 0, the choice is theirs.
+    Covered by `test_indel_haplotype_resolution` (B5's alleles, a minimal case and a brute force
+    over 600 random targets; 3 of the 4 tests fail on the code before).
+  - The release gate's searches B5, B6 and B7, run again with this change on the rebuilt indexes,
+    compared file by file: B5 changes HG04076's rows of that cluster only. Its alternative
+    alignments at chr14:105,863,796 to 105,863,802 lose 3 rows (its alignments of CFD 0, and one
+    whose target string the corrected alignment now holds) and gain 4; 116 more of its rows
+    change in the columns of the fewest-mismatches and CRISPR-Bulge blocks, and the cluster's
+    other 153 rows only in its count of other alignments (271 to 272; 272 to 273 on the
+    integrated row, that row's only change). Every other file is the same, and the real-data
+    checker passes it (459 findings, 0 gating). B6 and B7 (HPRC v2.1) write the same tables,
+    byte for byte.
+- **The real-data checker reads a slot's haplotype past a long deletion**
+  (`scripts/check_indel_rows.py`). It wrote a haplotype over the target and 2 x its length + 60
+  bases either side, and a soundness unit read the VCF over its rows and 1,046 bases either side,
+  so a deletion (or any record) whose REF ran past either end cut the haplotype at its junction,
+  and a target read through it lacked the bases after it. The release gate's HPRC v2.1 searches
+  (B6 and B7: the README guide, NRR, 4 + 1 + 1, both modes) failed so at chr21:37,942,668 (+).
+  NA18879's slot of the row's insertion chr21_37942670_T_TAACAGTAGTTTCTCAC also holds a
+  2,284-bp deletion (the same graph bubble) from under the target's last base, the PAM's last G,
+  and the base after the deletion is a G too: rebuilt from the VCF, the haplotype holds the row's
+  23 bases at the row's place, with its 4 mismatches and its DNA and RNA bulge, and METHODS
+  section 4 lists such a carrier (a second indel that leaves the bases as they are keeps the
+  row, and no row names two indel-path records). The checker found it off its row: 3 gating
+  `variant-missing` findings in each search. The window now reaches as far past such a REF as
+  past the target, a soundness unit reads past it as completeness did, and the deletions a
+  reading from the target's start can lose are counted as before. On the gate's results of B5,
+  B6 and B7 this change alone gives the same findings but those 3 in B6 and in B7 (B6 7,857
+  findings, 501 gating; B7 3,870 and 277; B5 465 and 6, as before), and one non-gating block
+  (chr11:118,727,664 (-) in B6 and B7) names one more of the alleles that overlap its record;
+  its chr22 checks are the same, row for row. With the reading of an indel beside a complex
+  allele (Added, the real-data checker) as well, B6 gives 7,857 findings and 288 gating, B7
+  3,870 and 208: in each, gate B's lines of a carrier listed on a slot whose MNV changes the
+  target, and no other. Covered by `test_check_indel_rows` (`ReadPastALongDeletion`; each test
+  fails on the code before).
 - **A search on a host whose coreutils are uutils' writes its results tables right.** The search
   joined its three lists of each site's best alignment (by CFD, by fewest mismatches and bulges, by
   CRISPR-Bulge) line by line into `*.bestMerge.txt` and `*.altMerge.txt` with `pr -m -t -J`

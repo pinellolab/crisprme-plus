@@ -1658,6 +1658,43 @@ class Window(object):
         j = bisect.bisect_left(self._starts, hi)
         return [k for k in self._order[i:j] if self.line_hi[k] > lo and self.line_lo[k] < hi]
 
+    def read_around(self, q):
+        """The stretch [a, b) of reference coordinates around ``q`` whose lines this window
+        read: the one it read, or the needed stretch that holds ``q``."""
+        if self.needed is None:
+            return self.beg, self.end
+        for a, b in self.needed:
+            if a <= q < b:
+                return a, b
+        return q, q + 1
+
+    def past_long_refs(self, lo, hi, room, first, last, n, at):
+        """[lo, hi) widened past every line whose REF runs past an end and that a reading of
+        a target of ``n`` bases over [first, last] can meet: on the right, one that begins
+        at most ``n`` bases past the target (or past such a line's end, which a reading
+        through it reads on from), on the left the same, mirrored; ``room`` bases past each,
+        within what the window read around ``at`` (read_around) and the contig. A haplotype
+        written over [lo, hi) (make_hap) stops at the junction of a deletion (or of any
+        edit) that runs past an end, so what a target reads through it would lack the bases
+        after the junction. Lines no reading meets are not followed (in a dense locus a
+        deletion begins at nearly every base)."""
+        top, bottom = self.read_around(at)
+        top, bottom = max(0, top), min(len(self.refseq), bottom)
+        near_lo, near_hi = first - n, last + n
+        while True:
+            wlo, whi, wnlo, wnhi = lo, hi, near_lo, near_hi
+            for k in self.lines_in(lo, hi):
+                if self.line_lo[k] < lo and self.line_hi[k] > near_lo:
+                    wlo = min(wlo, self.line_lo[k] - room)
+                    wnlo = min(wnlo, self.line_lo[k] - n)
+                if self.line_hi[k] > hi and self.line_lo[k] <= near_hi:
+                    whi = max(whi, self.line_hi[k] + room)
+                    wnhi = max(wnhi, self.line_hi[k] + n)
+            wlo, whi = max(wlo, min(top, lo)), min(whi, max(bottom, hi))
+            if (wlo, whi) == (lo, hi):
+                return lo, hi
+            lo, hi, near_lo, near_hi = wlo, whi, wnlo, wnhi
+
     def call(self, allele, sample):
         return self.calls[allele.line].get(sample)
 
@@ -1945,7 +1982,7 @@ def slot_reach(tgt, alleles):
     holding ``alleles``, can reach: its own last one, or as many bases on from its start
     as it holds plus every base those alleles delete there."""
     gone = sum(max(0, (a.edit_hi - a.edit_lo) - len(a.body)) for a in alleles
-               if a.edit_hi > tgt.start and a.edit_lo < tgt.hi)
+               if a.edit_hi > tgt.start and a.edit_lo < tgt.near_hi)
     return max(tgt.span[1], tgt.start + tgt.n - 1 + gone)
 
 
@@ -3526,7 +3563,7 @@ class Target(object):
     haplotype)."""
 
     __slots__ = ("main", "named", "probe", "strand", "start", "place", "span", "codes",
-                 "lo", "hi", "crrna", "aligned", "n", "src")
+                 "lo", "hi", "near_hi", "crrna", "aligned", "n", "src")
 
     def __init__(self, win, main, named, probe, strand, place, src, crrna, aligned):
         self.main = main
@@ -3541,8 +3578,20 @@ class Target(object):
         self.codes = [(i, pl[0]) for i, (pl, s) in enumerate(zip(place, src))
                       if pl[1] == 0 and s is not main and win.snv_at.get(pl[0])
                       and not (main is not None and main.lo <= pl[0] < main.hi)]
-        self.lo = max(0, min(self.span[0], main.lo) - 2 * self.n - 60)
-        self.hi = min(len(win.refseq), max(self.span[1], main.hi) + 2 * self.n + 60)
+        room = 2 * self.n + 60
+        self.lo = max(0, min(self.span[0], main.lo) - room)
+        self.hi = min(len(win.refseq), max(self.span[1], main.hi) + room)
+        # the deletions a slot's reading from the target's start can lose: those that
+        # begin before this end (slot_reach), as before the window reached past any
+        self.near_hi = self.hi
+        # the window the haplotypes are written over reaches as far past a line whose REF
+        # runs past either end as past the target: written over [lo, hi), a haplotype
+        # stops at such a deletion's junction, and a reading through it would lose the
+        # bases after it (HPRC v2.1's chr21:37,942,668 (+), whose carrier NA18879 holds,
+        # beside the row's insertion, a 2,284-bp deletion from under the target's last
+        # base; the base after it is the same G, so the slot holds the target)
+        self.lo, self.hi = win.past_long_refs(self.lo, self.hi, room, self.span[0],
+                                              self.span[1], self.n, self.start)
         self.crrna = crrna
         self.aligned = aligned
 
@@ -7150,6 +7199,36 @@ def row_span(r, pad):
     return max(0, lo - pad), hi + pad
 
 
+READ_PAST_ROUNDS = 8  # how many times a soundness unit's stretches are read past long REFs
+
+
+def read_past(win, needed, reach, pad, n):
+    """The stretches ``needed`` (sorted, apart) widened, ``pad`` bases past every line of
+    ``win`` whose REF runs past an end of one and that a reading of its rows' targets can
+    meet: one that begins at or before the end of the stretch's ``reach`` (or ends past its
+    start), which a reading through it reads ``n`` bases on from (Window.past_long_refs).
+    Returns the stretches and their reaches, sorted and merged."""
+    wide = []
+    for (a, b), (ra, rb) in zip(needed, reach):
+        wa, wb, wra, wrb = a, b, ra, rb
+        for k in win.lines_in(a, b):
+            if win.line_lo[k] < a and win.line_hi[k] > ra:
+                wa = min(wa, max(0, win.line_lo[k] - pad))
+                wra = min(wra, win.line_lo[k] - n)
+            if win.line_hi[k] > b and win.line_lo[k] <= rb:
+                wb = max(wb, min(len(win.refseq), win.line_hi[k] + pad))
+                wrb = max(wrb, win.line_hi[k] + n)
+        wide.append((wa, wb, wra, wrb))
+    out = []
+    for a, b, ra, rb in sorted(wide):
+        if out and a <= out[-1][1]:
+            pa, pb, pra, prb = out[-1]
+            out[-1] = (pa, max(pb, b), min(pra, ra), max(prb, rb))
+        else:
+            out.append((a, b, ra, rb))
+    return [(a, b) for a, b, _ra, _rb in out], [(ra, rb) for _a, _b, ra, rb in out]
+
+
 def run_unit(unit):
     """One work unit: ('sound' | 'comp', chrom, lo, hi, rows). Returns (the findings, the
     unit's counts: {'sites_only': records only sites-only VCFs hold, 'filtered': records
@@ -7162,14 +7241,29 @@ def run_unit(unit):
     pad = 2 * (len(ctx.guides[0]) + ctx.pam_len) + 1000
     vcfs = G["vcfs_for"][ch]
     if kind == "sound":
-        needed = []
-        for a, b in sorted(row_span(r, pad) for r in rows):
+        # the stretches read, and for each the stretch its rows' targets can be read over
+        one = max(len(ctx.full(g)) for g in ctx.guides) + max(ctx.bdna, ctx.brna) + 2
+        needed, reach = [], []
+        for (a, b), (ra, rb) in sorted((row_span(r, pad), row_span(r, one)) for r in rows):
             if needed and a <= needed[-1][1]:
                 needed[-1] = (needed[-1][0], max(needed[-1][1], b))
+                reach[-1] = (min(reach[-1][0], ra), max(reach[-1][1], rb))
             else:
                 needed.append((a, b))
+                reach.append((ra, rb))
         win = Window(refseq, ch, needed[0][0], needed[-1][1], vcfs, needed=needed,
                      panel=ctx.panel, sem=ctx.sem)
+        # a line whose REF runs past a stretch read and that a reading of a row's target
+        # can meet (a long deletion a carrier holds and the row does not name) is read
+        # past, as far as the stretch reads past its rows: the haplotypes that hold it go
+        # on after its junction (Target)
+        for _ in range(READ_PAST_ROUNDS):
+            wider, wreach = read_past(win, needed, reach, pad, one)
+            if wider == needed:
+                break
+            needed, reach = wider, wreach
+            win = Window(refseq, ch, needed[0][0], needed[-1][1], vcfs, needed=needed,
+                         panel=ctx.panel, sem=ctx.sem)
         if win.mixed or win.lower_snv:
             return [], refused(stats, win)   # the run is refused: nothing more to check
         for r in sorted(rows, key=lambda x: x["start"]):

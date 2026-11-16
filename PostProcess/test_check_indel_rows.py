@@ -7063,6 +7063,67 @@ def code_lines(path):
     return out
 
 
+def world_long_second_deletion(tmp, row_samples, n_del=1500):
+    """HPRC v2.1's chr21:37,942,668 (+) (gate B6 and B7), in small: the row's insertion
+    holds the target's first six bases (world_insertion). S04's slot of it also holds a
+    deletion of ``n_del`` bases from under the target's last base, the PAM's last G, and
+    the base after the deletion is a G too: the slot holds the target, read from its first
+    base on through the insertion (METHODS section 4: a second indel that leaves the bases
+    as they are keeps the carrier; no row names two indel-path records). S05 holds the
+    insertion alone. S06 holds it with a deletion one base longer, after which an A ends
+    the PAM (TGA): no target there. Both deletions run past the window the checks write
+    haplotypes over and past the stretch a soundness unit reads around the row."""
+    tail = GUIDE[6:] + "TG"
+    fill = ("ACTTCA" * (n_del // 6 + 2))[:n_del - 1]
+    seq = PRE + tail + "G" + fill + "G" + POST
+    anchor0 = len(PRE) - 1
+    ins = (anchor0 + 1, seq[anchor0], seq[anchor0] + "TTCAT" + GUIDE[:6],
+           {"S04": "1|0", "S05": "0|1", "S06": "1|0"})
+    mid = len(PRE) + len(tail) - 1   # 0-based: the PAM's middle G, the deletions' anchor
+    assert seq[mid] == "G" and seq[mid + 1] == "G" and seq[mid + 1 + n_del] == "G"
+    assert seq[mid + 2 + n_del] == "A"
+    dele = (mid + 1, seq[mid:mid + 1 + n_del], seq[mid], {"S04": "1|0"})
+    longer = (mid + 1, seq[mid:mid + 2 + n_del], seq[mid], {"S06": "1|0"})
+    rows = [row_fields("chr21", anchor0, "+", GUIDE + "NNN", seq[anchor0:anchor0 + 23],
+                       GUIDE + "TGG", "TGG", 0, 0, "X", tok("chr21", ins), row_samples)]
+    return Case(tmp, seq, [ins, dele, longer], rows)
+
+
+class ReadPastALongDeletion(Base):
+    """A slot's haplotype goes on after the junction of a deletion that runs past the
+    window the checks write it over (Target, Window.past_long_refs) and past the stretch a
+    soundness unit reads (read_past). At 72c2c8e it stopped at the junction, so a carrier
+    whose second deletion, from under the target's last base, leaves the bases as they are
+    was found off its row (gate B6 and B7, HPRC v2.1, chr21:37,942,668 (+), NA18879, 3
+    gating findings each, variant-missing). Each fails at 72c2c8e, the last because S04
+    is found off its row beside S06."""
+
+    def test_the_carrier_whose_deletion_keeps_the_bases_is_listed(self):
+        case = world_long_second_deletion(self.tmp, "S04,S05")
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_both_modes(self):
+        case = world_long_second_deletion(self.tmp, "S04,S05")
+        rc, found = case.run(mode="both")
+        self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_a_deletion_shorter_than_the_stretch_read(self):
+        """Past the window only (it ends within the stretch the unit reads anyway)."""
+        case = world_long_second_deletion(self.tmp, "S04,S05", n_del=300)
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_a_deletion_that_takes_the_pam_off_is_still_caught(self):
+        """S06's deletion leaves TGA at the PAM: listing it fails, and only it."""
+        case = world_long_second_deletion(self.tmp, "S04,S05,S06")
+        rc, found = case.run()
+        bad = gating(found)
+        self.assertEqual(rc, 1, found)
+        self.assertTrue(bad, found)
+        self.assertEqual({f[3] for f in bad}, {"S06"}, found)
+
+
 def shared_runs(a, b, k):
     """The runs of ``k`` or more consecutive lines of ``a`` that ``b`` holds consecutively
     too (code_lines), a run of imports aside: [(length, line in a, line in b, texts)]."""
