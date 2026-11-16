@@ -228,6 +228,8 @@ done
 #     MNV's, an untied multi-ALT alt's or an unphased call's, as it documents, whose known
 #     haplotype says otherwise, or a target the PUTATIVE rule ties with another; a slot
 #     holding two ALTs of one position is read by that rule, which there is the truth --,
+#     limit-indel-row-mnv -- a carrier whose slot holding the row's indel holds an MNV in the
+#     target, which no store CRISPRme reads holds (HPRC v2.1 only: none on this panel) --,
 #     limit-contig-end; limit-window-reach: a target that runs past its fake-indel window
 #     (the reference bases before the record and after it that the run's indel log records:
 #     30 and 30 on an enrichment of CRISPRitz 2.10.0, 25 and 27 on one of 2.9.1), or whose
