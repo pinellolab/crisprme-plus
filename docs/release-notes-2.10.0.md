@@ -60,7 +60,10 @@ describes the methods.
 - **Speed.** Coding every allele makes the immunoglobulin loci dense. An exact haplotype
   pre-check, a carriers-first check on the indel side and a post-analysis in pieces over the
   search's threads give the same rows about ten times faster (the README guide's per-sample search
-  of chr22). A search above 1 DNA + 1 RNA bulge on such an index is warned of.
+  of chr22). Genome-wide, on 32 threads, the release gate's per-sample searches took 0.95 to 1.3
+  times 2.8.1's time on HGDP + 1000 Genomes and 0.9 on HPRC, and its population-level search of
+  HGDP + 1000 Genomes with NRG 2.2 times (Known limits). A search above 1 DNA + 1 RNA bulge on such
+  an index is warned of.
 - **A dedicated index serves the PAMs its own holds** (an NRR index serves NGG, NAG and NRG,
   pruned), and a search prunes by itself where only such an index serves it.
 - **An independent check of the indel rows on real data**, `scripts/check_indel_rows.py`, which
@@ -107,15 +110,27 @@ read ([RELEASING.md](https://github.com/pinellolab/crisprme-plus/blob/v2.10.0/do
 
 ## Known limits
 
-Each is stated with its scale in METHODS §10, and TROUBLESHOOTING §14 and §15 say what a user
-sees. The haplotype scan of the dense regions, planned for 2.10.1 with no index rebuild, is to
-lift the first two.
+Each is stated with its scale in METHODS §10, and TROUBLESHOOTING §14 and §15 say what a user sees.
+The haplotype scan of the dense regions, planned for 2.10.1 with no index rebuild, is to lift the
+bulge limit and the two-indel one; where 2.10.1 plans a fix for another, it says so.
 
 - **Searches above 1 DNA + 1 RNA bulge in dense regions** (the immunoglobulin loci, some tandem
   repeats) grow by orders of magnitude on an index that codes every allele: on IGL alone, 0.76
   million raw targets at 4 + 1 + 1 and 33.7 million at 4 + 2 + 2, and IGH needed 225 GB at
   4 + 2 + 1 (measured during development, on fake-indel windows of 25/27). Keep the default budget
   there, or `--max-total-edits` 3 or less.
+- **Population-level searches of HGDP + 1000 Genomes in the immunoglobulin loci.** Coding every
+  allele makes those loci dense, and the population-level analysis, which reads no haplotype, cannot
+  skip their windows as a per-sample one does: the README guide's genome-wide population-level
+  search with NRG took 2.2 times 2.8.1's time (2 h 29 min against 1 h 8 min on 32 threads), where
+  the per-sample searches took 0.95 to 1.3 times. A faster population-level post-analysis of the
+  dense loci is planned for 2.10.1.
+- **On HPRC, an MNV beside an indel on one haplotype.** No store the search reads holds an MNV's
+  phase, so a carrier whose haplotype holding a row's indel also holds an MNV in the target is
+  listed for the target that haplotype would have without the MNV: the README guide's genome-wide
+  search lists carriers so 1,163 times at 94 sites per sample, each row at a CFD of 0.084 or less.
+  Of the published panels only HPRC v2.1 has MNVs. 2.10.1 is to store and read the MNVs' phase
+  (HPRC's Dictionaries built again, its index as it is).
 - **Two indels on one haplotype.** A fake-indel window holds one indel, so a carrier whose second
   indel moves a SNP the row names out of its target is listed all the same (one carrier in seven
   guides on 1000 Genomes chr22, at 2 + 2 bulges), and one whose own target, through a second

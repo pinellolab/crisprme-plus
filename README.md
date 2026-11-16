@@ -1012,9 +1012,14 @@ HPRC, and, with mega beside HGDP + 1000 Genomes (NRR), 17 min per sample against
 population-level: since the sites-only density guard (below) withholds mega's densest windows,
 per sample is the faster beside mega too (before the guard, 96 to 107 min per sample, 54 to 62
 min of it the report, against 49 to 55).
-Genome-wide it has not been timed yet on the indexes of the rebuild for 2.10.0 (its release
-gates do): from its parts we expect about 1.5 to 4 h per sample on 16 threads, against 2.8.1's
-1.2 h on 32 threads and an estimated 9 to 11 h without these steps (METHODS.md says how).
+Genome-wide, on the rebuilt indexes, the default search (the README guide, NRR) took 4 h 16 min to
+4 h 32 min per sample and 6 h 13 min to 6 h 27 min population-level on 16 threads (the estimate made
+from its parts before the rebuild was 1.5 to 4 h per sample). Against 2.8.1, on 32 threads, a
+per-sample search of HGDP + 1000 Genomes took 0.95 to 1.30 times 2.8.1's time and one of HPRC 0.90
+(0.96 population-level), but the README guide's population-level search of HGDP + 1000 Genomes with
+NRG took 2.2 times 2.8.1's: 2 h 29 min against 1 h 8 min. Its post-analysis of the immunoglobulin
+loci, which reads no haplotype and so skips none of their dense windows, is where the time goes; a
+faster one is planned for 2.10.1 (METHODS.md says how).
 Above 1 DNA + 1 RNA bulge the variant search itself explodes in those loci (IGL alone, at the
 default `--max-total-edits` of 6: 5.1 million SNP raw targets at 4 + 2 + 1, 33.7 million at
 4 + 2 + 2, where the indel search, on windows of 25/27, wrote 204 million and needed 157 GB of

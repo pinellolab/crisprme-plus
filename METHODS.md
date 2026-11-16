@@ -1852,20 +1852,30 @@ without these steps (measured during development, 16 threads, on a loaded node);
 min at 4 + 0 + 0, 4 + 1 + 0 and 4 + 0 + 1 alike and 9 min at 4 + 1 + 1 (16 threads, on a node at
 load 150 to 500: most of it is now the search and the steps after the post-analysis).
 
-Genome-wide, 2.10.0 has not been timed yet: the indexes of format 2 it searches exist for chr22 and
-the loci above only, until the rebuild, whose release gates time a genome-wide search. What its time
-is made of, as measured: 2.8.1's genome-wide per-sample search of the README guide took 73 min on 32
-threads of one node, 48 of them the search, on indexes of CRISPRitz 2.9.1 (format 1; the 2.8.1
-release gate); on chr22 the search of the format-2 indexes took about twice that of format 1 at the
-same 16 threads (69 s against 36 to 38 s, the README guide per sample), IGL being most of it; the
-IGH locus alone took 3.7 min of search, then 24 min on 16 threads (6.6 min of SNP post-analysis,
-11.8 min of indel post-analysis, 9 of them serial: the sorting and the clustering of its 37.6
-million indel raw targets, the merge, the end; then the steps after the post-analysis), the longest
-chromosome's part, beside which the other chromosomes' pieces run on the same workers. If the
-genome-wide search takes on 16 threads the 48 min it took on 32, or twice that, and on format 2 up
-to twice as long as on format 1, as on chr22, a genome-wide per-sample search takes about 1.5 to 4 h
-on 16 threads, against 2.8.1's 1.2 h on 32 and an estimate of 9 to 11 h without these steps made
-during development (whose model took that search, at 50 min). Above 1 DNA + 1 RNA bulge the variant
+**Genome-wide, against 2.8.1.** The release's timing gate ran each configuration of 2.8.1's release
+gate again on the rebuilt indexes (one node of the hardware above, a few searches at once as in
+2.8.1's gate, 32 threads each, 4 mismatches + 1 DNA + 1 RNA bulge, the whole `complete-search` under
+`/usr/bin/time`), against 2.8.1's own runs of the same configuration, or the released 2.8.1 image on
+its own indexes run beside it. Per sample on HGDP + 1000 Genomes, 2.10.0 took 0.95 to 1.30 times
+2.8.1's time: the README guide with NRG 1 h 34 min against 1 h 15 min (1.25; 1.30 beside the
+released 2.8.1), TRAC with NRG 1.21, the ACTGA guide with NRG 1.20 and with NRR 0.95, and the
+general index pruned to NRG and NRR 1.01 and 1.07. On HPRC (v2.1, against 2.8.1's v2.0) the README
+guide with NRR took 0.90 times 2.8.1's time per sample and 0.96 population-level, and on the mega,
+population-level, 1.18 (1.21 against 2.10.0's own search of 2.8.1's mega index). **Population-level
+on HGDP + 1000 Genomes is the exception:** the README guide with NRG took 2 h 29 min against
+1 h 8 min, 2.20 times 2.8.1's time (2.21 beside the released 2.8.1: 2 h 24 min against 1 h 5 min).
+Its searches take about 2.8.1's time (the reference 537 s against 433 s, the variant genome 2,368 s
+against 2,145 s); its post-analysis of the immunoglobulin loci does not: the SNP post-analysis took
+2,474 s on chr14 (IGH), 1,626 s on chr2 (IGK) and 765 s on chr22 (IGL), and chr14's indel
+post-analysis took 790 s over 49,265,617 lines; the whole search used 1,923% CPU on average, against
+2.8.1's 2,558 to 2,803%. That is the cost of coding every allele: the population-level analysis
+reads no haplotype, so the pre-check skips none of those windows, where per sample it skips the raw
+targets no sample carries. 2.10.0 is released with it (decided on 2026-11-16); a faster
+population-level post-analysis of the dense loci is planned for 2.10.1. On 16 threads, the README
+guide with NRR, the default, took 4 h 16 min to 4 h 32 min per sample and 6 h 13 min to 6 h 27 min
+population-level, on two nodes of the hardware above at different loads (on 8 threads, 4 h 33 min
+and 7 h 0 min), against the estimate of 1.5 to 4 h per sample made from its parts before the
+rebuild; the variant search is most of it (2.4 to 3.3 h). Above 1 DNA + 1 RNA bulge the variant
 search itself explodes in the dense loci (the `--max-total-edits` bullet above), which no step after
 the search removes: `complete-search` warns.
 
@@ -3563,6 +3573,15 @@ indels on one haplotype, and the searches above 1 DNA + 1 RNA bulge in dense reg
   near the default's cost. The haplotype scan of 2.10.1, which searches the samples' own
   haplotypes in the dense regions in place of the IUPAC search, is to make such searches
   exact and tractable.
+- **Population-level searches of a dense panel in the immunoglobulin loci.** Coding every allele
+  makes those loci dense, and the population-level analysis reads no haplotype, so the haplotype
+  pre-check, which skips per sample the raw targets no sample carries, skips none of their windows
+  (§5, search speed): the release gate's genome-wide population-level search of the README guide
+  with NRG on HGDP + 1000 Genomes took 2.20 times 2.8.1's time (2 h 29 min against 1 h 8 min, 32
+  threads), where its per-sample searches took 0.95 to 1.30 times and HPRC's searches 0.90 and 0.96.
+  Its searches take about 2.8.1's time; the SNP post-analysis of chr14 (IGH), chr2 (IGK) and chr22
+  (IGL) took 2,474, 1,626 and 765 s. 2.10.0 is released with it (decided on 2026-11-16); a faster
+  population-level post-analysis of the dense loci is planned for 2.10.1.
 - **One refusal's advice on a sites-only dataset.** Where a search refuses the INDELS index of a
   sites-only dataset (the mega) whose fake-indel genome is not in place while its VCFs are, the
   refusal says to remove that index and the dataset's enriched genome (and its variant index,
