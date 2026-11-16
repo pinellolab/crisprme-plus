@@ -2695,7 +2695,11 @@ the 1st added base, the SNP their target's 15th base, 18 carriers on the row nam
 are not demanded on the first row; a listed carrier whose own target holds a second indel and not a
 SNP the row names, pushed out of it, which §4's reading of a second indel keeps, is so counted as
 the documented limit `limit-two-indels`, not passed: NA20515 above, and no row of the 17 chr22 gate
-runs of this release lists such a carrier). Two alleles of one slot whose REF spans meet — a SNP at
+runs of this release lists such a carrier; so is one whose second indel deletes the target's last
+base and whose bases, read up to where that base stood, are the target's, its own target a repeat
+unit away: §10, 6 listings of the release gate's B10, which the check failed until it read up to
+where the last base stood rather than up to the base itself). Two alleles of one slot whose REF
+spans meet — a SNP at
 an insertion's own position, a SNP on a base a deletion removes, one complex allele split into
 overlapping records, two ALTs at one position phased onto one haplotype — describe one stretch
 twice, so the VCF gives no sequence there. Where every allele that meets the record's REF is one §4
@@ -3465,8 +3469,14 @@ indels on one haplotype, and the searches above 1 DNA + 1 RNA bulge in dense reg
   search of seven guides at 4 mismatches and 2 DNA and 2 RNA bulges, per sample, lists one
   such carrier: NA20515 on chr22:50,299,296 (+) of VEGFA site 1, whose 50,299,313 C>CG pushes
   the row's 50,299,316 T>G out of its target. No row of the 17 chr22 gate runs of this release
-  lists such a carrier. The real-data check counts it as `limit-two-indels` (§8). The haplotype
-  scan of 2.10.1 is to read each carrier's own bases there.
+  lists such a carrier. The carrier's own target can also start a repeat unit away from the
+  row's: on the release gate's genome-wide VEGFA site 3 search (B10, per sample, HGDP and 1000
+  Genomes), HGDP00655 is listed on chr1:21,194,250 and 21,194,251 (+) for 21,194,271 GTGT>G,
+  whose slot also holds 21,194,269 GT>G inside the target and 21,194,275 GGT>G, which deletes its
+  last base: read up to where that base stood, the slot holds the target's bases, and its own
+  target, through both deletions, starts two bases before the row (HG01432 so on
+  chr16:74,355,612 and 74,355,613 (+)). The real-data check counts both shapes as
+  `limit-two-indels` (§8). The haplotype scan of 2.10.1 is to read each carrier's own bases there.
 - **A target wholly inside a tandem repeat.** The merge reads each row's place on the haplotype
   from its own bases, the first place they fit (§4). In a microsatellite that holds a whole
   target, the target's alignments, each with its own bases, can fit different places, so they

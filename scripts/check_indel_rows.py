@@ -2023,11 +2023,18 @@ def reading_holds(hap, probe, place, core, unread=()):
     the bases ``probe`` at the target's own place, read from the place of its first base
     on or up to the place of its last base, through its record (every place of ``core``
     in the stretch read), and the stretch meets no allele of ``unread`` (a call of unknown
-    phase: those bases cannot be read)."""
+    phase: those bases cannot be read). A second indel of the slot can delete the base at
+    either place: the stretch is then read from where the first base stood on (the slot's
+    first base past that place), or up to where the last base stood (its last base before
+    that place), as CRISPRme reads it (indel_snp_cis.target_pairs). The gate's B10 (VEGFA
+    site 3, per sample) lists HGDP00655 on chr1:21,194,250 (+) of 21,194,271 GTGT>G, whose
+    slot also holds 21,194,269 GT>G inside the target and 21,194,275 GGT>G, which deletes
+    its last base: up to where that base stood, the slot holds the target's bases (its own
+    target, two indels, starts two bases before the row: METHODS section 10)."""
     n = len(probe)
-    for k in (hap.index(place[0]), None if hap.index(place[-1]) is None
-              else hap.index(place[-1]) - n + 1):
-        if k is None or k < 0 or hap.seq[k:k + n] != probe:
+    for k in (bisect.bisect_left(hap.place, place[0]),
+              bisect.bisect_right(hap.place, place[-1]) - n):
+        if k < 0 or k + n > len(hap.seq) or hap.seq[k:k + n] != probe:
             continue
         stretch = hap.place[k:k + n]
         if not core <= set(stretch):

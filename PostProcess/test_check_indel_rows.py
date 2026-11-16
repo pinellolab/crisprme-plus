@@ -7124,6 +7124,69 @@ class ReadPastALongDeletion(Base):
         self.assertEqual({f[3] for f in bad}, {"S06"}, found)
 
 
+def world_last_base_deleted(tmp, row_samples):
+    """The gate's B10 (VEGFA site 3, per sample): chr1:21,194,250 (+), the fewest-edits
+    block of an alternative alignment, hg38's bases 21,194,150..21,194,349 (0-based) as a
+    small chromosome. 21,194,271 GTGT>G makes the target -GTGtGTGtGTGTGTGtGTGTGGG.
+    HGDP00655 (S01) holds it with 21,194,269 GT>G inside the target and 21,194,275 GGT>G,
+    which deletes its last base: read from its first base on its slot has GGT at the PAM,
+    read up to where its last base stood the slot holds the target's bases (its own target,
+    through both deletions, starts two bases before the row): the second-indel rule lists
+    it (METHODS sections 4 and 10). S02 holds the row's deletion alone; S03 holds it with
+    21,194,269 GT>G only, whose bases are another target's either way."""
+    at = 21194150
+    seq = ("AATAATGGTCTCCAATCCTATCCAGGTTGCTGTGAATGCCATTAATTCTTTCCTTTTTTATGGCTGAGTAGTATTCTATT"
+           "GTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGTGGTGTGTGTGTATTTCTTTATCCACTCATTGATTGA"
+           "TGGTAACCCCTTATTTTTCTGTTGGAGAAACTGGGGCTCA")
+
+    def rec(pos1, ref, alt, gts):
+        assert seq[pos1 - 1 - at:pos1 - 1 - at + len(ref)] == ref, (pos1, ref)
+        return (pos1 - at, ref, alt, gts)
+
+    recs = [rec(21194229, "TTGTGTGTG", "T", {"S01": "0|1"}),
+            rec(21194269, "GT", "G", {"S01": "1|0", "S03": "1|0"}),
+            rec(21194271, "GTGT", "G", {"S01": "1|0", "S02": "0|1", "S03": "1|0"}),
+            rec(21194275, "GGT", "G", {"S01": "1|0"})]
+    start = 21194250 - at
+    ref_text = "-" + seq[start:start + 23].lower()
+    rows = [row_fields("chr21", start, "+", "GGTGAGTGAGTGTGTGCGTG-NNN", ref_text,
+                       "-GTGtGTGtGTGTGTGtGTGTGGG", "GGG", 3, 2, "RNA,DNA",
+                       tok("chr21", recs[2]), row_samples,
+                       spacer="GGTGAGTGAGTGTGTGCGTGNNN")]
+    return Case(tmp, seq, recs, rows)
+
+
+class ReadUpToWhereTheLastBaseStood(Base):
+    """CRISPRme reads a slot carrying a second indel from the place of the target's first
+    base on, or up to the place of its last base (indel_snp_cis.target_pairs); where the
+    slot's own variants delete the base at that place it reads from where it stood on, or
+    up to where it stood. The checker's reading of that rule (reading_holds) looked for the
+    base itself, so up to a640d92 it found the documented rule leaving such a carrier off,
+    and a listing it makes was a failure (gate B10: HGDP00655 on chr1:21,194,250 and 251
+    (+), HG01432 on chr16:74,355,612 and 613 (+), 6 gating variant-missing findings).
+    Each listing is the known limit of two indels on one haplotype (limit-two-indels).
+    Both fail at a640d92, the second because S01 is found off its row beside S03."""
+
+    VEGFA3 = "GGTGAGTGAGTGTGTGCGTG"
+
+    def test_the_listing_is_the_two_indel_limit(self):
+        case = world_last_base_deleted(self.tmp, "S01,S02")
+        rc, found = case.run(guide=self.VEGFA3)
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        # one line per block of the row (the three blocks hold the same alignment here)
+        self.assertEqual([(f[1], f[3]) for f in found], [("limit-two-indels", "S01")] * 3,
+                         found)
+
+    def test_a_slot_whose_bases_are_another_targets_is_still_caught(self):
+        """S03's slot reads GGT at the PAM from the target's first base on, and its last
+        base is in place: a listing of S03 fails, as at a640d92."""
+        case = world_last_base_deleted(self.tmp, "S01,S02,S03")
+        rc, found = case.run(guide=self.VEGFA3)
+        self.assertEqual(rc, 1, found)
+        self.assertEqual([(f[1], f[3]) for f in gating(found)],
+                         [("variant-missing", "S03")] * 3, found)
+
+
 def shared_runs(a, b, k):
     """The runs of ``k`` or more consecutive lines of ``a`` that ``b`` holds consecutively
     too (code_lines), a run of imports aside: [(length, line in a, line in b, texts)]."""
