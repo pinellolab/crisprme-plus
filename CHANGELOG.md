@@ -2332,38 +2332,52 @@ major.minor version (Changed). The main changes, each told in its entry below:
     `carrier-missing` findings (chr10:63,652,969 (−) HG02006, chr10:132,881,999 (+) HGDP00290,
     chr11:127,948,555 (+) HGDP01255 and HGDP00973, chr5:141,655,179 and 141,655,180 (−)
     HGDP00478, chr5:146,361,254 (+) HG03120). Rebuilt from the VCF, each slot holds its row's
-    target at the row's start, through a repeat unit gained or lost at the target's edge, and
-    the way from the first base on met two records of one base 2 to 41 bases past the target
-    (for HG03120, 146,361,314 GGGA>G and 146,361,315 GGA>G on its slot).
+    target at the row's start, through a second indel that leaves the target's bases as they are:
+    an insertion whose first 1 to 5 bases are the target's last, those the repeat goes on with, or
+    a repeat unit deleted 2 to 5 bases from an end of the target, but on HGDP00478's rows of
+    141,655,182 TAC>T, where it is 141,655,188's deletion of 37 bases, (AC)13 and an 11-base
+    linker, which starts after the target's sixth or seventh base on the + strand, runs past its
+    reference end and joins two AC runs. The way from the first base on met two records of one
+    base 2 to 41 bases past the target (for HG03120, 146,361,314 GGGA>G and 146,361,315 GGA>G on
+    its slot), and the way up to the last base, which reaches no variant past the target, does not
+    find the target's bases through the indel.
   - The slot is now written without the variants it cannot be written with, and a way is
     unreadable only where it reaches a base of one's REF: a base of its stretch on the slot, or
     of the target on the window, whose bases it reads with the slot's own alleles. A way that
     read before reads the same, so the change only keeps carriers; one whose target holds such
     a variant on the window stays off (HGDP01092 on chr1:7,231,326 (+): 7,231,350 T>A and
     T>TGTGTGTGTGA on its slot). Covered by `test_indel_haplotype_resolution`
-    (`AVariantPastTheStretch`, the analyzer's own `_breaking_slots` on HG03120's and
-    HGDP01092's slots) and `test_indel_overlaid_rows` (site AF, end to end); 6 of their 9 new
-    tests fail on the code before.
-  - On the release gate (each search it touches run again at a640d92 and with the change, in
-    gate B's sandbox and install; a640d92's runs give gate B's tables byte for byte): B10 lists
-    9 more carriers on 34 alignments of VEGFA site 3 at 8 sites, the 6 above and HG03765,
-    HG00881 and SS6004469, each rebuilt from the VCF holding the alignment's target at its
-    start; with the checker's change below its genome-wide check counts 590,939 findings, none
-    gating (45 before). Around them the tables move as they do for any change of a site's
-    rows, and no carrier leaves a site's listing: two alignments of one allele fold into one
-    entry or stop doing so as their carrier sets meet or part (chr13:72,892,782 (−));
+    (`AVariantPastTheStretch`, the analyzer's own `_breaking_slots` on HG03120's, HGDP00478's
+    and HGDP01092's slots) and `test_indel_overlaid_rows` (site AF, end to end); 7 of their 10
+    new tests fail on the code before.
+  - On the release gate (each search it touches run again at a640d92 and with the change, in gate
+    B's sandbox and install; a640d92's runs give gate B's tables byte for byte): B10 lists 9 more
+    carriers on 34 alignments of VEGFA site 3 at 8 sites, and with the checker's change below its
+    genome-wide check counts 590,939 findings, none gating (45 before). The 6 above and SS6004469
+    are each rebuilt from the VCF holding the alignment's target at its start. HG00881's slot
+    holds the bases of its row, chr2:2,873,200 (+), at the row's start through a second insertion,
+    2,873,216 T>TGA, which pushes the row's 2,873,218 T>A out of them: the limit of two indels on
+    one haplotype (METHODS section 10), which the checker counts as `limit-two-indels`. HG03765,
+    on chr13:72,892,782 (−), has a slot phased with nine alleles of the row's own position
+    72,892,785 (eight insertions, the row's among them, and TAC>T) and with 72,892,787 C>CAG, so
+    that slot has no one sequence in the VCF there and the target is on it only where the row's
+    allele is the one kept: it is listed as METHODS section 4 lists a slot phased with another
+    allele at the indel's own position, a phasing artefact, and the checker counts it as
+    `limit-overlapping-records`. Around these listings the tables move as they do for any change
+    of a site's rows, and no carrier leaves a site's listing: two alignments of one allele fold
+    into one entry or stop doing so as their carrier sets meet or part (chr13:72,892,782 (−));
     SS6004469's alignment takes the fewest-mismatches and CRISPR-Bulge columns of a row from a
     SNP's, whose carriers the row and the alternative alignments still list (chr2:186,127,481
-    (−)); and CRISPR-Bulge scores of chr2's other rows, read in another batch, move in their
-    fifth or sixth digit, which swaps two near-ties of the highest-CRISPR-Bulge column (EMX1 at
+    (−)); and CRISPR-Bulge scores of chr2's other rows, read in another batch, move in their fifth
+    or sixth digit, which swaps two near-ties of the highest-CRISPR-Bulge column (EMX1 at
     chr2:231,580,553 (+), VEGFA site 3 at chr2:222,776,092 (−)). B11, the same guides
-    population-level (no alternative alignments), changes in those chr2 rows alone, and its
-    checks pass as before (14,124 findings, one more non-gating). B6 and B7 (HPRC v2.1) list
-    HG02015 on one more row, chrY:22,614,199 (−) of chrY_22614210_ACTGTGGCT_A: its slot also
-    holds MNVs inside the target, which no store CRISPRme reads holds (22,614,202 GGCTG>ACTGT),
-    and the checker counts the listing in its MNV class, 3 more gating lines in each (291 and
-    211). The rest of the gate (B1 to B5, B8, B9, B12a, B12d, B13, B14, E2, E5) calls the rule
-    86,538 times with the same result each time, so their tables are a640d92's.
+    population-level (no alternative alignments), changes in those chr2 rows alone, and its checks
+    pass as before (14,124 findings, one more non-gating). B6 and B7 (HPRC v2.1) list HG02015 on
+    one more row, chrY:22,614,199 (−) of chrY_22614210_ACTGTGGCT_A: its slot also holds MNVs
+    inside the target, which no store CRISPRme reads holds (22,614,202 GGCTG>ACTGT), and the
+    checker counts the listing in its MNV class, 3 more gating lines in each (291 and 211). The
+    rest of the gate (B1 to B5, B8, B9, B12a, B12d, B13, B14, E2, E5) calls the rule 86,538 times
+    with the same result each time, so their tables are a640d92's.
 - **The real-data checker reads a slot up to where the target's last base stood when a second
   indel deletes it** (`scripts/check_indel_rows.py`, `reading_holds`). CRISPRme reads a slot
   that holds a second indel inside the target from the place of the target's first base on, or

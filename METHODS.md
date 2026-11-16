@@ -919,10 +919,17 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   release gate of 2.10.0 any such variant of the reading's side within the bases written out
   stopped it: on the gate's VEGFA site 3 search (B10: NRG, 4 mismatches and 1 DNA and 1 RNA bulge,
   per sample, on HGDP and 1000 Genomes) six carriers whose haplotype holds the target at its start,
-  through a repeat unit gained or lost at its edge, were left off it for two records of one base 2
-  to 41 bases past it, as HG03120 on chr5:146,361,254 (+) for 146,361,314 GGGA>G and 146,361,315
-  GGA>G on the same slot. Where a second indel deletes the base at the target's first or last
-  place, the reading starts where that base stood or ends where it stood. A second indel
+  through a second indel that leaves the target's bases as they are, were left off it. Their
+  reading from the first base on met two records of one base 2 to 41 bases past the target, as
+  HG03120's on chr5:146,361,254 (+) met 146,361,314 GGGA>G and 146,361,315 GGA>G on the same slot,
+  and their reading up to the last base, which reaches no variant past the target, does not find
+  the target's bases through the indel. That second indel is an insertion whose first 1 to 5 bases
+  are the target's last, those the repeat goes on with (HG03120's 146,361,281 A>AGTGT), or a repeat
+  unit deleted 2 to 5 bases from an end of the target, but on HGDP00478's rows of chr5:141,655,182
+  TAC>T: there it is 141,655,188's deletion of 37 bases, (AC)13 and an 11-base linker, which starts
+  after the target's sixth or seventh base on the + strand, runs past its reference end and joins
+  two AC runs. Where a second indel deletes the base at the target's first or last place, the
+  reading starts where that base stood or ends where it stood. A second indel
   inserted right next to the indel's anchor base is inside the target. A carrier whose second indel
   inside the target has an unphased call cannot be tied to a haplotype, so it stays listed,
   PUTATIVE, as every carrier on an unphased panel is; this holds even when another, phased second
