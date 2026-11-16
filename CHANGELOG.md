@@ -2258,7 +2258,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
     CFD 0 that its alleles beat.
   - The release gate's TRAC search (B5: NRG, per sample, 4 + 1 + 1, HGDP + 1000 Genomes) listed
     HG04076 so at chr14:105,863,798 (+), in IGH. Its slot of chr14_105863799_G_GC holds two or
-    three ALTs at 14 of the target's positions (split records, each 0|1), so it is resolved
+    three ALTs at 15 of the target's positions (split records, each 0|1), so it is resolved
     PUTATIVE. On `CTCT-CAGCTGGTACACGGCANNN` it was listed for `CTCTACcGgTGGTcgACGGC-GAG` (CFD 0)
     where its alleles give `CTCTCCgGaTGGTgtACGGC-GAG` (CFD 0.0009), and on a second alignment for
     CFD 0 against 0.0002. The real-data checker found it: 6 gating `carrier-not-strongest`
@@ -2270,6 +2270,15 @@ major.minor version (Changed). The main changes, each told in its entry below:
     order decides, as before; wherever the old passes reached a CFD above 0, the choice is theirs.
     Covered by `test_indel_haplotype_resolution` (B5's alleles, a minimal case and a brute force
     over 600 random targets; 3 of the 4 tests fail on the code before).
+  - The release gate's searches B5, B6 and B7, run again with this change on the rebuilt indexes,
+    compared file by file: B5 changes HG04076's rows of that cluster only. Its alternative
+    alignments at chr14:105,863,796 to 105,863,802 lose 3 rows (its alignments of CFD 0, and one
+    whose target string the corrected alignment now holds) and gain 4; 116 more of its rows
+    change in the columns of the fewest-mismatches and CRISPR-Bulge blocks, and the cluster's
+    other 153 rows only in its count of other alignments (271 to 272; 272 to 273 on the
+    integrated row, that row's only change). Every other file is the same, and the real-data
+    checker passes it (459 findings, 0 gating). B6 and B7 (HPRC v2.1) write the same tables,
+    byte for byte.
 - **The real-data checker reads a slot's haplotype past a long deletion**
   (`scripts/check_indel_rows.py`). It wrote a haplotype over the target and 2 x its length + 60
   bases either side, and a soundness unit read the VCF over its rows and 1,046 bases either side,
@@ -2284,8 +2293,12 @@ major.minor version (Changed). The main changes, each told in its entry below:
   row, and no row names two indel-path records). The checker found it off its row: 3 gating
   `variant-missing` findings in each search. The window now reaches as far past such a REF as
   past the target, a soundness unit reads past it as completeness did, and the deletions a
-  reading from the target's start can lose are counted as before. Covered by
-  `test_check_indel_rows` (`ReadPastALongDeletion`; each test fails on the code before).
+  reading from the target's start can lose are counted as before. On the gate's results of B5,
+  B6 and B7 the check gives the same findings but those 3 in B6 and in B7 (B6 7,857 findings, 501
+  gating; B7 3,870 and 277; B5 465 and 6, as before), and one non-gating block
+  (chr11:118,727,664 (-) in B6 and B7) names one more of the alleles that overlap its record;
+  its chr22 checks are the same, row for row. Covered by `test_check_indel_rows`
+  (`ReadPastALongDeletion`; each test fails on the code before).
 - **A search on a host whose coreutils are uutils' writes its results tables right.** The search
   joined its three lists of each site's best alignment (by CFD, by fewest mismatches and bulges, by
   CRISPR-Bulge) line by line into `*.bestMerge.txt` and `*.altMerge.txt` with `pr -m -t -J`
