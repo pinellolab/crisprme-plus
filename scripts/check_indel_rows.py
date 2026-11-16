@@ -81,15 +81,20 @@ removes, a complex allele split into overlapping records, two ALTs at one positi
 onto one haplotype) describe one stretch twice: the VCF gives no sequence there. Where
 every allele that meets the record's REF is one METHODS section 4 reads the record's slot
 without -- another allele at the record's own position (a phasing artefact), an allele
-only on bases the record deletes, an MNV (in no store CRISPRme reads beside the record) --
-and no allele kept meets one left out, the slot is read without them: the one reading of
-it that holds the record, so the one a row naming the record (and not them) can mean. A
-listed carrier must hold the target there, and is a note when it does
+only on bases the record deletes or replaces, an MNV (in no store CRISPRme reads beside the
+record), an indel at another position that changes none of the reference bases the target
+covers (the record's whole REF and the target's flank bases: one anchored on the record's
+last REF base past a target inside its ALT, say) -- and no allele kept meets one left out,
+the slot is read without them: the one reading of it that holds the record, so the one a
+row naming the record (and not them) can mean; for such an indel, the reading that keeps
+the record's ALT whole, on which the target's bases are what they are on any reading that
+holds the record. A listed carrier must hold the target there, and is a note when it does
 (overlap-reading-agrees); a carrier left off whose slot holds it there is counted
 (limit-overlapping-records: METHODS says such carriers stay listed; not turned into a
-failure). Any other overlap of the record (an indel or a SNV at another position: a
-complex allele, which METHODS takes off, or an undocumented one) leaves the slot no
-reading. Two other alleles of the slot whose REFs meet (an overlap zone) leave it no
+failure). Any other overlap of the record (an indel at another position that changes a
+base the target covers, or adds bases between two of them: a complex allele, which METHODS
+takes off whatever its bases; or a SNV at another position, an undocumented one) leaves the
+slot no reading. Two other alleles of the slot whose REFs meet (an overlap zone) leave it no
 sequence only where they can change what it says of the target -- one of them is named, or
 changes a base read from the target's start (no margin: a zone wholly before or after that
 stretch changes none of its bases) --: every reading of such zones (any of their alleles
@@ -173,9 +178,11 @@ limit (counted and listed under its own class, non-gating) or not (gating):
     RNA bulges (NA20515, chr22:50,299,296 (+), VEGFA site 1), and no row of the 2.10.0
     integration's 17 gate runs lists such a carrier;
   * another allele at the record's own position is a phasing artefact, a variant only on
-    bases the record deletes changes nothing, and an overlapping indel at another position
-    takes the slot off (limit-overlapping-records; a listed carrier the rule takes off is
-    carrier-off-by-rule, gating) -- the truth reads the first two as the rule does, so an
+    bases the record deletes or replaces changes nothing, an overlapping indel at another
+    position that changes none of the reference bases the target covers changes nothing
+    either, and one that changes one of them takes the slot off whatever its bases
+    (limit-overlapping-records; a listed carrier the rule takes off is
+    carrier-off-by-rule, gating) -- the truth reads the first three as the rule does, so an
     overlap explains a disagreement only on its own slot, as the clash it is; a reading
     of the slot through a second indel that meets two of its variants that overlap (or a
     call of unknown phase) cannot be read, either way;
@@ -1817,50 +1824,97 @@ def meets_ref(a, al):
 
 # the overlaps of a record that METHODS section 4 reads the record's slot without (the
 # record stays listed): another allele at its own position (a phasing artefact, or the
-# other allele of a multi-allelic heterozygote), an allele only on bases it deletes, an
-# MNV (in no store CRISPRme reads beside the record)
-LEFT_OUT = frozenset(("artefact", "deleted", "mnv"))
+# other allele of a multi-allelic heterozygote), an allele only on bases it deletes or
+# replaces, an MNV (in no store CRISPRme reads beside the record), and an indel at another
+# position that changes none of the reference bases a target covers ('beside': only for
+# that target, covered_span)
+LEFT_OUT = frozenset(("artefact", "deleted", "mnv", "beside"))
 # the documented causes an overlap gives (the 'mnv' overlap gives none: it is not read)
-OVERLAP_CAUSES = frozenset(("artefact", "deleted", "complex", "undocumented"))
+OVERLAP_CAUSES = frozenset(("artefact", "deleted", "complex", "undocumented", "beside"))
 
 
-def overlap_kind(a, al, phase_known=True):
+def covered_span(place, al):
+    """(first, last), inclusive: the reference bases a target whose bases stand at
+    ``place`` covers as METHODS section 4 reads a second indel against it -- the
+    coordinates of its bases and, where it holds a base of record ``al``'s ALT (a base the
+    record adds, replaces or keeps: the fake-indel window writes the ALT verbatim), the
+    record's whole REF. Every indel row's target holds one (the junction rule), so its
+    span takes in the REF however far inside a long ALT the target lies."""
+    lo, hi = span_of(place)
+    if any(al.lo <= pl[0] < al.hi for pl in place):
+        lo, hi = min(lo, al.lo), max(hi, al.hi - 1)
+    return lo, hi
+
+
+def complex_takes_off(a, al, cover):
+    """METHODS section 4: whether an indel ``a`` overlapping record ``al`` at another
+    position, on the record's slot, takes that slot off a target covering the reference
+    bases ``cover`` (covered_span), whatever bases it writes: it deletes or replaces one of
+    them that the record does not delete or replace itself (a base the record already
+    removed is on no haplotype carrying it: losing it again changes nothing), or it adds
+    bases between two of them (right after the base before its edit; inside the record's
+    REF that is always so). One that changes none of them -- an insertion or deletion
+    anchored on the record's last REF base, past a target inside the record's ALT, say,
+    or a deletion only of bases the record replaces -- leaves the target's bases as the
+    window has them, and the slot keeps the row."""
+    lo, hi = cover
+    # what it deletes or replaces among the covered bases: an interval, which changes the
+    # target unless the record's own edit holds all of it
+    x0, x1 = max(a.edit_lo, lo), min(a.edit_hi, hi + 1)
+    if x0 < x1 and not al.edit_lo <= x0 < x1 <= al.edit_hi:
+        return True
+    # the bases it adds go in right before its edit: between two covered bases?
+    return bool(a.body) and lo < a.edit_lo <= hi
+
+
+def overlap_kind(a, al, phase_known=True, cover=None):
     """How METHODS section 4 reads allele ``a``, on record ``al``'s slot, where its REF
     meets the record's: 'artefact' (another allele at the record's own position -- an
     alternative to it, so a slot phased with both is a phasing artefact -- or, its phase
     unknown, the other allele of a multi-allelic heterozygote, one allele per haplotype),
-    'deleted' (only on bases the record, a pure deletion, removes: it changes nothing),
-    'mnv' (an MNV, in no store CRISPRme reads beside the record: not read), 'complex' (an
-    indel at another position, one complex allele split into overlapping records: the
-    slot is taken off the target's rows whatever its bases) or 'undocumented' (a SNV at
-    another position, which METHODS does not cover: read as taking the slot off). The
-    first three leave the record's slot listed, read without them."""
+    'deleted' (only on bases the record, an indel, deletes or replaces: they are not in
+    the fake-indel window, so it changes nothing), 'mnv' (an MNV, in no store CRISPRme
+    reads beside the record: not read), 'complex' (an indel at another position -- one
+    complex allele split into overlapping records, or a repeat's indel left-aligned onto
+    the record's last bases -- that changes the reference bases the target covers: the
+    slot is taken off the target's rows whatever its bases; with no target given
+    (``cover`` None), every such indel), 'beside' (one that changes none of the bases a
+    target covering ``cover`` holds: complex_takes_off) or 'undocumented' (a SNV at
+    another position, which METHODS does not cover: read as taking the slot off). All but
+    'complex' and 'undocumented' leave the record's slot listed, read without them."""
     if a.key[0] == al.key[0]:
         return "artefact"
-    if not al.body and not a.adds() and a.lo >= al.edit_lo and a.hi <= al.edit_hi:
+    if (not al.body or al.kind == "indel") and not a.adds() \
+            and a.lo >= al.edit_lo and a.hi <= al.edit_hi:
         return "deleted"
     if not phase_known:
         return "artefact"
     if a.kind == "snv":
         return "undocumented"
     if a.kind == "indel":
+        if cover is not None and not complex_takes_off(a, al, cover):
+            return "beside"
         return "complex"
     return "mnv"
 
 
-def slot_reading(al, present):
+def slot_reading(al, present, cover=None):
     """(the alleles a slot holding record ``al`` and ``present`` is read with, the
-    overlapping alleles left out, the kinds of the overlaps; overlap_kind). Where every
-    allele whose REF meets the record's is one METHODS section 4 reads the slot without
-    (LEFT_OUT) and no allele kept meets one left out, the slot is read without them: the
-    one reading of the slot that holds the record (a row naming the record and one of
-    them names two records of one base). Otherwise the record keeps its overlap: the VCF
-    gives the slot no sequence there (a complex or undocumented overlap, which METHODS
-    reads as taking the slot off, or an allele kept that meets one left out)."""
+    overlapping alleles left out, the kinds of the overlaps; overlap_kind, for a target
+    covering the reference bases ``cover`` when one is given). Where every allele whose
+    REF meets the record's is one METHODS section 4 reads the slot without (LEFT_OUT) and
+    no allele kept meets one left out, the slot is read without them: the one reading of
+    the slot that holds the record (a row naming the record and one of them names two
+    records of one base) -- for an indel at another position that changes none of the
+    bases the target covers, the reading that keeps the record's ALT whole, on which the
+    target's bases are what they are on any reading that holds the record. Otherwise the
+    record keeps its overlap: the VCF gives the slot no sequence there (a complex or
+    undocumented overlap, which METHODS reads as taking the slot off, or an allele kept
+    that meets one left out)."""
     over = [a for a in present if meets_ref(a, al)]
     if not over:
         return present, [], frozenset()
-    kinds = frozenset(overlap_kind(a, al) for a in over)
+    kinds = frozenset(overlap_kind(a, al, cover=cover) for a in over)
     rest = [a for a in present if not meets_ref(a, al)]
     if not kinds <= LEFT_OUT or any(meets_ref(b, a) for a in over for b in rest):
         return present, [], kinds
@@ -3653,9 +3707,17 @@ def truth(win, tgt, sample, lids):
     base, through other SNP alts, is another row's target). A slot holding an allele whose
     REF meets the record's has no sequence there: where METHODS section 4 reads it without
     that allele (a phasing artefact at the record's position, an allele only on bases it
-    deletes, an MNV; slot_reading) the slot is read so -- the one reading of it that holds
-    the record, and so the one a row naming the record and not that allele can mean -- and
-    otherwise it is a clash, whatever its calls of unknown phase. Two other alleles of the
+    deletes or replaces, an MNV, an indel at another position that changes none of the
+    reference bases the target covers; slot_reading) the slot is read so -- the one reading
+    of it that holds the record, and so the one a row naming the record and not that allele
+    can mean -- and otherwise it is a clash, whatever its calls of unknown phase. An indel
+    that changes none of the bases the target covers (covered_span: for an indel row, the
+    record's whole REF and the target's flank bases) leaves the target's bases the same on
+    every reading that holds the record whole: the bases it deletes or replaces are the
+    record's own, or past the target, and it adds none between two of them (on HPRC v2.1, an
+    insertion or deletion anchored on a complex allele's last REF base, or a repeat's
+    deletion left-aligned onto its last bases, beside a target kilobases inside its ALT).
+    Two other alleles of the
     slot whose REFs meet (a zone) leave it no sequence only where they can change what it
     says of the target (zones_for: one of them is named, or changes a base read from the
     target's start): every reading of such zones -- any of their alleles no two of which
@@ -3675,11 +3737,12 @@ def truth(win, tgt, sample, lids):
     # a reading of the target holds the row's named SNVs and no other (snvs_held)
     named_snvs = frozenset(a.key for a in named if a.kind == "snv")
     core = record_core(tgt.place, tgt.src, tgt.main)
+    cover = covered_span(tgt.place, main_al)
     info = []
     verdicts = []
     for h in slots:
         present, unknown = slot_alleles(win, sample, main_al, call, h, lids)
-        use, left, _kinds = slot_reading(main_al, present)
+        use, left, _kinds = slot_reading(main_al, present, cover)
         keys = {a.key for a in use}
         can_named = all(k in keys or any(u.key == k for u in unknown) for k in named_keys)
         hap = make_hap(win.refseq, [main_al] + use, tgt.lo, tgt.hi)
@@ -3991,6 +4054,9 @@ def documented(win, ctx, tgt, sample, lids):
         causes.add("putative")
         return _documented_putative(win, ctx, tgt, sample, causes)
     s0, s1 = tgt.span
+    # the reference bases the target covers, as a second indel overlapping the record is
+    # read against them (covered_span: the record's whole REF and the target's flank bases)
+    cover = covered_span(tgt.place, main_al)
     # the reading must be through the record: the record's bases the row's target holds,
     # at their places (and the base past them), in the stretch read
     core = record_core(tgt.place, tgt.src, tgt.main)
@@ -4019,10 +4085,12 @@ def documented(win, ctx, tgt, sample, lids):
                     continue
                 if meets_ref(a, main_al):
                     # overlap_kind: an allele at the record's own position (or, its phase
-                    # unknown, a multi-allelic heterozygote) and one only on bases it
-                    # deletes stay out of the reading; an MNV is not read; an indel at
-                    # another position takes the slot off, and so (undocumented) does a SNV
-                    ok = overlap_kind(a, main_al, phase_known=(r != "?"))
+                    # unknown, a multi-allelic heterozygote), one only on bases it deletes
+                    # or replaces and an indel at another position that changes none of the
+                    # bases the target covers stay out of the reading; an MNV is not read;
+                    # an indel at another position that changes one of them takes the slot
+                    # off whatever its bases, and so (undocumented) does a SNV
+                    ok = overlap_kind(a, main_al, phase_known=(r != "?"), cover=cover)
                     if ok == "complex":
                         off = "complex"
                     elif ok == "undocumented":
@@ -4165,7 +4233,8 @@ LIMIT_OF = (("last-alt-wins", "limit-last-alt-wins"),
             ("complex", "limit-overlapping-records"),
             ("undocumented", "limit-overlapping-records"),
             ("artefact", "limit-overlapping-records"),
-            ("deleted", "limit-overlapping-records"))
+            ("deleted", "limit-overlapping-records"),
+            ("beside", "limit-overlapping-records"))
 
 
 def limit_of(causes):
@@ -5210,8 +5279,10 @@ def record_demands(win, ctx, al, carriers, full, lo, hi, reach):
     'putative-untied' (a demanded target through a SNV CRISPRme's stores read otherwise:
     an earlier record of a split site, an alt of a multi-ALT line no genotype ties). No
     target that needs a second indel-path record is a row either way. A slot whose record
-    meets an indel at another position (a complex allele) gives none: METHODS takes it off
-    the target's rows."""
+    meets an indel at another position (a complex allele) gives none for a target that
+    indel changes the covered reference bases of (METHODS takes the slot off it: whatever
+    the indel's bases), and, for one whose covered bases it leaves as they are, the row
+    CRISPRme writes for the slot read without its overlap (unread_overlap)."""
     lids = win.lines_in(lo, hi)
     groups = defaultdict(list)
     for s in sorted(carriers):   # a set: sorted, so that nothing depends on hash order
@@ -5230,11 +5301,16 @@ def record_demands(win, ctx, al, carriers, full, lo, hi, reach):
     cut = {}   # why (window_cut) -> the samples one of whose targets CRISPRme cannot hold
 
     def unread_overlap(members, main_al, present, unknown, kinds):
-        """A slot whose record overlaps an allele no documented reading leaves out: no
-        sequence. Its carriers are counted where a target of the record reads on it with
-        the overlapping alleles left out (the one-record reading CRISPRme's window makes);
-        its rows chain a cluster only as METHODS reads the slot -- none where it takes the
-        slot off (a complex allele), left open where it says nothing -- and never one that
+        """A slot whose record overlaps an allele no documented reading leaves out (for
+        every target: slot_reading reads it with no target): no sequence. Its carriers are
+        counted where a target of the record reads on it with the overlapping alleles left
+        out (the one-record reading CRISPRme's window makes); its rows chain a cluster only
+        as METHODS reads the slot -- none where an indel at another position overlapping the
+        record changes the reference bases the target covers (complex_takes_off: it takes
+        the slot off), a row CRISPRme writes where none does and every other overlap is one
+        METHODS reads the slot without (a target read so, exact or the window's: the row of
+        a carrier it keeps; one that touches a call of unknown phase or an overlap zone, a
+        row it may write or not), left open where it says nothing -- and never one that
         needs a second indel-path record."""
         full_hap = make_hap(win.refseq, [main_al] + present, lo, hi)
         own = full_hap.clashes(main_al.lo, main_al.hi - 1)
@@ -5251,10 +5327,24 @@ def record_demands(win, ctx, al, carriers, full, lo, hi, reach):
         if got:
             clash_who.update(members)
             clash_how.update(clash_text(win, own))
-            if "complex" not in kinds:
-                for kind, c, _x in got:
-                    if kind not in ("second", "zone-noted"):
-                        open_cps[c].add("overlap")
+            complex_ = [a for a in present if meets_ref(a, main_al)
+                        and overlap_kind(a, main_al) == "complex"]
+            # read without its overlap, the slot is METHODS' reading of it only where every
+            # allele left out meets the record (none overlaps only an allele that does) and
+            # no SNV at another position meets it (which METHODS does not cover)
+            read_so = (kinds <= LEFT_OUT | {"complex"}
+                       and all(meets_ref(a, main_al) for z in own for a in z[2]))
+            for kind, c, x in got:
+                if kind in ("second", "zone-noted"):
+                    continue
+                if complex_ and kind in ("exact", "window"):
+                    cover = covered_span(x[0].place, main_al)
+                    if any(complex_takes_off(a, main_al, cover) for a in complex_):
+                        continue   # METHODS takes the slot off this target: no row
+                    if read_so:
+                        clash_cps.add(c)
+                        continue
+                open_cps[c].add("overlap")
 
     for (call, _sig), members in groups.items():
         s = members[0]

@@ -919,13 +919,28 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   PUTATIVE, as every carrier on an unphased panel is; this holds even when another, phased second
   indel on its indel haplotype changes the target, so such a carrier is listed for a row its indel
   haplotype does not have (§8, residuals). On the same phased slot, an indel overlapping the first
-  at another position (one complex allele the VCF splits into overlapping records; the window keeps
-  the reference there) takes the haplotype off the target's rows whatever its bases. A variant only
-  on bases the indel deletes is not in the window's sequence and changes nothing. Another allele at
-  the indel's own position, an indel or a SNP, is an alternative to it (a haplotype holding both
-  would be one record), so a slot phased with both is a phasing artefact. And an unphased carrier of
-  two overlapping records is a multi-allelic heterozygote, one allele per haplotype. These three
-  stay listed;
+  at another position (one complex allele the VCF splits into overlapping records, or a repeat's
+  indel that the VCF left-aligns onto the last bases of a complex allele next to it; the window
+  keeps the reference there) takes the haplotype off the target's rows, whatever its bases, when it
+  changes the reference bases the target covers. Those are the places of the target's own bases and,
+  since the target holds a base of the first indel's ALT (every indel row's target does), that
+  indel's whole REF, however far inside a long ALT the target lies. The second indel changes them
+  when it deletes or replaces one of them that the first does not delete or replace itself, or adds
+  bases between two of them, as an insertion inside the first indel's REF always does (a haplotype
+  carrying the first has no place for bases added between two it replaces). One that changes none
+  of them leaves the target's bases as the window has them, on every reading of the slot that keeps
+  the first indel's ALT whole, and the haplotype keeps the row: a variant only on bases the indel
+  deletes or replaces is not in the window's sequence and changes nothing, and neither does a
+  second indel anchored on the first's last REF base, whose change lies past a target inside the
+  ALT. On HPRC v2.1, the README guide's search at 4 mismatches and 1 DNA and 1 RNA bulge, per
+  sample, lists carriers so 220 times (131 samples) on 27 row blocks, of 40 records at 11 positions
+  whose REF or ALT is 464 bases to 95 kb long (chr15:52,876,508 TATGTAT replaced by 2,375 bases,
+  beside 52,876,514 T>TAAAAAAA on the same slot; chr6:112,819,048's 95,320 bases replaced by
+  95,309, beside 112,914,365 CT>C): each haplotype, rebuilt from the VCF, holds its row's target at
+  its start, 111 bases to 76 kb from the overlap. Another allele at the indel's own position, an
+  indel or a SNP, is an alternative to it (a haplotype holding both would be one record), so a slot
+  phased with both is a phasing artefact. And an unphased carrier of two overlapping records is a
+  multi-allelic heterozygote, one allele per haplotype. These stay listed;
 - a target of the window that holds **no base of the indel** — none the ALT adds or replaces,
   and not the two bases on either side of the deleted ones — lies wholly in a flank and gives
   **no indel row**, with or without a code: its sequence is reference (or SNP) sequence, which
@@ -2677,12 +2692,21 @@ an insertion's own position, a SNP on a base a deletion removes, one complex all
 overlapping records, two ALTs at one position phased onto one haplotype — describe one stretch
 twice, so the VCF gives no sequence there. Where every allele that meets the record's REF is one §4
 reads the slot without (another allele at the record's own position, an allele only on bases it
-deletes, an MNV) and no allele kept meets one left out, the slot is read without them: the one
-reading that holds the record, and so the one a row naming the record and not them can mean. A
-listed carrier must hold the target there, and one that does is a note (`overlap-reading-agrees`);
-one the row leaves off while its slot holds it there (§4: it stays listed) is counted
-(`limit-overlapping-records`). Any other overlap of the record (an indel at another position, which
-§4 takes off, or a SNP there, which §4 does not cover) leaves the slot no reading. Two other alleles
+deletes or replaces, an MNV, an indel at another position that changes none of the reference bases
+the target covers — the record's whole REF and the target's flank bases, as §4 reads them) and no
+allele kept meets one left out, the slot is read without them: the one reading that holds the
+record, and so the one a row naming the record and not them can mean (for such an indel, the
+reading that keeps the record's ALT whole, on which the target's bases are those of any reading
+that holds the record). A listed carrier must hold the target there, and one that does is a note
+(`overlap-reading-agrees`); one the row leaves off while its slot holds it there (§4: it stays
+listed) is counted (`limit-overlapping-records`). Any other overlap of the record (an indel at
+another position that changes one of those bases, which §4 takes off whatever its bases, or a SNP
+at another position, which §4 does not cover) leaves the slot no reading. Up to the release gate of
+2.10.0 the check took every indel at another position as one §4 takes off, and so failed 213 lines
+of HPRC v2.1's genome-wide gate run per sample (the README guide at 4 mismatches and 1 DNA and 1
+RNA bulge) and 69 of its population-level run, whose 220 and 95 carrier listings (131 and 72
+samples) are of slots holding such an indel at the end of a complex allele: each haplotype,
+rebuilt from the VCF, holds its row's target (§4). Two other alleles
 of the slot whose REFs meet (an overlap zone) leave it no sequence only where they can change what
 it says of the target — one of them is named, or changes a base read from the target's start —:
 every reading of such zones (any of their alleles no two of which meet, none included) is tried, and

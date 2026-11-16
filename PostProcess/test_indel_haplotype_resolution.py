@@ -383,6 +383,41 @@ class PerHaplotypeCases(unittest.TestCase):
         self.assertEqual(isc.target_ref_span("AC-T", [10, 11, None, 12], 40, "A"), (10, 12))
         self.assertIsNone(isc.target_ref_span("--", [None, None], 40, "A"))
 
+    def test_an_indel_on_a_complex_alleles_last_bases(self):
+        """METHODS section 4 (gate B of 2.10.0, HPRC v2.1): an indel overlapping the
+        window's indel at another position takes a carrier's slot off only when it changes
+        the reference bases the target covers -- for a target inside the ALT, the indel's
+        whole REF -- and a base the indel replaces does not count. chr15:52876508 TATGTAT
+        replaced by 2,375 bases (an ALT written here as A, C..., A) with HG02965's row at
+        ALT offset 821; on its slot, 52876514 T>TAAAAAAA, anchored on the REF's last base.
+        Its haplotype holds the row's target: this pins the rule, on CRISPRme's side."""
+        pos1, ref, alt = 52876508, "TATGTAT", "A" + "C" * 2373 + "A"
+        start = pos1 - 1 - 30                    # the window's real start (30-base flank)
+        fake0 = 1000                             # the window's start on the fake contig
+        gone = (pos1 - 1, pos1 - 2 + len(ref))   # _other_indels: every REF base, replaced
+
+        def span(offset):
+            dna = "ACGT" * 5 + "AGG"
+            real_of = isc.build_offset_to_real(dna, fake0 + 30 + offset, "+", fake0, pos1,
+                                               start, ref, alt)
+            return isc.target_ref_span(dna, real_of, pos1, ref)
+        inside = span(821)
+        self.assertEqual(inside, (52876507, 52876513))   # the whole REF, the ALT's bases
+        self.assertFalse(isc.changes_span(52876514, "T", "TAAAAAAA", *inside, gone))
+        across = span(len(alt) - 10)                     # the ALT's last 10, then the flank
+        self.assertEqual(across, (52876507, 52876526))
+        self.assertTrue(isc.changes_span(52876514, "T", "TAAAAAAA", *across, gone))
+        # an insertion between two bases the ALT replaces has no place on the haplotype
+        self.assertTrue(isc.changes_span(52876510, "A", "AG", *inside, gone))
+        # chr14:57945439 ATGTGTGTG>A past chr14:57945431 CAATGATAA>2,850 bp; chrY:22286864
+        # TGGCACATG>T, which deletes the REF's last base and bases past it, beside
+        # chrY:22286408 458>6,305 bp; chr6:112914365 CT>C inside chr6:112819048
+        # 95,320>95,309 bp: none changes a base a target inside the ALT covers
+        for (p, r, a), (lo, hi) in ((((57945439, "ATGTGTGTG", "A")), (57945430, 57945438)),
+                                    (((22286864, "TGGCACATG", "T")), (22286407, 22286864)),
+                                    (((112914365, "CT", "C")), (112819047, 112914366))):
+            self.assertFalse(isc.changes_span(p, r, a, lo, hi, (lo, hi)), p)
+
     def test_overlapping_indels(self):
         """A second indel inside the target on the SAME slot: that slot does not
         have the window's sequence. On the other slot it does not matter; unphased,

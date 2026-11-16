@@ -6895,6 +6895,144 @@ class LowerCaseSnvByGenome(Base):
         self.assertIsNone(untold.codes_lower(case.vcf, "chr21", spos, {"A"}))
 
 
+def world_complex_edge(kind=None, listed="S01,S02", straddle=False):
+    """Gate B6/B7's shape (HPRC v2.1 genome-wide, 2.10.0): a complex record R replaces the
+    7 bases TATGTAT (chr15:52876508's REF) with an ALT that holds the target among the
+    bases it adds -- a kilobase-scale ALT scaled down: the row starts at R's last REF base,
+    as every row starting on a base R adds does. S01 (1|0) and S02 (0|1) carry R, and
+    S01's slot of R also holds a record that overlaps R's REF at another position:
+      'ins-past'     an insertion anchored on R's last REF base (chr15:52876514
+                     T>TAAAAAAA beside chr15:52876508 TATGTAT>2,375 bp);
+      'del-past'     a deletion anchored there (chr14:57945439 ATGTGTGTG>A beside
+                     chr14:57945431 CAATGATAA>2,850 bp);
+      'del-in'       a deletion of bases R replaces (chr6:112914365 CT>C inside
+                     chr6:112819048 95,320>95,309 bp; chr7:12242379 CAAAAAAAAA>C);
+      'del-straddle' a deletion of R's last REF base and of bases past it
+                     (chrY:22286864 TGGCACATG>T beside chrY:22286408 458>6,305 bp);
+      'ins-in'       an insertion between two bases R replaces: it takes the slot off
+                     whatever its bases (the control).
+    The haplotype of each of the first four, rebuilt from the VCF, holds the row's target
+    (the gate's 50 blocks: every one of their 1,020 carrier slots). ``straddle``: the
+    target runs from R's last bases into the reference past R (its ALT ends with
+    GUIDE[:9], the flank starts GUIDE[9:] + TGG), so 'del-past' deletes two of its bases.
+    Returns (seq, records, row, R)."""
+    lp = LONG + PRE
+    r_ref = "TATGTAT"
+    if straddle:
+        alt = "AAGCCAT" + "CATTGC" + GUIDE[:9]
+        post = GUIDE[9:] + "TGG" + POST
+    else:
+        alt = "AAGCCAT" + GUIDE + "TGG" + "CATTGCAAA"
+        post = "CGATTG" + POST
+    seq = lp + r_ref + post
+    pos1 = len(lp) + 1
+    r = (pos1, r_ref, alt, {"S01": "1|0", "S02": "0|1"})
+    last = pos1 + len(r_ref) - 1          # R's last REF base, 1-based
+    s01 = {"S01": "1|0"}
+    second = {"ins-past": (last, seq[last - 1], seq[last - 1] + "AAAAAAA", s01),
+              "del-past": (last, seq[last - 1:last + 2], seq[last - 1], s01),
+              "del-in": (pos1 + 2, seq[pos1 + 1:pos1 + 3], seq[pos1 + 1], s01),
+              "del-straddle": (last - 1, seq[last - 2:last + 3], seq[last - 2], s01),
+              "ins-in": (pos1 + 2, seq[pos1 + 1], seq[pos1 + 1] + "GG", s01)}
+    recs = [r] + ([second[kind]] if kind else [])
+    start = last - 1                      # 0-based: a base R adds is placed there
+    row = row_fields("chr21", start, "+", GUIDE + "NNN", seq[start:start + 23],
+                     GUIDE + "TGG", "TGG", 0, 0, "X", tok("chr21", r), listed)
+    return seq, recs, row, r
+
+
+class ComplexAlleleEdges(Base):
+    """Gate B (2.10.0) failed HPRC v2.1 on 282 carrier-off-by-rule lines (B6 213 in 27 row
+    blocks, B7 69 in 23), on 11 complex records of 0.3 to 95 kb: METHODS section 4 said an
+    indel overlapping the record at another position takes the slot off 'whatever its
+    bases', while CRISPRme (analisi_indels_NNN._other_indels) takes it off only when that
+    indel changes the reference bases the target covers. Every listed carrier's haplotype,
+    rebuilt from the VCF, holds the row's target at its start: the overlapping records only
+    touch the record's last REF bases, thousands of bases from the targets. METHODS now
+    says what CRISPRme does, and the checker reads such a slot as METHODS does."""
+
+    def test_an_overlap_past_the_target_keeps_the_carrier(self):
+        for kind in ("ins-past", "del-past", "del-in", "del-straddle"):
+            seq, recs, row, _r = world_complex_edge(kind)
+            rc, found = Case(self.tmp, seq, recs, [row]).run()
+            self.assertEqual((rc, gating(found)), (0, []), (kind, found))
+            self.assertIn(("overlap-reading-agrees", "S01"),
+                          {(f[1], f[3]) for f in found}, (kind, found))
+
+    def test_the_clean_world_is_clean(self):
+        for straddle in (False, True):
+            seq, recs, row, _r = world_complex_edge(None, straddle=straddle)
+            rc, found = Case(self.tmp, seq, recs, [row]).run()
+            self.assertEqual((rc, gating(found)), (0, []), (straddle, found))
+
+    def test_an_overlap_that_changes_the_covered_bases_still_takes_the_slot_off(self):
+        """An insertion between two bases R replaces, and a deletion of flank bases a
+        target running past R holds: the slot is taken off whatever its bases, and a
+        listed carrier fails; left off, it is counted."""
+        for kind, straddle in (("ins-in", False), ("del-past", True)):
+            seq, recs, row, _r = world_complex_edge(kind, straddle=straddle)
+            rc, found = Case(self.tmp, seq, recs, [row]).run()
+            self.assertEqual(rc, 1, (kind, found))
+            self.assertEqual({(f[1], f[3]) for f in gating(found)},
+                             {("carrier-off-by-rule", "S01")}, (kind, found))
+            seq, recs, row, _r = world_complex_edge(kind, listed="S02", straddle=straddle)
+            rc, found = Case(self.tmp, seq, recs, [row]).run()
+            self.assertEqual((rc, gating(found)), (0, []), (kind, found))
+
+    def test_a_carrier_left_off_whose_slot_holds_the_target_is_counted(self):
+        seq, recs, row, _r = world_complex_edge("ins-past", listed="S02")
+        rc, found = Case(self.tmp, seq, recs, [row]).run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertIn(("limit-overlapping-records", "S01"), {(f[1], f[3]) for f in found},
+                      found)
+
+    def test_the_rows_of_such_a_slot_chain_a_cluster(self):
+        """Completeness: the row CRISPRme writes for S01, its only carrier, is a Cluster
+        Position of R where the overlap changes none of the bases the target covers, and
+        none where it does (the slot is taken off)."""
+        import argparse
+        ns = argparse.Namespace(mm=0, bdna=0, brna=0, max_total_edits=0)
+        ctx = C.Ctx(ns, "NRG", 3, False, [GUIDE], None)
+        for kind, want in (("ins-past", True), ("del-straddle", True), ("ins-in", False)):
+            seq, recs, row, r = world_complex_edge(kind)
+            recs = [(r[0], r[1], r[2], {"S01": "1|0"})] + recs[1:]
+            case = Case(self.tmp, seq, recs, [])
+            win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(case.vcf)])
+            x = win.by_key[r[:3]][0]
+            e = C.record_demands(win, ctx, x, {"S01"}, ctx.full(GUIDE),
+                                 max(0, x.lo - 80), x.hi + 80,
+                                 (x.edit_lo - 26, x.edit_hi + 26))
+            cp = C.cluster_of(int(row[2]), "+", 23, 23, False)
+            self.assertEqual(cp in e["cps"], want, (kind, e["cps"], e["cps_open"]))
+            self.assertIn("S01", e["clash_who"], kind)
+
+    def test_the_covered_bases_of_a_long_alt(self):
+        """A target standing inside a long ALT covers the record's whole REF (95,320 bases
+        at chr6:112819048), however far it lies from the overlap: a deletion only of bases
+        the record replaces changes none of them, an insertion between two of them does."""
+        r = al(11, "ACGTACGTAC", "TTTTTTTT")      # REF 0-based 10..19, replaced
+        place = [(q, 0) for q in range(12, 16)]   # a target's bases standing at 12..15
+        self.assertEqual(C.covered_span(place, r), (10, 19))
+        self.assertEqual(C.covered_span([(30, 0), (31, 0)], r), (30, 31))   # a flank
+        dele = al(19, "AC", "A")                  # deletes 19, the record's last base
+        self.assertEqual(C.overlap_kind(dele, r), "deleted")
+        self.assertFalse(C.complex_takes_off(dele, r, (10, 19)))
+        past = al(20, "CG", "C")                  # deletes 20, past the record
+        self.assertEqual(C.overlap_kind(past, r, cover=(10, 19)), "beside")
+        self.assertEqual(C.overlap_kind(past, r, cover=(10, 25)), "complex")
+        self.assertEqual(C.overlap_kind(past, r), "complex")   # no target: as before
+        ins = al(15, "A", "AG")                   # G between 14 and 15
+        self.assertTrue(C.complex_takes_off(ins, r, (10, 19)))
+        self.assertEqual(C.overlap_kind(ins, r, cover=(10, 19)), "complex")
+        end = al(20, "C", "CAAA")                 # after the record's last base
+        self.assertEqual(C.overlap_kind(end, r, cover=(10, 19)), "beside")
+        self.assertEqual(C.overlap_kind(end, r, cover=(10, 22)), "complex")
+        # a pure deletion keeps its anchor: a second indel deleting it changes the target
+        d = al(11, "ACG", "A")
+        self.assertTrue(C.complex_takes_off(al(10, "GA", "G"), d, C.covered_span(
+            [(10, 0), (13, 0)], d)))
+
+
 def code_lines(path):
     """[(line number, text)] of a Python file's code lines: comments, docstrings (a string
     that is a statement) and blank lines left out, whitespace collapsed."""
