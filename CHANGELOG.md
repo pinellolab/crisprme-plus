@@ -1808,16 +1808,16 @@ major.minor version (Changed). The main changes, each told in its entry below:
     alternative alignments, chr2:2,873,200 (+), lists 2,972 carriers so), and 128 at population
     level; for the README guide with NRR, 3 per sample and 1 at population level, the same beside
     the mega; none for the gate's other searches (the README guide with NRG, TRAC, CEP290, SaCas9,
-    Cas12a, the ACTGA guide); on HPRC, 1 per sample. On 1000 Genomes chr22, a search of seven
-    guides at 4 mismatches and 2 DNA and 2 RNA bulges, per sample, lists one (NA20515 on
-    chr22:50,299,296 (+) of VEGFA site 1). The same limit leaves targets unreported: a target that a
-    haplotype holds only through two indels or more is not generated, so no row lists that
-    haplotype's carriers for it. The gate's chr22 checks count such targets, per sample, at 7 sites
-    for the README guide with NRR (3,425 listings by 1,770 samples, each at 5 or 6 edits and a CFD
-    below 0.0004), 343 for the three repeat-rich guides (VEGFA site 3's 305 reach a CFD of 0.35, and
-    3 edits), 21 on HPRC, 9 for TRAC and 9 for SaCas9's 21-nt guide at 2 mismatches and no bulge,
-    two of them perfect matches; none for the CEP290 and Cas12a guides (METHODS §10 gives each
-    search). No fix is planned yet: the haplotype scan planned for 2.10.1 writes the lines the
+    Cas12a, the ACTGA guide); on HPRC, 1 per sample. On 1000 Genomes chr22, a search of seven guides
+    at 4 mismatches and 2 DNA and 2 RNA bulges, per sample, lists one (NA20515 on chr22:50,299,296
+    (+) of VEGFA site 1). The same limit leaves targets unreported: a target that a haplotype holds
+    only through two indels or more is not generated, so no row lists that haplotype's carriers for
+    it. The gate's chr22 checks count such targets, per sample, at 7 sites for the README guide with
+    NRR (3,425 listings by 1,770 samples, each at 5 or 6 edits and a CFD below 0.0004) and 3 with
+    NRG, 343 for the three repeat-rich guides (VEGFA site 3's 305 reach a CFD of 0.35, and 3 edits),
+    21 on HPRC, 9 for TRAC, 2 for the ACTGA guide and 9 for SaCas9's 21-nt guide at 2 mismatches and
+    no bulge, two of them perfect matches; none for the CEP290 and Cas12a guides (METHODS §10 gives
+    each search). No fix is planned yet: the haplotype scan planned for 2.10.1 writes the lines the
     search writes, one indel per window.
   - **An MNV beside an indel on one haplotype.** No store the search reads holds an MNV, so a
     carrier whose haplotype holding a row's indel also holds an MNV that changes the target is

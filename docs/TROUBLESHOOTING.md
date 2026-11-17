@@ -562,13 +562,13 @@ rules behind them.
   holds only through two indels or more is not generated (a fake-indel window holds one), so no row
   lists that individual for it, and where no other carrier holds it, no row reports it at all. How
   often depends on the guide and its repeats: on chr22, per sample, the release gate's checks found
-  7 such sites for the README guide (held by 1,770 samples, each target at a CFD below 0.0004), 343
-  for three repeat-rich guides (VEGFA site 3's up to a CFD of 0.35), 21 on HPRC, 9 for TRAC, 9 for
-  SaCas9's 21-nt guide at 2 mismatches (two of them perfect matches) and none for the CEP290 and
-  Cas12a guides; at 6 of the README guide's 7 sites and 20 of HPRC's 21 the search writes no row
-  within 5 bp. To check a site for an individual, read its genotypes in the dataset's VCF around the
-  target; `assembly-search` searches an individual's assembled haplotypes, which hold every indel.
-  No fix is planned yet.
+  7 such sites for the README guide (held by 1,770 samples, each target at a CFD below 0.0004; 3
+  with NRG), 343 for three repeat-rich guides (VEGFA site 3's up to a CFD of 0.35), 21 on HPRC, 9
+  for TRAC, 2 for the ACTGA guide, 9 for SaCas9's 21-nt guide at 2 mismatches (two of them perfect
+  matches) and none for the CEP290 and Cas12a guides; at 6 of the README guide's 7 sites and 20 of
+  HPRC's 21 the search writes no row within 5 bp. To check a site for an individual, read its
+  genotypes in the dataset's VCF around the target; `assembly-search` searches an individual's
+  assembled haplotypes, which hold every indel. No fix is planned yet.
 - **On HPRC, a carrier listed on an indel row whose haplotype holds an MNV there.** No store
   CRISPRme reads holds an MNV (a record of two or more bases replaced by as many), so a carrier
   whose haplotype holding the row's indel also holds an MNV inside the target is listed for the

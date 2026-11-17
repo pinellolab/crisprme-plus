@@ -139,10 +139,11 @@ bulge limit in a per-sample search; where 2.10.1 plans a fix for another limit, 
   all at VEGFA site 3 in GT repeats (2,972 carriers on one alternative alignment), 3 for the README
   guide and none for the other guides checked. And a target that a haplotype holds only through two
   indels is not reported for its carriers: on chr22, the gate's checks find 7 such sites for the
-  README guide (3,425 carrier listings, each target at a CFD below 0.0004), 343 for the three
-  repeat-rich guides (VEGFA site 3's up to a CFD of 0.35), 21 on HPRC, 9 for TRAC, 9 for SaCas9's
-  guide at 2 mismatches (two of them perfect matches) and none for the CEP290 and Cas12a guides. No
-  fix is planned yet: the haplotype scan writes, as the search does, one indel per window.
+  README guide (3,425 carrier listings, each target at a CFD below 0.0004; 3 with NRG), 343 for the
+  three repeat-rich guides (VEGFA site 3's up to a CFD of 0.35), 21 on HPRC, 9 for TRAC, 2 for the
+  ACTGA guide, 9 for SaCas9's guide at 2 mismatches (two of them perfect matches) and none for the
+  CEP290 and Cas12a guides. No fix is planned yet: the haplotype scan writes, as the search does,
+  one indel per window.
 - **A target wholly inside a tandem repeat** can be split over two rows or written twice (in a
   model of microsatellites; no search of real data checked has one). A fix is planned for 2.10.1.
 - **An unphased call of two ALTs at one position** is listed, PUTATIVE, on a row that needs the
