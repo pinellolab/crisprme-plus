@@ -71,9 +71,10 @@ passes by itself): an NRR index serves NGG, NAG, NGA and NRG; NRG serves NGG and
 NNGRRT (SaCas9, the CEP290 guides: `PAMs/22bp-NNGRRT-SaCas9.txt`); TTTN serves TTTV and every
 Cas12a PAM CRISPRme ships (`PAMs/20bp-TTTV-Cas12a.txt`, `23bp-TTTV-Cas12a.txt`); the general index
 serves any 3′ PAM of up to 8 nt (SpRY, VRER, St1Cas9, Nme, a PAM of your own), its search taking
-3.3 times a dedicated NGG index's and 1.7 times the default NRR index's (genome-wide on the
-reference, `ACTGAAATCTGTAAGCAGGC` at 4 mismatches + 1 DNA + 1 RNA bulge, the engine's search: 26
-min for NGG against 8 min on the NGG index, and 15 min for NRR on the NRR index). NRG on HPRC and
+2.7 times a dedicated NGG index's and 1.9 times the default NRR index's (genome-wide on the
+published reference indexes, `ACTGAAATCTGTAAGCAGGC` at 4 mismatches + 1 DNA + 1 RNA bulge, the
+engine's search on 32 threads: 24.5 min pruned to NGG against 9.2 min on the NGG index, and 12.9
+min for NRR on the NRR index). NRG on HPRC and
 mega is served by the NRR index there, pruned: the same rows, more slowly than a dedicated NRG
 index (about twice the wall time in the engine's search of chr22's reference sequence: three NRG
 guides at 4 mismatches + 1 DNA + 1 RNA bulge, the same 85,563 rows in 107 against 57 s wall, 380
@@ -136,6 +137,53 @@ HuggingFace's HTTP-429 rate limit; the downloader retries with backoff, and
 authenticating (`hf auth login`) avoids it entirely. See METHODS §2 for
 the genotyped-vs-sites-only distinction and §4 for how each is scanned.
 
+### The archives of 2.10.0 and their sizes
+
+The index set's 26 archives, built on 2026-11-14 and 2026-11-15 and checked before the publish
+(METHODS §11), in `lucapinello/crisprme_plus_indices` once published. Sizes in GB (10⁹ bytes):
+each index and companion as `publish-index` packs it, measured before the publish (the archive
+the Hub holds differs from it only by the times its records give, a few bytes at most), and each
+kit as built; `docs/INDEX_PROVENANCE.md` gives each to the byte, with how it was built. The
+SHA-256 of each index and companion is the Hub's, in `indexes/SHA256SUMS`, written at the publish
+(`docs/RELEASE_CHECKLIST.md`, E, step 5); each kit's is in its `build-inputs/<dataset>.SHA256SUMS`.
+
+| Archive | GB | Archive | GB |
+|---|---|---|---|
+| `20-NRR_3_hg38` | 20.17 | `20-NRR_3_hg38+hg38_HGDP1kGP` | 27.84 |
+| `20-NGG_3_hg38` | 3.81 | `20-NGG_3_hg38+hg38_HGDP1kGP` | 5.34 |
+| `20-NRG_3_hg38` | 8.89 | `20-NRG_3_hg38+hg38_HGDP1kGP` | 12.24 |
+| `20-NNNNNNNN_3_hg38` | 82.21 | `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` | 110.91 |
+| `22-NNGRRN_3_hg38` | 5.41 | `22-NNGRRN_3_hg38+hg38_HGDP1kGP` | 7.52 |
+| `TTTN-20_3_hg38` | 2.83 | `TTTN-20_3_hg38+hg38_HGDP1kGP` | 4.54 |
+| `TTTN-23_3_hg38` | 3.09 | `TTTN-23_3_hg38+hg38_HGDP1kGP` | 4.83 |
+| `20-NRR_3_hg38+hg38_HPRC` | 29.55 | `20-NRR_3_hg38+hg38_mega` | 24.11 |
+| `dictionaries-bundle_hg38_HGDP1kGP` | 16.42 | `genotypes_hg38_HGDP1kGP` | 5.87 |
+| `dictionaries-bundle_hg38_HPRC` | 2.44 | `genotypes_hg38_HPRC` | 0.56 |
+| `dictionaries-bundle_hg38_mega` | 1.95 | `indel_genotypes_hg38_HGDP1kGP` | 7.64 |
+| `indel_genotypes_hg38_HPRC` | 0.59 | `build-inputs/hg38_HGDP1kGP` (kit) | 1.24 |
+| `build-inputs/hg38_HPRC` (kit) | 1.18 | `build-inputs/hg38_mega` (kit) | 1.02 |
+
+The 23 index and companion archives add up to 388.76 GB, the 3 kits to 3.44 GB. What a download
+fetches: a panel's first index brings the panel's Dictionaries bundle and its genotype store with
+it, once (HGDP + 1000 Genomes' default, `20-NRR_3_hg38+hg38_HGDP1kGP`, 50.13 GB in all; HPRC's
+32.55 GB; the mega's, sites-only, 26.06 GB with its bundle alone), and its reference index where
+that is not installed (`download --what all` fetches `20-NRR_3_hg38`); a later index of the panel
+its own archive alone. The `indel_genotypes_` archive is fetched, with the genotype store, by
+`download --what genotype-oracle`, the stores without the index (an index's bundle holds the same
+indel store). Computed from these sizes, as
+`download` installs them, the default install (`download --what all`, then
+`20-NRR_3_hg38+hg38_HGDP1kGP`) is a 71.46 GB download and takes 153.39 GB, its peak 159.25 GB while
+the archives unpack (`download --what all` alone: 21.33 GB, 44.13 GB installed); to be measured
+from the Hub at the publish. The kits and their member lists:
+
+```bash
+crisprme.py download --what build-inputs --dataset hg38_HGDP1kGP --path .  # hg38_HPRC, hg38_mega
+```
+
+The archives of 2.8.1 stay in `lucapinello/crisprme-data` (and the general index's in
+`lucapinello/crisprme-data-general-index`), unchanged, for CRISPRme 2.8.1 and earlier, which read
+index format 1 alone (**The archives of CRISPRme 2.8.1**, below).
+
 ## Layout on HuggingFace
 
 The indexes of 2.10.0 are under `indexes/` in **`lucapinello/crisprme_plus_indices`**
@@ -170,8 +218,8 @@ index of the panel finds them installed, the same, and fetches its own archive (
 reference index where that is not installed: `20-NGG_3_hg38` for `20-NGG_3_hg38+hg38_HGDP1kGP`),
 not the bundle and the store again. Up to
 2.8.1 every variant archive carried its own copy of the Dictionaries (16.5 GB of each HGDP +
-1000 Genomes archive) and every install replaced them (`docs/hf/README.md`). Download sizes are
-given here once the rebuild has published them.
+1000 Genomes archive) and every install replaced them (`docs/hf/README.md`). The download sizes
+are above (**The archives of 2.10.0 and their sizes**).
 
 ### The archives of CRISPRme 2.8.1
 
@@ -713,7 +761,8 @@ your **own** VCF) with the full workflow below. Each dataset's authoritative, va
 in its own document — summarized here with the key provenance and filters, and linked for the
 complete protocol. 2.10.0's kits and indexes of HGDP + 1000 Genomes are built on all of hg38
 (455 contigs, as `download --what genome` installs it, as the reference indexes are, and as
-2.8.1's NRR, NGG and NNN indexes of the panel were; its NRG index held 24), those of HPRC and
+2.8.1's NRR, NGG and NNN indexes of the panel were; its NRG index held 24; the TTTN indexes hold
+454, `chrUn_KI270539v1` having no TTTN site), those of HPRC and
 mega on its chromosomes chr1-22, X and Y alone (24 contigs), as 2.8.1's indexes of those panels
 were (`seq_script/rebuild/README.md`, rule 1). So a variant search of HGDP + 1000
 Genomes finds every site a reference search finds; an alt contig repeats a region of a primary
@@ -860,8 +909,10 @@ reported twice, the second time as a reference row on the alt contig.
    search of five guides at 4 mismatches and 1 + 1 bulges took 1.35 to 1.46 times the shipped
    mega's on chr22 and 1.53 to 1.73 times on chr14 (IGH), in several
    measurements side by side on shared nodes during 2.10.0's development; unguarded, 4.4 to 4.9
-   times on chr22, and the chr14 search was projected at 12 to 16 h against 46 min. The release's
-   gates time it genome-wide (`docs/RELEASE_CHECKLIST.md`).
+   times on chr22, and the chr14 search was projected at 12 to 16 h against 46 min. Genome-wide,
+   the release's timing gate measured the README guide's population-level search with NRR at 1.21
+   times the shipped mega's with the same code and 1.18 times 2.8.1's own (1 h 40 min against 1 h
+   22 min and 1 h 24 min, 32 threads).
 
 Once you have an enriched genome (`Genomes/hg38+hg38_<ds>/` + `_INDELS/`) — downloaded or
 rebuilt — **any** PAM reuses it via Step 3.

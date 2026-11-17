@@ -63,18 +63,20 @@ and only a WARNING in its error log).
 
 The default variant-aware install (`download --what all`, then
 `download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP`) takes **~150 GB** on disk
-(measured: 150.0 GB, with 2.8.1's `NRR_3_hg38+hg38_HGDP1kGP`) before any results:
+before any results (measured: 150.0 GB with 2.8.1's `NRR_3_hg38+hg38_HGDP1kGP`; 153.4 GB computed
+for 2.10.0's archives from their sizes, to be measured from the Hub):
 
 | Item | Approx size |
 |---|---|
 | Reference genome (hg38) | ~3 GB |
-| Reference + variant-aware indexes (`20-NRR_3_hg38`, `20-NRR_3_hg38+hg38_HGDP1kGP` and its indel index) | ~94 GB |
-| Its `Dictionaries/`: genotype store ~30 GB, allele-frequency registry ~8.5 GB, indel genotype store ~7.7 GB, indel logs ~6.5 GB (fetched by default; per-sample analysis, this index's default, reads the store) | ~52 GB |
+| Reference + variant-aware indexes (`20-NRR_3_hg38` ~40.7 GB, `20-NRR_3_hg38+hg38_HGDP1kGP` ~46.5 GB and its indel index ~9.4 GB) | ~97 GB |
+| Its `Dictionaries/`: genotype store ~30.5 GB, allele-frequency registry ~8.6 GB, indel genotype store ~7.7 GB, indel logs ~6.5 GB (fetched by default; per-sample analysis, this index's default, reads the store) | ~53 GB |
 | Annotations | ~0.1 GB |
-| Per-run results (grows with mismatches/bulges; larger for per-sample runs, the default on a phased index) | GB–tens of GB |
+| Per-run results (grows with mismatches/bulges; which mode writes more depends on the panel: the README guide's genome-wide search wrote 3.0 GB per sample and 22.1 GB population-level on HGDP + 1000 Genomes, 14.4 and 4.3 GB on HPRC) | GB–tens of GB |
 
-The install peaks around 161 GB while the archives unpack. Keep everything on a
-disk with **~200 GB free** before a first variant-aware run.
+The install peaks around 160 GB while the archives unpack (161 GB measured with 2.8.1's archives,
+159.3 GB computed for 2.10.0's). Keep everything on a disk with **~200 GB free** before a first
+variant-aware run.
 Use `CRISPRME_TMPDIR` (Section 1) on the same roomy disk.
 
 **Reclaiming space:** by default `complete-search` removes bulky intermediates when
@@ -127,7 +129,9 @@ on any other genotyped one.
   §5). These were measured during 2.10.0's development, on fake-indel windows of 25/27; on the
   release's 30/30 the integration's gate (8 threads a search, with many searches at once) took
   31 against 10 min on HGDP + 1000 Genomes and 9 against 14 min on HPRC, and beside mega 39
-  against 17 min (README, "What the default search costs").
+  against 17 min (README, "What the default search costs"); on the published indexes of HGDP +
+  1000 Genomes (8 threads, a node at load 170 to 410), 45.6 against 10.0 min with NRG and 53.1
+  against 13.0 min with NRR.
   On a phased index leaving out `--per-sample` is not enough, since per-sample is that
   index's default; population-level is the default only on a sites-only, unphased,
   hybrid or reference-only index.
@@ -554,10 +558,12 @@ rules behind them.
   genome-wide checks found 9,059 listings of this limit for three repeat-rich guides per sample on
   HGDP + 1000 Genomes, almost all at VEGFA site 3 in GT repeats (2,972 carriers on one alternative
   alignment, chr2:2,873,200 (+)), 3 for the README guide and none for the other guides checked. Such
-  a carrier's own target can also start a repeat unit away from the row: the genome-wide gate search
-  of VEGFA site 3 per sample lists two carriers so (HGDP00655 and HG01432 of HGDP + 1000 Genomes, in
-  GT repeats), their bases the row's, through a second deletion. No fix is planned yet: the
-  haplotype scan planned for 2.10.1 writes, as the search does, one indel per window.
+  a carrier's own target can also start one to three repeat units away from the row, its bases the
+  row's: rebuilt from the VCF, the gate's genome-wide searches of the three repeat-rich guides per
+  sample list 6 carriers so, at 8 sites of HGDP + 1000 Genomes (HGDP00655, HG01432, HG01883,
+  HGDP00465 and NA19475 on VEGFA site 3, in GT repeats, and NA20888 on EMX1, in an AAG repeat),
+  through a second deletion or insertion in the repeat. No fix is planned yet: the haplotype scan
+  planned for 2.10.1 writes, as the search does, one indel per window.
 - **An off-target missing for a carrier of two indels.** A target that an individual's haplotype
   holds only through two indels or more is not generated (a fake-indel window holds one), so no row
   lists that individual for it, and where no other carrier holds it, no row reports it at all. How
@@ -573,15 +579,24 @@ rules behind them.
 - **On HPRC, a carrier listed on an indel row whose haplotype holds an MNV there.** No store
   CRISPRme reads holds an MNV (a record of two or more bases replaced by as many), so a carrier
   whose haplotype holding the row's indel also holds an MNV inside the target is listed for the
-  target that haplotype would hold without the MNV. Of the published panels only HPRC v2.1 has MNVs:
-  the README guide's genome-wide search lists carriers so 1,163 times at 94 sites per sample on
-  indel rows (232 samples), each row at a CFD of 0.084 or less, and 3,334 times on SNP rows. And an
-  off-target that an individual's haplotype holds only through an MNV and another indel or MNV is
-  missing for that individual, as for two indels (above): on chr22, per sample, the release gate's
-  check finds 16 such sites, each target at a CFD of at most 0.016. To check a carrier, read its
-  genotypes in the dataset's VCF over the row's target. CRISPRme 2.10.1 is planned to read the
-  MNVs' phase, which takes such carriers off the rows of a sequence they do not have; an off-target
-  held only through an MNV and another indel or MNV stays missing.
+  target that haplotype would hold without the MNV. Of 2.10.0's panels only HPRC v2.1 has MNVs
+  (2.8.1's archives of HPRC v2.0 have them too): the README guide's genome-wide search lists
+  carriers so 1,163 times at 94 sites per sample on indel rows (232 samples), each row at a CFD of
+  0.084 or less, and 3,334 times on SNP rows. And an off-target that an individual's haplotype holds
+  only through an MNV and another indel or MNV is missing for that individual, as for two indels
+  (above): on chr22, per sample, of the 21 sites of such targets the release gate's check counts, 16
+  such sites, rebuilt from the VCF, need an MNV, each target at a CFD of at most 0.016. To check a
+  carrier, read its genotypes in the dataset's VCF over the row's target. CRISPRme 2.10.1 is planned
+  to read the MNVs' phase, which takes such carriers off the rows of a sequence they do not have; an
+  off-target held only through an MNV and another indel or MNV stays missing.
+- **A carrier missing from a SNP row, beside a long indel.** A per-sample search reads the phased
+  indel store within 500 bases of its SNP targets, so a carrier whose haplotype holds an indel in a
+  SNP row's target that adds or deletes more bases than that, less the target's length, is left off
+  the row, even where its own bases are the row's. The release gate found one: NA19185 on HPRC,
+  left off the SNP rows at chrX:1,408,064 and 1,408,065 (+), beside a deletion of 1,365 bases of
+  whole repeat units; none on HGDP + 1000 Genomes. To check a carrier, read its genotypes in the
+  dataset's VCF over the row's target. CRISPRme 2.10.1 is planned to read the store as far as a
+  haplotype's own indels need.
 - **One target written as two rows, or twice, in a microsatellite.** In a tandem repeat that
   holds a whole target, the merge places each row by its own bases, and the target's
   alignments can fit different places of the repeat: they can then go to two rows, or the
@@ -592,7 +607,9 @@ rules behind them.
   call is unphased (`/`) is listed, PUTATIVE, on every subset of its variants a target can hold.
   For a call of two ALTs at one position (`1/2`), that includes a row that needs the reference
   base there, which its genotype rules out: both of its slots hold an ALT. The rows are the same
-  for a line of several ALTs and for its split form.
+  for a line of several ALTs and for its split form. No published panel holds such a call (HGDP +
+  1000 Genomes holds no unphased call, HPRC v2.1 only on chrY, each with a missing allele, and the
+  mega no genotype): it is met only on a VCF of your own.
 - **On a classic install, an unphased carrier only on the row of all its variants.** A
   per-sample search of an index built without `--samplesID` (a classic install, as the
   benchmark `complete-test` builds its own) lists a carrier with an unphased call in a phased VCF

@@ -226,19 +226,21 @@ Measured (hg38 chr22:20-25Mb, EMX1, NGG 4mm/1/1, same host):
 | pam-less NNN + `--prune-pam NGG` | 772 (identical) | 13.3 s | 3.36 GB |
 | pam-less NNN, no filter | 9,736 | 15.6 s | 3.37 GB |
 
-~10x slower / ~11x RAM for NGG on this 5-Mb slice. On the whole of chr22's reference (2.10.0's
-portfolio measurement: the engine's search of five 20-nt guides at 4 mismatches, 4 threads,
-indexes of N = 3), the 8-nt general index took, pruned to NGG, 10 times a dedicated NGG index's
-time at 1 DNA + 1 RNA bulge and 18 times at 2 + 2, and, pruned to NRR, 1.6 to 1.7 times the
-NRR index's at 1 + 1 (three runs each) and 1.8 times at 2 + 2. Genome-wide on the reference
-(`ACTGAAATCTGTAAGCAGGC` at 4 mismatches + 1 DNA + 1
-RNA bulge, the engine's search on 32 threads; the NGG and general indexes of format 1, the NRR one
-of format 2), the general index, pruned to NGG, took 3.3 times a dedicated NGG index's time (26
-against 8 min) and 1.7 times the NRR index's (15 min), and its largest process peaked lower than
-either's (55.8 GiB, against 60.2 and 59.0 GiB). So the time penalty scales with PAM SELECTIVITY,
-and for a selective PAM it is smaller genome-wide than on one chromosome: NGG about 10 times on
-the 5-Mb slice and on chr22 (18 times there at 2 + 2 bulges) and 3.3 times genome-wide; NRR 1.6
-to 1.8 times on chr22; ~par for near-pamless (no small dedicated alternative).
+~10x slower / ~11x RAM for NGG on this 5-Mb slice. On the whole of chr22's reference (the
+engine's search of five 20-nt guides at 4 mismatches, 4 threads, indexes of N = 3; the published
+reference indexes of 2.10.0, its release gate), the 8-nt general index took, pruned to NGG, 13.3
+times a dedicated NGG index's time at 1 DNA + 1 RNA bulge and 17.8 times at 2 + 2, and, pruned to
+NRR, 1.63 times the NRR index's at 1 + 1 and 1.75 times at 2 + 2 (2.10.0's development measured
+10 and 18, and 1.6 to 1.7 and 1.8, on indexes of a development build). Genome-wide on the published
+reference indexes (`ACTGAAATCTGTAAGCAGGC` at 4 mismatches + 1 DNA + 1 RNA bulge, the engine's
+search on 32 threads), the general index, pruned to NGG, took 2.67 times a dedicated NGG index's
+time (24.5 against 9.2 min) and 1.90 times the NRR index's (12.9 min), and its largest process
+peaked lower than either's (54.0 GiB, against 59.1 and 58.9 GiB; during development, on indexes
+of format 1 for NGG and the general index, 3.3 and 1.7 times, 55.8 against 60.2 and 59.0 GiB). So
+the time penalty scales with PAM SELECTIVITY, and for a selective PAM it is smaller genome-wide than
+on one chromosome: NGG about 10 times on the 5-Mb slice, 13 to 18 times on chr22 and 2.7 times
+genome-wide; NRR 1.6 to 1.8 times on chr22; ~par for near-pamless (no small dedicated
+alternative).
 Higher mm/bulge pam-less searches are proportionally heavier (whole tree traversed regardless of
 the search PAM). **Guidance:** keep dedicated indexes as the fast default for a fixed known PAM;
 use the pam-less index for PAM flexibility / variable / arbitrary PAMs, accepting the per-search

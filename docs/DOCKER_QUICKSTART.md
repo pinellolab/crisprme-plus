@@ -65,18 +65,20 @@ docker info --format '{{.MemTotal}}' | awk '{printf "%.1f GB\n", $1/1073741824}'
 ```
 
 > **Disk:** the batteries-included (variant-aware) setup is a **~70 GB download → ~150 GB
-> on disk** (measured: 150.0 GB, with 2.8.1's archive of the default index; it peaks around
-> 161 GB while the archives unpack), so keep **≈ 200 GB free** on the disk that holds your
+> on disk** (measured: 150.0 GB, with 2.8.1's archive of the default index; computed from
+> 2.10.0's archives' sizes: a 71.5 GB download, 153.4 GB installed), and it peaks around
+> 160 GB while the archives unpack, so keep **≈ 200 GB free** on the disk that holds your
 > data folder. CRISPRme+ ships a
 > **dict-less** variant index (no per-sample dictionaries). Installed, the genome is ~3 GB,
-> the reference + variant genome indexes (the indel index included) ~94 GB, the compact
-> allele-frequency registry ~8.5 GB (shipped uncompressed for fast lookups), the genotype
-> store (for per-sample carrier annotation; `--no-genotypes` skips it) ~30 GB, the indel
+> the reference + variant genome indexes (the indel index included) ~97 GB, the compact
+> allele-frequency registry ~8.6 GB (shipped uncompressed for fast lookups), the genotype
+> store (for per-sample carrier annotation; `--no-genotypes` skips it) ~30.5 GB, the indel
 > genotype store ~7.7 GB and the indel logs ~6.5 GB. The
-> genotyped **HGDP + 1000 Genomes** (HGDP1kGP) index was a ~43 GB download as 2.8.1 published it;
-> the sites-only **mega** (five-source) index ~25 GB (2.10.0 publishes each panel's Dictionaries
-> once, beside its indexes: [`PRECOMPUTED_INDEXES.md`](PRECOMPUTED_INDEXES.md)). A reference-only
-> setup is far smaller (~44 GB).
+> genotyped **HGDP + 1000 Genomes** (HGDP1kGP) default index is a 50.1 GB download with its
+> panel's Dictionaries bundle and genotype store (27.8 + 16.4 + 5.9 GB), which 2.10.0 publishes
+> once, beside the panel's indexes; the sites-only **mega** (five-source) index 26.1 GB with its
+> bundle ([`PRECOMPUTED_INDEXES.md`](PRECOMPUTED_INDEXES.md) lists every archive). A
+> reference-only setup is far smaller (~44 GB).
 
 Check Docker works, then pull the CRISPRme+ image:
 
@@ -490,8 +492,10 @@ CRISPRme flags onto your `#SBATCH` directives:
 
 - `--thread N` → `#SBATCH --cpus-per-task N` (match the two; e.g. `--thread 8`
   with `#SBATCH --cpus-per-task 8`).
-- Memory → `#SBATCH --mem`. A genome-wide variant-aware search peaks at roughly
-  **64–80 GB**, so request e.g. `#SBATCH --mem=80G`.
+- Memory → `#SBATCH --mem`. On the indexes of 2.10.0, a genome-wide variant-aware search
+  took **38 GB** in all on 8 threads, 63 GB on 16 and 110–119 GB on 32 (the release's gates;
+  the README's [System Requirements](../README.md#0-system-requirements)), so request e.g.
+  `#SBATCH --mem=80G` for `--thread 8`, and more for more threads.
 
 ```bash
 #!/bin/bash

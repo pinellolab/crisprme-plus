@@ -22,7 +22,7 @@ through an interactive web-based interface.
 ### ✨ Highlights
 
 - **Dictionary-less variant-aware search** — a compact allele-frequency registry + genotype store ship with the index, so variant off-target search (with allele frequencies, rsIDs, and per-dataset provenance) runs out of the box. ([methods](METHODS.md#1-variant-aware-dictionary-less-data-model))
-- **Co-occurring off-targets** — off-targets that need two nearby variants together on the same chromosome copy (*in cis*, i.e. the same haplotype), so one individual carries both — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported **CONFIRMED** (phasing proves cis) or **PUTATIVE** (co-occurrence possible but cis unproven — unphased genotyped panels still name the carriers; sites-only panels like `mega` give a conservative min-AF bound with no carriers), with joint AF, and surfaced in the report. Since 2.8.1 an indel row lists only the individuals whose own haplotype has its sequence (but for an MNV beside the indel on that haplotype, which no store CRISPRme reads holds: a known limit, met on HPRC v2.1 only, [§10](METHODS.md#10-known-limits-of-2100)); where the phase is unknown, those whose own alleles allow it (PUTATIVE); on an install without SNP genotypes (`download --what index --no-genotypes`), every carrier of the indel where a SNP makes the site with it (PUTATIVE). Since 2.10.0 a per-sample SNP row does not list an individual whose haplotype holding its SNPs also holds an indel that changes the target (where that indel's phase is unknown, it stays, PUTATIVE; `CRISPRME_INDEL_SNP=0` turns this off too). Split multi-allelic SNP sites are the exception on an index CRISPRitz 2.9.1 or earlier built, as every one published until the rebuild for 2.10.0 ([§8](METHODS.md#8-off-target-scoring-assumptions-and-limitations)). An indel off-target is searched in a window of 30 reference bases on either side of its indel (CRISPRitz 2.10.0; 25 before and 27 after up to 2.9.1), which holds a target of up to 31 bases, guide, PAM and DNA bulges counted (27 on 2.9.1's, 26 at an MNV): a search whose targets need more says so, and each window's width is read from its index's own indel log, so an index of either release reads right. ([methods](METHODS.md#snpindel-off-targets-each-carriers-own-haplotype))
+- **Co-occurring off-targets** — off-targets that need two nearby variants together on the same chromosome copy (*in cis*, i.e. the same haplotype), so one individual carries both — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported **CONFIRMED** (phasing proves cis) or **PUTATIVE** (co-occurrence possible but cis unproven — unphased genotyped panels still name the carriers; sites-only panels like `mega` give a conservative min-AF bound with no carriers), with joint AF, and surfaced in the report. Since 2.8.1 an indel row lists only the individuals whose own haplotype has its sequence (but for an MNV beside the indel on that haplotype, which no store CRISPRme reads holds: a known limit, met on HPRC alone of the published panels, [§10](METHODS.md#10-known-limits-of-2100)); where the phase is unknown, those whose own alleles allow it (PUTATIVE); on an install without SNP genotypes (`download --what index --no-genotypes`), every carrier of the indel where a SNP makes the site with it (PUTATIVE). Since 2.10.0 a per-sample SNP row does not list an individual whose haplotype holding its SNPs also holds an indel that changes the target (where that indel's phase is unknown, it stays, PUTATIVE; `CRISPRME_INDEL_SNP=0` turns this off too). Split multi-allelic SNP sites are the exception on an index CRISPRitz 2.9.1 or earlier built, as every one published until the rebuild for 2.10.0 ([§8](METHODS.md#8-off-target-scoring-assumptions-and-limitations)). An indel off-target is searched in a window of 30 reference bases on either side of its indel (CRISPRitz 2.10.0; 25 before and 27 after up to 2.9.1), which holds a target of up to 31 bases, guide, PAM and DNA bulges counted (27 on 2.9.1's, 26 at an MNV): a search whose targets need more says so, and each window's width is read from its index's own indel log, so an index of either release reads right. ([methods](METHODS.md#snpindel-off-targets-each-carriers-own-haplotype))
 - **Complementary production indexes** — the **recommended default** is the phased **HGDP + 1000 Genomes** index of the default SpCas9 **NRR** PAM (`20-NRR_3_hg38+hg38_HGDP1kGP`: 4,091 samples, jointly SHAPEIT5-re-phased → CONFIRMED cis + named per-sample carriers throughout), with the **HPRC pangenome** and the sites-only five-source **mega** alternatives. All carry searchable indels genome-wide with SNP+SNP / SNP+indel co-occurrence — see the [index comparison table below](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) and [`docs/PRECOMPUTED_INDEXES.md`](docs/PRECOMPUTED_INDEXES.md). (Per-source retrieval recipes for 1000G 2019/2021, HGDP, gnomAD v4.1, TOPMed and All-of-Us are in [`paper/reproducibility/variant-datasets/`](paper/reproducibility/variant-datasets/).)
 - **One index, many PAMs (`--prune-pam`)** — a **PAM-less** index stores the raw genomic flank instead of a fixed PAM, and the PAM you pass is applied during the search, so one index answers any 3′ PAM no longer than that flank (a 3-nt flank serves NRG, NGG, NAG, …). Measured genome-wide on HGDP + 1000 Genomes for one guide, a PAM-less index with `--prune-pam` returned a **byte-identical** report to a dedicated NRG index at both a 3-nt and an 8-nt flank. A flank wider than the PAM, in an index built by CRISPRitz 2.9.1 or earlier (index format 1, as every one published until the rebuild for 2.10.0 is), does not index a PAM at a contig's very end (+ strand) or start (− strand): on hg38 at an 8-nt flank, 145 + 101 NGG and 308 + 241 NRG sites, none on a primary chromosome; the search says so when it uses such a flank. An index of format 2, which CRISPRitz 2.10.0 writes, has no such limit. The trade is size — 2.8.1's 3-nt PAM-less variant index is 110 GB against 28 GB for its `NRG_3_hg38+hg38_HGDP1kGP` — and pruning happens as results are emitted, so it is not *faster* than a dedicated index; it is worth it when you expect to search several PAMs over one genome. Since 2.10.0 a search prunes by itself, from the command line or the web form, whenever no installed index serves it unpruned, and a dedicated index serves any PAM its own holds the same way (an NRR index serves NGG, NAG, NGA and NRG). ([methods](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering))
 - **Context-aware analysis mode: per-sample on phased indexes by default; `--population-level` to opt out** — as of 2.8.0 `complete-search` auto-selects **per-sample** (CONFIRMED cis phasing + named carriers + exact joint AF) on a genotyped + **PHASED** index (e.g. the HGDP + 1000 Genomes default) and **population-level** (worst-possible representatives per variant window, lossless for detection) otherwise (sites-only / unphased / hybrid / reference-only). Add **`--population-level`** (CLI) or pick **Population-level** in the web form to force the worst-case screen on a phased index; add **`--per-sample`** to force resolution on any genotyped index (on a sites-only index, which has no genotypes, it runs the population-level analysis, with a warning). This is a **genotype-resolution** dial, not a speed dial: which mode is faster depends on the panel. On the indexes CRISPRitz 2.10.0 builds, which code every allele, per-sample is the faster on a dense panel of many samples such as the default HGDP + 1000 Genomes one (its haplotype pre-check skips the dense windows' raw targets nobody carries), and population-level can be on a small panel such as HPRC ([Search speed](METHODS.md#search-speed-on-indexes-that-code-every-allele-the-haplotype-pre-check-the-k-skip-and-the-post-analysis-in-pieces)). The report states which mode was used. ([methods](METHODS.md#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis))
@@ -80,6 +80,34 @@ that matter most:
   | `HPRC` | assembly / pangenome variation |
   | `mega` | **escalate here only** for a widest-provenance worst-case screen (sites-only, all co-occurrences PUTATIVE, no carriers) |
 
+### Known limitations and roadmap
+
+CRISPRme+ 2.10.0 ships with limits we measured and state plainly.
+The main ones:
+
+- **Above 1 DNA + 1 RNA bulge**, a search of the dense immunoglobulin loci can run for hours or
+  out of memory: keep the default budget there, or `--max-total-edits` 3 or less.
+- **Population-level searches of HGDP + 1000 Genomes** are slower than 2.8.1's in the dense loci:
+  the release's gate timed the README guide's genome-wide one with NRG at 2.2 times 2.8.1's (the
+  per-sample searches, this panel's default, at 0.95 to 1.30 times).
+- **On HPRC**, a carrier whose haplotype holds an MNV beside a row's indel is listed for a
+  sequence it does not have (1,163 listings at 94 sites in the README guide's genome-wide
+  search per sample, each row at a CFD of 0.084 or less).
+- **Two indels on one haplotype**: a target held only through two indels is not reported for its
+  carriers, and some carriers of a second indel are listed on a row of one indel; most often for
+  guides whose sites lie in tandem repeats (9,059 listings for three repeat-rich guides
+  genome-wide, 3 for the README guide).
+- Smaller ones: a target inside a microsatellite split over two rows, a SNP row's carrier left
+  off beside a long indel, unphased calls of two ALTs (in no published panel), the real-data
+  checker's unchecked columns.
+
+What each is, its measured size and who meets it: the
+[release notes](docs/release-notes-2.10.0.md), [METHODS §10](METHODS.md#10-known-limits-of-2100)
+and [Troubleshooting](docs/TROUBLESHOOTING.md) §14 and §15. What comes next, CRISPRme+ 2.10.1
+(the MNVs' phase on HPRC, the haplotype scan of the dense regions above 1 + 1 bulges, a faster
+population-level analysis of the dense loci, and the checker's and the web app's hardening), is in
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
+
 > ⚠️ **Note**  
 > The original public CRISPRme web service is no longer available.  
 > All functionalities are now accessible via the command-line interface or the 
@@ -107,7 +135,9 @@ small window with three buttons: **Start**, **Update**, **Stop**. Click **Start*
 first time it downloads the reference + variant data automatically (~70 GB download, once;
 ~150 GB on disk once installed — keep ~200 GB free; a reference-only setup is far smaller, ~44 GB), then
 opens the web interface at http://localhost:8080; every Start after that is instant.
-(Memory: the **whole-genome *variant-aware* search** needs **~64 GB of RAM** — set that
+(Memory: give the **whole-genome *variant-aware* search** **~64 GB of RAM** — on the indexes of
+2.10.0 it took 38 GB in all on 8 threads and 63 GB on 16, and more on more threads
+([§0](#0-system-requirements)) — set that
 under Docker Desktop → Settings → Resources → Memory. **On Windows with the WSL 2 backend
 there is no memory slider**; Windows caps the WSL 2 VM at roughly half your RAM, so set
 `memory=` in `C:\Users\<you>\.wslconfig`, run `wsl --shutdown`, and verify with
@@ -135,8 +165,9 @@ New to CRISPRme? Get the point-and-click web interface running in a few commands
 — just install Docker, then:
 
 > **Allocate memory first.** In **Docker Desktop → Settings → Resources → Memory**: the
-> genome-wide 1000G+HGDP variant search shown here peaks around **68–75 GB**, so
-> give Docker **64 GB+** for it (32 GB will OOM); smaller searches need less. On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). (On Linux/Docker Engine the
+> genome-wide HGDP + 1000 Genomes variant search shown here (8 threads) took **38 GB** in all
+> on the indexes of 2.10.0 (29 GB in its largest process), and more on more threads (63 GB on 16,
+> 110–119 GB on 32), so give Docker **64 GB+** for it (32 GB will OOM); smaller searches need less. On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). (On Linux/Docker Engine the
 > container uses host memory directly.) See [System Requirements](#0-system-requirements).
 
 > **In zsh, the default shell of macOS,** run `setopt interactive_comments` once in the terminal
@@ -194,10 +225,26 @@ SNP+SNP / SNP+indel co-occurrence; download whichever you need with `--what inde
 <name>` (or grab more later from the web **Settings**). The reference indexes and those of HGDP +
 1000 Genomes hold all 455 sequences of hg38, its alt, random and unplaced contigs and chrM
 included (as 2.8.1's NRR, NGG and NNN indexes of the panel did; its NRG one held 24), so a variant
-search finds every site a reference search finds; those of HPRC and mega hold its 24 chromosomes,
+search finds every site a reference search finds, but the Cas12a TTTN indexes, which hold 454
+(`chrUn_KI270539v1`, 993 bp, has no TTTN site); those of HPRC and mega hold its 24 chromosomes,
 chr1-22, X and Y. An alt contig repeats a region of a primary chromosome (the HLA region, for
 one), and no VCF of these panels covers it, so a site there can be reported twice: on the primary
-chromosome, and as a reference row on the alt contig.
+chromosome, and as a reference row on the alt contig. What each download takes (GB = 10⁹ bytes,
+each archive as `publish-index` packs it, measured before the publish; a variant index's first
+download of its panel adds the panel's Dictionaries bundle and genotype store, once;
+[`docs/PRECOMPUTED_INDEXES.md`](docs/PRECOMPUTED_INDEXES.md) lists every archive, and
+[`docs/INDEX_PROVENANCE.md`](docs/INDEX_PROVENANCE.md) how each was built and checked):
+
+| Index | Reference | HGDP + 1000 Genomes | HPRC | mega |
+|---|---|---|---|---|
+| SpCas9 **NRR** (the default) | `20-NRR_3_hg38` 20.17 | `20-NRR_3_hg38+hg38_HGDP1kGP` 27.84 | `20-NRR_3_hg38+hg38_HPRC` 29.55 | `20-NRR_3_hg38+hg38_mega` 24.11 |
+| SpCas9 **NGG** | `20-NGG_3_hg38` 3.81 | `20-NGG_3_hg38+hg38_HGDP1kGP` 5.34 | | |
+| SpCas9 **NRG** | `20-NRG_3_hg38` 8.89 | `20-NRG_3_hg38+hg38_HGDP1kGP` 12.24 | | |
+| **General** (PAM-less, 8-nt flank) | `20-NNNNNNNN_3_hg38` 82.21 | `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` 110.91 | | |
+| SaCas9 **NNGRRN** | `22-NNGRRN_3_hg38` 5.41 | `22-NNGRRN_3_hg38+hg38_HGDP1kGP` 7.52 | | |
+| Cas12a **TTTN**, 20 nt | `TTTN-20_3_hg38` 2.83 | `TTTN-20_3_hg38+hg38_HGDP1kGP` 4.54 | | |
+| Cas12a **TTTN**, 23 nt | `TTTN-23_3_hg38` 3.09 | `TTTN-23_3_hg38+hg38_HGDP1kGP` 4.83 | | |
+| The panel's Dictionaries bundle + genotype store, once | — | 16.42 + 5.87 | 2.44 + 0.56 | 1.95 (no genotypes) |
 
 | Index (`--index-name`) | Variant sources | Resolution | Best for |
 |---|---|---|---|
@@ -247,12 +294,13 @@ again. Download sizes are in
 
 NRR is the default because it is the broadest SpCas9 screen of the three: an NRR search also
 reports the NAA and NGA sites, which NRG leaves out, as NRG reports the NAG ones NGG leaves
-out. It costs about twice the search time of NRG genome-wide (2 h 26 min against 1 h 14 min for
-`ACTGAAATCTGTAAGCAGGC` on HGDP + 1000 Genomes, per-sample, 4 mismatches + 1 + 1 bulge, 32
-threads, CRISPRme 2.8.1), at no higher peak memory (66 GB against 82 GB, summed over each run's
-processes). On chr22, on indexes CRISPRitz 2.10.0 built, the gate runs of this release took 1.2
-times NRG's time per sample and, in the largest process, 1.8 times its memory (8.9 against 5.0
-GiB; 8 threads, METHODS.md §5). An NRR index also serves an NGG, NAG, NRG or NGA search, and an
+out. It costs more search time than NRG, at about the same memory: genome-wide on the indexes of
+2.10.0, 1.57 times NRG's time for `ACTGAAATCTGTAAGCAGGC` on HGDP + 1000 Genomes per sample at 4
+mismatches + 1 + 1 bulge on 32 threads (2 h 19 min against 1 h 29 min; 110.5 against 102.3 GiB
+summed over each run's processes), and 1.96 times for the README guide on 16 threads (4 h 16 min
+against 2 h 11 min, on a shared node; 58.6 against 57.9 GiB). On chr22 (8 threads) it took 1.31
+times NRG's time per sample and, in the largest process, 1.86 times its memory (9.54 against 5.14
+GiB; METHODS.md §5). An NRR index also serves an NGG, NAG, NRG or NGA search, and an
 NRG one an NGG or NAG search: the search prunes the index to its PAM by itself, and says so,
 more slowly than from an index of that PAM (see below).
 
@@ -269,16 +317,16 @@ crisprme.py complete-search \
   --pam ./PAMs/20bp-NGG-SpCas9.txt  ...
 ```
 
-The general index of 2.10.0 is `20-NNNNNNNN_3_hg38` (and `+hg38_HGDP1kGP`): an 8-nt flank, any
-3′ PAM of up to 8 nt. Its search takes 3.3 times a dedicated NGG index's, and 1.7 times the
-default NRR index's (genome-wide on the reference, `ACTGAAATCTGTAAGCAGGC` at 4 mismatches + 1
-DNA + 1 RNA bulge, the engine's search: 26 min for NGG against 8 min on the NGG index, and 15
-min for NRR on the NRR index). **`NNN_3` (the 3-nt flank of 2.8.1) is not built again for
-2.10.0**: the general index serves every search it served, at the same speed (a 3-nt and an
-8-nt PAM-less index cost the same, every position being a site), and a download of 2.8.1's
-`NNN_3_*` says so. A 5′ PAM (Cas12a) needs a
-dedicated index (the TTTN ones), which `build-index-only` builds for any other: these indexes
-store the flank on the 3′ side of the guide, so a 5′ search does not use them.
+The general index of 2.10.0 is `20-NNNNNNNN_3_hg38` (and `+hg38_HGDP1kGP`): an 8-nt flank, any 3′
+PAM of up to 8 nt. Its search takes 2.7 times a dedicated NGG index's, and 1.9 times the default NRR
+index's (genome-wide on the published reference indexes, `ACTGAAATCTGTAAGCAGGC` at 4 mismatches + 1
+DNA + 1 RNA bulge, the engine's search on 32 threads: 24.5 min pruned to NGG against 9.2 min on the
+NGG index, and 12.9 min for NRR on the NRR index). **`NNN_3` (the 3-nt flank of 2.8.1) is not built
+again for 2.10.0**: the general index serves every search it served, at the same speed (a 3-nt and
+an 8-nt PAM-less index cost the same, every position being a site), and a download of 2.8.1's
+`NNN_3_*` says so. A 5′ PAM (Cas12a) needs a dedicated index (the TTTN ones), which
+`build-index-only` builds for any other: these indexes store the flank on the 3′ side of the guide,
+so a 5′ search does not use them.
 
 An index also fixes how many bases it stores per site, from the guide length it was built
 for and its `N` (`20-NRR_3`: N = 3, up to 2 bulges of each type). An index built for a 20-nt
@@ -419,6 +467,7 @@ so the search above works out of the box on a fresh install.
 <br>5 [Contacts](#5-contacts)
 <br>6 [License](#6-license)
 <br>• [Methods &amp; validation](METHODS.md) — the self-contained technical reference (variant-aware data model, haplotype scanning, worst-case scoring, annotation, report, scoring assumptions &amp; limitations)
+<br>• [Known limitations and roadmap](#known-limitations-and-roadmap) — what 2.10.0 does not do yet, with its measured size, and what 2.10.1 is to do
 
 ## 0 System Requirements
 
@@ -426,33 +475,33 @@ Memory scales with the search — pick your tier (measured figures):
 
 | Search | RAM | Disk |
 |---|---|---|
-| **Reference-only** (no variant dataset) | grows with `--thread`: about 18 GiB genome-wide on 8 threads, the default (below) | ~44 GB (reference-only install) |
-| **Variant-aware, one chromosome or region** | up to 13 GiB on chr22 and 25 GiB for the IGH locus of chr14 alone, searched with NRG; NRR, the default, took 1.8 times NRG's memory on chr22 (below) | what its genome and indexes take |
-| **Whole-genome, variant-aware** (e.g. HGDP + 1000 Genomes (`20-NRR_3_hg38+hg38_HGDP1kGP`); the web/Quickstart default) | **64 GB minimum, ~80 GB for high `--max-total-edits`** | ~150 GB (full variant-aware install; keep ~200 GB free) |
+| **Reference-only** (no variant dataset) | grows with `--thread`: 17.6 GiB genome-wide on 8 threads, the default (below) | ~44 GB (reference-only install) |
+| **Variant-aware, one chromosome or region** | up to 12.6 GiB on chr22, and 27.3 GiB on the whole of chr14, which holds IGH, with NRR, the default (8 threads; below) | what its genome and indexes take |
+| **Whole-genome, variant-aware** (e.g. HGDP + 1000 Genomes (`20-NRR_3_hg38+hg38_HGDP1kGP`); the web/Quickstart default) | **64 GB**: 38 GB in all on 8 threads, the default, 63 GB on 16, and more on more threads (below); far more above 1 DNA + 1 RNA bulge ([Troubleshooting](docs/TROUBLESHOOTING.md) §14) | ~150 GB (full variant-aware install; keep ~200 GB free) |
 
-The variant-aware genome-wide search is the memory-heavy one: the CRISPRitz search
-process alone peaks around **68–75 GB** loading and traversing the variant index, so
-**16 GB or 32 GB will OOM a real genome-wide variant search** — allocate 64 GB+.
-The smaller searches took, at 4 mismatches + 1 DNA + 1 RNA bulge (the peak of the largest
-process):
+The variant-aware genome-wide search is the memory-heavy one, and CRISPRitz's search loads the
+index one chromosome per thread, so its memory grows with `--thread`. On the indexes of 2.10.0
+the README guide's genome-wide search of HGDP + 1000 Genomes with NRR at 4 mismatches + 1 DNA + 1
+RNA bulge, per sample, took 27.3 GiB in its largest process and 35.1 GiB summed over its
+processes on 8 threads (the default of `--thread`; population-level about the same) and 37.2 and
+58.6 GiB on 16, and the release's genome-wide gate searches on 32 threads 68.9 to 70.5 GiB and 102
+to 111 GiB (GiB = 2³⁰ bytes):
+**16 GB or 32 GB will OOM a genome-wide variant search** — allocate 64 GB+, and keep to 16
+threads or fewer within it. The smaller searches took, at 4 mismatches + 1 DNA + 1 RNA bulge (the
+peak of the largest process, on the published indexes, the release's gates):
 
-- **Reference-only.** CRISPRitz's search loads the index one chromosome per thread, so its
-  memory grows with `--thread`: genome-wide, its search of `ACTGAAATCTGTAAGCAGGC` took 18.4 GiB
-  on 8 threads (the default of `--thread`) and 60.2 GiB on 32, on an NGG reference index of
-  format 1 (measured during 2.10.0's development; on 32 threads the NRR index of format 2 took
-  59.0 GiB). The web interface searches on 4 threads.
-- **Variant-aware, one chromosome or region**, on indexes of HGDP + 1000 Genomes that CRISPRitz
-  2.10.0 built (the gate runs of this release, 8 threads; METHODS.md §5): on chr22, per sample,
-  the README guide took 5.0 GiB with NRG and 8.9 GiB with NRR, the default PAM, and three
-  repeat-rich guides at once, with NRG, 12.5 GiB; population-level, about the same. The
-  immunoglobulin loci are the densest part of these indexes: searched with NRG, the IGH locus
-  alone (chr14 with every base outside it set to N, and the panel's records of the locus) took
-  25.0 GiB, IGK alone 6.2 GiB and IGL alone 3.0 GiB. No search of them with NRR was measured; on
-  chr22, NRR, the default, took 1.8 times NRG's memory. The gate searched no other chromosome
-  whole (during development, the rebuilt mega's search of chr14 whole, five guides
-  population-level with its density guard on, took 20.5 GiB). Give a search of a chromosome that
-  holds IGH at least what the locus alone took with NRG, and more on an index of NRR, the default:
-  a search of chr14 on `20-NRR_3_hg38+hg38_HGDP1kGP` can need more than 25 GiB.
+- **Reference-only.** Genome-wide, `complete-search` of `ACTGAAATCTGTAAGCAGGC` on `20-NRR_3_hg38`
+  took 10.5 GiB on 4 threads (the web interface's; 45 min), 17.6 GiB on 8 (the default of
+  `--thread`; 29 min) and 58.0 GiB on 32 (25 min).
+- **Variant-aware, one chromosome or region**, on the indexes of HGDP + 1000 Genomes, 8 threads
+  (METHODS.md §5): on chr22 the README guide took 5.1 GiB with NRG and 9.5 GiB with NRR, the
+  default PAM, per sample and population-level alike, and three repeat-rich guides at once, with
+  NRG, 12.6 GiB; SaCas9's 21-nt guide, which the NNGRRN index serves, 5.4 GiB. The immunoglobulin
+  loci are the densest part of these indexes: the whole of chr14, which holds IGH, took 27.3 GiB
+  with NRR, per sample (56 min). During 2.10.0's development, on fake-indel windows of 25/27, the
+  loci alone, searched with NRG, took 25.0 GiB (IGH, chr14 with every base outside it set to N),
+  6.2 GiB (IGK) and 3.0 GiB (IGL), and the rebuilt mega's search of chr14 whole, five guides
+  population-level with its density guard on, 20.5 GiB.
 
 To estimate the cost of a large search up front, see `docs/SCALABILITY_ANALYSIS.md`.
 
@@ -660,7 +709,8 @@ CRISPRme's searches are memory intensive. By default Docker Desktop caps the
 memory available to containers, which can cause searches to fail with
 out-of-memory errors. Before running large analyses, raise the limit in
 **Docker Desktop → Settings → Resources → Memory**: a genome-wide **variant** search
-needs **64 GB+** (it peaks at ~68–75 GB), and smaller searches need less
+needs **64 GB+** (on the indexes of 2.10.0 it took 38 GB in all on 8 threads, 63 GB on 16
+and 110–119 GB on 32), and smaller searches need less
 ([§0](#0-system-requirements)). On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). CRISPRme prints a non-fatal
 `WARNING:` at the start of a `complete-search` / `complete-test` run when it
 detects less than 32 GB of total memory, reminding you to increase this
@@ -1014,7 +1064,8 @@ per sample is the faster beside mega too (before the guard, 96 to 107 min per sa
 min of it the report, against 49 to 55).
 Genome-wide, on the rebuilt indexes, the default search (the README guide, NRR) took 4 h 16 min to
 4 h 32 min per sample and 6 h 13 min to 6 h 27 min population-level on 16 threads (the estimate made
-from its parts before the rebuild was 1.5 to 4 h per sample). Against 2.8.1, on 32 threads, a
+from its parts before the rebuild was 1.5 to 4 h per sample), and 4 h 33 min and 7 h 0 min on 8
+threads, the default (on a shared node). Against 2.8.1, on 32 threads, a
 per-sample search of HGDP + 1000 Genomes took 0.95 to 1.30 times 2.8.1's time and one of HPRC 0.90
 (0.96 population-level), but the README guide's population-level search of HGDP + 1000 Genomes with
 NRG took 2.2 times 2.8.1's: 2 h 29 min against 1 h 8 min. Its searches took about 2.8.1's time;
@@ -1251,8 +1302,10 @@ its purpose and usage:
   Measured at 4 mismatches and 1 + 1 bulges, a search of the mega rebuilt for 2.10.0 with the
   guard took 1.35 to 1.46 (chr22) and 1.53 to 1.73 (chr14) times the shipped mega's, in several
   measurements side by side on shared nodes during 2.10.0's development; unguarded, 4.4 to 4.9
-  times on chr22, and the chr14 search was projected at 12 to 16 h. The release's gates time it
-  genome-wide. See METHODS §5.
+  times on chr22, and the chr14 search was projected at 12 to 16 h. Genome-wide, the release's
+  timing gate measured the README guide's population-level search with NRR on the rebuilt mega at
+  1.21 times the shipped mega's with the same code and 1.18 times 2.8.1's own (1 h 40 min against
+  1 h 22 min and 1 h 24 min, 32 threads). See METHODS §5.
 
 - `--per-sample` (*Optional*)
   <br>Force per-sample genotype resolution into observed haplotypes for the SNP
@@ -1573,20 +1626,20 @@ header of its `.bin` files (index format 2) or its `.pam_build` records (the 3�
 any). With another nuclease's PAM the example guide may have no off-target in
 the genome, which passes as an empty result.
 
-With `--chrom` (e.g. `--chrom chr22`) it searches that chromosome only. It runs from a
-per-run view of the working directory in which that chromosome is the only one: a hidden
-`.crisprme-test-view-*` folder of symlinks, removed when the run ends. So its result
-tables hold exactly the off-targets the whole-genome test reports on that chromosome (the
-shareable report's top-1000 view then ranks that chromosome alone, so it can list sites the
-whole-genome report ranks below its top 1000), for a fraction of the cost: with `NRR_3_hg38+hg38_HGDP1kGP` (2.8.1's archive), `--chrom chr22` peaked at about 10 GB of RAM
-and took about 2 minutes at 16 threads in testing (about 5 GB and 1.5 to 4 minutes with `NRG_3_hg38+hg38_HGDP1kGP`). A chromosome that holds none of
-the example guide's off-targets, as `chrM` and most contigs of 2.8.1's reference-only
+With `--chrom` (e.g. `--chrom chr22`) it searches that chromosome only. It runs from a per-run view
+of the working directory in which that chromosome is the only one: a hidden `.crisprme-test-view-*`
+folder of symlinks, removed when the run ends. So its result tables hold exactly the off-targets the
+whole-genome test reports on that chromosome (the shareable report's top-1000 view then ranks that
+chromosome alone, so it can list sites the whole-genome report ranks below its top 1000), for a
+fraction of the cost: with `20-NRR_3_hg38+hg38_HGDP1kGP`, `--chrom chr22` peaked at 9.2 GiB of RAM
+and took about 3 minutes at 16 threads (4.9 GiB and about 3 minutes with
+`20-NRG_3_hg38+hg38_HGDP1kGP`; the release's gates, on a shared node). A chromosome that holds none
+of the example guide's off-targets, as `chrM` and most contigs of 2.8.1's reference-only
 `NRG_3_hg38` do, passes with an empty result, which Complete Search ends without an
-`integrated_results.tsv`. A chromosome that the genome or the index does not have is
-refused in one line naming those it has.
-Without `--chrom` it searches **every chromosome** of the index's genome; with a variant
-index such as `20-NRR_3_hg38+hg38_HGDP1kGP` that is a genome-wide variant search, which needs
-the memory given in [§0](#0-system-requirements) (64 GB or more).
+`integrated_results.tsv`. A chromosome that the genome or the index does not have is refused in one
+line naming those it has. Without `--chrom` it searches **every chromosome** of the index's genome;
+with a variant index such as `20-NRR_3_hg38+hg38_HGDP1kGP` that is a genome-wide variant search,
+which needs the memory given in [§0](#0-system-requirements) (64 GB or more).
 
 This module is suited for:
 
@@ -2656,9 +2709,9 @@ downloaded (e.g. `20-NRR_3_hg38+hg38_HGDP1kGP`), execute the following command:
   ```
 
 It searches chromosome 22 alone and reports the off-targets the
-[Full Genome Test](#322-full-genome-test) reports there. With `NRR_3_hg38+hg38_HGDP1kGP` (2.8.1's archive)
-it peaked at about 10 GB of RAM and took about 2 minutes at 16 threads in testing (about 5 GB
-and 1.5 to 4 minutes with `NRG_3_hg38+hg38_HGDP1kGP`).
+[Full Genome Test](#322-full-genome-test) reports there. With `20-NRR_3_hg38+hg38_HGDP1kGP` it
+peaked at 9.2 GiB of RAM and took about 3 minutes at 16 threads (4.9 GiB and about 3 minutes with
+`20-NRG_3_hg38+hg38_HGDP1kGP`; the release's gates, on a shared node).
 `validate-test` does not apply to it, as to any run of the prebuilt-index smoke.
 
 As CI runs it, the single-chromosome test is `complete-test`'s benchmark mode followed by

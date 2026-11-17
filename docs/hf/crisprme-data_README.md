@@ -112,7 +112,8 @@ above all) are withheld and listed in the dense-region files, and noted on the r
 rows of two or more variants whose frequencies fail the bound (product under 1e-06, or the
 rarest under 0.001) are ranked after the others; with the guard a search of it took 1.35 to 1.46
 (chr22) and 1.53 to 1.73 (chr14) times the shipped mega's, at 4 mismatches and 1 + 1 bulges
-(during 2.10.0's development; the release's gates time it genome-wide). The
+(during 2.10.0's development), and genome-wide 1.21 times with the same code and 1.18 times 2.8.1's
+own (the release's timing gate, the README guide population-level with NRR, 32 threads). The
 rebuilt archives are published with the release, in the location of the 2.10.0 indexes; the ones
 above stay for earlier releases.
 

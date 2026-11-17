@@ -30,9 +30,14 @@ keep their archives (index format 1) unchanged, so an older client never finds a
 CRISPRme+ 2.10.0 reads both formats; a download of an archive of 2.8.1 by its own name names the
 index here that replaces it.
 
-**Versions:** CRISPRme+ and CRISPRitz share their major.minor: CRISPRme+ 2.10.z with CRISPRitz
-2.10.z (Bioconda pins `crispritz >=2.10.0,<2.11`; the Docker image the exact CRISPRitz it was
-tested with). Every install route of 2.10.0 installs the matching CRISPRitz.
+**Versions:** CRISPRme+ and CRISPRitz share their major.minor: CRISPRme+ 2.10.z runs on
+CRISPRitz 2.10.z (Bioconda pins `crispritz >=2.10.0,<2.11`, and CRISPRitz 2.10.0's recipe asks for
+`crisprme >=2.10.0`; the Docker image builds the exact CRISPRitz it was tested with, `v2.10.0`).
+A breaking change in either package (an index format, the enricher's output, a command line or a
+file one reads of the other) bumps the minor of both; any other change bumps only the patch of the
+package it changes ([version policy](https://github.com/pinellolab/crisprme-plus/blob/main/docs/RELEASING.md#version-policy)).
+So every index here serves CRISPRme+ 2.10.z; a release that changes the index format publishes its
+own. Every install route of 2.10.0 installs the matching CRISPRitz.
 
 ## Names
 
@@ -65,7 +70,10 @@ sites-only (5 sources, allele frequencies only).
 
 **Contigs.** The reference indexes and those of HGDP + 1000 Genomes hold all 455 sequences of
 hg38 (its alt, random and unplaced contigs and chrM included), so a variant search finds every
-site a reference search finds; those of HPRC and mega hold its 24 chromosomes, chr1-22, X and Y.
+site a reference search finds, but the Cas12a TTTN indexes (`TTTN-20_3_*`, `TTTN-23_3_*`), which
+hold 454: `chrUn_KI270539v1` (993 bp, GC 0.80) has no `TTT` and no `AAA`, so no TTTN site and no
+tree, and a TTTN search has nothing to find there. Those of HPRC and mega hold its 24
+chromosomes, chr1-22, X and Y.
 An alt contig repeats a region of a primary chromosome (the HLA region, for one) and no VCF of
 these panels covers it, so a site there can be reported twice, the second time as a reference
 row on the alt contig.
@@ -93,6 +101,49 @@ a site), with the same rows; 2.8.1's `NNN_3` archives stay in `lucapinello/crisp
 
 The list, with how each archive is built and published, is the index set,
 [`seq_script/rebuild/index_set_2.10.0.tsv`](https://github.com/pinellolab/crisprme-plus/blob/main/seq_script/rebuild/index_set_2.10.0.tsv).
+
+## Archives and sizes
+
+Each archive is a `.tar.gz` (the table gives its path without it). GB = 10⁹ bytes: each index
+and companion as `publish-index` packs it, measured before the publish, and each kit as built;
+`indexes/SHA256SUMS` gives each index's and companion's SHA-256, from the Hub, and
+`build-inputs/<dataset>.SHA256SUMS` each kit's.
+
+| Archive | GB | Archive | GB |
+|---|---|---|---|
+| `indexes/20-NRR_3_hg38` | 20.17 | `indexes/20-NRR_3_hg38+hg38_HGDP1kGP` | 27.84 |
+| `indexes/20-NGG_3_hg38` | 3.81 | `indexes/20-NGG_3_hg38+hg38_HGDP1kGP` | 5.34 |
+| `indexes/20-NRG_3_hg38` | 8.89 | `indexes/20-NRG_3_hg38+hg38_HGDP1kGP` | 12.24 |
+| `indexes/20-NNNNNNNN_3_hg38` | 82.21 | `indexes/20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` | 110.91 |
+| `indexes/22-NNGRRN_3_hg38` | 5.41 | `indexes/22-NNGRRN_3_hg38+hg38_HGDP1kGP` | 7.52 |
+| `indexes/TTTN-20_3_hg38` | 2.83 | `indexes/TTTN-20_3_hg38+hg38_HGDP1kGP` | 4.54 |
+| `indexes/TTTN-23_3_hg38` | 3.09 | `indexes/TTTN-23_3_hg38+hg38_HGDP1kGP` | 4.83 |
+| `indexes/20-NRR_3_hg38+hg38_HPRC` | 29.55 | `indexes/20-NRR_3_hg38+hg38_mega` | 24.11 |
+| `indexes/dictionaries-bundle_hg38_HGDP1kGP` | 16.42 | `indexes/genotypes_hg38_HGDP1kGP` | 5.87 |
+| `indexes/dictionaries-bundle_hg38_HPRC` | 2.44 | `indexes/genotypes_hg38_HPRC` | 0.56 |
+| `indexes/dictionaries-bundle_hg38_mega` | 1.95 | `indexes/indel_genotypes_hg38_HGDP1kGP` | 7.64 |
+| `indexes/indel_genotypes_hg38_HPRC` | 0.59 | `build-inputs/hg38_HGDP1kGP` | 1.24 |
+| `build-inputs/hg38_HPRC` | 1.18 | `build-inputs/hg38_mega` | 1.02 |
+
+A panel's first index is fetched with its Dictionaries bundle and genotype store, once: the
+default `20-NRR_3_hg38+hg38_HGDP1kGP` is 50.13 GB in all, HPRC's 32.55 GB, the mega's 26.06 GB;
+`download --what all` adds the default reference index, `20-NRR_3_hg38`.
+
+## Provenance
+
+Every archive here was built on 2026-11-14 and 2026-11-15 by CRISPRitz 2.10.0, from one image
+and one commit, and checked before the publish: the integrity of every index, the panels' counts
+recounted from their VCFs, and the kits' checksums and member lists (Gate A), the real-data indel
+checker on genome-wide searches of each panel, the `--prune-pam` equivalence and the timing
+against 2.8.1. Their record — the build image's sha256 and binaries, each input with its version
+and checksum (hg38's 455 FASTAs; HGDP + 1000 Genomes' re-phased callset; HPRC v2.1's VCF, its S3
+ETag and the split files' SHA-256; the mega's merged VCFs; the samplesID lists), each archive's
+threads, wall time, memory and size, and each kit's SHA-256 and member list — is
+[`docs/INDEX_PROVENANCE.md`](https://github.com/pinellolab/crisprme-plus/blob/main/docs/INDEX_PROVENANCE.md)
+(2.10.0), and the methods of the rebuild are
+[METHODS §11](https://github.com/pinellolab/crisprme-plus/blob/main/METHODS.md#11-index-rebuild-of-2100).
+The known limits of 2.10.0, which these indexes share, are in
+[METHODS §10](https://github.com/pinellolab/crisprme-plus/blob/main/METHODS.md#10-known-limits-of-2100).
 
 ## Layout
 
