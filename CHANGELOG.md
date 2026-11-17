@@ -2412,6 +2412,46 @@ major.minor version (Changed). The main changes, each told in its entry below:
   the same findings, line for line, but those 6 (B10: 590,981 findings, 39 gating). Covered by
   `test_check_indel_rows` (`ReadUpToWhereTheLastBaseStood`; both tests fail on the code
   before).
+- **A per-sample SNP row's carrier is no longer left off it for a variant past the bases its reading
+  compares** (`new_simple_analysis._snp_slot_verdict`, `indel_snp_cis.snp_target_held`; the SNP-row
+  form of the indel-row fix above).
+  - The rule that takes off a per-sample SNP row a carrier whose haplotype holding its SNPs also
+    holds an indel that changes the target keeps one whose own bases, read from the target's first
+    base on or up to its last, are still the target's (a repeat unit gained or lost at the edge); a
+    reading that meets a variant the haplotype cannot be written with (an indel whose call cannot be
+    put on its slot, two records of one base, a SNP alt on an indel's REF) cannot be read. Each
+    reading wrote the haplotype over the whole frame with every indel of its side, so such a variant
+    past the target, which its stretch never reaches, stopped it, as on an indel row before the fix
+    above, and a carrier whose bases are the target's left the row.
+  - The haplotype is now written without those variants, and a reading cannot be read only where the
+    bases it compares (its stretch on the haplotype and the target's span) reach one
+    (`target_pairs`' `avoid`); a reading that held before reads as it did, so the change only keeps
+    carriers. The real-data checker's SNP-row report reads a slot so too (`snp_row_keeps`).
+  - On the release gate, each per-sample search was run again with the change and an analysis that
+    also calls the old rule on every SNP-row verdict and logs the calls that differ (gate B's
+    sandbox and install). Of about 213 million verdicts, 3,593 differ, 191 distinct (target,
+    carrier, haplotype, variant set) calls, every one a carrier kept that the old rule dropped: B10
+    (the three repeat-rich guides) 157 of 190,443,762, B1 and B8 (the README guide with NRR) 5 of
+    5,526,903, B3 (with NRG) 5, B5 (TRAC) 6, B13a (CEP290) 2, E2 and E5 (the ACTGA guide through the
+    general index) 7 each, B6 (HPRC) 2, and none in B12a, B12d, B14a and B14c. Rebuilt from the VCF,
+    each of the 189 on HGDP + 1000 Genomes holds the row's target; HPRC's 2 (HG03669 on chr15,
+    HG02015 on chrY) hold MNVs inside the target, which no store CRISPRme reads holds (Changed, the
+    known limits: an MNV beside an indel). Most of the haplotypes kept change no row: the tables of
+    B1, B3, B5, B6, B12a, B12d, B13a, B14a, B14c, E2 and E5 are the same as before (E2's
+    and E5's but for two annotation columns, which gate E read from another install's files). In
+    B10, 13 alternative alignments of VEGFA site 3 and EMX1 list 5 more carriers (HGDP01087,
+    LP6005441-DNA_B08, LP6005441-DNA_C01; HG03779 and HG03861 on one EMX1 alignment), the integrated
+    row chr10:128,732,537 (−) lists HGDP01087 too (one more target in VEGFA site 3's per-sample
+    summaries), and at chr16:87,938,642 and 87,938,646 (−) HG03785's SNP rows, which name 87,938,651
+    T>C and which the change keeps, become the integrated rows, where its rows naming that SNP with
+    87,938,657 GACTC>G were, now among the alternative alignments; no carrier leaves any row. The
+    real-data checker's SNP-row report, with its model of this change, finds the 5 carriers missing
+    from those rows on gate B's B10, which list other carriers (30 lines); it cannot see a row the
+    rule removed whole. Population-level
+    searches do not read the store and are unchanged.
+  - Covered by `test_snp_row_indel_carriers` (`AVariantPastTheStretch`; `ObservedPath` and
+    `DictionaryPath`, end to end) and `test_check_indel_rows` (`SnpRowsReport`): 6 of the 7 new
+    tests fail on the code before, the 7th a control.
 - **A search on a host whose coreutils are uutils' writes its results tables right.** The search
   joined its three lists of each site's best alignment (by CFD, by fewest mismatches and bulges, by
   CRISPR-Bulge) line by line into `*.bestMerge.txt` and `*.altMerge.txt` with `pr -m -t -J`
