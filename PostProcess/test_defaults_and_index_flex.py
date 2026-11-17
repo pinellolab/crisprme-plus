@@ -1600,6 +1600,90 @@ class TheFinalDocsOfTheRebuild(unittest.TestCase):
             self.assertIn("\n" + heading + "\n", notes)
 
 
+class TheFinalDocsReviewFixes(unittest.TestCase):
+    """The review of the final docs (finaldocs-review A-r1 and B-r1). Two CFD bounds sat below
+    the maxima measured (the MNV rows' strongest CFD block is 0.0844, at chr5:177,802,035 (+), a
+    row whose sequence no HPRC haplotype holds: the MNV is on each of the 317 haplotypes with its
+    deletion; the MNV sites' best target 0.01638). The README tied the immunoglobulin loci's memory
+    to windows of 25/27 (they are the integration gate's, on 30/30) and cited METHODS section 5
+    for gate D's figures, which it did not give. A later index's download was said to fetch its
+    archive alone (crisprme_hf fetches its PAM's reference index where that is not installed).
+    The release notes and ROADMAP dropped the classic-install limit's condition, an unphased
+    call in a VCF that is otherwise phased (the peel runs only where the dictionary is phased).
+    METHODS section 10 gave NA18640's listing a cause not measured (the second deletion is inside
+    the target, its 10th and 11th bases) and split HPRC's unphased chrY genotypes into two kinds
+    of three. ROADMAP kept as open the checker's read of a whole chromosome a lower-case SNV,
+    which bdefe09e fixed."""
+
+    @staticmethod
+    def _flat(name):
+        return " ".join((_REPO / name).read_text().split())
+
+    _LIMIT_DOCS = ("README.md", "METHODS.md", "CHANGELOG.md", "docs/TROUBLESHOOTING.md",
+                   "docs/release-notes-2.10.0.md", "docs/ROADMAP.md")
+
+    def test_no_cfd_bound_is_below_its_measured_maximum(self):
+        for name in self._LIMIT_DOCS:
+            text = self._flat(name)
+            with self.subTest(doc=name):
+                self.assertNotIn("CFD of 0.084 or less", text)
+                self.assertIsNone(re.search(r"at most 0\.016(?!\d)", text))
+        self.assertLessEqual(0.0844242, 0.085)
+        self.assertLessEqual(0.016382, 0.0164)
+
+    def test_the_strongest_mnv_row_is_stated(self):
+        for name in ("METHODS.md", "CHANGELOG.md", "docs/TROUBLESHOOTING.md",
+                     "docs/release-notes-2.10.0.md"):
+            self.assertIn("chr5:177,802,035 (+)", self._flat(name), name)
+        self.assertIn("lists the 206 carriers of its deletion, and each of the 317 HPRC "
+                      "haplotypes with the deletion holds the MNV too",
+                      self._flat("docs/release-notes-2.10.0.md"))
+
+    def test_the_memory_figures_keep_their_basis(self):
+        readme = self._flat("README.md")
+        self.assertNotIn("on fake-indel windows of 25/27, the loci alone", readme)
+        self.assertIn("the integration's gate's searches of the loci alone with NRG, on indexes "
+                      "built with the release's fake-indel windows of 30/30", readme)
+        self.assertIn("1.86 times its memory (9.54 against 5.14 GiB; METHODS.md §5)", readme)
+        methods = self._flat("METHODS.md")
+        published = methods[methods.index("**On the published indexes.**"):]
+        published = published[:published.index("**What the default budget costs.**")]
+        for figure in ("5.14 GiB", "9.54 GiB", "12.60 GiB", "5.42 GiB", "1.86 times NRG's memory",
+                       "1.31 times its time", "27.30 GiB"):
+            self.assertIn(figure, published)
+        self.assertNotIn("README §0 gives these with their basis", self._flat("CHANGELOG.md"))
+
+    def test_a_later_index_brings_its_reference_index(self):
+        code = (_REPO / "PostProcess" / "crisprme_hf.py").read_text()
+        self.assertIn('ref_index_name = install_name.partition("+")[0]', code)
+        for name in ("docs/PRECOMPUTED_INDEXES.md", "docs/release-notes-2.10.0.md"):
+            text = self._flat(name)
+            self.assertNotIn("its own archive alone", text, name)
+            self.assertIn("its PAM's reference index where that is not installed", text, name)
+
+    def test_the_unphased_limits_keep_their_conditions(self):
+        for name in ("docs/release-notes-2.10.0.md", "docs/ROADMAP.md"):
+            self.assertIn("a carrier with an unphased call in a VCF that is otherwise phased",
+                          self._flat(name), name)
+        methods = self._flat("METHODS.md")
+        self.assertIn("(28,228,108 `./.`, 596,382 `0/.` and 51,717 `1/.`)", methods)
+        self.assertEqual(28228108 + 596382 + 51717, 28876207)
+        self.assertNotIn("so none is a call of two ALTs", methods)
+
+    def test_methods_gives_na18640_as_measured(self):
+        methods = self._flat("METHODS.md")
+        self.assertNotIn("a second deletion past the bases CRISPRme reads", methods)
+        self.assertIn("11,818,799 GCC>G, takes out two of the target's bases, its 10th and 11th",
+                      methods)
+        self.assertIn("why the search lists the carrier was not established", methods)
+
+    def test_the_roadmap_keeps_no_fixed_item_open(self):
+        checker = (_REPO / "scripts" / "check_indel_rows.py").read_text()
+        self.assertIn("def fasta_layout(path):", checker)
+        self.assertNotIn("reads a whole enriched chromosome for each SNV written in lower case",
+                         self._flat("docs/ROADMAP.md"))
+
+
 class AGenomeFolderWithASpaceIsRefusedUpFront(unittest.TestCase):
     """A genome folder with a space in its path failed later with a misleading path: the
     search takes it into shell commands unquoted (IDX-19), and the working directory's too.
