@@ -1515,6 +1515,91 @@ class TheTimingGatesNoteCountsTheControlAsAPair(unittest.TestCase):
         self.assertIn("chr4's 853 s", note)
 
 
+class TheFinalDocsOfTheRebuild(unittest.TestCase):
+    """The docs wave after the index rebuild of 2.10.0 (finaldocs-build). TROUBLESHOOTING section 15
+    and the release notes said that the gate's B10 search lists "two carriers" whose own target
+    starts a repeat unit away (closure review B-r3, B-R3-1): rebuilt from the VCF, each listing of
+    B10's 9,059 at the place where its slot holds the row's target, 8 listings by 6 carriers at 8
+    sites are of that shape (HGDP00655 and HG01432 2 bases before the row in reference
+    coordinates; HG01883, HGDP00465, NA19475 and NA20888 at another base of the row's own
+    insertion), 8,693 of the named-SNP shape. The TTTN indexes hold 454 contigs (Gate A); METHODS
+    section 4 states the SNP-row rule's store coverage (_SNP_INDEL_MARGIN), and section 10 what was
+    measured of the unphased-call limits; METHODS section 11 is the rebuild's methods; the README
+    points to the limits and the plan; the release notes fit a release body."""
+
+    @staticmethod
+    def _flat(name):
+        return " ".join((_REPO / name).read_text().split())
+
+    def test_the_two_indel_shapes_are_counted_from_the_vcf(self):
+        for name in ("docs/TROUBLESHOOTING.md", "docs/release-notes-2.10.0.md"):
+            text = self._flat(name)
+            self.assertNotIn("lists two carriers so", text, name)
+            self.assertNotIn("through a second deletion in a repeat", text, name)
+        self.assertIn("list 6 carriers so, at 8 sites of HGDP + 1000 Genomes (HGDP00655, HG01432, "
+                      "HG01883, HGDP00465 and NA19475 on VEGFA site 3, in GT repeats, and NA20888 on "
+                      "EMX1, in an AAG repeat), through a second deletion or insertion in the repeat",
+                      self._flat("docs/TROUBLESHOOTING.md"))
+        self.assertIn("8,693 of the 9,059 are of the first shape, and 8 of the second, by 6 carriers",
+                      self._flat("docs/release-notes-2.10.0.md"))
+        methods = self._flat("METHODS.md")
+        self.assertIn("B10's 9,059 listings split so: in 8,693 (at 260 sites, by 3,558 samples)",
+                      methods)
+        self.assertIn("in 8 (6 carriers at 8 sites) its own target, through a second indel in the "
+                      "repeat, starts one to three repeat units (2 to 6 bases) before the row's",
+                      methods)
+        # the split adds up to the class's count
+        self.assertEqual(8693 + 8 + 357 + 1, 9059)
+
+    def test_the_tttn_indexes_hold_454_contigs(self):
+        for name in ("README.md", "METHODS.md", "docs/hf/crisprme_plus_indices_README.md",
+                     "docs/INDEX_PROVENANCE.md", "docs/RELEASE_CHECKLIST.md"):
+            text = self._flat(name)
+            with self.subTest(doc=name):
+                self.assertIn("454", text)
+                self.assertTrue("chrUn_KI270539v1" in text or "one unplaced contig has no TTTN "
+                                "site" in text)
+        self.assertNotIn("hold all 455 sequences of hg38 (its alt, random and unplaced contigs and "
+                         "chrM included), so a variant search finds every site a reference search "
+                         "finds; those", self._flat("docs/hf/crisprme_plus_indices_README.md"))
+
+    def test_methods_section_4_states_the_store_the_snp_rows_read(self):
+        code = (_REPO / "PostProcess" / "new_simple_analysis.py").read_text()
+        self.assertIn("_SNP_INDEL_MARGIN = 500\n", code)
+        methods = self._flat("METHODS.md")
+        self.assertIn("a search reads the store only around the chromosome's SNP targets, each "
+                      "widened by 500 bases on either side (`_SNP_INDEL_MARGIN`", methods)
+        self.assertIn("- **A SNP row's carrier whose indel reaches past the store the search "
+                      "read.**", methods)
+
+    def test_methods_says_what_was_measured_of_the_unphased_limits(self):
+        methods = self._flat("METHODS.md")
+        item = methods[methods.index("- **An unphased call of two ALTs at one position.**"):]
+        item = item[:item.index("- **What the real-data check does not check.**")]
+        self.assertIn("The published panels hold no such call, measured on their VCFs", item)
+        self.assertIn("where its size was not measured", item)
+        self.assertIn("Its size on a classic install of a VCF with unphased calls was not "
+                      "measured.", item)
+
+    def test_methods_has_the_rebuild_and_the_readme_points_to_the_limits(self):
+        methods = (_REPO / "METHODS.md").read_text()
+        self.assertIn("\n## 11. Index rebuild of 2.10.0\n", methods)
+        self.assertIn("11. [Index rebuild of 2.10.0](#11-index-rebuild-of-2100)", methods)
+        readme = (_REPO / "README.md").read_text()
+        section = readme[readme.index("### Known limitations and roadmap"):]
+        section = section[:section.index("\n> ")]
+        for target in ("docs/release-notes-2.10.0.md", "METHODS.md#10-known-limits-of-2100",
+                       "docs/ROADMAP.md"):
+            self.assertIn(target, section)
+
+    def test_the_release_notes_fit_a_release_body(self):
+        notes = (_REPO / "docs" / "release-notes-2.10.0.md").read_text()
+        self.assertLess(len(notes), 125000)
+        for heading in ("## What is new", "## Upgrading from 2.8.1", "## Known limitations",
+                        "## Planned for 2.10.1"):
+            self.assertIn("\n" + heading + "\n", notes)
+
+
 class AGenomeFolderWithASpaceIsRefusedUpFront(unittest.TestCase):
     """A genome folder with a space in its path failed later with a misleading path: the
     search takes it into shell commands unquoted (IDX-19), and the working directory's too.
