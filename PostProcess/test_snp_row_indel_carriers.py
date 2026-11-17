@@ -211,6 +211,65 @@ class PureHelpers(unittest.TestCase):
         self.assertEqual(ways, [None, None])
 
 
+def _two_records_at(p0):
+    """Two records of one base at 0-based ``p0`` (one VCF POS): a deletion of the next
+    base and an insertion after it. A slot phased with both has no one sequence there."""
+    return [(p0 + 1, GENOME[p0:p0 + 2], GENOME[p0]), (p0 + 1, GENOME[p0], GENOME[p0] + "A")]
+
+
+class AVariantPastTheStretch(unittest.TestCase):
+    """2.10.0's release gates (B10: VEGFA site 3, per sample, HGDP + 1000 Genomes) found
+    an indel row's carrier left off for a variant its slot cannot be written with (two
+    records of one base, a SNP alt on an indel's REF, an unphased call) 2 to 41 bases
+    past the target, which the bases its reading compares never reach. A SNP row's rule
+    read the slot the same way: such a variant anywhere in the frame on a way's side
+    stopped that way. The slot is now written without it, and only a way that reaches a
+    base of its REF -- a base of its stretch, or of the target's span -- cannot be read.
+
+    The world: _gene_run_del (TG>T at the PAM's T) keeps the target's bases from its
+    first base on, through one G of the TGGG run the run puts back; that reading's
+    stretch ends one base past the target (HI + 1). Up to the last base it does not hold
+    them. Each case puts a variant the slot cannot be written with on the reading from
+    the first base on, at HI + 5 (past the stretch: kept) or at HI + 1 (the stretch's
+    last base: not). On 2.10.0's code before the fix, every such slot was dropped."""
+
+    def value(self, src):
+        return src if isinstance(src, str) else GENOME[src]
+
+    def held(self, held, value=None, unread=None):
+        return isc.snp_target_held(LO, HI, [SNP_POS1 - 1], held, value or self.value,
+                                   GENOME, *(() if unread is None else (unread,)))
+
+    def test_two_records_of_one_base_past_the_stretch(self):
+        run = _gene_run_del()
+        self.assertTrue(self.held(([run] + _two_records_at(HI + 5), [run])))
+        # on the stretch's last base: that way cannot be read
+        self.assertFalse(self.held(([run] + _two_records_at(HI + 1), [run])))
+
+    def test_an_unphased_indel_past_the_stretch(self):
+        run = _gene_run_del()
+        far = (HI + 6, GENOME[HI + 5], GENOME[HI + 5] + "TT")
+        self.assertTrue(self.held(([run], [run]), unread=([far], [])))
+        near = (HI + 2, GENOME[HI + 1], GENOME[HI + 1] + "TT")
+        self.assertFalse(self.held(([run], [run]), unread=([near], [])))
+
+    def test_a_snp_alt_on_an_indel_ref_past_the_stretch(self):
+        run = _gene_run_del()
+        for at, want in ((HI + 5, True), (HI + 1, False)):
+            dele = (at + 1, GENOME[at:at + 2], GENOME[at])
+            snp = "C" if GENOME[at + 1] != "C" else "A"  # an alt on the deleted base
+            alt_on_ref = lambda s: snp if s == at + 1 else self.value(s)  # noqa: E731
+            self.assertEqual(self.held(([run, dele], [run]), alt_on_ref), want, at)
+
+    def test_without_them_the_same(self):
+        """A slot with no such variant reads as it did: the run deletion kept, a deletion
+        inside the protospacer dropped."""
+        self.assertTrue(self.held(([_gene_run_del()], [_gene_run_del()])))
+        self.assertFalse(self.held(([_spacer_del()], [_spacer_del()])))
+        self.assertFalse(self.held(([_spacer_del()] + _two_records_at(HI + 5),
+                                    [_spacer_del()])))
+
+
 class EnumeratorSlotFilter(unittest.TestCase):
     """observed_haplotypes: the slot filter decides per haplotype."""
 
@@ -361,6 +420,24 @@ class ObservedPath(unittest.TestCase):
                       observed=self.observed)
         fx.ns["mydict"]["chrT,%d" % (HI + 2)] = "S8:1|0;G,T;rs2;0.10"
         self.assertEqual(fx.snp_carriers(fx.run()), {"S7"})
+
+    def test_a_variant_past_the_stretch_read_does_not_stop_it(self):
+        """2.10.0's release gates (AVariantPastTheStretch): S7's and S9's slot of the SNP
+        holds the G-run deletion, whose bases read from the target's first base on are
+        the target's, and past that stretch two records of one base (S7) or an unphased
+        insertion (S9): kept. S8's two records of one base stand on the stretch's last
+        base: that reading cannot be read, and S8 leaves the row. Up to the gates all
+        three left it."""
+        run = _gene_run_del()
+        far = (HI + 9, GENOME[HI + 8], GENOME[HI + 8] + "TT")
+        indels = [(run, {"S7": "1|0", "S8": "1|0", "S9": "1|0"}), (far, {"S9": "0/1"})]
+        indels += [(rec, {"S7": "1|0"}) for rec in _two_records_at(HI + 5)]
+        indels += [(rec, {"S8": "1|0"}) for rec in _two_records_at(HI + 1)]
+        indels.sort(key=lambda x: x[0])
+        got, fx = self._carriers({"S7": "1|0", "S8": "1|0", "S9": "1|0", "S6": "1|0"},
+                                 indels)
+        self.assertEqual(got, {"S6", "S7", "S9"})
+        self.assertEqual(fx.ns["_snp_indel_stats"]["kept"], 2)
 
     def test_junction_outside_and_artefact(self):
         art = (SNP_POS1, "C", "CAA")  # an insertion at the SNP's own position

@@ -1328,8 +1328,12 @@ def _snp_slot_verdict(sample, slot, vset, lo, hi, touching, readings=None):
     its own bases still read the target at its place, from the first base on or up to
     the last, through the row's SNPs (a repeat unit gained or lost at the target's edge:
     indel_snp_cis.snp_target_held), read with every indel of the store it holds there:
-    KEEP if they do, DROP if not, or if they cannot be read (an indel there whose slot
-    is unknown, two records of one base, a frame the store was not read over). An indel
+    KEEP if they do, DROP if not, or if they cannot be read: a way that reaches a base of
+    a variant the slot cannot be written with (an indel there whose slot is unknown, two
+    records of one base, a SNP alt on an indel's REF), or a frame the store was not read
+    over. One past the bases a way compares, or before them, does not stop it (since
+    2.10.0's release gates, as on an indel row: up to them, any such indel of the frame
+    on a way's side stopped it). An indel
     whose slot is unknown (an unphased heterozygous call, or an unphased sample's
     candidate haplotype) cannot be tied to the haplotype: if no other one is on it, the
     carrier stays, PUTATIVE. An indel at the position of a SNP the row names is another
@@ -1338,9 +1342,10 @@ def _snp_slot_verdict(sample, slot, vset, lo, hi, touching, readings=None):
     row's own position (2.8.1).
 
     ``readings`` (a dict of the target's, or None) keeps each reading of the bases: it
-    depends on the haplotype only through the indels each way reads, the row's SNPs and
-    the haplotype's alleles at the frame's positions outside the target that hold a SNP
-    record, so the carriers of one common indel share a reading."""
+    depends on the haplotype only through the indels each way reads, those it reaches
+    whose slot is unknown, the row's SNPs and the haplotype's alleles at the frame's
+    positions outside the target that hold a SNP record, so the carriers of one common
+    indel share a reading."""
     row = {lo + pc: alt for pc, alt in vset}
     mine, unknown = [], False
     for rec in touching:
@@ -1355,6 +1360,7 @@ def _snp_slot_verdict(sample, slot, vset, lo, hi, touching, readings=None):
         return _SLOT_PUTATIVE if unknown else _SLOT_KEEP
     first, last = _isc.snp_target_frame(lo, hi, mine)
     held = [list(mine), list(mine)]  # the indels each way reads
+    unread = [[], []]                # those it reaches whose slot is unknown
     for rec in _snp_indels.near(first, last):
         p, r, _a = rec
         if rec in mine or p - 1 in row:
@@ -1366,16 +1372,16 @@ def _snp_slot_verdict(sample, slot, vset, lo, hi, touching, readings=None):
         if on is False:
             continue
         for side in (0, 1):
-            if reach[side] and held[side] is not None:
-                held[side] = None if on is None else held[side] + [rec]
+            if reach[side]:
+                (unread[side] if on is None else held[side]).append(rec)
     for side in (0, 1):
-        if held[side] is not None and not _snp_indels.covers(
-                *_isc.snp_target_frame(lo, hi, held[side])):
+        if not _snp_indels.covers(*_isc.snp_target_frame(lo, hi, held[side])):
             held[side] = None  # the store was not read that far
     allele = _snp_slot_allele(sample, slot, lo, hi, row)
     frames = [_isc.snp_target_frame(lo, hi, h) for h in held if h is not None]
     if readings is None or not frames:
-        held_bases = _isc.snp_target_held(lo, hi, sorted(row), held, allele, genomeStr)
+        held_bases = _isc.snp_target_held(lo, hi, sorted(row), held, allele, genomeStr,
+                                          unread)
     else:
         first, last = min(f[0] for f in frames), max(f[1] for f in frames)
         sites = readings.get((first, last))
@@ -1383,12 +1389,12 @@ def _snp_slot_verdict(sample, slot, vset, lo, hi, touching, readings=None):
             sites = readings[(first, last)] = [
                 q for q in range(max(first, 0), min(last + 1, len(genomeStr)))
                 if not lo <= q <= hi and _snp_site(q)]
-        key = (tuple(None if h is None else tuple(h) for h in held), vset,
-               tuple(allele(q) for q in sites))
+        key = (tuple(None if h is None else tuple(h) for h in held),
+               tuple(tuple(u) for u in unread), vset, tuple(allele(q) for q in sites))
         held_bases = readings.get(key)
         if held_bases is None:
             held_bases = readings[key] = _isc.snp_target_held(lo, hi, sorted(row), held,
-                                                              allele, genomeStr)
+                                                              allele, genomeStr, unread)
     if held_bases:
         _snp_indel_stats["kept"] += 1
         return _SLOT_KEEP

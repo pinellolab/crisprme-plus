@@ -1016,7 +1016,7 @@ def snp_target_frame(lo, hi, indels):
     return lo - margin, hi + margin
 
 
-def snp_target_held(lo, hi, snps, held, value, reference):
+def snp_target_held(lo, hi, snps, held, value, reference, unread=None):
     """True iff a haplotype holding a SNP row's SNPs and some indels has the row's
     target at its place: the bases of the reference lo..hi (0-based, inclusive) with the
     haplotype's own alleles there, read from the target's first base on or up to its
@@ -1024,26 +1024,37 @@ def snp_target_held(lo, hi, snps, held, value, reference):
     0-based positions), not one another variant pushed out of it.
 
     ``held`` gives, for each way (from the first base on, up to the last base), the
-    haplotype's indels [(POS, REF, ALT)] that way reads, or None where it cannot be read
-    (an indel there that cannot be put on a slot). ``value`` (source -> base, None where
-    not known) gives the haplotype's alleles, the row's at a position of lo..hi;
-    ``reference`` is the chromosome's sequence. A way that reads two records of one base
-    (two indels whose REFs share a base, or a SNP alt of the haplotype on a base of an
-    indel's REF) cannot be read."""
+    haplotype's indels [(POS, REF, ALT)] that way can reach, or None where it cannot be
+    read (a frame the store was not read over). ``unread`` gives, for each way, the
+    indels it can reach whose call cannot be put on the haplotype (an unphased
+    heterozygous call; None: none). ``value`` (source -> base, None where not known)
+    gives the haplotype's alleles, the row's at a position of lo..hi; ``reference`` is
+    the chromosome's sequence. The haplotype is written without the indels it cannot be
+    written with: those of ``unread``, one with a SNP alt of the haplotype (or an allele
+    its calls leave unknown) on a base of its REF, and two records of one base (two
+    indels whose REFs share a base, or that insert at one point: overlapping_records).
+    A way that reaches a base of one of their REFs -- a base of its stretch on the
+    haplotype, or of the target's bases -- cannot be read; one that ends before them or
+    starts past them is read as it is, as an indel row's is (target_pairs' ``avoid``).
+    Up to 2.10.0's release gates such an indel anywhere in the frame on a way's side
+    stopped it, as it stopped an indel row's (gate B10)."""
     through = [(p, 0) for p in snps]
     for side in (0, 1):
         indels = held[side]
         if indels is None:
             continue
-        if any(not 0 <= q < len(reference) or value(q) != reference[q]
-               for p, r, _a in indels for q in range(p - 1, p - 1 + len(r))):
-            continue  # a SNP alt on a base of the indel's REF: two records of one base
+        bad = set(unread[side]) if unread is not None else set()
+        bad.update((p, r, a) for p, r, a in indels
+                   if any(not 0 <= q < len(reference) or value(q) != reference[q]
+                          for q in range(p - 1, p - 1 + len(r))))
+        bad |= overlapping_records(indels)
+        got = [rec for rec in indels if rec not in bad]
         first, last = snp_target_frame(lo, hi, indels)
-        hap = local_haplotype(first, last, None, indels)
+        hap = local_haplotype(first, last, None, got)
         if hap is None:
-            continue  # two of its indels overlap
+            continue  # cannot happen: two records of one base are in bad
         ways = target_pairs(local_haplotype(first, last, None), hap, (lo, 0), (hi, 0),
-                            through)
+                            through, avoid=tuple(sorted(bad)))
         if holds_target_bases([ways[side]], value):
             return True
     return False
