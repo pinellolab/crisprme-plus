@@ -548,24 +548,23 @@ Each changes no other row; how often each occurs depends on the guide and the pa
 scale where it was measured, and §4 gives the rules behind them.
 
 - **A carrier listed for a SNP that its own target does not hold.** On an indel row, a carrier
-  whose haplotype holds a second indel that pushes one of the row's named SNPs out of the
-  target's bases is listed on the row all the same. How often depends on the guide: the release
-  gate's genome-wide checks found 9,059 listings of this limit for three repeat-rich guides per
-  sample on
+  whose haplotype holds a second indel that pushes one of the row's named SNPs out of the target's
+  bases is listed on the row all the same. How often depends on the guide: the release gate's
+  genome-wide checks found 9,059 listings of this limit for three repeat-rich guides per sample on
   HGDP + 1000 Genomes, almost all at VEGFA site 3 in GT repeats (2,972 carriers on one alternative
   alignment, chr2:2,873,200 (+)), 3 for the README guide and none for the other guides checked. Such
-  a carrier's own target can also
-  start a repeat unit away from the row: the genome-wide gate search of VEGFA site 3 per sample
-  lists two carriers so (HGDP00655 and HG01432 of HGDP + 1000 Genomes, in GT repeats), their
-  bases the row's, through a second deletion. The haplotype scan planned for 2.10.1 reads each
-  carrier's own bases.
+  a carrier's own target can also start a repeat unit away from the row: the genome-wide gate search
+  of VEGFA site 3 per sample lists two carriers so (HGDP00655 and HG01432 of HGDP + 1000 Genomes, in
+  GT repeats), their bases the row's, through a second deletion. The haplotype scan planned for
+  2.10.1 reads each carrier's own bases.
 - **On HPRC, a carrier listed on an indel row whose haplotype holds an MNV there.** No store
   CRISPRme reads holds an MNV (a record of two or more bases replaced by as many), so a carrier
   whose haplotype holding the row's indel also holds an MNV inside the target is listed for the
   target that haplotype would hold without the MNV. Of the published panels only HPRC v2.1 has MNVs:
-  the README guide's genome-wide search lists carriers so 1,163 times at 94 sites per sample (232
-  samples), each row at a CFD of 0.084 or less. To check a carrier, read its genotypes in the
-  dataset's VCF over the row's target. CRISPRme 2.10.1 is planned to read the MNVs' phase.
+  the README guide's genome-wide search lists carriers so 1,163 times at 94 sites per sample on
+  indel rows (232 samples), each row at a CFD of 0.084 or less, and 3,334 times on SNP rows. To
+  check a carrier, read its genotypes in the dataset's VCF over the row's target. CRISPRme 2.10.1 is
+  planned to read the MNVs' phase.
 - **One target written as two rows, or twice, in a microsatellite.** In a tandem repeat that
   holds a whole target, the merge places each row by its own bases, and the target's
   alignments can fit different places of the repeat: they can then go to two rows, or the
