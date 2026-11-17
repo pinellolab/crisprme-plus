@@ -7,6 +7,20 @@ this file held before is kept at its end, for the record.
 
 ## CRISPRme+ 2.10.1 (planned)
 
+2.10.1 runs on CRISPRitz 2.10 and on the indexes of 2.10.0: no index is built again (HPRC's
+Dictionaries are, for the MNVs' phase). Each item below is a limit of 2.10.0 that METHODS §10 and
+[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §14 and §15 state with its measured size, or a gap the
+release's gates found.
+
+- **The MNVs' phase (HPRC).** No store the search reads holds an MNV, so on HPRC v2.1 a carrier
+  whose haplotype holding an indel row's indel also holds an MNV in the target is listed for a
+  sequence it does not have ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15): 1,163 listings at 94
+  sites in the README guide's genome-wide search per sample, 3,334 on SNP rows. 2.10.1 is to store
+  each MNV with its haplotype, HPRC's Dictionaries built again and its index as it is, and to read
+  it as a second variant of the slot, which takes such a carrier off that row. A target held only
+  through an MNV and another indel or MNV stays unreported, as one held through two indels does
+  (below); in 171 of the 1,163 listings the haplotype holds another target within the search's
+  budget there (METHODS §10), and one of those that needs the MNV would then go unreported too.
 - **The haplotype scan.** In the dense regions of a variant genome that codes every allele (the
   immunoglobulin loci above all), a search above 1 DNA + 1 RNA bulge expands so many IUPAC
   combinations that it runs for hours or out of memory, and 2.10.0 warns of it
@@ -20,24 +34,41 @@ this file held before is kept at its end, for the record.
 - **One density pass before the search**, defined by the genome and shared by the scan, the speed
   steps of 2.10.0 and the mega's density guard (in 2.10.0 the dense-region file is written from
   each search's own raw targets).
-- **A known limit of 2.10.0 the release fixes** ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15):
-  one target written as two rows, or twice, in a microsatellite (the merge).
-- **The MNVs' phase (HPRC).** No store the search reads holds an MNV, so on HPRC v2.1 a carrier
-  whose haplotype holding an indel row's indel also holds an MNV in the target is listed for a
-  sequence it does not have ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15). 2.10.1 is to store
-  each MNV with its haplotype, HPRC's Dictionaries built again and its index as it is, and to read
-  it as a second variant of the slot, which takes such a carrier off that row. A target held only
-  through an MNV and another indel or MNV stays unreported, as one held through two indels does
-  (below).
 - **A faster population-level post-analysis of the dense loci.** In the release gate, 2.10.0's
   genome-wide population-level search of the README guide with NRG on HGDP + 1000 Genomes took 2.20
   times 2.8.1's time, its search phases about 2.8.1's: a population-level post-analysis reads no
   haplotype, so the haplotype pre-check skips none of the dense loci's windows, the immunoglobulin
   loci among them (METHODS §10). 2.10.1 is to make that post-analysis faster, and to time the
-  search again.
-- **The real-data check** (`scripts/check_indel_rows.py`) checks `Variant_info_spacer+PAM` (each
+  search again (C9, with C8 and C10, the per-sample ones beside it), with the post-analysis changes
+  made after the gate.
+- **Known limits of 2.10.0 the release fixes** ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15):
+  one target written as two rows, or twice, in a microsatellite (the merge); and a SNP row's carrier
+  left off beside an indel that adds or deletes more bases than the store is read around a target
+  (500 bases: one carrier on two rows of the release gate's HPRC search), the store to be read as
+  far as a haplotype's own indels need.
+- **One rule for a complex record inside an indel's deleted bases.** CRISPRme takes a carrier off
+  an indel row where its slot holds a second record, inside the first's deleted or replaced bases,
+  that puts bases of its own there (METHODS §4), and the real-data check reads that slot without it
+  (31 pairs of records on one slot in HPRC v2.1, 249 slots): 2.10.1 is to decide which reading is
+  right and make the other say the same.
+- **The real-data check** (`scripts/check_indel_rows.py`): to check `Variant_info_spacer+PAM` (each
   variant's number in its target) and redundant alternative alignments, which it does not today
-  ([`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md), step 4c).
+  ([`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md), step 4c); to hold less memory (one process holds
+  the whole alternative-alignment table: 106.5 to 116.1 GiB on the release gate's largest searches
+  genome-wide, 124.6 GiB with a SNP-row report); to check a search beside the mega on chrY, which
+  only the mega's VCFs hold (it refuses the whole genome there today, so the gate checked each
+  other chromosome); to check SNP rows for completeness, so that it sees a SNP row the rule takes
+  off whole; to name every record a missed target needs in its completeness line, a record past a
+  long deletion included; and to tell a run's genome where it refuses one today.
+- **CRISPR-Bulge scores of near-ties.** A CRISPR-Bulge score can move by about 1e-5 with how a
+  chromosome's rows are batched, which flips the order of near-ties in the highest-CRISPR-Bulge
+  column: the scoring is to be made batch-independent, or the gates to compare with a tolerance.
+- **The web app**: temporary folders by name in a shared `CRISPRME_TMPDIR` that is not sticky; the
+  History page's reads of a results folder's files through the safe-file reader, and a `Results/`
+  folder that is a link (it answers HTTP 500 today); the reads of headers and PAM files.
+- **The rebuild's tooling**: an INDELS index of an exact budget refused early, not late; the
+  completeness of `$REF` checked; the checklist's lessons of the 2.10.0 rebuild
+  ([`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md), D and E).
 
 ## Open, no release named
 
@@ -48,7 +79,8 @@ this file held before is kept at its end, for the record.
   The haplotype scan does not lift it: it writes, as the search does, one indel per window.
 - An unphased call of two ALTs at one position (`1/2`) is listed on a row that needs the
   reference base there, and on a classic install an unphased carrier only on the row of all its
-  variants ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15).
+  variants ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15). No published panel holds such a call
+  (measured on their VCFs: METHODS §10); a VCF of one's own can.
 - The advice a search prints for an INDELS index it cannot use, on a sites-only dataset whose
   fake-indel genome is not in place, removes the enriched genome before a `build-index-only`
   that refuses the dataset ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §12 says what to do
