@@ -495,9 +495,11 @@ row's SNPs holds an indel of the phased store that changes the target is dropped
 its own bases, read from the target's first base on or up to its last through the row's
 SNPs, still are the target's, or the indel's call cannot be tied to the slot (kept,
 PUTATIVE), or it sits at a named SNP's position (a phasing artefact) -- a slot whose
-bases cannot be read (an indel near whose slot is unknown, two records of one base)
-leaves the row. Listing a carrier the rule drops is reported (snp-row-indel-carrier); an
-MNV the store does not hold, limit-snp-row-mnv. Population-level SNP rows are a documented
+bases cannot be read (the bases a reading compares reach an indel whose slot is unknown,
+or two records of one base; since 2.10.0's release gates one past them, or before them,
+does not stop it) leaves the row. Listing a carrier the rule drops is reported
+(snp-row-indel-carrier); an MNV the store does not hold, limit-snp-row-mnv.
+Population-level SNP rows are a documented
 worst-case union and are out of scope, as are a sites-only dataset's SNP rows, which are
 population-level whatever the search's mode (one limit-no-genotypes line each). Without
 --max-total-edits the cap is the run's own

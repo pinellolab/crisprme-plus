@@ -590,12 +590,19 @@ store the indel post-analysis reads (§4, SNP+indel), as an indel row's second i
 - a phased carrier is decided by its haplotype: one whose indel is on the other haplotype
   stays. One homozygous for an indel that changes the bases holds it on every haplotype and
   leaves the row (one homozygous for an indel that leaves them as they are stays, as above).
-  Otherwise one whose indel call or SNP call is unphased cannot be tied to a haplotype and
-  stays, PUTATIVE, as every carrier on an unphased panel is. An indel at the position of a
-  SNP the row names is another allele of that base (a VCF writes a haplotype holding both as
-  one record), so a haplotype phased with both is a phasing artefact, and it stays; a
-  haplotype whose bases cannot be read (an indel there whose slot is unknown, two records
-  of one base) leaves the row;
+  Otherwise one whose indel call or SNP call is unphased cannot be tied to a haplotype and stays,
+  PUTATIVE, as every carrier on an unphased panel is. An indel at the position of a SNP the row
+  names is another allele of that base (a VCF writes a haplotype holding both as one record), so a
+  haplotype phased with both is a phasing artefact, and it stays; a haplotype whose bases cannot be
+  read leaves the row: a reading cannot be read where the bases it compares, its stretch on the
+  haplotype and the target's span, reach an indel whose slot is unknown, or two records of one base
+  (two indels whose REFs share a base, a SNP alt of the haplotype on a base of an indel's REF); one
+  past those bases, or before them, changes none of them and does not stop it, as for an indel row's
+  second indel. Up to 2.10.0's release gates such a variant anywhere in the frame on a reading's
+  side stopped it: on the gate's CEP290 search (per sample, HGDP + 1000 Genomes), NA18623 was left
+  off a SNP row at chr14:105,863,639 (IGH), its haplotype holding the row's two SNPs and 105,863,665
+  T>TG, which leaves the target's bases as they are, for a SNP alt on the REF of a deletion 21 bases
+  past the target (105,863,688 AT>A and 105,863,689 T>C on its haplotype);
 - a haploid call — a male's on chrX outside PAR — is his one haplotype's, so his calls in a
   window are cis by construction (they make one enumerated haplotype, not every subset of
   them, below) and an indel of his that changes the target takes him off the row, whatever
