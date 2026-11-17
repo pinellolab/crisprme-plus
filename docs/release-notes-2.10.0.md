@@ -131,9 +131,10 @@ each gives its size and who meets it.
   guide's genome-wide search lists carriers so 1,163 times at 94 sites per sample on indel rows,
   each row at a CFD of 0.084 or less, and 3,334 times on SNP rows. And a target that a haplotype
   holds only through an MNV and another indel or MNV is not reported for its carriers, as with two
-  indels (below): on chr22, of the 21 sites of such targets the gate's per-sample check counts, 16
-  such sites, rebuilt from the VCF, need an MNV, each target at a CFD of at most 0.016. Of 2.10.0's
-  panels only HPRC v2.1 has MNVs (2.8.1's HPRC archives, of v2.0, have them too).
+  indels (below): on chr22, the gate's per-sample check counts 21 sites of targets held only through
+  two or more indels or MNVs, and, rebuilt from the VCF, 16 such sites need an MNV, each target at a
+  CFD of at most 0.016. Of 2.10.0's panels only HPRC v2.1 has MNVs (2.8.1's HPRC archives, of v2.0,
+  have them too).
 - **Two indels on one haplotype.** Who: most of all, guides whose sites lie in tandem repeats. A
   fake-indel window holds one indel, so a carrier whose second indel moves a SNP the row names out
   of its target is listed all the same, and one whose own target, through a second indel in a

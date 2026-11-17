@@ -585,11 +585,12 @@ rules behind them.
   carriers so 1,163 times at 94 sites per sample on indel rows (232 samples), each row at a CFD of
   0.084 or less, and 3,334 times on SNP rows. And an off-target that an individual's haplotype holds
   only through an MNV and another indel or MNV is missing for that individual, as for two indels
-  (above): on chr22, per sample, of the 21 sites of such targets the release gate's check counts, 16
-  such sites, rebuilt from the VCF, need an MNV, each target at a CFD of at most 0.016. To check a
-  carrier, read its genotypes in the dataset's VCF over the row's target. CRISPRme 2.10.1 is planned
-  to read the MNVs' phase, which takes such carriers off the rows of a sequence they do not have; an
-  off-target held only through an MNV and another indel or MNV stays missing.
+  (above): on chr22, per sample, the release gate's check counts 21 sites of targets held only
+  through two or more indels or MNVs, and, rebuilt from the VCF, 16 such sites need an MNV, each
+  target at a CFD of at most 0.016. To check a carrier, read its genotypes in the dataset's VCF over
+  the row's target. CRISPRme 2.10.1 is planned to read the MNVs' phase, which takes such carriers
+  off the rows of a sequence they do not have; an off-target held only through an MNV and another
+  indel or MNV stays missing.
 - **A carrier missing from a SNP row, beside a long indel.** A per-sample search reads the phased
   indel store within 500 bases of its SNP targets, so a carrier whose haplotype holds an indel in a
   SNP row's target that adds or deletes more bases than that, less the target's length, is left off
