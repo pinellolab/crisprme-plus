@@ -3531,7 +3531,10 @@ indels on one haplotype, and the searches above 1 DNA + 1 RNA bulge in dense reg
   log lists an MNV's carriers with no phase), so a carrier whose haplotype holding a row's indel
   also holds an MNV that changes the target is listed on the indel row for the target that haplotype
   would hold without the MNV, a sequence it does not have (§4); a SNP row keeps such a carrier too
-  (§8, residuals). Of the published panels only HPRC v2.1 has MNVs: 702,193 of the 49,547,631
+  (§8, residuals): on HPRC's search of the README guide below, per sample, the real-data check's
+  SNP-row report counts 3,334 such listings of SNP rows on 219 row blocks, by all 232 samples
+  (`limit-snp-row-mnv`). Of the published panels only
+  HPRC v2.1 has MNVs: 702,193 of the 49,547,631
   records of its VCFs (699,719 of the 12,361,907 records of its indel log); HGDP + 1000 Genomes
   (127,666,429 SNVs and 17,192,381 indels) and `hg38_mega` have none. HPRC's genome-wide search of
   the README guide at 4 mismatches + 1 DNA + 1 RNA bulge (NRR), per sample, lists carriers so 1,163

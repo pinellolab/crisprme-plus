@@ -128,7 +128,8 @@ bulge limit and the two-indel one; where 2.10.1 plans a fix for another, it says
 - **On HPRC, an MNV beside an indel on one haplotype.** No store the search reads holds an MNV's
   phase, so a carrier whose haplotype holding a row's indel also holds an MNV in the target is
   listed for the target that haplotype would have without the MNV: the README guide's genome-wide
-  search lists carriers so 1,163 times at 94 sites per sample, each row at a CFD of 0.084 or less.
+  search lists carriers so 1,163 times at 94 sites per sample on indel rows, each row at a CFD of
+  0.084 or less, and 3,334 times on SNP rows.
   Of the published panels only HPRC v2.1 has MNVs. 2.10.1 is to store and read the MNVs' phase
   (HPRC's Dictionaries built again, its index as it is).
 - **Two indels on one haplotype.** A fake-indel window holds one indel, so a carrier whose second
