@@ -26,7 +26,8 @@ major.minor version (Changed). The main changes, each told in its entry below:
   (`20-NRR_3_hg38+hg38_HGDP1kGP`), in a Hugging Face repo of their own,
   `lucapinello/crisprme_plus_indices`. The archives of 2.8.1 stay where they are. The HPRC
   panel is built from HPRC release 2's Minigraph-Cactus graph v2.1, where 2.8.1's was built from
-  v2.0 (Changed).
+  v2.0 (Changed). The rebuild ran on 2026-11-14 and 2026-11-15, and the release's gates checked
+  what it built before anything is published (Changed; METHODS §11, `docs/INDEX_PROVENANCE.md`).
 - **The defaults.** SpCas9 NRR is the default PAM and index (it was NRG), and a search given no
   bulges takes 1 DNA + 1 RNA bulge, `assembly-search` included.
 - **Indel rows.** A row that starts inside an insertion starts at the insertion's anchor, and
@@ -680,7 +681,12 @@ major.minor version (Changed). The main changes, each told in its entry below:
     insertion or deletion anchored on the complex record's last REF base, or a repeat's
     deletion left-aligned onto its last bases, and each listed carrier's haplotype, rebuilt
     from the VCF, holds its row's target at its start, 111 bases to 76 kb from the overlap.
-    METHODS now says what CRISPRme does, and the check reads such a slot by it. Two other
+    METHODS now says what CRISPRme does, and the check reads such a slot by it, but in one case:
+    a second record that puts bases of its own inside the record's deleted or replaced bases (a
+    complex record such as TCC>G there), which CRISPRme counts as bases added inside the record's
+    REF and so takes off, as METHODS section 4 says, and which the check reads the slot without,
+    counting what differs as `limit-overlapping-records` (HPRC v2.1's VCFs hold 31 such pairs of
+    records on one phased slot, 249 slots; which reading is right is for 2.10.1). Two other
     alleles of the slot that overlap
     each other are tried on every reading that can change what it says of the target. A slot
     with no reading gives no truth, so METHODS' rules are the only model there: a listed
@@ -1306,6 +1312,47 @@ major.minor version (Changed). The main changes, each told in its entry below:
   haplotype, and keeps the IUPAC search there).
 
 ### Changed
+- **The published indexes are built again for 2.10.0, and checked before the publish** (METHODS §11;
+  `docs/INDEX_PROVENANCE.md`, 2.10.0, records each archive). The index set's 26 archives — 16
+  indexes, the 7 companions of the variant panels and the 3 enriched-genome kits — were built on
+  2026-11-14 and 2026-11-15, on two nodes (ml008: the reference indexes, HPRC and the mega; ml007:
+  HGDP + 1000 Genomes), every row exit 0, from one image: CRISPRme `db50986`, and CRISPRitz 2.10.0
+  (`4ded5e6`) compiled, in the environment of an unpublished release candidate of 2.8.1, the image
+  route, since the release image is built from tags the build precedes (sha256 `e95dd278…`; its
+  base, binaries and tools are recorded). Their inputs, each checked against a list of checksums
+  before the build: hg38's 455 FASTAs; HGDP + 1000 Genomes' re-phased BCFs and 2.8.1's normalised
+  VCFs of them, sha256 equal to HF's; HPRC Release 2's Minigraph-Cactus graph v2.1 (below), split
+  per chromosome; the mega's merged VCFs of five sources, sha256 equal to HF's; gnomAD's metadata
+  and 1000 Genomes 2021's samplesID, which name the samples' populations. The reference indexes were
+  built on 16 threads, HGDP + 1000 Genomes on 64, HPRC on 32, the mega on 16, as each recipe sets it
+  (a `.bin` file's bytes depend on the threads, its targets do not). What they hold:
+  - the reference indexes and HGDP + 1000 Genomes' all 455 contigs of hg38 (the Cas12a TTTN
+    indexes 454: `chrUn_KI270539v1`, 993 bp, holds no TTTN site), HPRC's and the mega's chr1-22, X
+    and Y, as 2.8.1's indexes of each panel;
+  - HGDP + 1000 Genomes 127,666,429 SNP alleles (2,486,165 more than 2.8.1's build, which coded
+    the last record of a split site alone) and 17,192,381 indels, 4,091 phased samples; HPRC
+    36,719,470 and 12,361,907, 232 phased samples; the mega 48,731,015 and 13,853,753 indel-path
+    alleles, sites-only;
+  - 388.76 GB for the 23 index and companion archives, as `publish-index` packs them (measured
+    before the publish), and 3.44 GB for the kits; a panel's first index with its companions is a
+    50.13 GB download for HGDP + 1000 Genomes, 32.55 GB for HPRC and 26.06 GB for the mega.
+
+  Each gate ran on the indexes as built. **Gate A** (integrity: `crispritz.py index-info` on every
+  index and sub-index, the rebuild's `postcheck`, each panel's counts recounted from its VCFs, the
+  kits' SHA-256 and member lists, nothing changed after its row) passed on both nodes. **Gate B**,
+  the real-data checker on the searches B1-B14 genome-wide, found 790 gating findings on its first
+  run, none from the indexes; each was fixed in the search or the checker or documented as a limit
+  the checker classes as non-gating (under Fixed and the known limits below), and the 88 checks run
+  again on the final code have none. **G5**: each index pruned to a narrower PAM gives the
+  dedicated index's rows, byte for byte (`ACTGAAATCTGTAAGCAGGC` per sample, 4 + 1 + 1, genome-wide:
+  NRG 183,207 rows, NRR 387,782, NGG 85,347). **The timing gate**: 11 of 13 pairs within twice
+  2.8.1's time (the Speed summary above; the population-level search of HGDP + 1000 Genomes with NRG
+  at 2.20 times, a known limit). **The docs' figures** were measured on these indexes: the install
+  (a 71.46 GB download, 153.39 GB installed, a peak of 159.25 GB while it unpacks: computed from the
+  archives' sizes, to be measured from the Hub; reference-only 21.33 GB and 44.13 GB), memory and
+  time at 4, 8, 16 and 32 threads (README §0), the general index's cost. Nothing is published yet:
+  the SHA-256 of each index and companion archive, and its size as the Hub holds it, are filled in
+  at the publish, from the Hub (`docs/RELEASE_CHECKLIST.md`, E, step 5).
 - **The default search budget, 1 DNA + 1 RNA bulge, is every search's.** complete-search (given
   neither `--bDNA` nor `--bRNA`, up to the bulges an index it
   can use or build holds) and the web form (its simple mode, and its Advanced panel's defaults,
@@ -1808,55 +1855,75 @@ major.minor version (Changed). The main changes, each told in its entry below:
     HGDP + 1000 Genomes the release gate's genome-wide checks (4 + 1 + 1) count 9,059 listings of
     this limit (the class `limit-two-indels`, each shape) at 435 sites by 3,583 samples for the
     three repeat-rich guides per sample, almost all VEGFA site 3's in GT repeats (one of its
-    alternative alignments, chr2:2,873,200 (+), lists 2,972 carriers so), and 128 at population
-    level; for the README guide with NRR, 3 per sample and 1 at population level, the same beside
-    the mega; none for the gate's other searches (the README guide with NRG, TRAC, CEP290, SaCas9,
-    Cas12a, the ACTGA guide); on HPRC, 1 per sample. On 1000 Genomes chr22, a search of seven guides
-    at 4 mismatches and 2 DNA and 2 RNA bulges, per sample, lists one (NA20515 on chr22:50,299,296
-    (+) of VEGFA site 1). The same limit leaves targets unreported: a target that a haplotype holds
-    only through two indels or more is not generated, so no row lists that haplotype's carriers for
-    it. The gate's chr22 checks count such targets, per sample, at 7 sites for the README guide with
-    NRR (3,425 listings by 1,770 samples, each at 5 or 6 edits and a CFD below 0.0004) and 3 with
-    NRG, 343 for the three repeat-rich guides (VEGFA site 3's 305 reach a CFD of 0.35, and 3 edits),
-    5 on HPRC (205 listings, each at 6 edits and a CFD of 0; 16 more sites there need an MNV: the
-    next item), 9 for TRAC, 2 for the ACTGA guide and 9 for SaCas9's 21-nt guide at 2 mismatches and
-    no bulge, two of them perfect matches (43 at 4 + 1 + 1); none for the CEP290 and Cas12a guides
-    (METHODS §10 gives each search). No fix is planned yet: the haplotype scan planned for 2.10.1
-    writes the lines the search writes, one indel per window.
+    alternative alignments, chr2:2,873,200 (+), lists 2,972 carriers so; rebuilt from the VCF, 8,693
+    of the 9,059, at 260 sites, are of that shape, 8, by 6 carriers at 8 sites, five of VEGFA site 3
+    and one of EMX1, are of another, the carrier's own target, its bases the row's, starting one to
+    three repeat units before the row's through a second deletion or insertion in the repeat, 357
+    hold the row's target with every variant it names, and in 1 a second deletion takes two bases
+    out of the target: METHODS §10), and 128 at population level; for the README guide with NRR, 3
+    per sample and 1 at population level, the same beside the mega; none for the gate's other
+    searches (the README guide with NRG, TRAC, CEP290, SaCas9, Cas12a, the ACTGA guide); on HPRC, 1
+    per sample. On 1000 Genomes chr22, a search of seven guides at 4 mismatches and 2 DNA and 2 RNA
+    bulges, per sample, lists one (NA20515 on chr22:50,299,296 (+) of VEGFA site 1). The same limit
+    leaves targets unreported: a target that a haplotype holds only through two indels or more is
+    not generated, so no row lists that haplotype's carriers for it. The gate's chr22 checks count
+    such targets, per sample, at 7 sites for the README guide with NRR (3,425 listings by 1,770
+    samples, each at 5 or 6 edits and a CFD below 0.0004) and 3 with NRG, 343 for the three
+    repeat-rich guides (VEGFA site 3's 305 reach a CFD of 0.35, and 3 edits), 5 on HPRC (205
+    listings, each at 6 edits and a CFD of 0; 16 more sites there need an MNV: the next item), 9 for
+    TRAC, 2 for the ACTGA guide and 9 for SaCas9's 21-nt guide at 2 mismatches and no bulge, two of
+    them perfect matches (43 at 4 + 1 + 1); none for the CEP290 and Cas12a guides (METHODS §10 gives
+    each search). No fix is planned yet: the haplotype scan planned for 2.10.1 writes the lines the
+    search writes, one indel per window.
   - **An MNV beside an indel on one haplotype.** No store the search reads holds an MNV, so a
     carrier whose haplotype holding a row's indel also holds an MNV that changes the target is
-    listed for the target that haplotype would hold without it. Of the published panels only HPRC
-    v2.1 has MNVs (702,193 of its 49,547,631 records); its genome-wide search of the README guide at
-    4 + 1 + 1 lists carriers so 1,163 times at 94 sites per sample (232 samples) and 558 times at 73
-    sites at population level (229 samples), each row at a CFD of 0.084 or less, and its SNP rows
-    3,334 times at 219 sites (the check's SNP-row report). The real-data check counts them as
-    `limit-indel-row-mnv` and `limit-snp-row-mnv` (the first gated as `variant-missing` until its
-    genome-wide run on HPRC). It leaves targets unreported too: one that a haplotype holds only
-    through an MNV and a second indel-path record (an indel, or another MNV) is not generated, as
-    one held through two indels is not; the gate's chr22 check of that search counts 16 such sites
-    (18 listings by 8 samples; 7 of the sites through MNVs alone), each at a CFD of at most 0.0164.
-    A fix needs the MNVs' phased genotypes in a store built with the panel's Dictionaries; 2.10.1 is
-    to build it (HPRC's Dictionaries rebuilt, its index as it is), which takes such a carrier off a
-    row of a sequence it does not have. A target held only through an MNV and a second indel-path
-    record stays unreported.
+    listed for the target that haplotype would hold without it. Of 2.10.0's panels only HPRC v2.1
+    has MNVs (702,193 of its 49,547,631 records; 2.8.1's archives of HPRC v2.0 hold them too); its
+    genome-wide search of the README guide at 4 + 1 + 1 lists carriers so 1,163 times at 94 sites
+    per sample (232 samples) and 558 times at 73 sites at population level (229 samples), each row
+    at a CFD of 0.084 or less, and its SNP rows 3,334 times at 219 sites (the check's SNP-row
+    report). The real-data check counts them as `limit-indel-row-mnv` and `limit-snp-row-mnv` (the
+    first gated as `variant-missing` until its genome-wide run on HPRC). It leaves targets
+    unreported too: one that a haplotype holds only through an MNV and a second indel-path record
+    (an indel, or another MNV) is not generated, as one held through two indels is not; the gate's
+    chr22 check of that search counts 21 sites of targets held only through two or more indel-path
+    records, and, rebuilt from the VCF, 16 such sites (18 listings by 8 samples; 7 of the sites
+    through MNVs alone) need an MNV, each at a CFD of at most 0.0164. A fix needs the MNVs' phased
+    genotypes in a store built with the panel's Dictionaries; 2.10.1 is to build it (HPRC's
+    Dictionaries rebuilt, its index as it is), which takes such a carrier off a row of a sequence it
+    does not have. A target held only through an MNV and a second indel-path record stays
+    unreported.
+  - **A SNP row's carrier whose indel reaches past the store the search read.** A per-sample search
+    reads the phased indel store only within 500 bases of its SNP targets, so a carrier whose
+    haplotype holds an indel in the target that adds or deletes more bases than that, less the
+    target's length, cannot be read and is left off the SNP row, even where its bases are the row's
+    (METHODS §4). The release gate's check finds one: NA19185, left off two SNP rows of HPRC's
+    search of the README guide per sample, chrX:1,408,064 and 1,408,065 (+), through a deletion of
+    1,365 bases of whole repeat units (6 report-only lines of the check's SNP-row report; none on
+    the per-sample searches of HGDP + 1000 Genomes). 2.10.1 is to read the store over the frame a
+    haplotype's own indels need.
   - **A target wholly inside a tandem repeat.** The merge reads a row's place on the haplotype
     from its own bases, and in a microsatellite that holds a whole target the target's
     alignments can fit different places: the target can then be split over two rows, or written
     twice. A model of microsatellites around insertion anchors, at 1 DNA + 1 RNA bulge and
     `--merge` 3, split 134 targets and wrote 15 twice in 10,000 trials; no search of real data
     checked has such a target, and no row is lost or wrong. A fix is planned for 2.10.1.
-  - **An unphased call of two ALTs.** An unphased carrier is listed for every non-empty subset
-    of its variants in the target (METHODS §4). For a call of two ALTs at one position (`1/2`),
-    whose two slots both hold an ALT there, that takes in a subset that needs the reference base
-    at the position, which its genotype rules out: the carrier is listed, PUTATIVE, on that row
-    too. The real-data check counts such listings as `limit-snp-row-unphased` (non-gating).
+  - **An unphased call of two ALTs.** An unphased carrier is listed for every non-empty subset of
+    its variants in the target (METHODS §4). For a call of two ALTs at one position (`1/2`), whose
+    two slots both hold an ALT there, that takes in a subset that needs the reference base at the
+    position, which its genotype rules out: the carrier is listed, PUTATIVE, on that row too. The
+    real-data check counts such listings as `limit-snp-row-unphased` (non-gating), a class that
+    takes in other calls of unknown phase too. The published panels hold no such call, measured on
+    their VCFs: HGDP + 1000 Genomes holds no unphased genotype, HPRC v2.1 holds them on chrY alone
+    (28,876,207 genotypes of 127 samples, each with a missing allele), and the mega no genotype; so
+    it is met only on a VCF of one's own, where its size was not measured.
   - **An unphased carrier on a classic install.** On an index built without `--samplesID` (the
     classic dictionaries, no Tier-1 store), an unphased carrier in a VCF that is otherwise phased
     is listed only on the row of the union of its variants in the target, not on every subset as
     the Tier-1 path lists it: the dictionary path puts an unphased call on both slots, and the
     per-haplotype pruning keeps the largest combination. 2.8.1 does the same. An index built
     with `--samplesID`, as every published variant index of a genotyped panel is, lists every
-    subset.
+    subset; the size on a classic install of one's own was not measured.
   - **What the real-data check does not check.** It does not read `Variant_info_spacer+PAM`, nor
     whether an alternative alignment is one the merge should have folded into a better one
     (Added: the unit tests and the SNP+indel oracle's planted sites check both). And it refuses
@@ -1949,8 +2016,8 @@ major.minor version (Changed). The main changes, each told in its entry below:
 
 - **SpCas9 NRR (`NAA`, `NAG`, `NGA`, `NGG`) is the default PAM and index; it was NRG (`NAG`,
   `NGG`).** The broadest SpCas9 screen of the three published ones, and the one recommended for an
-  IND package: an NRR search also reports the `NGA` and `NAA` sites, and the variant-created
-  ones, that an NRG search leaves out, as NRG reports the `NAG` ones NGG leaves out. The PAM file
+  IND package: an NRR search also reports the `NGA` and `NAA` sites, and the variant-created ones,
+  that an NRG search leaves out, as NRG reports the `NAG` ones NGG leaves out. The PAM file
   `PAMs/20bp-NRR-SpCas9.txt` ships with CRISPRme, and a download of the PAM files (`download --what
   pams`, and so `--what all`) installs it where the data repo has none (the repo's `pams/` holds the
   NRG, NGG and PAM-less files). The web form selects it when it is installed (then NRG, then NGG, as
@@ -1961,23 +2028,27 @@ major.minor version (Changed). The main changes, each told in its entry below:
   (`docs/install.sh`, `docs/install.ps1`), the Docker Quickstart, the web user guide, the CLI guide,
   PRECOMPUTED_INDEXES, METHODS, the Hugging Face cards, RELEASE_CHECKLIST's default-index gate, the
   help of `download`, `setup` and `complete-test`, complete-test's advice when no index is
-  installed, the advice of a search and of the report to download a tiered index, and the notes
-  of the panel build recipes (`seq_script/merge_panels/`) and of the paper's dataset table.
+  installed, the advice of a search and of the report to download a tiered index, and the notes of
+  the panel build recipes (`seq_script/merge_panels/`) and of the paper's dataset table.
   complete-test's smoke searches a PAM-less 8-nt-flank index for NRR (it searched it for NRG). The
-  NRG and NGG indexes stay published and searchable. What it costs (measured with 2.8.1's NRR
-  archives, of index format 1; those built again for 2.10.0 can differ in size): the default
-  install is a ~70 GB
-  download (it was ~45 GB) and takes ~150 GB on disk (it took ~98 GB; measured 150,048,109,201
-  bytes: indexes 94.2 GB, `Dictionaries/` 52.4 GB, genome 3.3 GB), with a peak of 161 GB while the
-  archives unpack, so every surface that sizes it (the installers, the README, the website, the
-  Quickstart, TROUBLESHOOTING, DATA_LAYOUT, install/README) asks for ~200 GB free (it asked for
-  ~150 GB); a reference-only setup takes ~44 GB (it took ~25 GB). A genome-wide search takes
-  about twice as long (2 h 26 min against 1 h 14 min for `ACTGAAATCTGTAAGCAGGC` on HGDP + 1000
-  Genomes, per-sample, 4 mismatches + 1 + 1 bulge, 32 threads, CRISPRme 2.8.1), at no higher peak
-  memory (66 GB, against 82 GB summed over the NRG run's processes). On chr22, on indexes
-  CRISPRitz 2.10.0 built, the gate runs of this release took 1.2 times NRG's time per sample and,
-  in the largest process, 1.8 times its memory (8.9 against 5.0 GiB; 8 threads, METHODS §5).
-  Covered by `PostProcess/test_defaults_and_index_flex.py`.
+  NRG and NGG indexes stay published and searchable. What it costs: the default install is a ~70 GB
+  download (it was ~45 GB) and takes ~150 GB on disk (it took ~98 GB), with a peak of about 160 GB
+  while the archives unpack, so every surface that sizes it (the installers, the README, the
+  website, the Quickstart, TROUBLESHOOTING, DATA_LAYOUT, install/README) asks for ~200 GB free (it
+  asked for ~150 GB); a reference-only setup takes ~44 GB (it took ~25 GB). Measured with 2.8.1's
+  NRR archives (150,048,109,201 bytes installed: indexes 94.2 GB, `Dictionaries/` 52.4 GB, genome
+  3.3 GB; a peak of 161 GB), and computed for 2.10.0's from the sizes of its archives as `download`
+  installs them (a 71.46 GB download, 153.39 GB installed: indexes 96.69 GB, `Dictionaries/` 53.30
+  GB, genome 3.27 GB; a peak of 159.25 GB; reference-only 21.33 and 44.13 GB), to be measured from
+  the Hub at the publish. A genome-wide search with NRR takes longer than with NRG, at about the
+  same memory, on the indexes built again for 2.10.0 (the release's gates): `ACTGAAATCTGTAAGCAGGC`
+  on HGDP + 1000 Genomes per sample, 4 mismatches + 1 + 1 bulge, 32 threads, 1.57 times NRG's time
+  (2 h 19 min against 1 h 29 min), its memory summed over the run's processes 8% higher (110.5
+  against 102.3 GiB); the README guide on 16 threads 1.96 times (4 h 16 min against 2 h 11 min, on a
+  shared node), at 58.6 against 57.9 GiB; on chr22, 8 threads, 1.31 times NRG's time per sample and,
+  in the largest process, 1.86 times its memory (9.54 against 5.14 GiB). (2.8.1's NRR took 2 h 26
+  min against 1 h 14 min, 32 threads, at 66 GB against NRG's 82 GB summed.) Covered by
+  `PostProcess/test_defaults_and_index_flex.py`.
 - **`--prune-pam` no longer needs `--index-path`**, and a search passes it by itself (see Added).
   The refusals that told a user to run again with `--prune-pam --index-path` now say, where the
   engine cannot prune, that an index serves the search pruned and the installed CRISPRitz cannot do
@@ -2051,10 +2122,12 @@ major.minor version (Changed). The main changes, each told in its entry below:
   built from v2.0** (Luca, 2026-11-13). `20-NRR_3_hg38+hg38_HPRC` is built from
   `hprc-v2.1-mc-grch38.wave.vcf.gz`, HPRC's VCF of the graph on GRCh38 decomposed with `vcfwave`
   (in `pangenomes/freeze/release2/minigraph-cactus/v2.1/hprc-v2.1-mc-grch38/` of HPRC's S3 bucket
-  `human-pangenomics`; 2,291,014,302 bytes, md5 `63cc82deb0e010ab98719a9e31dfa352`), split per
-  chromosome as 2.8.1's input of v2.0 was (`bcftools view --regions <chr>`, then `tabix`; the
-  commands are in `docs/PRECOMPUTED_INDEXES.md`), and `seq_script/merge_panels/hprc_build.sh`
-  reads it as it read v2.0. Why: v2.1 is HPRC's current release of the graph, which, HPRC says,
+  `human-pangenomics`; 2,291,014,302 bytes, md5 `63cc82deb0e010ab98719a9e31dfa352`, its S3
+  multipart ETag `3e33ef1c419591a0774722d0ca9e10c5-274` recomputed from the file and equal), split
+  per chromosome as 2.8.1's input of v2.0 was (`bcftools view --regions <chr>`, then `tabix`; the
+  commands are in `docs/PRECOMPUTED_INDEXES.md`, and the 48 files' SHA-256 in
+  `docs/INDEX_PROVENANCE.md`), and `seq_script/merge_panels/hprc_build.sh` reads it as it read
+  v2.0. Why: v2.1 is HPRC's current release of the graph, which, HPRC says,
   fixes the start positions of the mitochondrial sequences and orders the minigraph construction
   per chromosome, from nearly the same assemblies, and HPRC advises using it unless v2.0's results
   must be reproduced; the index set is built again for 2.10.0 anyway. HPRC's L95 VCF,
@@ -2065,7 +2138,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
     fields; `FILTER` `.` throughout; no REF or ALT in lower case and no haploid genotype, in either.
   - On chr1-22, X and Y, 42,417,050 records against 42,056,098 (+0.86%). The gain lies in
     centromeric, pericentromeric, acrocentric and segmental-duplication regions (chr1 at 143-145
-    Mb, chr15 at 17-21 Mb, chr9 at 67 Mb, chr22 at 10-13 Mb, among others), where fewer haplotypes
+    Mb, chr16 at 35 Mb, chr9 at 67 Mb, chr22 at 10-13 Mb, among others), where fewer haplotypes
     align: the records whose `AN` is below 232, half the panel's 464 alleles, rise from 605,349 to
     769,017, and a frequency there is one of fewer haplotypes. v2.1 also has records on chrM and
     on 32 random and unplaced contigs, which the panel, built on chr1-22, X and Y, does not read.
