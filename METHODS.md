@@ -16,21 +16,21 @@ separate commercial licence (for **both** CRISPRme+ and stock CRISPRme). See
 [README §6 License](README.md#6-license).
 
 **Versions and defaults.** From 2.10.0, CRISPRme and CRISPRitz, its search engine, share their
-major.minor version: CRISPRme X.Y.z requires CRISPRitz X.Y.*, their patch numbers are
-independent, and a breaking change in either package (an index format, the enricher's output)
-bumps the minor of both (`docs/RELEASING.md`, Version policy). CRISPRme 2.10.0 installs
-CRISPRitz 2.10.0, which writes index format 2 (§9), codes every allele of a split multi-allelic
-site and reads REF and ALT in either case (§2), and cuts fake-indel windows of 30 bases on
-either side of an indel (§4); CRISPRme 2.8.1 runs on CRISPRitz 2.9.1. The Bioconda recipe of
-CRISPRme 2.10.z asks for `crispritz >=2.10.0,<2.11`, and that of CRISPRitz 2.10.0 carries
-`run_constrained: crisprme >=2.10.0`, so that conda installs it beside no earlier CRISPRme,
-none of which reads index format 2. The default PAM and index are SpCas9 NRR's (`NAA`, `NAG`,
-`NGA`, `NGG`; `20-NRR_3_hg38+hg38_HGDP1kGP`), and the default bulge budget is 1 DNA + 1 RNA
-bulge (§5). The indexes of 2.10.0 are published in `lucapinello/crisprme_plus_indices`
-(those of 2.8.1 stay in `lucapinello/crisprme-data` and
+major.minor version: CRISPRme X.Y.z requires CRISPRitz X.Y.*, their patch numbers are independent,
+and a breaking change in either package (an index format, the enricher's output) bumps the minor of
+both (`docs/RELEASING.md`, Version policy). CRISPRme 2.10.0 installs CRISPRitz 2.10.0, which writes
+index format 2 (§9), codes every allele of a split multi-allelic site and reads REF and ALT in
+either case (§2), and cuts fake-indel windows of 30 bases on either side of an indel (§4); CRISPRme
+2.8.1 runs on CRISPRitz 2.9.1. The Bioconda recipe of CRISPRme 2.10.z asks for `crispritz
+>=2.10.0,<2.11`, and that of CRISPRitz 2.10.0 carries `run_constrained: crisprme >=2.10.0`, so that
+conda installs it beside no earlier CRISPRme, none of which reads index format 2. The default PAM
+and index are SpCas9 NRR's (`NAA`, `NAG`, `NGA`, `NGG`; `20-NRR_3_hg38+hg38_HGDP1kGP`), and the
+default bulge budget is 1 DNA + 1 RNA bulge (§5). The indexes of 2.10.0 are published in
+`lucapinello/crisprme_plus_indices` (those of 2.8.1 stay in `lucapinello/crisprme-data` and
 `lucapinello/crisprme-data-general-index`, §9); the reference indexes and those of HGDP + 1000
-Genomes are built on all 455 contigs of hg38, those of HPRC and mega on its 24 chromosomes
-(chr1-22, X and Y). The known limits of 2.10.0 are gathered in §10.
+Genomes are built on all 455 contigs of hg38 (the Cas12a TTTN indexes hold 454 of them: one unplaced
+contig has no TTTN site), those of HPRC and mega on its 24 chromosomes (chr1-22, X and Y). The known
+limits of 2.10.0 are gathered in §10, and how its indexes were built and checked in §11.
 
 Sections:
 1. [Variant-aware, dictionary-less data model](#1-variant-aware-dictionary-less-data-model)
@@ -46,6 +46,7 @@ Sections:
    limitations](#8-off-target-scoring-assumptions-and-limitations)
 9. [PAM-less indexes and dynamic PAM filtering](#9-pam-less-indexes-and-dynamic-pam-filtering)
 10. [Known limits of 2.10.0](#10-known-limits-of-2100)
+11. [Index rebuild of 2.10.0](#11-index-rebuild-of-2100)
 
 Throughout, "protospacer window" means the genomic interval spanned by a
 candidate off-target's protospacer plus PAM (and any bulges), i.e. the interval
@@ -587,23 +588,30 @@ store the indel post-analysis reads (§4, SNP+indel), as an indel row's second i
   last), and the carrier stays. The bases must be read through the SNPs the row names: a
   haplotype whose indel pushes a named SNP out of the stretch, or deletes its base, has its
   target thanks to the indel, not the SNP;
-- a phased carrier is decided by its haplotype: one whose indel is on the other haplotype
-  stays. One homozygous for an indel that changes the bases holds it on every haplotype and
-  leaves the row (one homozygous for an indel that leaves them as they are stays, as above).
-  Otherwise one whose indel call or SNP call is unphased cannot be tied to a haplotype and stays,
-  PUTATIVE, as every carrier on an unphased panel is. An indel at the position of a SNP the row
-  names is another allele of that base (a VCF writes a haplotype holding both as one record), so a
-  haplotype phased with both is a phasing artefact, and it stays; a haplotype whose bases cannot be
-  read leaves the row: a reading cannot be read where the bases it compares, its stretch on the
-  haplotype and the target's span, reach an indel whose slot is unknown, or two records of one base
-  (two indels whose REFs share a base, a SNP alt of the haplotype on a base of an indel's REF); one
-  past those bases, or before them, changes none of them and does not stop it, as for an indel row's
-  second indel. Up to 2.10.0's release gates such a variant anywhere in the frame on a reading's
-  side stopped it: on the gate's VEGFA site 3 search (B10: per sample, HGDP + 1000 Genomes),
-  HGDP01087 was left off the integrated row at chr10:128,732,537 (−), which names 128,732,546 G>A,
-  its haplotype holding that SNP and 128,732,538 C>CCA, a unit of the CA repeat gained at the
-  target's edge, which leaves the target's bases as they are, for a SNP alt on the REF of a deletion
-  about 20 bases past the target (128,732,578 ATG>A and 128,732,580 G>A on its haplotype);
+- a phased carrier is decided by its haplotype: one whose indel is on the other haplotype stays. One
+  homozygous for an indel that changes the bases holds it on every haplotype and leaves the row (one
+  homozygous for an indel that leaves them as they are stays, as above). Otherwise one whose indel
+  call or SNP call is unphased cannot be tied to a haplotype and stays, PUTATIVE, as every carrier
+  on an unphased panel is. An indel at the position of a SNP the row names is another allele of that
+  base (a VCF writes a haplotype holding both as one record), so a haplotype phased with both is a
+  phasing artefact, and it stays; a haplotype whose bases cannot be read leaves the row: a reading
+  cannot be read where the bases it compares, its stretch on the haplotype and the target's span,
+  reach an indel whose slot is unknown, or two records of one base (two indels whose REFs share a
+  base, a SNP alt of the haplotype on a base of an indel's REF); one past those bases, or before
+  them, changes none of them and does not stop it, as for an indel row's second indel. Nor can a
+  reading be read whose frame (the target's span and, on either side, its length and the bases the
+  haplotype's indels add or delete, `indel_snp_cis.snp_target_frame`) reaches past the bases of the
+  store the search read: a search reads the store only around the chromosome's SNP targets, each
+  widened by 500 bases on either side (`_SNP_INDEL_MARGIN`, the stretches merged where they meet),
+  so a haplotype whose indels there add or delete more than 500 bases less the target's length
+  leaves the row, whatever its bases, unless other targets near it widened what was read: a known
+  limit of 2.10.0 (§10). Up to 2.10.0's release gates such a variant anywhere in the frame on a
+  reading's side stopped it: on the gate's VEGFA site 3 search (B10: per sample, HGDP + 1000
+  Genomes), HGDP01087 was left off the integrated row at chr10:128,732,537 (−), which names
+  128,732,546 G>A, its haplotype holding that SNP and 128,732,538 C>CCA, a unit of the CA repeat
+  gained at the target's edge, which leaves the target's bases as they are, for a SNP alt on the REF
+  of a deletion about 20 bases past the target (128,732,578 ATG>A and 128,732,580 G>A on its
+  haplotype);
 - a haploid call — a male's on chrX outside PAR — is his one haplotype's, so his calls in a
   window are cis by construction (they make one enumerated haplotype, not every subset of
   them, below) and an indel of his that changes the target takes him off the row, whatever
@@ -916,63 +924,71 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   the README guide (NRR, per sample) and 9,059 times at 435 sites, by 3,583 samples, for the three
   repeat-rich guides per sample, almost all of them VEGFA site 3's in GT repeats (9,022 at 414
   sites; one alternative alignment at chr2:2,873,200 (+) lists 2,972 carriers so), and §10 gives
-  each search, with the targets this limit leaves unreported (§8, residuals). On 1000
-  Genomes chr22, the search of seven guides at 4 mismatches and 2 DNA and 2 RNA bulges, per sample,
-  lists one such carrier: NA20515 on chr22:50,299,296 (+) of VEGFA site 1, whose 50,299,313 C>CG
-  pushes the row's 50,299,316 T>G out of its target (its own target holds the insertion 50,299,300
-  T>TG and that second one). One whose second indel changes the bases is not listed for it, on any
-  indel row (§8, residuals), nor one whose bases cannot be read either way: each way meets an
-  unphased or missing SNP call, an unphased indel that does not itself change the target, or two of
-  its variants that overlap, two records of one base: two other indels whose REFs share a base (any
-  two at one position do, even a duplication and the deletion of the same bases, which together
-  would leave the reference), or a SNP on a base of the second indel's REF. A reading from the
-  target's first base on meets no variant upstream of that base, one up to its last base none
-  downstream of it, and neither meets one whose REF holds none of the bases it compares: those of
-  the stretch on the haplotype and those of the target on the window, which it reads with the
-  haplotype's own alleles. Up to the release gate of 2.10.0 any such variant of the reading's side
-  within the bases written out stopped it: on the gate's VEGFA site 3 search (B10: NRG, 4 mismatches
-  and 1 DNA and 1 RNA bulge, per sample, on HGDP and 1000 Genomes) six carriers whose haplotype
-  holds the target at its start, through a second indel that leaves the target's bases as they are,
-  were left off it. Their reading from the first base on met two records of one base 2 to 41 bases
-  past the target, as HG03120's on chr5:146,361,254 (+) met 146,361,314 GGGA>G and 146,361,315 GGA>G
-  on the same slot, and their reading up to the last base, which reaches no variant past the target,
-  does not find the target's bases through the indel. That second indel is an insertion whose first
-  1 to 5 bases are the target's last, those the repeat goes on with (HG03120's 146,361,281 A>AGTGT),
-  or a repeat unit deleted 2 to 5 bases from an end of the target, but on HGDP00478's rows of
-  chr5:141,655,182 TAC>T: there it is 141,655,188's deletion of 37 bases, (AC)13 and an 11-base
-  linker, which starts after the target's sixth or seventh base on the + strand, runs past its
-  reference end and joins two AC runs. Where a second indel deletes the base at the target's first
-  or last place, the reading starts where that base stood or ends where it stood. A second indel
-  inserted right next to the indel's anchor base is inside the target. A carrier whose second indel
-  inside the target has an unphased call cannot be tied to a haplotype, so it stays listed,
-  PUTATIVE, as every carrier on an unphased panel is; this holds even when another, phased second
-  indel on its indel haplotype changes the target, so such a carrier is listed for a row its indel
-  haplotype does not have (§8, residuals). An MNV is in no store the search reads (the phased indel
-  store keeps records whose REF and ALT differ in length, the SNP tiers SNVs), so a carrier whose
-  indel haplotype also holds an MNV that changes the target is listed for the target that haplotype
-  would hold without it, a sequence it does not have: a known limit of 2.10.0 (§10). On the same
-  phased slot, an indel overlapping the first at another position (one complex allele the VCF splits
-  into overlapping records, or a repeat's indel that the VCF left-aligns onto the last bases of a
-  complex allele next to it; the window keeps the reference there) takes the haplotype off the
-  target's rows, whatever its bases, when it changes the reference bases the target covers. Those
-  are the places of the target's own bases and, since the target holds a base of the first indel's
-  ALT (every indel row's target does), that indel's whole REF, however far inside a long ALT the
-  target lies. The second indel changes them when it deletes or replaces one of them that the first
-  does not delete or replace itself, or adds bases between two of them, as an insertion inside the
-  first indel's REF always does (a haplotype carrying the first has no place for bases added between
-  two it replaces). One that changes none of them leaves the target's bases as the window has them,
-  on every reading of the slot that keeps the first indel's ALT whole, and the haplotype keeps the
-  row: a variant only on bases the indel deletes or replaces is not in the window's sequence and
-  changes nothing, and neither does a second indel anchored on the first's last REF base, whose
-  change lies past a target inside the ALT. On HPRC v2.1, the README guide's search at 4 mismatches
-  and 1 DNA and 1 RNA bulge, per sample, lists carriers so 220 times (131 samples) on 27 row blocks,
-  of 40 records at 11 positions whose REF or ALT is 464 bases to 95 kb long (chr15:52,876,508
-  TATGTAT replaced by 2,375 bases, beside 52,876,514 T>TAAAAAAA on the same slot; chr6:112,819,048's
-  95,320 bases replaced by 95,309, beside 112,914,365 CT>C): each haplotype, rebuilt from the VCF,
-  holds its row's target at its start, 111 bases to 76 kb from the overlap. Another allele at the
-  indel's own position, an indel or a SNP, is an alternative to it (a haplotype holding both would
-  be one record), so a slot phased with both is a phasing artefact. And an unphased carrier of two
-  overlapping records is a multi-allelic heterozygote, one allele per haplotype. These stay listed;
+  each search, with the targets this limit leaves unreported (§8, residuals). On 1000 Genomes chr22,
+  the search of seven guides at 4 mismatches and 2 DNA and 2 RNA bulges, per sample, lists one such
+  carrier: NA20515 on chr22:50,299,296 (+) of VEGFA site 1, whose 50,299,313 C>CG pushes the row's
+  50,299,316 T>G out of its target (its own target holds the insertion 50,299,300 T>TG and that
+  second one). One whose second indel changes the bases is not listed for it, on any indel row (§8,
+  residuals), nor one whose bases cannot be read either way: each way meets an unphased or missing
+  SNP call, an unphased indel that does not itself change the target, or two of its variants that
+  overlap, two records of one base: two other indels whose REFs share a base (any two at one
+  position do, even a duplication and the deletion of the same bases, which together would leave the
+  reference), or a SNP on a base of the second indel's REF. A reading from the target's first base
+  on meets no variant upstream of that base, one up to its last base none downstream of it, and
+  neither meets one whose REF holds none of the bases it compares: those of the stretch on the
+  haplotype and those of the target on the window, which it reads with the haplotype's own alleles.
+  Up to the release gate of 2.10.0 any such variant of the reading's side within the bases written
+  out stopped it: on the gate's VEGFA site 3 search (B10: NRG, 4 mismatches and 1 DNA and 1 RNA
+  bulge, per sample, on HGDP and 1000 Genomes) six carriers whose haplotype holds the target at its
+  start, through a second indel that leaves the target's bases as they are, were left off it. Their
+  reading from the first base on met two records of one base 2 to 41 bases past the target, as
+  HG03120's on chr5:146,361,254 (+) met 146,361,314 GGGA>G and 146,361,315 GGA>G on the same slot,
+  and their reading up to the last base, which reaches no variant past the target, does not find the
+  target's bases through the indel. That second indel is an insertion whose first 1 to 5 bases are
+  the target's last, those the repeat goes on with (HG03120's 146,361,281 A>AGTGT), or a repeat unit
+  deleted 2 to 5 bases from an end of the target, but on HGDP00478's rows of chr5:141,655,182 TAC>T:
+  there it is 141,655,188's deletion of 37 bases, (AC)13 and an 11-base linker, which starts after
+  the target's sixth or seventh base on the + strand, runs past its reference end and joins two AC
+  runs. Where a second indel deletes the base at the target's first or last place, the reading
+  starts where that base stood or ends where it stood. A second indel inserted right next to the
+  indel's anchor base is inside the target. A carrier whose second indel inside the target has an
+  unphased call cannot be tied to a haplotype, so it stays listed, PUTATIVE, as every carrier on an
+  unphased panel is; this holds even when another, phased second indel on its indel haplotype
+  changes the target, so such a carrier is listed for a row its indel haplotype does not have (§8,
+  residuals). An MNV is in no store the search reads (the phased indel store keeps records whose REF
+  and ALT differ in length, the SNP tiers SNVs), so a carrier whose indel haplotype also holds an
+  MNV that changes the target is listed for the target that haplotype would hold without it, a
+  sequence it does not have: a known limit of 2.10.0 (§10). On the same phased slot, an indel
+  overlapping the first at another position (one complex allele the VCF splits into overlapping
+  records, or a repeat's indel that the VCF left-aligns onto the last bases of a complex allele next
+  to it; the window keeps the reference there) takes the haplotype off the target's rows, whatever
+  its bases, when it changes the reference bases the target covers. Those are the places of the
+  target's own bases and, since the target holds a base of the first indel's ALT (every indel row's
+  target does), that indel's whole REF, however far inside a long ALT the target lies. The second
+  indel changes them when it deletes or replaces one of them that the first does not delete or
+  replace itself, or adds bases between two of them, as an insertion inside the first indel's REF
+  always does (a haplotype carrying the first has no place for bases added between two it replaces).
+  One that changes none of them leaves the target's bases as the window has them, on every reading
+  of the slot that keeps the first indel's ALT whole, and the haplotype keeps the row: a variant
+  only on bases the indel deletes or replaces is not in the window's sequence and changes nothing,
+  and neither does a second indel anchored on the first's last REF base, whose change lies past a
+  target inside the ALT. But a second record that puts bases of its own there, its ALT holding bases
+  its REF does not share at either end (a complex record such as TCC>G, its REF wholly in the first
+  indel's deleted or replaced bases), adds them inside the first indel's REF, as an insertion there
+  does, and takes the haplotype off, whatever its bases (`indel_snp_cis.changes_span`): HPRC v2.1's
+  normalised VCFs hold 31 such pairs of records on one phased slot, 249 slots in all (29 pairs, 247
+  slots, beside a first record that is a deletion), and the real-data check, which reads such a slot
+  without the second record, counts what differs as `limit-overlapping-records`, non-gating; which
+  reading is right is to be decided for 2.10.1. On HPRC v2.1, the README guide's search at 4
+  mismatches and 1 DNA and 1 RNA bulge, per sample, lists carriers so 220 times (131 samples) on 27
+  row blocks, of 40 records at 11 positions whose REF or ALT is 464 bases to 95 kb long
+  (chr15:52,876,508 TATGTAT replaced by 2,375 bases, beside 52,876,514 T>TAAAAAAA on the same slot;
+  chr6:112,819,048's 95,320 bases replaced by 95,309, beside 112,914,365 CT>C): each haplotype,
+  rebuilt from the VCF, holds its row's target at its start, 111 bases to 76 kb from the overlap.
+  Another allele at the indel's own position, an indel or a SNP, is an alternative to it (a
+  haplotype holding both would be one record), so a slot phased with both is a phasing artefact. And
+  an unphased carrier of two overlapping records is a multi-allelic heterozygote, one allele per
+  haplotype. These stay listed;
 - a target of the window that holds **no base of the indel** — none the ALT adds or replaces,
   and not the two bases on either side of the deleted ones — lies wholly in a flank and gives
   **no indel row**, with or without a code: its sequence is reference (or SNP) sequence, which
@@ -3338,29 +3354,34 @@ are identical, 182,369 rows each (MD5 `c76f3490` once the licence-gated COSMIC c
 dedicated arm's fresh install, is set aside; the two PAM-less arms are identical with it, MD5
 `c4586f7a`). The same holds for NRR: 386,012 rows each (MD5 `f810dd76`) over a dedicated index, both
 PAM-less indexes with `--prune-pam`, and the 3-nt one without it. Those indexes are of format 1,
-built by CRISPRitz 2.9.1 or earlier (below). For them it holds at *L = K*, and at *K > L* for a
-guide with no site at a contig's very end or start, as this one has none. The build scans a contig
-for a PAM only where a whole window of *K* bases fits, so with *K > L* a + strand PAM with 1 to *K −
-L* bases after it to the contig's end, and a − strand PAM in the contig's first *K − L* bases, are
-not indexed. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG sites (about 7.5 × 10⁻⁷ of
-all), none on a primary chromosome for those PAMs; in two whole-genome searches the 8-nt flank lost
-one row each against a dedicated index (27,215 of 27,216 rows for a guide picked for its perfect
-match on `chr11_JH159136v1_alt`, and 216,977 of 216,978 for VEGFA site 3 at 5 mismatches). A −
-strand PAM exactly *K − L* bases from the start is indexed in the window at the contig's first base,
-which CRISPRitz 2.9.1's search read as a window of the + strand, as it read that of a − strand PAM
-at a contig's first base (below): it reported that PAM on the + strand at another coordinate.
-CRISPRitz 2.10.0's search reads it right, in an index of either format. A search that reads a flank
-of format 1 wider than its PAM says so: from the command line on stdout and in the run's
-`Params.txt`, from the web in its `log_verbose.txt`; under CRISPRitz 2.9.1 it also says that PAM is
-reported on the + strand. N runs inside a contig are not affected by the width. An index of format 2
-stores a PAM-less window whose flank runs off the contig, its bases off the contig as `N`, which
-matches no PAM base: with `--prune-pam` it returns the rows of a dedicated index of format 2 **built
-for the same guide length and budget**, for any 3′ PAM of *L ≤ K*, contig ends included (CRISPRitz's
-`docs/INDEX_FORMAT.md`, section 8; through the real CLI on a synthetic genome of sites at contig
-ends and N runs, `test/index_format2/check_boundary_rows.py`, an NGG search off an 8-nt flank gives
-the dedicated index's 13 rows, where of format 1 it gives 5 of 6). Of two indexes of format 2 built
-for one guide length, the one of the larger budget returns a superset of the other's rows. Neither
-holds across guide lengths (below).
+built by CRISPRitz 2.9.1 or earlier (below). On the indexes of 2.10.0 (format 2) the release gate
+measured it again, with the same guide and budget, each pruned search given a library of the one
+index it prunes: NRG 183,207 rows each over the dedicated index, the general index and the NRR index
+pruned to NRG; NRR 387,782 over the dedicated index and the general index; NGG 85,347 over the
+dedicated index and the NRR index pruned to NGG; in each group every data file is identical but the
+records that name the index searched and the reports' dates (§11). For them it holds at *L = K*, and
+at *K > L* for a guide with no site at a contig's very end or start, as this one has none. The build
+scans a contig for a PAM only where a whole window of *K* bases fits, so with *K > L* a + strand PAM
+with 1 to *K − L* bases after it to the contig's end, and a − strand PAM in the contig's first *K −
+L* bases, are not indexed. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG sites (about
+7.5 × 10⁻⁷ of all), none on a primary chromosome for those PAMs; in two whole-genome searches the
+8-nt flank lost one row each against a dedicated index (27,215 of 27,216 rows for a guide picked for
+its perfect match on `chr11_JH159136v1_alt`, and 216,977 of 216,978 for VEGFA site 3 at 5
+mismatches). A − strand PAM exactly *K − L* bases from the start is indexed in the window at the
+contig's first base, which CRISPRitz 2.9.1's search read as a window of the + strand, as it read
+that of a − strand PAM at a contig's first base (below): it reported that PAM on the + strand at
+another coordinate. CRISPRitz 2.10.0's search reads it right, in an index of either format. A search
+that reads a flank of format 1 wider than its PAM says so: from the command line on stdout and in
+the run's `Params.txt`, from the web in its `log_verbose.txt`; under CRISPRitz 2.9.1 it also says
+that PAM is reported on the + strand. N runs inside a contig are not affected by the width. An index
+of format 2 stores a PAM-less window whose flank runs off the contig, its bases off the contig as
+`N`, which matches no PAM base: with `--prune-pam` it returns the rows of a dedicated index of
+format 2 **built for the same guide length and budget**, for any 3′ PAM of *L ≤ K*, contig ends
+included (CRISPRitz's `docs/INDEX_FORMAT.md`, section 8; through the real CLI on a synthetic genome
+of sites at contig ends and N runs, `test/index_format2/check_boundary_rows.py`, an NGG search off
+an 8-nt flank gives the dedicated index's 13 rows, where of format 1 it gives 5 of 6). Of two
+indexes of format 2 built for one guide length, the one of the larger budget returns a superset of
+the other's rows. Neither holds across guide lengths (below).
 
 **Genomic `N`.** This equivalence needs engine support, not just a filter. A genomic `N`
 is stored as a code that intersects nothing, so it fails a PAM match at every position; a
@@ -3520,39 +3541,54 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   with NRR: 3 per sample, at 2, and 1 at population level, the same beside the mega; none for the
   README guide with NRG, TRAC, the CEP290 guides, SaCas9's, Cas12a's and the ACTGA guide. On HPRC,
   the README guide with NRR: 1 per sample, none at population level. The carrier's own target can
-  also start a repeat unit away from the row's: on the release gate's genome-wide VEGFA site 3
-  search (B10, per sample, HGDP and 1000 Genomes), HGDP00655 is listed on chr1:21,194,250 and
-  21,194,251 (+) for 21,194,271 GTGT>G, whose slot also holds 21,194,269 GT>G inside the target and
-  21,194,275 GGT>G, which deletes its last base: read up to where that base stood, the slot holds
-  the target's bases, and its own target, through both deletions, starts two bases before the row
-  (HG01432 so on chr16:74,355,612 and 74,355,613 (+)). The real-data check counts both shapes as
-  `limit-two-indels` (§8). The same limit leaves targets unreported: one that a haplotype holds only
-  through two or more indel-path records (indels, and on HPRC MNVs too: the next item) is not
-  generated (§8, residuals), so no row reports it for that haplotype's carriers. The release gate's
-  chr22 checks (`--chrom chr22 --mode both`) count such targets (`limit-two-indels`, completeness),
-  here as sites and the (site, sample) listings they leave out. On HGDP + 1000 Genomes, which hold
-  no MNV, per sample: the README guide with NRR 7 sites (3,425 listings by 1,770 samples, where the
-  search's own indel rows and alternative alignments stand at 211 sites of chr22), with NRG 3 (1,725
-  listings), TRAC 9 (31), the ACTGA guide through the general index 2 (3), SaCas9's 21-nt guide 9
-  (125) at 2 mismatches and no bulge and 43 (4,349) at 4 + 1 + 1, and the three repeat-rich guides
-  343 (25,853 by 4,015 samples, against indel rows and alternative alignments at 4,232 sites): VEGFA
-  site 3 305, EMX1 30, VEGFA site 1 8; population-level, the README guide 6 with NRR and 3 with NRG,
-  the three repeat-rich guides 95; beside the mega, 7 per sample and 4 population-level; on HPRC,
-  the README guide 21 (223 listings by 110 samples) in either mode, of which 5 (205 listings by 107
-  samples) through indels alone and 16 (18 listings by 8 samples) only through an MNV, 7 of them
-  through MNVs alone; none for the CEP290 guides and Cas12a's. Each target's best alignment is at 5
-  or 6 edits for the README guide, TRAC, the ACTGA guide, EMX1, VEGFA site 1 and HPRC, at a CFD of
-  at most 0.0004 for the README guide, 0.0025 for TRAC, 0.0243 for EMX1, 0.052 for the ACTGA guide
-  and 0.11 for VEGFA site 1, and on HPRC of 0 through indels alone (each at 6 edits) and at most
-  0.0164 through an MNV; VEGFA site 3's reach down to 3 edits and up to a CFD of 0.35 (24 sites at
-  0.1 or more), and two of SaCas9's match the guide perfectly. At 6 of the README guide's 7 sites,
-  20 of HPRC's 21 (each of its 5 through indels alone) and 41 of the three repeat-rich guides' 343,
-  no row of the search starts within 5 bp; at the others, rows of other carriers or of other
-  targets stand there. Rebuilt from the VCF, every carrier of 13 of these targets (at 8 sites of
-  five searches; 2,782 listings) holds the target on a haplotype that does not hold it with only
-  one of its indels there, or none; so does every carrier of HPRC's 24 targets (223 listings), with
-  only one of the indels and MNVs that meet the target, or none. No fix is planned yet: the
-  haplotype scan planned for 2.10.1 writes the lines the search writes, one indel per window.
+  also start a repeat unit away from the row's, its bases the row's: on the release gate's
+  genome-wide VEGFA site 3 search (B10, per sample, HGDP and 1000 Genomes), HGDP00655 is listed on
+  chr1:21,194,250 and 21,194,251 (+) for 21,194,271 GTGT>G, whose slot also holds 21,194,269 GT>G
+  inside the target and 21,194,275 GGT>G, which deletes its last base: read up to where that base
+  stood, the slot holds the target's bases, and its own target, through both deletions, starts two
+  bases before the row. Rebuilt from the VCF (each listed carrier's slot holding the row's indel,
+  written with every record of the VCF within 300 bases, where the row's target lies on it), B10's
+  9,059 listings split so: in 8,693 (at 260 sites, by 3,558 samples) the slot holds the row's bases
+  at the row's place, without a SNP the row names; in 8 (6 carriers at 8 sites) its own target,
+  through a second indel in the repeat, starts one to three repeat units (2 to 6 bases) before the
+  row's: HGDP00655, and HG01432 on chr16:74,355,612 and 74,355,613 (+), 2 bases before the row's
+  start, through a second deletion; HG01883 on chr22:21,998,423 (+) (6 bases, through a second
+  deletion), HGDP00465 on chr5:20,117,008 (+) and NA19475 on chr8:41,582,673 (+) (2 bases each,
+  through a second insertion), all VEGFA site 3's in GT repeats, and NA20888 of EMX1 on
+  chr3:155,655,439 (+) (3 bases, an AAG repeat, through a second insertion), these four at another
+  base of the row's own insertion, so that a row of their own target gives the row's start, the
+  insertion's anchor; in 357 the slot holds the row's target at its place with every variant the row
+  names (342 of them beside a second indel inside it that the repeat puts back, which the reading
+  above keeps by design); and in 1 (NA18640 of EMX1 on chr3:11,818,792 (+)) a second deletion past
+  the bases CRISPRme reads takes two bases out of the target, so the slot holds the row's bases at
+  no place. The real-data check counts every shape as `limit-two-indels` (§8). The same limit leaves
+  targets unreported: one that a haplotype holds only through two or more indel-path records
+  (indels, and on HPRC MNVs too: the next item) is not generated (§8, residuals), so no row reports
+  it for that haplotype's carriers. The release gate's chr22 checks (`--chrom chr22 --mode both`)
+  count such targets (`limit-two-indels`, completeness), here as sites and the (site, sample)
+  listings they leave out. On HGDP + 1000 Genomes, which hold no MNV, per sample: the README guide
+  with NRR 7 sites (3,425 listings by 1,770 samples, where the search's own indel rows and
+  alternative alignments stand at 211 sites of chr22), with NRG 3 (1,725 listings), TRAC 9 (31), the
+  ACTGA guide through the general index 2 (3), SaCas9's 21-nt guide 9 (125) at 2 mismatches and no
+  bulge and 43 (4,349) at 4 + 1 + 1, and the three repeat-rich guides 343 (25,853 by 4,015 samples,
+  against indel rows and alternative alignments at 4,232 sites): VEGFA site 3 305, EMX1 30, VEGFA
+  site 1 8; population-level, the README guide 6 with NRR and 3 with NRG, the three repeat-rich
+  guides 95; beside the mega, 7 per sample and 4 population-level; on HPRC, the README guide 21 (223
+  listings by 110 samples) in either mode, of which 5 (205 listings by 107 samples) through indels
+  alone and 16 (18 listings by 8 samples) only through an MNV, 7 of them through MNVs alone; none
+  for the CEP290 guides and Cas12a's. Each target's best alignment is at 5 or 6 edits for the README
+  guide, TRAC, the ACTGA guide, EMX1, VEGFA site 1 and HPRC, at a CFD of at most 0.0004 for the
+  README guide, 0.0025 for TRAC, 0.0243 for EMX1, 0.052 for the ACTGA guide and 0.11 for VEGFA site
+  1, and on HPRC of 0 through indels alone (each at 6 edits) and at most 0.0164 through an MNV;
+  VEGFA site 3's reach down to 3 edits and up to a CFD of 0.35 (24 sites at 0.1 or more), and two of
+  SaCas9's match the guide perfectly. At 6 of the README guide's 7 sites, 20 of HPRC's 21 (each of
+  its 5 through indels alone) and 41 of the three repeat-rich guides' 343, no row of the search
+  starts within 5 bp; at the others, rows of other carriers or of other targets stand there. Rebuilt
+  from the VCF, every carrier of 13 of these targets (at 8 sites of five searches; 2,782 listings)
+  holds the target on a haplotype that does not hold it with only one of its indels there, or none;
+  so does every carrier of HPRC's 24 targets (223 listings), with only one of the indels and MNVs
+  that meet the target, or none. No fix is planned yet: the haplotype scan planned for 2.10.1 writes
+  the lines the search writes, one indel per window.
 - **An MNV beside an indel on one haplotype.** No store the search reads holds an MNV (the phased
   indel store keeps records whose REF and ALT differ in length, the SNP tiers SNVs, and the indel
   log lists an MNV's carriers with no phase), so a carrier whose haplotype holding a row's indel
@@ -3560,25 +3596,27 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   would hold without the MNV, a sequence it does not have (§4); a SNP row keeps such a carrier too
   (§8, residuals): on HPRC's search of the README guide below, per sample, the real-data check's
   SNP-row report counts 3,334 such listings of SNP rows at 219 sites, by all 232 samples
-  (`limit-snp-row-mnv`). Of the published panels only HPRC v2.1 has MNVs: 702,193 of the 49,547,631
-  records of its VCFs (699,719 of the 12,361,907 records of its indel log); HGDP + 1000 Genomes
-  (127,666,429 SNVs and 17,192,381 indels) and `hg38_mega` have none. HPRC's genome-wide search of
-  the README guide at 4 mismatches + 1 DNA + 1 RNA bulge (NRR), per sample, lists carriers so 1,163
-  times at 94 sites (74 rows and 25 alternative alignments; 232 samples), and 558 times at 73 sites
-  at population level (229 samples), each row at a CFD of 0.084 or less (0 in 162 of the 194 CFD
-  blocks per sample). Rebuilt from the VCF, the haplotype each carrier is listed for holds the row's
-  target in none of the 1,163, and no target within the search's budget there in 992 (in the other
-  171 it holds another, as strong as the row's by mismatches and bulges in 162 and one edit weaker
-  in 9); of the carriers, 66 hold the row's target on their other haplotype, 172 have their other
-  haplotype unknown there (a missing call, '.') and 925 hold it on neither. The real-data check
-  counts them as `limit-indel-row-mnv` (§8). Targets go unreported too: one that a haplotype holds
-  only through an MNV and a second indel-path record, an indel or another MNV, is not generated (one
-  record per fake-indel window: the item above), so no row reports it for that haplotype's carriers.
-  On chr22, the release gate's check of that search counts 16 such sites (18 listings by 8 samples),
-  7 of them through MNVs alone, each target's best alignment at 5 or 6 edits and a CFD of at most
-  0.0164, and 15 of them with no row of the search within 5 bp (`limit-two-indels`; the same at
-  population level). The indel log cannot settle the listings: taking off the row every carrier it
-  lists for such an MNV, whatever the slot, would also take off 92 carriers at their sites in that
+  (`limit-snp-row-mnv`). Of 2.10.0's panels only HPRC v2.1 has MNVs: 702,193 of the 49,547,631
+  records of its VCFs (699,719 of the 12,361,907 records of its indel log; 2.8.1's archives of HPRC
+  v2.0, which 2.10.0 also reads, hold them too, §8); HGDP + 1000 Genomes (127,666,429 SNVs and
+  17,192,381 indels) and `hg38_mega` have none. HPRC's genome-wide search of the README guide at 4
+  mismatches + 1 DNA + 1 RNA bulge (NRR), per sample, lists carriers so 1,163 times at 94 sites (74
+  rows and 25 alternative alignments; 232 samples), and 558 times at 73 sites at population level
+  (229 samples), each row at a CFD of 0.084 or less (0 in 162 of the 194 CFD blocks per sample).
+  Rebuilt from the VCF, the haplotype each carrier is listed for holds the row's target in none of
+  the 1,163, and no target within the search's budget there in 992 (in the other 171 it holds
+  another, as strong as the row's by mismatches and bulges in 162 and one edit weaker in 9); of the
+  carriers, 66 hold the row's target on their other haplotype, 172 have their other haplotype
+  unknown there (a missing call, '.') and 925 hold it on neither. The real-data check counts them as
+  `limit-indel-row-mnv` (§8). Targets go unreported too: one that a haplotype holds only through an
+  MNV and a second indel-path record, an indel or another MNV, is not generated (one record per
+  fake-indel window: the item above), so no row reports it for that haplotype's carriers. On chr22,
+  the release gate's check of that search counts 21 sites of targets held only through two or more
+  indel-path records (`limit-two-indels`; the same at population level), and, rebuilt from the VCF,
+  16 such sites (18 listings by 8 samples) need an MNV, 7 of them through MNVs alone, each target's
+  best alignment at 5 or 6 edits and a CFD of at most 0.0164, 15 of them with no row of the search
+  within 5 bp. The indel log cannot settle the listings: taking off the row every carrier it lists
+  for such an MNV, whatever the slot, would also take off 92 carriers at their sites in that
   per-sample search (34 at population level) whose haplotype holding the indel does not hold the
   MNV. A fix needs the MNVs' phased genotypes in a store built with the panel's Dictionaries, which
   the haplotype scan does not read either (it reads the stores the search reads); 2.10.1 is to build
@@ -3586,6 +3624,19 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   second variant of the slot, which takes a carrier off a row of a sequence it does not have: a
   target held only through an MNV and a second indel-path record stays unreported, as one held
   through two indels does.
+- **A SNP row's carrier whose indel reaches past the store the search read.** A per-sample search
+  reads the phased indel store only around its SNP targets, 500 bases on either side of each (§4),
+  so a carrier whose haplotype holds an indel in the target that adds or deletes more bases than
+  that, less the target's length, cannot be read and is left off the SNP row, even where its bases
+  are the row's. On the release gate's HPRC search of the README guide per sample (B6), NA19185 is
+  left off two SNP rows, chrX:1,408,064 and 1,408,065 (+) in PAR1, which name 1,408,077 G>T: its
+  slot holds that SNP, 1,408,043 T>TA and 1,408,078's deletion of 1,365 bases, whole units of a
+  repeat, and, rebuilt from the VCF, the row's target from its first base on; the deletion's frame
+  reaches 1,388 bases from the target, and no other row of that search lies within 4 kb. The
+  real-data check's SNP-row report finds it (6 report-only `carrier-missing` lines) and no such
+  carrier on the per-sample searches of HGDP + 1000 Genomes; a row the rule takes off whole, which
+  the report cannot see, is not counted. 2.10.1 is to read the store over the frame a haplotype's
+  own indels need.
 - **A target wholly inside a tandem repeat.** The merge reads each row's place on the haplotype
   from its own bases, the first place they fit (§4). In a microsatellite that holds a whole
   target, the target's alignments, each with its own bases, can fit different places, so they
@@ -3595,19 +3646,26 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   such a target, and no row is lost or wrong: at worst one off-target is reported twice. A fix
   is planned for 2.10.1.
 - **An unphased call of two ALTs at one position.** An unphased carrier is listed for every
-  non-empty subset of its variants in the target (§4). For a `1/2` call, both slots hold an
-  ALT of the position, yet the subsets take in those that hold neither, the reference base
-  there: such a carrier is also listed, PUTATIVE, on a row that needs the reference base at that
-  position, which its genotype rules out. The same rows come from a line of several ALTs and
-  from its split form. The real-data check counts such listings as `limit-snp-row-unphased`
-  (non-gating).
-- **An unphased carrier on a classic install.** On an index built without `--samplesID` (the
-  classic per-sample dictionaries, no Tier-1 store), the dictionary path puts an unphased call
-  of a VCF that is otherwise phased on both slots, and the per-haplotype pruning keeps the
-  largest combination: the carrier is listed only on the row of the union of its variants in
-  the target, not on every subset, as the Tier-1 path lists it. 2.8.1 does the same. Every
-  published variant index of a genotyped panel is built with `--samplesID`; build an index of
-  one's own with it too.
+  non-empty subset of its variants in the target (§4). For a `1/2` call, both slots hold an ALT of
+  the position, yet the subsets take in those that hold neither, the reference base there: such a
+  carrier is also listed, PUTATIVE, on a row that needs the reference base at that position, which
+  its genotype rules out. The same rows come from a line of several ALTs and from its split form.
+  The real-data check counts such listings as `limit-snp-row-unphased` (non-gating), a class that
+  also takes in every other call of unknown phase in a target (a haploid call, a slot phased with
+  two ALTs of one position), so its count is not this limit's size. The published panels hold no
+  such call, measured on their VCFs: HGDP + 1000 Genomes holds no unphased genotype (the census of
+  its re-phased callset, `docs/HGDP_1KGP_PHASED_INDEX_METHODS.md`); HPRC v2.1's only unphased
+  genotypes are on chrY, 28,876,207 of them (127 samples), each with a missing allele (`./.` or an
+  ALT beside `.`: 51,717), so none is a call of two ALTs; the mega holds no genotype. So the limit
+  is met only on a VCF of one's own with unphased calls of two ALTs, where its size was not
+  measured.
+- **An unphased carrier on a classic install.** On an index built without `--samplesID` (the classic
+  per-sample dictionaries, no Tier-1 store), the dictionary path puts an unphased call of a VCF that
+  is otherwise phased on both slots, and the per-haplotype pruning keeps the largest combination:
+  the carrier is listed only on the row of the union of its variants in the target, not on every
+  subset, as the Tier-1 path lists it. 2.8.1 does the same. Every published variant index of a
+  genotyped panel is built with `--samplesID`, so none is affected; build an index of one's own with
+  it too. Its size on a classic install of a VCF with unphased calls was not measured.
 - **What the real-data check does not check.** `scripts/check_indel_rows.py` (§8) does not read
   `Variant_info_spacer+PAM`, nor whether an alternative alignment is one the merge should have
   folded into a better one of the same target (a redundant fold). A variant numbered at the
@@ -3660,6 +3718,159 @@ its scale on the release gate is in the first item above); an MNV is in no phase
 carriers are resolved PUTATIVE (§4); an indel row, and each ALT of a VCF line that lists several
 ALTs, gives the record's first ID (§8); and an index of format 1, as every archive of 2.8.1, keeps
 the limits at contig ends and `N` runs of §9 until it is built again.
+
+## 11. Index rebuild of 2.10.0
+
+Every index CRISPRme 2.10.0 publishes is built again by CRISPRitz 2.10.0, so that each holds what
+this release's engine writes: index format 2, every allele of a split site coded, and fake-indel
+windows of 30/30. The rebuild ran on 2026-11-14 and 2026-11-15 on two nodes of 2 × 64 cores and
+about 1 TB of RAM; `docs/INDEX_PROVENANCE.md` (2.10.0) records each archive: the image it was
+built in, every input with its checksum, the threads, the wall time and memory of each row, each
+archive's size and contents, and the checksums of the kits and their member lists. The release
+checklist (`docs/RELEASE_CHECKLIST.md`, D and E) gives each gate.
+
+**The index set.** The rebuild built the archives of the index set,
+`seq_script/rebuild/index_set_2.10.0.tsv` (decided on 2026-11-08): 16 indexes, each of N = 3
+(`--bDNA 2 --bRNA 2`, the web's ceiling) — SpCas9 NRR for a 20-nt guide on the reference,
+HGDP + 1000 Genomes, HPRC and the mega; NGG, NRG, the general PAM-less index (an 8-nt 3′ flank),
+SaCas9 NNGRRN at 22 nt and Cas12a TTTN at 20 and 23 nt on the reference and on HGDP + 1000
+Genomes — each variant panel's companions (its Dictionaries bundle, and the genotype store and
+phased indel genotypes of a genotyped panel), and each panel's enriched-genome kit: 26 archives.
+`NNN_3` is not built again, the general index serving its searches at the same speed (§9). Each
+panel is built in one working directory, so that its indexes share its one Dictionaries: its first
+row enriches hg38 with the panel, writes its Dictionaries and builds its NRR index, its later rows
+build an index of another PAM from the same enriched genome. Every row ran in one image, under
+`env -i`: CRISPRme `db50986`, and CRISPRitz `4ded5e6` (2.10.0) compiled, in the environment of an
+unpublished release candidate of 2.8.1, the image route, since the release image is built from
+tags the build precedes (`docs/INDEX_PROVENANCE.md` gives its sha256 and its binaries' md5).
+
+**The genome: 455 contigs or 24.** The reference indexes and those of HGDP + 1000 Genomes are built
+on all 455 sequences of hg38 as `download --what genome` installs them (chr1-22, X, Y and M, and
+the alt, random and unplaced contigs), as 2.8.1's NRR, NGG and NNN indexes of the reference and of
+that panel were (its NRG index held 24): so a variant search of the default panel finds every site
+a reference search finds. No VCF of these panels covers an alt contig, which repeats a region of a
+primary chromosome (the HLA region, for one), so a site there can be reported twice, the second
+time as a reference row of the alt contig. The indexes of HPRC and the mega are built on chr1-22,
+X and Y, the 24 contigs of 2.8.1's indexes of those panels, which are the chromosomes of their
+split VCFs; the mega's recipe refuses a genome folder that holds any other FASTA. A contig with no
+site of the PAM gets no tree: `chrUn_KI270539v1` (993 bp, GC 0.80) holds no TTTN site, so
+TTTN-20 and TTTN-23 hold 454 contigs on the reference and on HGDP + 1000 Genomes.
+
+**What every index shares** (the engine's rules, §2, §4, §9):
+- index format 2 (CRISPRitz's `docs/INDEX_FORMAT.md`): a magic at either end and a header that
+  records the build PAM, its side, the guide length and the budget; it holds the sites at contig
+  ends and `N` runs that format 1 loses (§9);
+- every ALT of a split multi-allelic site coded, `Q` where the reference base and its ALTs cover A,
+  C, G and T, and each listed in the dictionary; each record's `AF` read by its key (§2, §8);
+- REF and ALT read in either case, as VCF 4.x allows: the records written in lower case (6
+  deletions of HGDP + 1000 Genomes, 13 records of the mega, 37,546 indels of HPRC v2.1 as
+  normalised) are coded, and named in upper case in the indel logs and the fake-indel genomes
+  (§2); a line of several ALTs is listed in the dictionary in split form, each ALT tied to `1`
+  (§4);
+- each indel searched in a fake-indel window of 30 reference bases on either side (25 and 27 up to
+  CRISPRitz 2.9.1), which each reader takes from the panel's indel log (§4);
+- the records whose FILTER is `PASS` or `.`, those CRISPRitz's enricher reads, in the index and in
+  every store CRISPRme reads beside it.
+
+**The panels' recipes** (`seq_script/merge_panels/`, each called by the index set's build command,
+`docs/PRECOMPUTED_INDEXES.md` giving each panel's inputs):
+- *Reference*: `build-index-only --genome Genomes/hg38 --pam <PAM file> --bDNA 2 --bRNA 2 --thread
+  16`.
+- *HGDP + 1000 Genomes* (`hgdp1kgp_build.sh`, 64 threads, its tiers emitted by 3 workers): gnomAD
+  v3.1.2's joint callset of 4,091 samples, re-phased with SHAPEIT5 keeping singletons
+  (`docs/HGDP_1KGP_PHASED_INDEX_METHODS.md`). Its VCF-PREP makes each chromosome's VCF from the
+  re-phased BCF: on chrX the males outside PAR made haploid (`bcftools +fixploidy`),
+  `FORMAT/PP` dropped, `bcftools norm -m -any` against hg38, AN, AC and AF filled from the
+  genotypes, sorted. 2.8.1's output of that step, which it reproduces record for record (sha256
+  equal to the files HF hosts), was put in its place. The samplesID comes from gnomAD's metadata
+  file, `gnomad_meta_updated.tsv`; `build-index-only` then reads the VCFs with `--samplesID`, its
+  registry raw and the SNP+indel co-occurrence on, and writes the tiers, the phased indel
+  genotypes and `variant_count.json`.
+- *HPRC* (`hprc_build.sh`, 32 threads): HPRC Release 2's Minigraph-Cactus graph **v2.1** on GRCh38,
+  `hprc-v2.1-mc-grch38.wave.vcf.gz` (decomposed with `vcfwave`; 2.8.1's archives were built from
+  v2.0), split per chromosome (`bcftools view --regions <chr>`); each chromosome normalised
+  (`bcftools norm -m -any` against hg38), its AF, AC and AN filled from the genotypes, sorted; the
+  samplesID in the VCF's order (the same 232 samples as v2.0, CHM13 among them), populations from
+  1000 Genomes 2021's samplesID; then `build-index-only` as above.
+- *mega* (`mega_rebuild.sh`, 16 threads; decision D2): from the merged sites-only VCFs of five
+  sources (`AF_<source>`, `AF_max`), only the records CRISPRitz's enricher reads (`PASS` or `.`),
+  each with AF = `AF_max`; its registry and indel frequencies hold exactly the records its genome
+  codes (§3, §5), a synthetic pseudo-sample at every indel site puts each indel in the fake-indel
+  genome, and `verify_mega_chrom.py` checks each chromosome's registry, logs and frequencies
+  against its VCF before the recipe ends.
+- *Kits*: the panel's enriched genome and fake-indel genome, `tar | pigz`, with its `SHA256SUMS`;
+  its member list (`scripts/kit_members.py`) gives the md5 of each file it holds, which no packing
+  changes.
+
+The `.bin` files of an index depend on the threads it was built with (CRISPRitz's parallel sort
+writes the same records in another order), its targets do not: the published reference indexes
+(16 threads) and HGDP + 1000 Genomes' own reference indexes (64 threads) differ in most of their
+`.bin` files, and searches of either give the same rows (the README guide genome-wide, per sample
+and population-level). Each row ran with its recipe's count, which a rebuild from its kit must use
+to get the published bytes (`docs/INDEX_PROVENANCE.md`, Threads).
+
+**How it was checked.** Each gate ran on the indexes as built, before any publish, and none of their
+findings came from index creation:
+1. **Gate A, integrity** (`docs/INDEX_PROVENANCE.md`, Gate A): `crispritz.py index-info` on every
+   index and sub-index (format 2, the PAM, side and guide length of its name, N = 3, the expected
+   contigs), the rebuild's `postcheck` (every `_INDELS` sub-index there and not empty, `built_by`
+   2.10.0, no lower-case base in a fake-indel genome), each panel's counts recounted from its input
+   VCFs (HGDP + 1000 Genomes 127,666,429 SNP alleles and 17,192,381 indels; HPRC 36,719,470 and
+   12,361,907; the mega 48,731,015 and 13,853,753, record by record against its build VCFs), the
+   kits' `SHA256SUMS` and member lists, and that nothing changed after its row. It passed on both
+   nodes, each node's results re-derived by an independent second check.
+2. **Gate B, the real-data checker** (§8), on the searches B1 to B14, genome-wide at 4 mismatches +
+   1 DNA + 1 RNA bulge unless said otherwise: the README guide with NRR and with NRG, per sample and
+   population-level (B1-B4); TRAC (B5); the README guide on HPRC, both modes (B6, B7), and on HGDP +
+   1000 Genomes beside the mega (B8, B9); three repeat-rich guides (VEGFA site 3, EMX1, VEGFA site
+   1), both modes (B10, B11); SaCas9's 21-nt guide served by the general index (B12: at 2 + 0 + 0
+   genome-wide, a search without bulges, which scans the genome and reads no index, and at 4 + 1 + 1
+   on chr22 of the general index; at 4 + 1 + 1 genome-wide this guide, an Alu motif, wrote 59 to 141
+   million raw targets of each kind and its post-analysis would have taken more than a day, so the
+   general index's genome-wide checks at 4 + 1 + 1 are G5's searches of it, below); the CEP290
+   guides on NNGRRN (B13) and Cas12a's on TTTN-20 and TTTN-23 (B14). Each was checked genome-wide
+   (soundness) and on chr22 (soundness and completeness). Its first run found 790 gating findings:
+   504 and 280 on HPRC v2.1 (B6, B7) and 6 of TRAC (B5). They came from the search, the checker or a
+   rule of §4, none from the indexes: a PUTATIVE carrier listed for a weaker target than its alleles
+   allow (B5), complex overlapping records, whose rule §4 now states as the code applies it, a slot
+   the checker did not read past a long deletion, and an MNV beside an indel on HPRC (a known limit,
+   §10). The check of the repeat-rich guides (B10), which ended later, found two more: a carrier
+   left off for a variant past the bases its reading compares (on indel rows, and the same on SNP
+   rows), and the checker's reading of a target whose last base a second deletion removes. Each was
+   fixed in the search code or the checker, or documented and classed as non-gating; the 88 checks
+   run again with the final checker on the final code's tables have no gating finding (beside the
+   mega chromosome by chromosome: a whole-genome check refuses a run where only one dataset has a
+   VCF of chrY, the mega's, so the mega's chrY is not checked).
+3. **G5, the `--prune-pam` equivalence** (§9): `ACTGAAATCTGTAAGCAGGC` per sample at 4 + 1 + 1 on
+   HGDP + 1000 Genomes, genome-wide, each pruned search given a library of the one index it prunes:
+   the dedicated NRG index, the general index pruned to NRG and the NRR index pruned to NRG give the
+   same 183,207 rows; the NRR index and the general index pruned to NRR 387,782; the NGG index and
+   the NRR index pruned to NGG 85,347; in each group every data file is identical, but those that
+   name the index searched and the reports' dates. Against 2.8.1's runs of NRG and NRR (182,369 and
+   386,012 rows) every difference is put down to a change of this release (every allele coded, an
+   indel row's start and numbering, `PAM_creation`, the carriers a SNP row no longer lists, chrX
+   males' haploid calls, the scorer's last digits); the 455 contigs and the windows of 30/30 changed
+   no row of this guide.
+4. **The timing gate**: 13 pairs of genome-wide searches on 32 threads of one node, each against
+   2.8.1's time of the same configuration (2.8.1's own timing gate, or 2.8.1 run beside it); 11 took
+   at most twice 2.8.1's time: per sample 0.95 to 1.30 times on HGDP + 1000 Genomes, on HPRC 0.90
+   per sample and 0.96 population-level (its v2.1 has 0.86 % more records than 2.8.1's v2.0), on the
+   mega 1.18 and 1.21; the
+   README guide's population-level search with NRG on HGDP + 1000 Genomes took 2.20 times, and its
+   side-by-side control 2.21 (§5, §10: accepted for 2.10.0). The gate timed the code of `72c2c8e`.
+   The gate B fixes that followed change the post-analysis and were not timed by the gate again: the
+   first, the PUTATIVE choice (B5), cost nothing measurable on B8's search run side by side with and
+   without it (4 h 6 min against 4 h 16 min, on a shared node); the B10 and SNP-row fixes were not
+   timed.
+5. **The docs' figures**, measured on the rebuilt indexes: the install's size (computed from the
+   archives' sizes, to be measured from the Hub), the archives' sizes, memory and time genome-wide
+   and on one chromosome at 4, 8, 16 and 32 threads, the general index's cost; the image's size
+   waits for the release's tag.
+
+The checks after the first run of gate B changed the search and the checker, not the indexes: the
+build half's lines are those the rebuild ran (md5 `7389f7e234d4e617860f8f9b34abdc49`), and the
+size and SHA-256 of each archive as the Hub holds it are filled in at the publish (the release
+checklist, E, step 5).
 
 ---
 
