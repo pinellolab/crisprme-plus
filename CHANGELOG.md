@@ -2333,7 +2333,10 @@ major.minor version (Changed). The main changes, each told in its entry below:
     B's: 41,271; 8 more `limit-no-genotypes` notes), and chr22 with completeness 715 (712). In both
     searches the carrier gate's table changes in 214 lines of `hg38_mega`'s alignments (tier C2: a
     variant not in the panel) and in the row numbers it gives, where rows of the integrated table
-    moved.
+    moved. Of the rest of the gate, run again with this release's code, B1, B3, B12a, B12d, B13a,
+    B14a and B14c per sample and B2, B4, B13b, B14b and B14d population-level write gate B's tables,
+    byte for byte (E2 and E5 gate E's, but for two annotation columns): this change touches B5, B8
+    and B9 alone, and B6, B7, B10 and B11 change by the indel-row and SNP-row entries below.
 - **The real-data checker reads a slot's haplotype past a long deletion**
   (`scripts/check_indel_rows.py`). It wrote a haplotype over the target and 2 x its length + 60
   bases either side, and a soundness unit read the VCF over its rows and 1,046 bases either side,
