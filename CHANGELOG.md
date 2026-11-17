@@ -2326,7 +2326,14 @@ major.minor version (Changed). The main changes, each told in its entry below:
     4,899,114 findings, none gating (gate B's: 4,925,229; 26,115 fewer `limit-no-genotypes` notes,
     each a sites-only record's row, whose strings, target and variants are checked), and chr22 with
     completeness 85,647 (86,175); the whole-genome command stops, as on gate B's, at chrY, which
-    only `hg38_mega` has a VCF of.
+    only `hg38_mega` has a VCF of. B9 (the same search, population-level), run again with this
+    release's code, which calls no rule that changes its tables from a640d92's (the indel-row and
+    SNP-row entries below), changes the same 1,055 integrated rows, line for line as B8's, and
+    writes no alternative alignments; its 23 chromosomes give 41,279 findings, none gating (gate
+    B's: 41,271; 8 more `limit-no-genotypes` notes), and chr22 with completeness 715 (712). In both
+    searches the carrier gate's table changes in 214 lines of `hg38_mega`'s alignments (tier C2: a
+    variant not in the panel) and in the row numbers it gives, where rows of the integrated table
+    moved.
 - **The real-data checker reads a slot's haplotype past a long deletion**
   (`scripts/check_indel_rows.py`). It wrote a haplotype over the target and 2 x its length + 60
   bases either side, and a soundness unit read the VCF over its rows and 1,046 bases either side,
