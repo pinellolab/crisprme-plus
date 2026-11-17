@@ -980,12 +980,12 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   slots, beside a first record that is a deletion), and the real-data check, which reads such a slot
   without the second record, counts what differs as `limit-overlapping-records`, non-gating; which
   reading is right is to be decided for 2.10.1. On HPRC v2.1, the README guide's search at 4
-  mismatches and 1 DNA and 1 RNA bulge, per sample, lists carriers so 220 times (131 samples) on 27
-  row blocks, of 40 records at 11 positions whose REF or ALT is 464 bases to 95 kb long
-  (chr15:52,876,508 TATGTAT replaced by 2,375 bases, beside 52,876,514 T>TAAAAAAA on the same slot;
-  chr6:112,819,048's 95,320 bases replaced by 95,309, beside 112,914,365 CT>C): each haplotype,
-  rebuilt from the VCF, holds its row's target at its start, 111 bases to 76 kb from the overlap.
-  Another allele at the indel's own position, an indel or a SNP, is an alternative to it (a
+  mismatches and 1 DNA and 1 RNA bulge, per sample, lists carriers so 220 times (131 samples) at 27
+  sites (chromosome, start, strand), of 40 records at 11 positions whose REF or ALT is 464 bases to
+  95 kb long (chr15:52,876,508 TATGTAT replaced by 2,375 bases, beside 52,876,514 T>TAAAAAAA on the
+  same slot; chr6:112,819,048's 95,320 bases replaced by 95,309, beside 112,914,365 CT>C): each
+  haplotype, rebuilt from the VCF, holds its row's target at its start, 111 bases to 76 kb from the
+  overlap. Another allele at the indel's own position, an indel or a SNP, is an alternative to it (a
   haplotype holding both would be one record), so a slot phased with both is a phasing artefact. And
   an unphased carrier of two overlapping records is a multi-allelic heterozygote, one allele per
   haplotype. These stay listed;
@@ -1869,11 +1869,23 @@ README guide with NRR (in runs sampled for it, CRISPRitz's index search, `search
 for the three repeat-rich guides in either mode and 2.44 to 3.03 GiB for SaCas9 (2.44 GiB in both
 rounds; the same search of the same code peaks at either from one run to the next, `searchTST`'s
 search of the variant index); at 4.1 GiB on HPRC chr22; and at 3.0, 6.2 and 25.0 GiB for IGL,
-IGK and IGH alone, searched with NRG (one round). NRR's per-sample search of chr22 thus took 1.8
-times NRG's memory and 1.2 times its time; no search of the loci with NRR was measured. Of chr14
-and chr2 the gate searched the loci alone. Of chr14 whole, the rebuilt mega's search of the five
-guides above (population-level, its density guard on; during development, on fake-indel windows
-of 25/27) peaked at 20.5 GiB, and the shipped mega's at 8.9 GiB.
+IGK and IGH alone, searched with NRG (one round). In those runs NRR's per-sample search of chr22
+took 1.8 times NRG's memory and 1.2 times its time, and no search of the loci with NRR was made:
+of chr14 and chr2 they searched the loci alone. Of chr14 whole, the rebuilt mega's search of the
+five guides above (population-level, its density guard on; during development, on fake-indel
+windows of 25/27) peaked at 20.5 GiB, and the shipped mega's at 8.9 GiB.
+
+**On the published indexes.** The release measured these searches again on the indexes of 2.10.0
+(§11, the docs' figures), each a search of one chromosome's view of the published genome-wide
+indexes of HGDP + 1000 Genomes, made as `complete-test --chrom` makes it (`--thread 8`, 4
+mismatches + 1 DNA + 1 RNA bulge, one node of the hardware above at load 80 to 410). On chr22 the
+largest process peaked at 5.14 GiB for the README guide with NRG and 9.54 GiB with NRR, per sample
+and population-level alike (597 and 781 s per sample, 2,737 and 3,183 s population-level), 12.60 GiB
+for the three repeat-rich guides in either mode, and 5.42 GiB for SaCas9's 21-nt guide at 4 + 1 + 1
+(3.20 GiB at 2 + 0 + 0; the NNGRRN index pruned to NNGRRT): there NRR's per-sample search took 1.86
+times NRG's memory and 1.31 times its time. The whole of chr14, which holds IGH, searched per sample
+with NRR, peaked at 27.30 GiB, in 56 min. The loci alone and the mega's chr14 were not measured
+again (the indexes of the loci alone were built for the integration's gate, and are not published).
 
 **What the default budget costs.** The bulges drive it: on chr22 per sample the README guide's
 search took 238 s at 4 + 0 + 0, 471 s at 4 + 1 + 0, 481 s at 4 + 0 + 1 and 5,758 s at 4 + 1 + 1
@@ -3552,21 +3564,24 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   at the row's place, without a SNP the row names; in 8 (6 carriers at 8 sites) its own target,
   through a second indel in the repeat, starts one to three repeat units (2 to 6 bases) before the
   row's: HGDP00655, and HG01432 on chr16:74,355,612 and 74,355,613 (+), 2 bases before the row's
-  start, through a second deletion; HG01883 on chr22:21,998,423 (+) (6 bases, through a second
+  start, through two more deletions each; HG01883 on chr22:21,998,423 (+) (6 bases, through a second
   deletion), HGDP00465 on chr5:20,117,008 (+) and NA19475 on chr8:41,582,673 (+) (2 bases each,
   through a second insertion), all VEGFA site 3's in GT repeats, and NA20888 of EMX1 on
   chr3:155,655,439 (+) (3 bases, an AAG repeat, through a second insertion), these four at another
   base of the row's own insertion, so that a row of their own target gives the row's start, the
   insertion's anchor; in 357 the slot holds the row's target at its place with every variant the row
   names (342 of them beside a second indel inside it that the repeat puts back, which the reading
-  above keeps by design); and in 1 (NA18640 of EMX1 on chr3:11,818,792 (+)) a second deletion past
-  the bases CRISPRme reads takes two bases out of the target, so the slot holds the row's bases at
-  no place. The real-data check counts every shape as `limit-two-indels` (§8). The same limit leaves
-  targets unreported: one that a haplotype holds only through two or more indel-path records
-  (indels, and on HPRC MNVs too: the next item) is not generated (§8, residuals), so no row reports
-  it for that haplotype's carriers. The release gate's chr22 checks (`--chrom chr22 --mode both`)
-  count such targets (`limit-two-indels`, completeness), here as sites and the (site, sample)
-  listings they leave out. On HGDP + 1000 Genomes, which hold no MNV, per sample: the README guide
+  above keeps by design); and in 1 (NA18640 of EMX1 on chr3:11,818,792 (+)) a second deletion on
+  both slots, 11,818,799 GCC>G, takes out two of the target's bases, its 10th and 11th: the slot
+  without the row's 11,818,794 G>A holds the row's bases at no place within 80 bases, and the slot
+  with it holds 11,818,794 G>C as well (each 0|1: two ALTs of one position on one slot, which no
+  sequence holds); why the search lists the carrier was not established. The real-data check counts
+  every shape as `limit-two-indels` (§8). The same limit leaves targets unreported: one that a
+  haplotype holds only through two or more indel-path records (indels, and on HPRC MNVs too: the
+  next item) is not generated (§8, residuals), so no row reports it for that haplotype's carriers.
+  The release gate's chr22 checks (`--chrom chr22 --mode both`) count such targets
+  (`limit-two-indels`, completeness), here as sites and the (site, sample) listings they leave out.
+  On HGDP + 1000 Genomes, which hold no MNV, per sample: the README guide
   with NRR 7 sites (3,425 listings by 1,770 samples, where the search's own indel rows and
   alternative alignments stand at 211 sites of chr22), with NRG 3 (1,725 listings), TRAC 9 (31), the
   ACTGA guide through the general index 2 (3), SaCas9's 21-nt guide 9 (125) at 2 mismatches and no
@@ -3602,11 +3617,14 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   17,192,381 indels) and `hg38_mega` have none. HPRC's genome-wide search of the README guide at 4
   mismatches + 1 DNA + 1 RNA bulge (NRR), per sample, lists carriers so 1,163 times at 94 sites (74
   rows and 25 alternative alignments; 232 samples), and 558 times at 73 sites at population level
-  (229 samples), each row at a CFD of 0.084 or less (0 in 162 of the 194 CFD blocks per sample).
-  Rebuilt from the VCF, the haplotype each carrier is listed for holds the row's target in none of
-  the 1,163, and no target within the search's budget there in 992 (in the other 171 it holds
-  another, as strong as the row's by mismatches and bulges in 162 and one edit weaker in 9); of the
-  carriers, 66 hold the row's target on their other haplotype, 172 have their other haplotype
+  (229 samples), each row at a CFD of 0.085 or less (0 in 162 of the 194 CFD blocks per sample). The
+  strongest, chr5:177,802,035 (+) at a CFD of 0.084, names the deletion 177,802,052 TTATTTAA>T and
+  lists its 206 carriers for a sequence no HPRC haplotype holds: the MNV 177,802,060 AA>GG is on
+  each of the 317 haplotypes that hold the deletion, and on no other. Rebuilt from the VCF, the
+  haplotype each carrier is listed for holds the row's target in none of the 1,163, and no target
+  within the search's budget there in 992 (in the other 171 it holds another, as strong as the row's
+  by mismatches and bulges in 162 and one edit weaker in 9); of the carriers, 66 hold the row's
+  target on their other haplotype, 172 have their other haplotype
   unknown there (a missing call, '.') and 925 hold it on neither. The real-data check counts them as
   `limit-indel-row-mnv` (§8). Targets go unreported too: one that a haplotype holds only through an
   MNV and a second indel-path record, an indel or another MNV, is not generated (one record per
@@ -3653,12 +3671,15 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   The real-data check counts such listings as `limit-snp-row-unphased` (non-gating), a class that
   also takes in every other call of unknown phase in a target (a haploid call, a slot phased with
   two ALTs of one position), so its count is not this limit's size. The published panels hold no
-  such call, measured on their VCFs: HGDP + 1000 Genomes holds no unphased genotype (the census of
-  its re-phased callset, `docs/HGDP_1KGP_PHASED_INDEX_METHODS.md`); HPRC v2.1's only unphased
-  genotypes are on chrY, 28,876,207 of them (127 samples), each with a missing allele (`./.` or an
-  ALT beside `.`: 51,717), so none is a call of two ALTs; the mega holds no genotype. So the limit
-  is met only on a VCF of one's own with unphased calls of two ALTs, where its size was not
-  measured.
+  such call, measured on their VCFs (2.10.0's; 2.8.1's archives of HPRC v2.0 were not measured):
+  HGDP + 1000 Genomes holds no unphased genotype (the census of its re-phased callset,
+  `docs/HGDP_1KGP_PHASED_INDEX_METHODS.md`); HPRC v2.1's only unphased genotypes are on chrY,
+  28,876,207 of them (127 samples), each with a missing allele (28,228,108 `./.`, 596,382 `0/.` and
+  51,717 `1/.`), and where a sample's `1/.` calls hold the ALTs of two records of one position (6
+  pairs of a sample and a position, at 4 positions), the records are an SNV and a deletion from that
+  position, which keeps the reference base there, so none rules out the reference base at a position
+  as a `1/2` call does; the mega holds no genotype. So no index of 2.10.0 meets the limit; a VCF of
+  one's own with unphased calls of two ALTs can, where its size was not measured.
 - **An unphased carrier on a classic install.** On an index built without `--samplesID` (the classic
   per-sample dictionaries, no Tier-1 store), the dictionary path puts an unphased call of a VCF that
   is otherwise phased on both slots, and the per-haplotype pruning keeps the largest combination:

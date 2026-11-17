@@ -125,9 +125,10 @@ and companion as `publish-index` packs it, measured before the publish, and each
 | `indexes/indel_genotypes_hg38_HPRC` | 0.59 | `build-inputs/hg38_HGDP1kGP` | 1.24 |
 | `build-inputs/hg38_HPRC` | 1.18 | `build-inputs/hg38_mega` | 1.02 |
 
-A panel's first index is fetched with its Dictionaries bundle and genotype store, once: the
-default `20-NRR_3_hg38+hg38_HGDP1kGP` is 50.13 GB in all, HPRC's 32.55 GB, the mega's 26.06 GB;
-`download --what all` adds the default reference index, `20-NRR_3_hg38`.
+A panel's first index is fetched with its Dictionaries bundle and genotype store, once: the default
+`20-NRR_3_hg38+hg38_HGDP1kGP` with them is 50.13 GB, HPRC's 32.55 GB, the mega's 26.06 GB (its
+bundle alone). A variant index also brings its PAM's reference index where that is not installed;
+`download --what all` installs the default's, `20-NRR_3_hg38`.
 
 ## Provenance
 

@@ -165,16 +165,17 @@ SHA-256 of each index and companion is the Hub's, in `indexes/SHA256SUMS`, writt
 
 The 23 index and companion archives add up to 388.76 GB, the 3 kits to 3.44 GB. What a download
 fetches: a panel's first index brings the panel's Dictionaries bundle and its genotype store with
-it, once (HGDP + 1000 Genomes' default, `20-NRR_3_hg38+hg38_HGDP1kGP`, 50.13 GB in all; HPRC's 32.55
-GB; the mega's, sites-only, 26.06 GB with its bundle alone), and its reference index where that is
-not installed (`download --what all` fetches `20-NRR_3_hg38`); a later index of the panel its own
-archive alone. The `indel_genotypes_` archive is fetched, with the genotype store, by `download
---what genotype-oracle`, the stores without the index (an index's bundle holds the same indel
-store). Computed from these sizes, as `download` installs them, the default install (`download
---what all`, then `20-NRR_3_hg38+hg38_HGDP1kGP`) is a 71.46 GB download and takes 153.39 GB, its
-peak 159.25 GB while the archives unpack (`download --what all` alone: 21.33 GB, 44.13 GB
-installed); to be measured from the Hub at the publish. A panel's enriched-genome kit, its SHA-256
-checked (its member list, `build-inputs/<dataset>.members.md5`, is beside it on the Hub):
+it, once (HGDP + 1000 Genomes' default, `20-NRR_3_hg38+hg38_HGDP1kGP`, 50.13 GB with them; HPRC's
+32.55 GB; the mega's, sites-only, 26.06 GB with its bundle alone), and its reference index where
+that is not installed (`download --what all` fetches `20-NRR_3_hg38`); a later index of the panel
+its own archive (and its PAM's reference index where that is not installed), not the bundle and the
+store again. The `indel_genotypes_` archive is fetched, with the genotype store, by `download --what
+genotype-oracle`, the stores without the index (an index's bundle holds the same indel store).
+Computed from these sizes, as `download` installs them, the default install (`download --what all`,
+then `20-NRR_3_hg38+hg38_HGDP1kGP`) is a 71.46 GB download and takes 153.39 GB, its peak 159.25 GB
+while the archives unpack (`download --what all` alone: 21.33 GB, 44.13 GB installed); to be
+measured from the Hub at the publish. A panel's enriched-genome kit, its SHA-256 checked (its member
+list, `build-inputs/<dataset>.members.md5`, is beside it on the Hub):
 
 ```bash
 crisprme.py download --what build-inputs --dataset hg38_HGDP1kGP --path .  # hg38_HPRC, hg38_mega

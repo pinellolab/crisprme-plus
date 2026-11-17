@@ -20,7 +20,8 @@ gap the release's gates found.
   it as a second variant of the slot, which takes such a carrier off that row. A target held only
   through an MNV and another indel or MNV stays unreported, as one held through two indels does
   (below); in 171 of the 1,163 listings the haplotype holds another target within the search's
-  budget there (METHODS §10), and one of those that needs the MNV would then go unreported too.
+  budget there (METHODS §10), and each such target, held through the indel and the MNV, would then
+  go unreported too.
 - **The haplotype scan.** In the dense regions of a variant genome that codes every allele (the
   immunoglobulin loci above all), a search above 1 DNA + 1 RNA bulge expands so many IUPAC
   combinations that it runs for hours or out of memory, and 2.10.0 warns of it
@@ -78,9 +79,11 @@ gap the release's gates found.
   ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15; METHODS §10 gives the release gate's counts).
   The haplotype scan does not lift it: it writes, as the search does, one indel per window.
 - An unphased call of two ALTs at one position (`1/2`) is listed on a row that needs the
-  reference base there, and on a classic install an unphased carrier only on the row of all its
-  variants ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15). No published panel holds such a call
-  (measured on their VCFs: METHODS §10); a VCF of one's own can.
+  reference base there, and on a classic install a carrier with an unphased call in a VCF that is
+  otherwise phased only on the row of all its variants ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)
+  §15). No index of 2.10.0 meets either: none of its panels holds a `1/2` call (measured on their
+  VCFs: METHODS §10), and every published variant index of a genotyped panel is built with
+  `--samplesID`; an index one builds oneself can.
 - The advice a search prints for an INDELS index it cannot use, on a sites-only dataset whose
   fake-indel genome is not in place, removes the enriched genome before a `build-index-only`
   that refuses the dataset ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §12 says what to do
@@ -91,8 +94,6 @@ gap the release's gates found.
   commands quote paths by hand, so a path holding an apostrophe cannot be pasted;
   `complete-search`'s help says the population-level analysis can be the faster beside mega,
   which was measured only before the sites-only density guard (METHODS §5).
-- The real-data check reads a whole enriched chromosome for each SNV written in lower case: slow
-  on a user's VCF written so (none of the published panels holds one).
 
 ---
 

@@ -555,16 +555,16 @@ rules behind them.
 - **A carrier listed for a SNP that its own target does not hold.** On an indel row, a carrier whose
   haplotype holds a second indel that pushes one of the row's named SNPs out of the target's bases
   is listed on the row all the same. How often depends on the guide: the release gate's genome-wide
-  checks found 9,059 listings of this limit (each of its shapes; rebuilt from the VCF, 8,693 are of
-  this one) for three repeat-rich guides per sample on HGDP + 1000 Genomes, almost all at VEGFA site
-  3 in GT repeats (2,972 carriers on one alternative alignment, chr2:2,873,200 (+)), 3 for the
-  README guide and none for the other guides checked. Such a carrier's own target can also start one
-  to three repeat units away from the row, its bases the row's: rebuilt from the VCF, the gate's
-  genome-wide searches of the three repeat-rich guides per sample list 6 carriers so, at 8 sites of
-  HGDP + 1000 Genomes (HGDP00655, HG01432, HG01883, HGDP00465 and NA19475 on VEGFA site 3, in GT
-  repeats, and NA20888 on EMX1, in an AAG repeat), through a second deletion or insertion in the
-  repeat. No fix is planned yet: the haplotype scan planned for 2.10.1 writes, as the search does,
-  one indel per window.
+  checks count 9,059 listings under this limit (each of its shapes; rebuilt from the VCF, 8,693 are
+  of this one, and 357 hold the row's target with every variant it names) for three repeat-rich
+  guides per sample on HGDP + 1000 Genomes, almost all at VEGFA site 3 in GT repeats (2,972 carriers
+  on one alternative alignment, chr2:2,873,200 (+)), 3 for the README guide and none for the other
+  guides checked. Such a carrier's own target can also start one to three repeat units away from the
+  row, its bases the row's: rebuilt from the VCF, the gate's genome-wide searches of the three
+  repeat-rich guides per sample list 6 carriers so, at 8 sites of HGDP + 1000 Genomes (HGDP00655,
+  HG01432, HG01883, HGDP00465 and NA19475 on VEGFA site 3, in GT repeats, and NA20888 on EMX1, in an
+  AAG repeat), through a second deletion or insertion in the repeat. No fix is planned yet: the
+  haplotype scan planned for 2.10.1 writes, as the search does, one indel per window.
 - **An off-target missing for a carrier of two indels.** A target that an individual's haplotype
   holds only through two indels or more is not generated (a fake-indel window holds one), so no row
   lists that individual for it, and where no other carrier holds it, no row reports it at all. How
@@ -583,22 +583,24 @@ rules behind them.
   target that haplotype would hold without the MNV. Of 2.10.0's panels only HPRC v2.1 has MNVs
   (2.8.1's archives of HPRC v2.0 have them too): the README guide's genome-wide search lists
   carriers so 1,163 times at 94 sites per sample on indel rows (232 samples), each row at a CFD of
-  0.084 or less, and 3,334 times on SNP rows. And an off-target that an individual's haplotype holds
-  only through an MNV and another indel or MNV is missing for that individual, as for two indels
-  (above): on chr22, per sample, the release gate's check counts 21 sites of targets held only
-  through two or more indels or MNVs, and, rebuilt from the VCF, 16 such sites need an MNV, each
-  target at a CFD of at most 0.016. To check a carrier, read its genotypes in the dataset's VCF over
-  the row's target. CRISPRme 2.10.1 is planned to read the MNVs' phase, which takes such carriers
-  off the rows of a sequence they do not have; an off-target held only through an MNV and another
-  indel or MNV stays missing.
+  0.085 or less, and 3,334 times on SNP rows; its strongest such row, chr5:177,802,035 (+) at a CFD
+  of 0.084, lists the 206 carriers of its deletion for a sequence no HPRC haplotype holds, each
+  haplotype with the deletion holding the MNV too. And an off-target that an individual's haplotype
+  holds only through an MNV and another indel or MNV is missing for that individual, as for two
+  indels (above): on chr22, per sample, the release gate's check counts 21 sites of targets held
+  only through two or more indels or MNVs, and, rebuilt from the VCF, 16 such sites need an MNV,
+  each target at a CFD of at most 0.0164. To check a carrier, read its genotypes in the dataset's
+  VCF over the row's target. CRISPRme 2.10.1 is planned to read the MNVs' phase, which takes such
+  carriers off the rows of a sequence they do not have; an off-target held only through an MNV and
+  another indel or MNV stays missing.
 - **A carrier missing from a SNP row, beside a long indel.** A per-sample search reads the phased
   indel store within 500 bases of its SNP targets, so a carrier whose haplotype holds an indel in a
   SNP row's target that adds or deletes more bases than that, less the target's length, is left off
-  the row, even where its own bases are the row's. The release gate found one: NA19185 on HPRC,
-  left off the SNP rows at chrX:1,408,064 and 1,408,065 (+), beside a deletion of 1,365 bases of
-  whole repeat units; none on HGDP + 1000 Genomes. To check a carrier, read its genotypes in the
-  dataset's VCF over the row's target. CRISPRme 2.10.1 is planned to read the store as far as a
-  haplotype's own indels need.
+  the row, even where its own bases are the row's, unless other SNP targets near it widened what was
+  read. The release gate found one: NA19185 on HPRC, left off the SNP rows at chrX:1,408,064 and
+  1,408,065 (+), beside a deletion of 1,365 bases of whole repeat units; none on HGDP + 1000
+  Genomes. To check a carrier, read its genotypes in the dataset's VCF over the row's target.
+  CRISPRme 2.10.1 is planned to read the store as far as a haplotype's own indels need.
 - **One target written as two rows, or twice, in a microsatellite.** In a tandem repeat that
   holds a whole target, the merge places each row by its own bases, and the target's
   alignments can fit different places of the repeat: they can then go to two rows, or the
@@ -609,9 +611,9 @@ rules behind them.
   call is unphased (`/`) is listed, PUTATIVE, on every subset of its variants a target can hold.
   For a call of two ALTs at one position (`1/2`), that includes a row that needs the reference
   base there, which its genotype rules out: both of its slots hold an ALT. The rows are the same
-  for a line of several ALTs and for its split form. No published panel holds such a call (HGDP +
-  1000 Genomes holds no unphased call, HPRC v2.1 only on chrY, each with a missing allele, and the
-  mega no genotype): it is met only on a VCF of your own.
+  for a line of several ALTs and for its split form. None of 2.10.0's panels holds such a call
+  (HGDP + 1000 Genomes holds no unphased call, HPRC v2.1 only on chrY, each with a missing allele,
+  and the mega no genotype; 2.8.1's archives of HPRC v2.0 were not measured): a VCF of your own can.
 - **On a classic install, an unphased carrier only on the row of all its variants.** A
   per-sample search of an index built without `--samplesID` (a classic install, as the
   benchmark `complete-test` builds its own) lists a carrier with an unphased call in a phased VCF

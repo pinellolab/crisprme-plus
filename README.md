@@ -92,13 +92,14 @@ The main ones:
   per-sample searches, this panel's default, at 0.95 to 1.30 times).
 - **On HPRC**, a carrier whose haplotype holds an MNV beside a row's indel is listed for a
   sequence it does not have (1,163 listings at 94 sites in the README guide's genome-wide
-  search per sample, each row at a CFD of 0.084 or less).
+  search per sample, each row at a CFD of 0.085 or less).
 - **Two indels on one haplotype**: a target held only through two indels is not reported for its
   carriers, and some carriers of a second indel are listed on a row of one indel; most often for
-  guides whose sites lie in tandem repeats (9,059 listings for three repeat-rich guides
-  genome-wide, 3 for the README guide).
+  guides whose sites lie in tandem repeats (the release gate's check counts 9,059 listings under
+  this limit for three repeat-rich guides genome-wide, 8,693 of them carriers whose own target lacks
+  a SNP the row names, and 3 for the README guide).
 - Smaller ones: a target inside a microsatellite split over two rows, a SNP row's carrier left
-  off beside a long indel, unphased calls of two ALTs (in no published panel), the real-data
+  off beside a long indel, unphased calls of two ALTs (in none of 2.10.0's panels), the real-data
   checker's unchecked columns.
 
 What each is, its measured size and who meets it: the
@@ -484,8 +485,11 @@ index one chromosome per thread, so its memory grows with `--thread`. On the ind
 the README guide's genome-wide search of HGDP + 1000 Genomes with NRR at 4 mismatches + 1 DNA + 1
 RNA bulge, per sample, took 27.3 GiB in its largest process and 35.1 GiB summed over its
 processes on 8 threads (the default of `--thread`; population-level about the same) and 37.2 and
-58.6 GiB on 16, and the release's genome-wide gate searches on 32 threads 68.9 to 70.5 GiB and 102
-to 111 GiB (GiB = 2³⁰ bytes):
+58.6 GiB on 16 (GiB = 2³⁰ bytes). On 32 threads the release gate's genome-wide searches of HGDP +
+1000 Genomes at that budget took 68.9 to 85.9 GiB in their largest process (68.9 to 70.7 for the
+README and ACTGA guides on the SpCas9 indexes, up to 82.3 for other guides there and for the
+general index pruned, up to 85.7 and 85.9 for SaCas9's and Cas12a's guides on theirs) and, where it
+was measured, about 102 to 111 GiB summed:
 **16 GB or 32 GB will OOM a genome-wide variant search** — allocate 64 GB+, and keep to 16
 threads or fewer within it. The smaller searches took, at 4 mismatches + 1 DNA + 1 RNA bulge (the
 peak of the largest process, on the published indexes, the release's gates):
@@ -498,10 +502,11 @@ peak of the largest process, on the published indexes, the release's gates):
   default PAM, per sample and population-level alike, and three repeat-rich guides at once, with
   NRG, 12.6 GiB; SaCas9's 21-nt guide, which the NNGRRN index serves, 5.4 GiB. The immunoglobulin
   loci are the densest part of these indexes: the whole of chr14, which holds IGH, took 27.3 GiB
-  with NRR, per sample (56 min). During 2.10.0's development, on fake-indel windows of 25/27, the
-  loci alone, searched with NRG, took 25.0 GiB (IGH, chr14 with every base outside it set to N),
-  6.2 GiB (IGK) and 3.0 GiB (IGL), and the rebuilt mega's search of chr14 whole, five guides
-  population-level with its density guard on, 20.5 GiB.
+  with NRR, per sample (56 min). During 2.10.0's development, the integration's gate's searches of
+  the loci alone with NRG, on indexes built with the release's fake-indel windows of 30/30, took
+  25.0 GiB (IGH, chr14 with every base outside it set to N), 6.2 GiB (IGK) and 3.0 GiB (IGL), and
+  the rebuilt mega's search of chr14 whole, five guides population-level with its density guard on,
+  20.5 GiB, on the windows of 25/27.
 
 To estimate the cost of a large search up front, see `docs/SCALABILITY_ANALYSIS.md`.
 

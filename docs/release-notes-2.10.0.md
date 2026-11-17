@@ -16,11 +16,12 @@ describes the methods, §10 the known limits and §11 how the indexes were built
   on the reference, HGDP + 1000 Genomes, HPRC and the mega; NGG, NRG, the general PAM-less index
   (an 8-nt flank), SaCas9 NNGRRN at 22 nt and Cas12a TTTN at 20 and 23 nt on the reference and
   HGDP + 1000 Genomes. Each panel's Dictionaries and genotype store are published once, beside its
-  indexes, and fetched once: the default `20-NRR_3_hg38+hg38_HGDP1kGP` is a 50.1 GB download with
-  them, a second index of the panel its own archive alone. `NNN_3` is not built again: the general
-  index serves its searches as fast. The archives of 2.8.1 stay in `lucapinello/crisprme-data`
-  (and `lucapinello/crisprme-data-general-index`), unchanged, and a download by one of their names
-  says which index of 2.10.0 replaces it.
+  indexes, and fetched once: after `download --what all`, which installs the reference index
+  `20-NRR_3_hg38`, the default `20-NRR_3_hg38+hg38_HGDP1kGP` is a 50.1 GB download with them, and a
+  second index of the panel its own archive, with its PAM's reference index where that is not
+  installed. `NNN_3` is not built again: the general index serves its searches as fast. The archives
+  of 2.8.1 stay in `lucapinello/crisprme-data` (and `lucapinello/crisprme-data-general-index`),
+  unchanged, and a download by one of their names says which index of 2.10.0 replaces it.
 - **What the new indexes hold.** Every allele of a split multi-allelic site is coded: up to 2.9.1
   CRISPRitz coded only the last record's ALT at a position written on several records, so an
   off-target that needs an earlier ALT was missed, or reported lower, without its carriers
@@ -110,10 +111,11 @@ read ([RELEASING.md](https://github.com/pinellolab/crisprme-plus/blob/v2.10.0/do
 
 ## Known limitations
 
-These are the limits of 2.10.0 we measured. Each is stated with its scale where it was measured in
-METHODS §10, and TROUBLESHOOTING §14 and §15 say what a user sees and what to do. The first two
-concern a search's cost; the others which carriers some rows list, or targets left unreported, and
-each gives its size and who meets it.
+These are the known limits of 2.10.0. METHODS §10 states each, with its scale where it was
+measured, and TROUBLESHOOTING §14 and §15 say what a user sees and what to do. The first two
+concern a search's cost; the next five the rows (which carriers some list, a target split or written
+twice, targets left unreported), each with its size where it was measured; the last two what the
+real-data check does not check and what an index of 2.8.1 keeps.
 
 - **Searches above 1 DNA + 1 RNA bulge in dense regions.** Who: anyone who raises the bulges on a
   variant index. On an index that codes every allele, the search of the immunoglobulin loci and some
@@ -129,12 +131,14 @@ each gives its size and who meets it.
   reads holds an MNV's phase, so a carrier whose haplotype holding a row's indel also holds an MNV
   in the target is listed for the target that haplotype would have without the MNV: the README
   guide's genome-wide search lists carriers so 1,163 times at 94 sites per sample on indel rows,
-  each row at a CFD of 0.084 or less, and 3,334 times on SNP rows. And a target that a haplotype
-  holds only through an MNV and another indel or MNV is not reported for its carriers, as with two
-  indels (below): on chr22, the gate's per-sample check counts 21 sites of targets held only through
-  two or more indels or MNVs, and, rebuilt from the VCF, 16 such sites need an MNV, each target at a
-  CFD of at most 0.016. Of 2.10.0's panels only HPRC v2.1 has MNVs (2.8.1's HPRC archives, of v2.0,
-  have them too).
+  each row at a CFD of 0.085 or less, and 3,334 times on SNP rows. Such a row can describe a
+  sequence no haplotype holds: the strongest, chr5:177,802,035 (+) at a CFD of 0.084, lists the 206
+  carriers of its deletion, and each of the 317 HPRC haplotypes with the deletion holds the MNV too.
+  And a target that a haplotype holds only through an MNV and another indel or MNV is not reported
+  for its carriers, as with two indels (below): on chr22, the gate's per-sample check counts 21
+  sites of targets held only through two or more indels or MNVs, and, rebuilt from the VCF, 16 such
+  sites need an MNV, each target at a CFD of at most 0.0164. Of 2.10.0's panels only HPRC v2.1 has
+  MNVs (2.8.1's HPRC archives, of v2.0, have them too).
 - **Two indels on one haplotype.** Who: most of all, guides whose sites lie in tandem repeats. A
   fake-indel window holds one indel, so a carrier whose second indel moves a SNP the row names out
   of its target is listed all the same, and one whose own target, through a second indel in a
@@ -155,18 +159,21 @@ each gives its size and who meets it.
   window.
 - **A SNP row's carrier beside a long indel.** Who: per-sample searches. A search reads the phased
   indel store within 500 bases of its SNP targets, so a carrier whose indel in the target adds or
-  deletes more bases than that is left off the SNP row even where its bases are the row's: on the
-  release gate, one carrier on two rows of HPRC (NA19185, beside a deletion of 1,365 bases), none on
-  HGDP + 1000 Genomes.
+  deletes more bases than that, less the target's length, is left off the SNP row even where its
+  bases are the row's, unless other SNP targets near it widened what was read: on the release gate,
+  one carrier on two rows of HPRC (NA19185, beside a deletion of 1,365 bases), none on HGDP + 1000
+  Genomes.
 - **A target wholly inside a tandem repeat** can be split over two rows or written twice (in a
   model of microsatellites, 134 and 15 of 10,000 targets at 1 + 1 bulges; no search of real data
   checked has one). No row is lost or wrong.
-- **An unphased call of two ALTs at one position** (`1/2`) is listed, PUTATIVE, on a row that
-  needs the reference base there; on a classic install (an index built without `--samplesID`) an
-  unphased carrier is listed only on the row of all its variants. No published panel holds such a
-  call (HGDP + 1000 Genomes has no unphased call, HPRC v2.1 only on chrY, each with a missing
-  allele, and the mega no genotype), so only a VCF of your own can meet them; their size there
-  was not measured.
+- **Unphased calls.** A carrier of an unphased call of two ALTs at one position (`1/2`) is listed,
+  PUTATIVE, on a row that needs the reference base there; and on a classic install (an index built
+  without `--samplesID`) a carrier with an unphased call in a VCF that is otherwise phased is listed
+  only on the row of all its variants. No index of 2.10.0 meets either: none of its panels holds a
+  `1/2` call (HGDP + 1000 Genomes has no unphased call, HPRC v2.1 only on chrY, each with a missing
+  allele, and the mega no genotype; 2.8.1's archives of HPRC v2.0 were not measured), and every
+  published variant index of a genotyped panel is built with `--samplesID`. An index you build
+  yourself can meet them; their size there was not measured.
 - **What the real-data check does not check.** `scripts/check_indel_rows.py` does not read an
   indel row's `Variant_info_spacer+PAM` (each variant's number in its target), nor whether an
   alternative alignment is one the merge should have folded into a better one; the unit tests and

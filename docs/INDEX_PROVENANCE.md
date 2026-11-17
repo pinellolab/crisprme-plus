@@ -62,8 +62,9 @@ during the build under that name (in the index set's header, its `repo` column a
 command: each kit's `hf upload` and each index's `publish-index --hf-repo`, which the image of
 `db50986` the publish runs in needs, as its code routes an index of format 2 to the name the plan
 had given the repo, which is no repo's; and in `seq_script/merge_panels/README.md`; no recipe and
-no build command names a repo). At `cb282e83` it prints that name alone: the recipes, their
-comments included, are `db50986`'s, so the HPRC recipe's header still names v2.0's graph, the
+no build command names a repo). At `cb282e83` it prints that name and the index set's header
+comment on why a publish names it: the recipes, their comments included, are `db50986`'s, so the
+HPRC recipe's header still names v2.0's graph, the
 recipe's default `SRC`, where the rebuild gave it v2.1's split as `SRC` (`$HPRC_SRC`, above). The
 19 row lines of the build half keep their md5 (`7389f7e234d4e617860f8f9b34abdc49`: those of
 `check_index_set.py --commands build` after its `# build` line, the `if`, `else` and mark lines
@@ -192,8 +193,9 @@ wall time and peak memory (the maximum resident set size of its largest process,
 row of HGDP + 1000 Genomes, whose tiers ran on 3 workers, up to 495 GiB summed over its
 processes). A panel's first row enriches hg38 with the panel, writes its Dictionaries (which its
 companions pack at the publish) and builds its first index; its next rows reuse them and build an
-index alone. Each kit's size is its
-tarball's (`stat -c %s`) and its SHA-256 the one its row wrote in `<dataset>.SHA256SUMS`.
+index (each rewrites the registry's `variant_count.json` and the samplesID list, with the same
+bytes: Gate A). Each kit's size is its tarball's (`stat -c %s`) and its SHA-256 the one its row
+wrote in `<dataset>.SHA256SUMS`.
 
 The size of each index and companion archive is that of the archive `publish-index` packs, measured
 on 2026-11-15 by running each publish row of the index set through `publish-index` (CRISPRme
@@ -237,11 +239,12 @@ release checklist, E, step 5), and each size from the Hub's listing of `indexes/
 | `build-inputs/hg38_mega` | ml008 | (pigz) | 0:17 | 0.1 GiB | 1,018,696,857 | `f374afa01c455bb750e178364c040b82443c7e7fc2d617600edff8d3a072ee45` |
 
 The 23 index and companion archives add up to 388,761,127,579 bytes (388.76 GB) and the 3 kits to
-3,438,236,607 (3.44 GB). A panel's first index, with the panel's companions, which a download of
-it fetches: HGDP + 1000 Genomes 50.13 GB (27.84 + 16.42 + 5.87; the phased indel genotypes are in
-the bundle too, and their own archive, 7.64 GB, is fetched with the genotype store by `download
---what genotype-oracle`), HPRC 32.55 GB, the mega 26.06 GB. The rows took 0.82 to 1.03 times the upper end of the plan's
-estimate of each node's groups of rows.
+3,438,236,607 (3.44 GB). A panel's first index, with the companions a download of it fetches, its
+reference index aside: HGDP + 1000 Genomes 50.13 GB (27.84 + 16.42 + 5.87; the phased indel
+genotypes are in the bundle too, and their own archive, 7.64 GB, is fetched with the genotype store
+by `download --what genotype-oracle`), HPRC 32.55 GB, the mega 26.06 GB. The rows took 0.82 to 1.03
+times the upper end of the plan's estimate of each group of rows, and HGDP + 1000 Genomes' kit, a
+group of its own, 0.06 times (17 s).
 
 Each kit's member list, `<dataset>.members.md5`, gives the md5 of each file the kit holds, by its
 path in it (`scripts/kit_members.py`): the tarball is not byte-reproducible (tar records each
