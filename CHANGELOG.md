@@ -2310,6 +2310,23 @@ major.minor version (Changed). The main changes, each told in its entry below:
     integrated row, that row's only change). Every other file is the same, and the real-data
     checker passes it (459 findings, 0 gating). B6 and B7 (HPRC v2.1) write the same tables,
     byte for byte.
+  - A sites-only dataset's indel rows take the same choice (with no genotypes to resolve, one
+    PUTATIVE row of the strongest target the codes allow), which that comparison did not cover. B8
+    (the README guide with NRR, per sample, 4 + 1 + 1, HGDP + 1000 Genomes beside `hg38_mega`), run
+    again at gate B's code (72c2c8e, whose run gives gate B's tables byte for byte) and at a640d92
+    (this change, the only change of the search between them), in gate B's sandbox and install,
+    changes in `hg38_mega`'s alignments alone. 1,055 of its 462,701 integrated rows change: 929 only
+    in their count of other alignments, and in 126 a block takes other bases or another alignment
+    (where the highest-CFD block keeps its alignment, its CFD rises on 42 rows and falls on none; on
+    21 rows it takes another). Its alternative alignments list 8,705 fewer of `hg38_mega`'s
+    alignments (13,146 fewer at 2,934 sites, 4,441 more at 1,464; 1,728,090 in all); at every site
+    the lines that list carriers (150,638) and the reference lines (1,236,915) are the same in
+    number, and one carrier line changes, in its CRISPR-Bulge columns alone (chr3:154,083,765 (−)).
+    The real-data checker passes the new tables as it does gate B's: its 23 chromosomes give
+    4,899,114 findings, none gating (gate B's: 4,925,229; 26,115 fewer `limit-no-genotypes` notes,
+    each a sites-only record's row, whose strings, target and variants are checked), and chr22 with
+    completeness 85,647 (86,175); the whole-genome command stops, as on gate B's, at chrY, which
+    only `hg38_mega` has a VCF of.
 - **The real-data checker reads a slot's haplotype past a long deletion**
   (`scripts/check_indel_rows.py`). It wrote a haplotype over the target and 2 x its length + 60
   bases either side, and a soundness unit read the VCF over its rows and 1,046 bases either side,
@@ -2438,8 +2455,9 @@ major.minor version (Changed). The main changes, each told in its entry below:
     each of the 189 on HGDP + 1000 Genomes holds the row's target; HPRC's 2 (HG03669 on chr15,
     HG02015 on chrY) hold MNVs inside the target, which no store CRISPRme reads holds (Changed, the
     known limits: an MNV beside an indel). Most of the haplotypes kept change no row: the tables of
-    B1, B3, B5, B6, B12a, B12d, B13a, B14a, B14c, E2 and E5 are the same as before (E2's
-    and E5's but for two annotation columns, which gate E read from another install's files). In
+    B1, B3, B5, B6, B8, B12a, B12d, B13a, B14a, B14c, E2 and E5 are the same as before (B8's as
+    a640d92's, which differ from gate B's in `hg38_mega`'s rows by the PUTATIVE fix above; E2's and
+    E5's but for two annotation columns, which gate E read from another install's files). In
     B10, 13 alternative alignments of VEGFA site 3 and EMX1 list 5 more carriers (HGDP01087,
     LP6005441-DNA_B08, LP6005441-DNA_C01; HG03779 and HG03861 on one EMX1 alignment), the integrated
     row chr10:128,732,537 (−) lists HGDP01087 too (one more target in VEGFA site 3's per-sample
