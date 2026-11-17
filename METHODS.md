@@ -919,30 +919,29 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   Genomes chr22, the search of seven guides at 4 mismatches and 2 DNA and 2 RNA bulges, per sample,
   lists one such carrier: NA20515 on chr22:50,299,296 (+) of VEGFA site 1, whose 50,299,313 C>CG
   pushes the row's 50,299,316 T>G out of its target (its own target holds the insertion 50,299,300
-  T>TG and that second one).
-  One whose second indel changes the bases is not listed for it, on any indel row (§8, residuals),
-  nor one whose bases cannot be read either way: each way meets an unphased or missing SNP call, an
-  unphased indel that does not itself change the target, or two of its variants that overlap, two
-  records of one base: two other indels whose REFs share a base (any two at one position do, even a
-  duplication and the deletion of the same bases, which together would leave the reference), or a
-  SNP on a base of the second indel's REF. A reading from the target's first base on meets no
-  variant upstream of that base, one up to its last base none downstream of it, and neither meets
-  one whose REF holds none of the bases it compares: those of the stretch on the haplotype and
-  those of the target on the window, which it reads with the haplotype's own alleles. Up to the
-  release gate of 2.10.0 any such variant of the reading's side within the bases written out
-  stopped it: on the gate's VEGFA site 3 search (B10: NRG, 4 mismatches and 1 DNA and 1 RNA bulge,
-  per sample, on HGDP and 1000 Genomes) six carriers whose haplotype holds the target at its start,
-  through a second indel that leaves the target's bases as they are, were left off it. Their
-  reading from the first base on met two records of one base 2 to 41 bases past the target, as
-  HG03120's on chr5:146,361,254 (+) met 146,361,314 GGGA>G and 146,361,315 GGA>G on the same slot,
-  and their reading up to the last base, which reaches no variant past the target, does not find
-  the target's bases through the indel. That second indel is an insertion whose first 1 to 5 bases
-  are the target's last, those the repeat goes on with (HG03120's 146,361,281 A>AGTGT), or a repeat
-  unit deleted 2 to 5 bases from an end of the target, but on HGDP00478's rows of chr5:141,655,182
-  TAC>T: there it is 141,655,188's deletion of 37 bases, (AC)13 and an 11-base linker, which starts
-  after the target's sixth or seventh base on the + strand, runs past its reference end and joins
-  two AC runs. Where a second indel deletes the base at the target's first or last place, the
-  reading starts where that base stood or ends where it stood. A second indel
+  T>TG and that second one). One whose second indel changes the bases is not listed for it, on any
+  indel row (§8, residuals), nor one whose bases cannot be read either way: each way meets an
+  unphased or missing SNP call, an unphased indel that does not itself change the target, or two of
+  its variants that overlap, two records of one base: two other indels whose REFs share a base (any
+  two at one position do, even a duplication and the deletion of the same bases, which together
+  would leave the reference), or a SNP on a base of the second indel's REF. A reading from the
+  target's first base on meets no variant upstream of that base, one up to its last base none
+  downstream of it, and neither meets one whose REF holds none of the bases it compares: those of
+  the stretch on the haplotype and those of the target on the window, which it reads with the
+  haplotype's own alleles. Up to the release gate of 2.10.0 any such variant of the reading's side
+  within the bases written out stopped it: on the gate's VEGFA site 3 search (B10: NRG, 4 mismatches
+  and 1 DNA and 1 RNA bulge, per sample, on HGDP and 1000 Genomes) six carriers whose haplotype
+  holds the target at its start, through a second indel that leaves the target's bases as they are,
+  were left off it. Their reading from the first base on met two records of one base 2 to 41 bases
+  past the target, as HG03120's on chr5:146,361,254 (+) met 146,361,314 GGGA>G and 146,361,315 GGA>G
+  on the same slot, and their reading up to the last base, which reaches no variant past the target,
+  does not find the target's bases through the indel. That second indel is an insertion whose first
+  1 to 5 bases are the target's last, those the repeat goes on with (HG03120's 146,361,281 A>AGTGT),
+  or a repeat unit deleted 2 to 5 bases from an end of the target, but on HGDP00478's rows of
+  chr5:141,655,182 TAC>T: there it is 141,655,188's deletion of 37 bases, (AC)13 and an 11-base
+  linker, which starts after the target's sixth or seventh base on the + strand, runs past its
+  reference end and joins two AC runs. Where a second indel deletes the base at the target's first
+  or last place, the reading starts where that base stood or ends where it stood. A second indel
   inserted right next to the indel's anchor base is inside the target. A carrier whose second indel
   inside the target has an unphased call cannot be tied to a haplotype, so it stays listed,
   PUTATIVE, as every carrier on an unphased panel is; this holds even when another, phased second
@@ -2733,13 +2732,11 @@ SNP the row names, pushed out of it, which §4's reading of a second indel keeps
 the documented limit `limit-two-indels`, not passed (NA20515 above; the release gate's genome-wide
 checks count 9,059 listings of the class, with the shape below, on B10's three repeat-rich guides
 per sample and 3 on the README guide's, §10); so is one whose second indel deletes the target's last
-base and whose bases, read up
-to where that base stood, are the target's, its own target a repeat unit away: §10, 6 of B10's
-lines, on 4 row blocks, which the check failed until it read up to
-where the last base stood rather than up to the base itself). Two alleles of one slot whose REF
-spans meet — a SNP at
-an insertion's own position, a SNP on a base a deletion removes, one complex allele split into
-overlapping records, two ALTs at one position phased onto one haplotype — describe one stretch
+base and whose bases, read up to where that base stood, are the target's, its own target a repeat
+unit away: §10, 6 of B10's lines, on 4 row blocks, which the check failed until it read up to where
+the last base stood rather than up to the base itself). Two alleles of one slot whose REF spans meet
+— a SNP at an insertion's own position, a SNP on a base a deletion removes, one complex allele split
+into overlapping records, two ALTs at one position phased onto one haplotype — describe one stretch
 twice, so the VCF gives no sequence there. Where every allele that meets the record's REF is one §4
 reads the slot without (another allele at the record's own position, an allele only on bases it
 deletes or replaces, an MNV, an indel at another position that changes none of the reference bases
@@ -2755,23 +2752,23 @@ at another position, which §4 does not cover) leaves the slot no reading. Up to
 2.10.0 the check took every indel at another position as one §4 takes off, and so failed 213 lines
 of HPRC v2.1's genome-wide gate run per sample (the README guide at 4 mismatches and 1 DNA and 1
 RNA bulge) and 69 of its population-level run, whose 220 and 95 carrier listings (131 and 72
-samples) are of slots holding such an indel at the end of a complex allele: each haplotype,
-rebuilt from the VCF, holds its row's target (§4). Two other alleles
-of the slot whose REFs meet (an overlap zone) leave it no sequence only where they can change what
-it says of the target — one of them is named, or changes a base read from the target's start —:
-every reading of such zones (any of their alleles no two of which meet, none included) is tried, and
-where all agree the slot is judged so; a zone wholly before or after the stretch read changes none
-of its bases. Where the readings part, the slot has no reading. There the VCF holds no truth, and
-§4's rules are the only model: a listed carrier they take off the target for a documented cause (a
-complex allele, a second indel the slot cannot be read through, the last record of a split site, the
-PUTATIVE rule) fails (`carrier-off-by-rule`), any other is counted. Whatever its overlaps, a slot
-that holds a named variant on no reading (neither on it nor of unknown phase there) lacks the
-target. Where a call that touches the target has unknown phase (unphased, a missing allele, or fewer
-copies than the record's call — a haploid call against a diploid one), or the record's slot holds
-two SNV ALTs of one position that the search's stores both read (split records phased one by one,
-every allele coded: the slot has no one sequence in the VCF there, and §4 resolves such a carrier
-PUTATIVE), the record's known slot is judged first — when no placement of those calls lets it hold
-the target (a phased second indel inside it, say), or every placement does — and otherwise the truth
+samples) are of slots holding such an indel at the end of a complex allele: each haplotype, rebuilt
+from the VCF, holds its row's target (§4). Two other alleles of the slot whose REFs meet (an overlap
+zone) leave it no sequence only where they can change what it says of the target — one of them is
+named, or changes a base read from the target's start —: every reading of such zones (any of their
+alleles no two of which meet, none included) is tried, and where all agree the slot is judged so; a
+zone wholly before or after the stretch read changes none of its bases. Where the readings part, the
+slot has no reading. There the VCF holds no truth, and §4's rules are the only model: a listed
+carrier they take off the target for a documented cause (a complex allele, a second indel the slot
+cannot be read through, the last record of a split site, the PUTATIVE rule) fails
+(`carrier-off-by-rule`), any other is counted. Whatever its overlaps, a slot that holds a named
+variant on no reading (neither on it nor of unknown phase there) lacks the target. Where a call that
+touches the target has unknown phase (unphased, a missing allele, or fewer copies than the record's
+call — a haploid call against a diploid one), or the record's slot holds two SNV ALTs of one
+position that the search's stores both read (split records phased one by one, every allele coded:
+the slot has no one sequence in the VCF there, and §4 resolves such a carrier PUTATIVE), the
+record's known slot is judged first — when no placement of those calls lets it hold the target (a
+phased second indel inside it, say), or every placement does — and otherwise the truth
 is the PUTATIVE rule of §4: the strongest target the sample's own alleles allow on the row's
 alignment, the guide's base wherever it carries it and the alignment pairs the position with a guide
 base, elsewhere (a DNA bulge included, and at the PAM jointly) the alleles that maximize the
@@ -3510,22 +3507,20 @@ indels on one haplotype, and the searches above 1 DNA + 1 RNA bulge in dense reg
   the row's 50,299,316 T>G out of its target; no row of the 17 chr22 gate runs of this release's
   development lists one. The release gate's genome-wide checks (4 mismatches + 1 DNA + 1 RNA bulge)
   count listings of this limit (`limit-two-indels`, each shape) as follows. On HGDP + 1000 Genomes,
-  the three
-  repeat-rich guides: 9,059 per sample, on 435 row blocks, by 3,583 samples (VEGFA site 3 9,022 on
-  414, in GT repeats, EMX1 30 on 20, VEGFA site 1 7 on 1; one alternative alignment of VEGFA site 3
-  at chr2:2,873,200 (+) lists 2,972 carriers so), and 128 on 41 at population level; the README
-  guide with NRR: 3 per sample, on 2, and 1 at population level, the same beside the mega; none for
-  the README guide with NRG, TRAC, the CEP290 guides, SaCas9's, Cas12a's and the ACTGA guide. On
-  HPRC, the README guide with NRR: 1 per sample, none at population level. The carrier's own target
-  can also start a repeat unit away
-  from the
-  row's: on the release gate's genome-wide VEGFA site 3 search (B10, per sample, HGDP and 1000
-  Genomes), HGDP00655 is listed on chr1:21,194,250 and 21,194,251 (+) for 21,194,271 GTGT>G,
-  whose slot also holds 21,194,269 GT>G inside the target and 21,194,275 GGT>G, which deletes its
-  last base: read up to where that base stood, the slot holds the target's bases, and its own
-  target, through both deletions, starts two bases before the row (HG01432 so on
-  chr16:74,355,612 and 74,355,613 (+)). The real-data check counts both shapes as
-  `limit-two-indels` (§8). The haplotype scan of 2.10.1 is to read each carrier's own bases there.
+  the three repeat-rich guides: 9,059 per sample, on 435 row blocks, by 3,583 samples (VEGFA site 3
+  9,022 on 414, in GT repeats, EMX1 30 on 20, VEGFA site 1 7 on 1; one alternative alignment of
+  VEGFA site 3 at chr2:2,873,200 (+) lists 2,972 carriers so), and 128 on 41 at population level;
+  the README guide with NRR: 3 per sample, on 2, and 1 at population level, the same beside the
+  mega; none for the README guide with NRG, TRAC, the CEP290 guides, SaCas9's, Cas12a's and the
+  ACTGA guide. On HPRC, the README guide with NRR: 1 per sample, none at population level. The
+  carrier's own target can also start a repeat unit away from the row's: on the release gate's
+  genome-wide VEGFA site 3 search (B10, per sample, HGDP and 1000 Genomes), HGDP00655 is listed on
+  chr1:21,194,250 and 21,194,251 (+) for 21,194,271 GTGT>G, whose slot also holds 21,194,269 GT>G
+  inside the target and 21,194,275 GGT>G, which deletes its last base: read up to where that base
+  stood, the slot holds the target's bases, and its own target, through both deletions, starts two
+  bases before the row (HG01432 so on chr16:74,355,612 and 74,355,613 (+)). The real-data check
+  counts both shapes as `limit-two-indels` (§8). The haplotype scan of 2.10.1 is to read each
+  carrier's own bases there.
 - **An MNV beside an indel on one haplotype.** No store the search reads holds an MNV (the phased
   indel store keeps records whose REF and ALT differ in length, the SNP tiers SNVs, and the indel
   log lists an MNV's carriers with no phase), so a carrier whose haplotype holding a row's indel
@@ -3533,8 +3528,7 @@ indels on one haplotype, and the searches above 1 DNA + 1 RNA bulge in dense reg
   would hold without the MNV, a sequence it does not have (§4); a SNP row keeps such a carrier too
   (§8, residuals): on HPRC's search of the README guide below, per sample, the real-data check's
   SNP-row report counts 3,334 such listings of SNP rows on 219 row blocks, by all 232 samples
-  (`limit-snp-row-mnv`). Of the published panels only
-  HPRC v2.1 has MNVs: 702,193 of the 49,547,631
+  (`limit-snp-row-mnv`). Of the published panels only HPRC v2.1 has MNVs: 702,193 of the 49,547,631
   records of its VCFs (699,719 of the 12,361,907 records of its indel log); HGDP + 1000 Genomes
   (127,666,429 SNVs and 17,192,381 indels) and `hg38_mega` have none. HPRC's genome-wide search of
   the README guide at 4 mismatches + 1 DNA + 1 RNA bulge (NRR), per sample, lists carriers so 1,163

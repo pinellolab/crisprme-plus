@@ -1803,13 +1803,13 @@ major.minor version (Changed). The main changes, each told in its entry below:
     that row, which names the SNP its own target does not hold. How often depends on the guide: on
     HGDP + 1000 Genomes the release gate's genome-wide checks (4 + 1 + 1) count 9,059 listings of
     this limit (the class `limit-two-indels`, each shape) by 3,583 samples for the three repeat-rich
-    guides per sample, almost all VEGFA site 3's in GT
-    repeats (one of its alternative alignments, chr2:2,873,200 (+), lists 2,972 carriers so), 128 at
-    population level, 3 for the README guide per sample and none for the gate's other searches (the
-    README guide with NRG, TRAC, CEP290, SaCas9, Cas12a, the ACTGA guide); on HPRC, 1.
-    On 1000 Genomes chr22, a search of seven guides at 4 mismatches and 2 DNA and 2 RNA bulges, per
-    sample, lists one (NA20515 on chr22:50,299,296 (+) of VEGFA site 1). The haplotype scan planned
-    for 2.10.1 is to read each carrier's own bases there.
+    guides per sample, almost all VEGFA site 3's in GT repeats (one of its alternative alignments,
+    chr2:2,873,200 (+), lists 2,972 carriers so), 128 at population level, 3 for the README guide
+    per sample and none for the gate's other searches (the README guide with NRG, TRAC, CEP290,
+    SaCas9, Cas12a, the ACTGA guide); on HPRC, 1. On 1000 Genomes chr22, a search of seven guides at
+    4 mismatches and 2 DNA and 2 RNA bulges, per sample, lists one (NA20515 on chr22:50,299,296 (+)
+    of VEGFA site 1). The haplotype scan planned for 2.10.1 is to read each carrier's own bases
+    there.
   - **An MNV beside an indel on one haplotype.** No store the search reads holds an MNV, so a
     carrier whose haplotype holding a row's indel also holds an MNV that changes the target is
     listed for the target that haplotype would hold without it. Of the published panels only HPRC
@@ -1819,8 +1819,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
     3,334 times on 219 row blocks (the check's SNP-row report). The real-data check counts them as
     `limit-indel-row-mnv` and `limit-snp-row-mnv` (the first gated as `variant-missing` until its
     genome-wide run on HPRC). A fix needs the MNVs' phased genotypes in a store built with the
-    panel's Dictionaries;
-    2.10.1 is to build it (HPRC's Dictionaries rebuilt, its index as it is).
+    panel's Dictionaries; 2.10.1 is to build it (HPRC's Dictionaries rebuilt, its index as it is).
   - **A target wholly inside a tandem repeat.** The merge reads a row's place on the haplotype
     from its own bases, and in a microsatellite that holds a whole target the target's
     alignments can fit different places: the target can then be split over two rows, or written
@@ -2449,8 +2448,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
     87,938,657 GACTC>G were, now among the alternative alignments; no carrier leaves any row. The
     real-data checker's SNP-row report, with its model of this change, finds the 5 carriers missing
     from those rows on gate B's B10, which list other carriers (30 lines); it cannot see a row the
-    rule removed whole. Population-level
-    searches do not read the store and are unchanged.
+    rule removed whole. Population-level searches do not read the store and are unchanged.
   - Covered by `test_snp_row_indel_carriers` (`AVariantPastTheStretch`; `ObservedPath` and
     `DictionaryPath`, end to end) and `test_check_indel_rows` (`SnpRowsReport`): 6 of the 7 new
     tests fail on the code before, the 7th a control.

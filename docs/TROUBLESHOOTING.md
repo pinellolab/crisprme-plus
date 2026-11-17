@@ -544,8 +544,8 @@ combinations (the haplotype scan); the indexes of 2.10.0 serve it as they are.
 ## 15. A row that looks wrong: the known limits of 2.10.0
 
 Each changes no other row; how often each occurs depends on the guide and the panel.
-[METHODS.md](../METHODS.md) §10 lists them, with their
-scale where it was measured, and §4 gives the rules behind them.
+[METHODS.md](../METHODS.md) §10 lists them, with their scale where it was measured, and §4 gives the
+rules behind them.
 
 - **A carrier listed for a SNP that its own target does not hold.** On an indel row, a carrier
   whose haplotype holds a second indel that pushes one of the row's named SNPs out of the target's
