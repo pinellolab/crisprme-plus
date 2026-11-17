@@ -902,11 +902,17 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   not those of the carrier's own target, which holds its second indel (no row names two indel-path
   records). Where the second indel pushes a SNP the row names out of the stretch read, the carrier's
   own target does not hold that SNP, and the row names it all the same: a known limit of 2.10.0
-  (§10), which the haplotype scan planned for 2.10.1 is to read on each carrier's own bases. On 1000
+  (§10), which the haplotype scan planned for 2.10.1 is to read on each carrier's own bases. How
+  often depends on the guide and on its repeats: the release gate's genome-wide checks of
+  HGDP + 1000 Genomes at 4 mismatches and 1 DNA and 1 RNA bulge (§8) count carriers listed through a
+  second indel whose own target is not the row's 3 times for the README guide (NRR, per sample) and
+  9,059 times on 435 row blocks, by 3,583 samples, for the three repeat-rich guides per sample,
+  almost all of them VEGFA site 3's in GT repeats (9,022 on 414 row blocks; one alternative
+  alignment at chr2:2,873,200 (+) lists 2,972 carriers so), and §10 gives each search. On 1000
   Genomes chr22, the search of seven guides at 4 mismatches and 2 DNA and 2 RNA bulges, per sample,
   lists one such carrier: NA20515 on chr22:50,299,296 (+) of VEGFA site 1, whose 50,299,313 C>CG
   pushes the row's 50,299,316 T>G out of its target (its own target holds the insertion 50,299,300
-  T>TG and that second one); no row of the 17 chr22 gate runs of this release lists such a carrier.
+  T>TG and that second one).
   One whose second indel changes the bases is not listed for it, on any indel row (§8, residuals),
   nor one whose bases cannot be read either way: each way meets an unphased or missing SNP call, an
   unphased indel that does not itself change the target, or two of its variants that overlap, two
@@ -2717,10 +2723,12 @@ carriers on the row naming the two, and those that also hold 26,153,549 T>G read
 the 1st added base, the SNP their target's 15th base, 18 carriers on the row naming the three, who
 are not demanded on the first row; a listed carrier whose own target holds a second indel and not a
 SNP the row names, pushed out of it, which §4's reading of a second indel keeps, is so counted as
-the documented limit `limit-two-indels`, not passed: NA20515 above, and no row of the 17 chr22 gate
-runs of this release lists such a carrier; so is one whose second indel deletes the target's last
-base and whose bases, read up to where that base stood, are the target's, its own target a repeat
-unit away: §10, 6 listings of the release gate's B10, which the check failed until it read up to
+the documented limit `limit-two-indels`, not passed (NA20515 above; the release gate's genome-wide
+checks count 9,059 listings of the class, with the shape below, on B10's three repeat-rich guides
+per sample and 3 on the README guide's, §10); so is one whose second indel deletes the target's last
+base and whose bases, read up
+to where that base stood, are the target's, its own target a repeat unit away: §10, 6 of B10's
+lines, on 4 row blocks, which the check failed until it read up to
 where the last base stood rather than up to the base itself). Two alleles of one slot whose REF
 spans meet — a SNP at
 an insertion's own position, a SNP on a base a deletion removes, one complex allele split into
@@ -3492,8 +3500,18 @@ indels on one haplotype, and the searches above 1 DNA + 1 RNA bulge in dense reg
   not hold that SNP, and it is listed on the row all the same. On 1000 Genomes chr22, the
   search of seven guides at 4 mismatches and 2 DNA and 2 RNA bulges, per sample, lists one
   such carrier: NA20515 on chr22:50,299,296 (+) of VEGFA site 1, whose 50,299,313 C>CG pushes
-  the row's 50,299,316 T>G out of its target. No row of the 17 chr22 gate runs of this release
-  lists such a carrier. The carrier's own target can also start a repeat unit away from the
+  the row's 50,299,316 T>G out of its target; no row of the 17 chr22 gate runs of this release's
+  development lists one. The release gate's genome-wide checks (4 mismatches + 1 DNA + 1 RNA bulge)
+  count listings of this limit (`limit-two-indels`, each shape) as follows. On HGDP + 1000 Genomes,
+  the three
+  repeat-rich guides: 9,059 per sample, on 435 row blocks, by 3,583 samples (VEGFA site 3 9,022 on
+  414, in GT repeats, EMX1 30 on 20, VEGFA site 1 7 on 1; one alternative alignment of VEGFA site 3
+  at chr2:2,873,200 (+) lists 2,972 carriers so), and 128 on 41 at population level; the README
+  guide with NRR: 3 per sample, on 2, and 1 at population level, the same beside the mega; none for
+  the README guide with NRG, TRAC, the CEP290 guides, SaCas9's, Cas12a's and the ACTGA guide. On
+  HPRC, the README guide with NRR: 1 per sample, none at population level. The carrier's own target
+  can also start a repeat unit away
+  from the
   row's: on the release gate's genome-wide VEGFA site 3 search (B10, per sample, HGDP and 1000
   Genomes), HGDP00655 is listed on chr1:21,194,250 and 21,194,251 (+) for 21,194,271 GTGT>G,
   whose slot also holds 21,194,269 GT>G inside the target and 21,194,275 GGT>G, which deletes its

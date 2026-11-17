@@ -543,14 +543,18 @@ combinations (the haplotype scan); the indexes of 2.10.0 serve it as they are.
 
 ## 15. A row that looks wrong: the known limits of 2.10.0
 
-Each is rare and changes no other row. [METHODS.md](../METHODS.md) §10 lists them, with their
+Each changes no other row; how often each occurs depends on the guide and the panel.
+[METHODS.md](../METHODS.md) §10 lists them, with their
 scale where it was measured, and §4 gives the rules behind them.
 
 - **A carrier listed for a SNP that its own target does not hold.** On an indel row, a carrier
   whose haplotype holds a second indel that pushes one of the row's named SNPs out of the
-  target's bases is listed on the row all the same. On 1000 Genomes chr22, a per-sample search of
-  seven guides at 4 mismatches + 2 DNA + 2 RNA bulges lists one such carrier (NA20515, at VEGFA
-  site 1), and none of the 17 gate searches of 2.10.0 does. Such a carrier's own target can also
+  target's bases is listed on the row all the same. How often depends on the guide: the release
+  gate's genome-wide checks found 9,059 listings of this limit for three repeat-rich guides per
+  sample on
+  HGDP + 1000 Genomes, almost all at VEGFA site 3 in GT repeats (2,972 carriers on one alternative
+  alignment, chr2:2,873,200 (+)), 3 for the README guide and none for the other guides checked. Such
+  a carrier's own target can also
   start a repeat unit away from the row: the genome-wide gate search of VEGFA site 3 per sample
   lists two carriers so (HGDP00655 and HG01432 of HGDP + 1000 Genomes, in GT repeats), their
   bases the row's, through a second deletion. The haplotype scan planned for 2.10.1 reads each

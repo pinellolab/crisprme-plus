@@ -132,10 +132,12 @@ bulge limit and the two-indel one; where 2.10.1 plans a fix for another, it says
   Of the published panels only HPRC v2.1 has MNVs. 2.10.1 is to store and read the MNVs' phase
   (HPRC's Dictionaries built again, its index as it is).
 - **Two indels on one haplotype.** A fake-indel window holds one indel, so a carrier whose second
-  indel moves a SNP the row names out of its target is listed all the same (one carrier in seven
-  guides on 1000 Genomes chr22, at 2 + 2 bulges), and one whose own target, through a second
-  deletion in a repeat, starts a repeat unit away is listed on the row of its bases (two carriers
-  of VEGFA site 3 genome-wide on HGDP + 1000 Genomes).
+  indel moves a SNP the row names out of its target is listed all the same, and one whose own
+  target, through a second deletion in a repeat, starts a repeat unit away is listed on the row of
+  its bases. How often depends on the guide: on the release gate's genome-wide checks of
+  HGDP + 1000 Genomes, 9,059 listings of this limit for three repeat-rich guides per sample, almost
+  all at VEGFA site 3 in GT repeats (2,972 carriers on one alternative alignment), 3 for the README
+  guide and none for the other guides checked.
 - **A target wholly inside a tandem repeat** can be split over two rows or written twice (in a
   model of microsatellites; no search of real data checked has one). A fix is planned for 2.10.1.
 - **An unphased call of two ALTs at one position** is listed, PUTATIVE, on a row that needs the

@@ -655,8 +655,10 @@ major.minor version (Changed). The main changes, each told in its entry below:
     listed carrier whose own target holds a second indel and not a SNP the row names, pushed out
     of it, which CRISPRme's reading of a second indel keeps (a known limit of 2.10.0, METHODS
     "Known limits of 2.10.0"), is so counted as `limit-two-indels`, not passed: NA20515 on
-    chr22:50,299,296 (+) of VEGFA site 1 in the seven-guide search at 2 DNA and 2 RNA bulges; no
-    row of the 17 chr22 gate runs of this release lists such a carrier. Two
+    chr22:50,299,296 (+) of VEGFA site 1 in the seven-guide search at 2 DNA and 2 RNA bulges, and
+    the release gate's genome-wide checks count 9,059 listings of the class for the three
+    repeat-rich guides per sample, 2,972 of them on one alternative alignment of VEGFA site 3 at
+    chr2:2,873,200 (+), and 3 for the README guide (METHODS section 10). Two
     alleles of one slot whose REF spans meet give
     no sequence; where every allele that meets the record's REF is one METHODS section 4
     reads the slot without (another allele at the record's own position, an allele only on
@@ -1796,13 +1798,18 @@ major.minor version (Changed). The main changes, each told in its entry below:
 
 - **The known limits of 2.10.0, stated with their scale where it was measured** (METHODS §10,
   "Known limits of 2.10.0").
-  - **Two indels on one haplotype.** A fake-indel window holds one indel. A listed carrier whose
-    own target holds a second indel that pushes a SNP the row names out of the target stays
-    listed on that row, which names the SNP its own target does not hold. On 1000 Genomes chr22,
-    a search of seven guides at 4 mismatches and 2 DNA and 2 RNA bulges, per sample, lists one
-    such carrier (NA20515 on chr22:50,299,296 (+) of VEGFA site 1); no row of the 17 chr22 gate
-    runs of this release lists one. The haplotype scan planned for 2.10.1 is to read each
-    carrier's own bases there.
+  - **Two indels on one haplotype.** A fake-indel window holds one indel. A listed carrier whose own
+    target holds a second indel that pushes a SNP the row names out of the target stays listed on
+    that row, which names the SNP its own target does not hold. How often depends on the guide: on
+    HGDP + 1000 Genomes the release gate's genome-wide checks (4 + 1 + 1) count 9,059 listings of
+    this limit (the class `limit-two-indels`, each shape) by 3,583 samples for the three repeat-rich
+    guides per sample, almost all VEGFA site 3's in GT
+    repeats (one of its alternative alignments, chr2:2,873,200 (+), lists 2,972 carriers so), 128 at
+    population level, 3 for the README guide per sample and none for the gate's other searches (the
+    README guide with NRG, TRAC, CEP290, SaCas9, Cas12a, the ACTGA guide); on HPRC, 1.
+    On 1000 Genomes chr22, a search of seven guides at 4 mismatches and 2 DNA and 2 RNA bulges, per
+    sample, lists one (NA20515 on chr22:50,299,296 (+) of VEGFA site 1). The haplotype scan planned
+    for 2.10.1 is to read each carrier's own bases there.
   - **An MNV beside an indel on one haplotype.** No store the search reads holds an MNV, so a
     carrier whose haplotype holding a row's indel also holds an MNV that changes the target is
     listed for the target that haplotype would hold without it. Of the published panels only HPRC

@@ -174,9 +174,11 @@ limit (counted and listed under its own class, non-gating) or not (gating):
     pushes a SNP the row names out of the stretch read, the slot's reading holds other SNP
     alts than the row names, so THE TRUTH lists it on no row of one indel-path record, and
     its listing is limit-two-indels (documented: second-indel) -- a known limit of 2.10.0
-    (METHODS section 4): one carrier on 1000 Genomes chr22 at 4 mismatches and 2 DNA and 2
-    RNA bulges (NA20515, chr22:50,299,296 (+), VEGFA site 1), and no row of the 2.10.0
-    integration's 17 gate runs lists such a carrier;
+    (METHODS sections 4 and 10): one carrier on 1000 Genomes chr22 at 4 mismatches and 2 DNA
+    and 2 RNA bulges (NA20515, chr22:50,299,296 (+), VEGFA site 1), and, on the release
+    gate's genome-wide checks of HGDP + 1000 Genomes at 4 + 1 + 1, 9,059 listings of the
+    class for the three repeat-rich guides per sample (2,972 on one alternative alignment of
+    VEGFA site 3 at chr2:2,873,200 (+)) and 3 for the README guide;
   * another allele at the record's own position is a phasing artefact, a variant only on
     bases the record deletes or replaces changes nothing, an overlapping indel at another
     position that changes none of the reference bases the target covers changes nothing
