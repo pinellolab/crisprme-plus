@@ -1398,12 +1398,105 @@ class TheHaplotypeScanIsNotTheTwoIndelLimitsFix(unittest.TestCase):
     def test_the_users_docs_say_what_it_leaves_unreported(self):
         notes = self._flat("docs/release-notes-2.10.0.md")
         self.assertIn("And a target that a haplotype holds only through two indels is not "
-                      "reported for its carriers: on chr22, the gate's checks find 7 such sites for "
-                      "the README guide", notes)
+                      "reported for its carriers: on chr22, the gate's per-sample checks find 7 "
+                      "such sites for the README guide", notes)
         trouble = self._flat("docs/TROUBLESHOOTING.md")
         self.assertIn("**An off-target missing for a carrier of two indels.**", trouble)
-        self.assertIn("at 6 of the README guide's 7 sites and 20 of HPRC's 21 the search writes no "
-                      "row within 5 bp", trouble)
+        self.assertIn("at 6 of the README guide's 7 sites and at each of HPRC's 5 the search "
+                      "writes no row within 5 bp", trouble)
+
+
+class HprcsMissedTargetsSayWhichNeedAnMnv(unittest.TestCase):
+    """The docs gave HPRC's share of the two-indel limit's unreported targets as 21 sites on chr22
+    at a CFD of up to 0.0164 (the checker's `limit-two-indels` completeness lines of B6, B7 the
+    same). The class counts targets held only through two or more indel-path records, an MNV
+    among them, and HPRC is the one published panel with MNVs: rebuilt from the VCF, each
+    carrier's haplotype with every subset of the indels and MNVs that meet the target, 5 of the
+    21 (205 listings, each at 6 edits and a CFD of 0) are held through indels alone and 16 (18
+    listings) only through an MNV, 7 of them through MNVs alone, the 0.0164 one among them
+    (closure review r2, B-R2-1; closure-refix-r2's ground truth, gt_hprc_split.py). The two-indel
+    summaries give HPRC's 5, METHODS the split, and each MNV item what the MNV limit leaves
+    unreported."""
+
+    @staticmethod
+    def _flat(name):
+        return " ".join((_REPO / name).read_text().split())
+
+    def _item(self, text, start, end):
+        i = text.index(start)
+        return text[i:text.index(end, i)]
+
+    def test_the_two_indel_summaries_give_hprc_through_indels_alone(self):
+        for name in ("CHANGELOG.md", "docs/release-notes-2.10.0.md", "docs/TROUBLESHOOTING.md"):
+            text = self._flat(name)
+            self.assertNotIn("21 on HPRC", text, name)
+            self.assertNotIn("20 of HPRC's 21", text, name)
+        self.assertIn("5 on HPRC (205 listings, each at 6 edits and a CFD of 0; 16 more sites "
+                      "there need an MNV: the next item)", self._flat("CHANGELOG.md"))
+        self.assertIn("5 on HPRC (each at a CFD of 0; 16 more there need an MNV, above)",
+                      self._flat("docs/release-notes-2.10.0.md"))
+        self.assertIn("5 on HPRC (each at a CFD of 0; 16 more there need an MNV: the next item)",
+                      self._flat("docs/TROUBLESHOOTING.md"))
+
+    def test_methods_splits_hprcs_21(self):
+        methods = self._flat("METHODS.md")
+        item = self._item(methods, "- **Two indels on one haplotype.**",
+                          "- **An MNV beside an indel on one haplotype.**")
+        self.assertIn("on HPRC, the README guide 21 (223 listings by 110 samples) in either mode, "
+                      "of which 5 (205 listings by 107 samples) through indels alone and 16 (18 "
+                      "listings by 8 samples) only through an MNV, 7 of them through MNVs alone",
+                      item)
+        self.assertNotIn("0.0164 on HPRC,", item)
+        self.assertIn("and on HPRC of 0 through indels alone (each at 6 edits) and at most 0.0164 "
+                      "through an MNV", item)
+
+    def test_each_mnv_item_says_what_it_leaves_unreported(self):
+        items = {
+            "METHODS.md": ("- **An MNV beside an indel on one haplotype.**",
+                           "- **A target wholly inside a tandem repeat.**"),
+            "CHANGELOG.md": ("- **An MNV beside an indel on one haplotype.**",
+                             "- **A target wholly inside a tandem repeat.**"),
+            "docs/release-notes-2.10.0.md": ("- **On HPRC, an MNV beside an indel on one "
+                                             "haplotype.**", "- **Two indels on one haplotype.**"),
+            "docs/TROUBLESHOOTING.md": ("- **On HPRC, a carrier listed on an indel row whose "
+                                        "haplotype holds an MNV there.**",
+                                        "- **One target written as two rows"),
+        }
+        for name, (start, end) in items.items():
+            item = self._item(self._flat(name), start, end)
+            self.assertIn("16 such sites", item, name)
+            self.assertIn("only through an MNV and a", item, name)
+        self.assertIn("a target held only through an MNV and a second indel-path record stays "
+                      "unreported, as one held through two indels does.", self._flat("METHODS.md"))
+
+
+class TheChangelogListsThePopulationLevelLimit(unittest.TestCase):
+    """METHODS section 10, the release notes, the README and RELEASE_CHECKLIST state the timing
+    gate's one limit, the README guide's population-level search with NRG on HGDP + 1000 Genomes
+    at 2.20 times 2.8.1's time (C9, accepted on 2026-11-16, a faster post-analysis of the dense
+    loci planned for 2.10.1); the CHANGELOG, which says it lists the known limits under Changed,
+    did not, nor any of the gate's ratios (closure review r2, B-R2-2)."""
+
+    def test_its_known_limits_hold_it(self):
+        text = " ".join((_REPO / "CHANGELOG.md").read_text().split())
+        start = text.index("- **The known limits of 2.10.0, stated with their scale where it was "
+                           "measured**")
+        limits = text[start:text.index("- **The `Observed` column", start)]
+        self.assertIn("- **Population-level searches of a dense panel in its dense loci** (the "
+                      "timing gate).", limits)
+        self.assertIn("took 2.20 times 2.8.1's time (2 h 29 min against 1 h 8 min, 32 threads; "
+                      "2.21 times the released 2.8.1's run beside it)", limits)
+        self.assertIn("a faster population-level post-analysis of the dense loci is planned for "
+                      "2.10.1.", limits)
+
+    def test_its_speed_summary_gives_the_gates_ratios(self):
+        text = " ".join((_REPO / "CHANGELOG.md").read_text().split())
+        speed = text[text.index("- **Speed.**"):text.index("- **Population-level rows and the "
+                                                            "mega.**")]
+        self.assertIn("the release gate's searches took 0.95 to 1.30 times 2.8.1's time per sample "
+                      "on HGDP + 1000 Genomes, 0.90 and 0.96 on HPRC and 1.18 to 1.21 on the mega, "
+                      "and its population-level search of HGDP + 1000 Genomes with NRG 2.20 times",
+                      speed)
 
 
 class TheTimingGatesNoteCountsTheControlAsAPair(unittest.TestCase):

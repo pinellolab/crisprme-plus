@@ -129,8 +129,13 @@ bulge limit in a per-sample search; where 2.10.1 plans a fix for another limit, 
   phase, so a carrier whose haplotype holding a row's indel also holds an MNV in the target is
   listed for the target that haplotype would have without the MNV: the README guide's genome-wide
   search lists carriers so 1,163 times at 94 sites per sample on indel rows, each row at a CFD of
-  0.084 or less, and 3,334 times on SNP rows. Of the published panels only HPRC v2.1 has MNVs.
-  2.10.1 is to store and read the MNVs' phase (HPRC's Dictionaries built again, its index as it is).
+  0.084 or less, and 3,334 times on SNP rows. And a target that a haplotype holds only through an
+  MNV and another indel or MNV is not reported for its carriers, as with two indels (below): on
+  chr22, the gate's per-sample check finds 16 such sites, each target at a CFD of at most 0.016. Of
+  the published panels only HPRC v2.1 has MNVs. 2.10.1 is to store and read the MNVs' phase (HPRC's
+  Dictionaries built again, its index as it is), which takes such carriers off the rows of a
+  sequence they do not have; the targets held only through an MNV and another indel or MNV stay
+  unreported.
 - **Two indels on one haplotype.** A fake-indel window holds one indel, so a carrier whose second
   indel moves a SNP the row names out of its target is listed all the same, and one whose own
   target, through a second deletion in a repeat, starts a repeat unit away is listed on the row of
@@ -138,12 +143,13 @@ bulge limit in a per-sample search; where 2.10.1 plans a fix for another limit, 
   HGDP + 1000 Genomes, 9,059 listings of this limit for three repeat-rich guides per sample, almost
   all at VEGFA site 3 in GT repeats (2,972 carriers on one alternative alignment), 3 for the README
   guide and none for the other guides checked. And a target that a haplotype holds only through two
-  indels is not reported for its carriers: on chr22, the gate's checks find 7 such sites for the
-  README guide (3,425 carrier listings, each target at a CFD below 0.0004; 3 with NRG), 343 for the
-  three repeat-rich guides (VEGFA site 3's up to a CFD of 0.35), 21 on HPRC, 9 for TRAC, 2 for the
-  ACTGA guide, 9 for SaCas9's guide at 2 mismatches (two of them perfect matches) and none for the
-  CEP290 and Cas12a guides. No fix is planned yet: the haplotype scan writes, as the search does,
-  one indel per window.
+  indels is not reported for its carriers: on chr22, the gate's per-sample checks find 7 such sites
+  for the README guide (3,425 carrier listings, each target at a CFD below 0.0004; 3 with NRG), 343
+  for the three repeat-rich guides (VEGFA site 3's up to a CFD of 0.35), 5 on HPRC (each at a CFD
+  of 0; 16 more there need an MNV, above), 9 for TRAC, 2 for the ACTGA guide, 9 for SaCas9's guide
+  at 2 mismatches (two of them perfect matches; 43 at 4 + 1 + 1) and none for the CEP290 and Cas12a
+  guides. No fix is planned yet: the haplotype scan writes, as the search does, one indel per
+  window.
 - **A target wholly inside a tandem repeat** can be split over two rows or written twice (in a
   model of microsatellites; no search of real data checked has one). A fix is planned for 2.10.1.
 - **An unphased call of two ALTs at one position** is listed, PUTATIVE, on a row that needs the

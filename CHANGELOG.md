@@ -37,8 +37,11 @@ major.minor version (Changed). The main changes, each told in its entry below:
 - **Speed.** Coding every allele makes the immunoglobulin loci dense. An exact haplotype
   pre-check, a carriers-first check on the indel side and a post-analysis in pieces over the
   search's threads give the same rows about ten times faster (the README guide's per-sample
-  search of chr22). A search above 1 DNA + 1 RNA bulge on such an index is warned of, unless a
-  cap of 3 total edits or less keeps it near the default's cost.
+  search of chr22). Genome-wide, on 32 threads, the release gate's searches took 0.95 to 1.30
+  times 2.8.1's time per sample on HGDP + 1000 Genomes, 0.90 and 0.96 on HPRC and 1.18 to 1.21
+  on the mega, and its population-level search of HGDP + 1000 Genomes with NRG 2.20 times (a
+  known limit, under Changed). A search above 1 DNA + 1 RNA bulge on such an index is warned of,
+  unless a cap of 3 total edits or less keeps it near the default's cost.
 - **Population-level rows and the mega.** The carrier gate checks a population-level row's
   variants against phased haplotypes, and the report ranks a combination no haplotype carries
   after the others. The mega is rebuilt from the records the enricher reads, with a density
@@ -1815,10 +1818,11 @@ major.minor version (Changed). The main changes, each told in its entry below:
     it. The gate's chr22 checks count such targets, per sample, at 7 sites for the README guide with
     NRR (3,425 listings by 1,770 samples, each at 5 or 6 edits and a CFD below 0.0004) and 3 with
     NRG, 343 for the three repeat-rich guides (VEGFA site 3's 305 reach a CFD of 0.35, and 3 edits),
-    21 on HPRC, 9 for TRAC, 2 for the ACTGA guide and 9 for SaCas9's 21-nt guide at 2 mismatches and
-    no bulge, two of them perfect matches; none for the CEP290 and Cas12a guides (METHODS §10 gives
-    each search). No fix is planned yet: the haplotype scan planned for 2.10.1 writes the lines the
-    search writes, one indel per window.
+    5 on HPRC (205 listings, each at 6 edits and a CFD of 0; 16 more sites there need an MNV: the
+    next item), 9 for TRAC, 2 for the ACTGA guide and 9 for SaCas9's 21-nt guide at 2 mismatches and
+    no bulge, two of them perfect matches (43 at 4 + 1 + 1); none for the CEP290 and Cas12a guides
+    (METHODS §10 gives each search). No fix is planned yet: the haplotype scan planned for 2.10.1
+    writes the lines the search writes, one indel per window.
   - **An MNV beside an indel on one haplotype.** No store the search reads holds an MNV, so a
     carrier whose haplotype holding a row's indel also holds an MNV that changes the target is
     listed for the target that haplotype would hold without it. Of the published panels only HPRC
@@ -1827,8 +1831,14 @@ major.minor version (Changed). The main changes, each told in its entry below:
     sites at population level (229 samples), each row at a CFD of 0.084 or less, and its SNP rows
     3,334 times at 219 sites (the check's SNP-row report). The real-data check counts them as
     `limit-indel-row-mnv` and `limit-snp-row-mnv` (the first gated as `variant-missing` until its
-    genome-wide run on HPRC). A fix needs the MNVs' phased genotypes in a store built with the
-    panel's Dictionaries; 2.10.1 is to build it (HPRC's Dictionaries rebuilt, its index as it is).
+    genome-wide run on HPRC). It leaves targets unreported too: one that a haplotype holds only
+    through an MNV and a second indel-path record (an indel, or another MNV) is not generated, as
+    one held through two indels is not; the gate's chr22 check of that search counts 16 such sites
+    (18 listings by 8 samples; 7 of the sites through MNVs alone), each at a CFD of at most 0.0164.
+    A fix needs the MNVs' phased genotypes in a store built with the panel's Dictionaries; 2.10.1 is
+    to build it (HPRC's Dictionaries rebuilt, its index as it is), which takes such a carrier off a
+    row of a sequence it does not have. A target held only through an MNV and a second indel-path
+    record stays unreported.
   - **A target wholly inside a tandem repeat.** The merge reads a row's place on the haplotype
     from its own bases, and in a microsatellite that holds a whole target the target's
     alignments can fit different places: the target can then be split over two rows, or written
@@ -1863,6 +1873,18 @@ major.minor version (Changed). The main changes, each told in its entry below:
     repeats grows by orders of magnitude above the default budget, and can run for many hours
     or run out of memory. The haplotype scan planned for 2.10.1 is to make them tractable per
     sample.
+  - **Population-level searches of a dense panel in its dense loci** (the timing gate). Coding
+    every allele makes some loci dense, the immunoglobulin loci among them, and the
+    population-level analysis reads no haplotype, so the haplotype pre-check (Added), which skips
+    per sample the raw targets no sample carries, skips none of their windows: the release gate's
+    genome-wide population-level search of the README guide with NRG on HGDP + 1000 Genomes took
+    2.20 times 2.8.1's time (2 h 29 min against 1 h 8 min, 32 threads; 2.21 times the released
+    2.8.1's run beside it), where the gate's per-sample searches of HGDP + 1000 Genomes took 0.95
+    to 1.30 times, HPRC's searches 0.90 and 0.96 and the mega's 1.18 to 1.21. Its search phases
+    took about 2.8.1's time; its SNP post-analysis of chr14 (IGH), chr2 (IGK), chr4 and chr22
+    (IGL) took 2,474, 1,626, 853 and 765 s (2.8.1's per chromosome was not timed). 2.10.0 is
+    released with it (decided on 2026-11-16); a faster population-level post-analysis of the
+    dense loci is planned for 2.10.1.
   - **One refusal's advice on a sites-only dataset.** Where a search refuses the INDELS index of
     a sites-only dataset (the mega) whose fake-indel genome is not in place while its VCFs are,
     the refusal says to remove that index and the dataset's enriched genome and to build them

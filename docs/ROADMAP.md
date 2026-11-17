@@ -22,6 +22,19 @@ this file held before is kept at its end, for the record.
   each search's own raw targets).
 - **A known limit of 2.10.0 the release fixes** ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15):
   one target written as two rows, or twice, in a microsatellite (the merge).
+- **The MNVs' phase (HPRC).** No store the search reads holds an MNV, so on HPRC v2.1 a carrier
+  whose haplotype holding an indel row's indel also holds an MNV in the target is listed for a
+  sequence it does not have ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15). 2.10.1 is to store
+  each MNV with its haplotype, HPRC's Dictionaries built again and its index as it is, and to read
+  it as a second variant of the slot, which takes such a carrier off that row. A target held only
+  through an MNV and another indel or MNV stays unreported, as one held through two indels does
+  (below).
+- **A faster population-level post-analysis of the dense loci.** In the release gate, 2.10.0's
+  genome-wide population-level search of the README guide with NRG on HGDP + 1000 Genomes took 2.20
+  times 2.8.1's time, its search phases about 2.8.1's: a population-level post-analysis reads no
+  haplotype, so the haplotype pre-check skips none of the dense loci's windows, the immunoglobulin
+  loci among them (METHODS §10). 2.10.1 is to make that post-analysis faster, and to time the
+  search again.
 - **The real-data check** (`scripts/check_indel_rows.py`) checks `Variant_info_spacer+PAM` (each
   variant's number in its target) and redundant alternative alignments, which it does not today
   ([`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md), step 4c).

@@ -563,20 +563,25 @@ rules behind them.
   lists that individual for it, and where no other carrier holds it, no row reports it at all. How
   often depends on the guide and its repeats: on chr22, per sample, the release gate's checks found
   7 such sites for the README guide (held by 1,770 samples, each target at a CFD below 0.0004; 3
-  with NRG), 343 for three repeat-rich guides (VEGFA site 3's up to a CFD of 0.35), 21 on HPRC, 9
-  for TRAC, 2 for the ACTGA guide, 9 for SaCas9's 21-nt guide at 2 mismatches (two of them perfect
-  matches) and none for the CEP290 and Cas12a guides; at 6 of the README guide's 7 sites and 20 of
-  HPRC's 21 the search writes no row within 5 bp. To check a site for an individual, read its
-  genotypes in the dataset's VCF around the target; `assembly-search` searches an individual's
-  assembled haplotypes, which hold every indel. No fix is planned yet.
+  with NRG), 343 for three repeat-rich guides (VEGFA site 3's up to a CFD of 0.35), 5 on HPRC (each
+  at a CFD of 0; 16 more there need an MNV: the next item), 9 for TRAC, 2 for the ACTGA guide, 9
+  for SaCas9's 21-nt guide at 2 mismatches (two of them perfect matches; 43 at 4 + 1 + 1) and none
+  for the CEP290 and Cas12a guides; at 6 of the README guide's 7 sites and at each of HPRC's 5 the
+  search writes no row within 5 bp. To check a site for an individual, read its genotypes in the
+  dataset's VCF around the target; `assembly-search` searches an individual's assembled haplotypes,
+  which hold every indel. No fix is planned yet.
 - **On HPRC, a carrier listed on an indel row whose haplotype holds an MNV there.** No store
   CRISPRme reads holds an MNV (a record of two or more bases replaced by as many), so a carrier
   whose haplotype holding the row's indel also holds an MNV inside the target is listed for the
   target that haplotype would hold without the MNV. Of the published panels only HPRC v2.1 has MNVs:
   the README guide's genome-wide search lists carriers so 1,163 times at 94 sites per sample on
-  indel rows (232 samples), each row at a CFD of 0.084 or less, and 3,334 times on SNP rows. To
-  check a carrier, read its genotypes in the dataset's VCF over the row's target. CRISPRme 2.10.1 is
-  planned to read the MNVs' phase.
+  indel rows (232 samples), each row at a CFD of 0.084 or less, and 3,334 times on SNP rows. And an
+  off-target that an individual's haplotype holds only through an MNV and another indel or MNV is
+  missing for that individual, as for two indels (above): on chr22, per sample, the release gate's
+  check finds 16 such sites, each target at a CFD of at most 0.016. To check a carrier, read its
+  genotypes in the dataset's VCF over the row's target. CRISPRme 2.10.1 is planned to read the
+  MNVs' phase, which takes such carriers off the rows of a sequence they do not have; an off-target
+  held only through an MNV and another indel or MNV stays missing.
 - **One target written as two rows, or twice, in a microsatellite.** In a tandem repeat that
   holds a whole target, the merge places each row by its own bases, and the target's
   alignments can fit different places of the repeat: they can then go to two rows, or the

@@ -3527,27 +3527,32 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   the target's bases, and its own target, through both deletions, starts two bases before the row
   (HG01432 so on chr16:74,355,612 and 74,355,613 (+)). The real-data check counts both shapes as
   `limit-two-indels` (§8). The same limit leaves targets unreported: one that a haplotype holds only
-  through two or more indel-path records is not generated (§8, residuals), so no row reports it for
-  that haplotype's carriers. The release gate's chr22 checks (`--chrom chr22 --mode both`) count
-  such targets (`limit-two-indels`, completeness), here as sites and the (site, sample) listings
-  they leave out. On HGDP + 1000 Genomes, per sample: the README guide with NRR 7 sites (3,425
-  listings by 1,770 samples, where the search's own indel rows stand at 211 sites of chr22), with
-  NRG 3 (1,725 listings), TRAC 9 (31), the ACTGA guide through the general index 2 (3), SaCas9's
-  21-nt guide 9 (125) at 2 mismatches and no bulge and 43 (4,349) at 4 + 1 + 1, and the three
-  repeat-rich guides 343 (25,853 by 4,015 samples, against indel rows at 4,232 sites): VEGFA site 3
-  305, EMX1 30, VEGFA site 1 8; population-level, the README guide 6 with NRR and 3 with NRG, the
-  three repeat-rich guides 95; beside the mega, 7 per sample and 4 population-level; on HPRC, the
-  README guide 21 (223 listings by 110 samples) in either mode; none for the CEP290 guides and
-  Cas12a's. Each target's best alignment is at 5 or 6 edits for the README guide, TRAC, the ACTGA
-  guide, EMX1, VEGFA site 1 and HPRC, at a CFD of at most 0.0004 for the README guide, 0.0025 for
-  TRAC, 0.0164 on HPRC, 0.0243 for EMX1, 0.052 for the ACTGA guide and 0.11 for VEGFA site 1; VEGFA
-  site 3's reach down to 3 edits and up to a CFD of 0.35 (24 sites at 0.1 or more), and two of
-  SaCas9's match the guide perfectly. At 6 of the README guide's 7 sites, 20 of HPRC's 21 and 41 of
-  the three repeat-rich guides' 343, no row of the search starts within 5 bp; at the others, rows of
-  other carriers or of other targets stand there. Rebuilt from the VCF, every carrier of 13 of these
-  targets (at 8 sites of five searches; 2,782 listings) holds the target on a haplotype that does
-  not hold it with only one of its indels there, or none. No fix is planned yet: the haplotype scan
-  planned for 2.10.1 writes the lines the search writes, one indel per window.
+  through two or more indel-path records (indels, and on HPRC MNVs too: the next item) is not
+  generated (§8, residuals), so no row reports it for that haplotype's carriers. The release gate's
+  chr22 checks (`--chrom chr22 --mode both`) count such targets (`limit-two-indels`, completeness),
+  here as sites and the (site, sample) listings they leave out. On HGDP + 1000 Genomes, which hold
+  no MNV, per sample: the README guide with NRR 7 sites (3,425 listings by 1,770 samples, where the
+  search's own indel rows and alternative alignments stand at 211 sites of chr22), with NRG 3 (1,725
+  listings), TRAC 9 (31), the ACTGA guide through the general index 2 (3), SaCas9's 21-nt guide 9
+  (125) at 2 mismatches and no bulge and 43 (4,349) at 4 + 1 + 1, and the three repeat-rich guides
+  343 (25,853 by 4,015 samples, against indel rows and alternative alignments at 4,232 sites): VEGFA
+  site 3 305, EMX1 30, VEGFA site 1 8; population-level, the README guide 6 with NRR and 3 with NRG,
+  the three repeat-rich guides 95; beside the mega, 7 per sample and 4 population-level; on HPRC,
+  the README guide 21 (223 listings by 110 samples) in either mode, of which 5 (205 listings by 107
+  samples) through indels alone and 16 (18 listings by 8 samples) only through an MNV, 7 of them
+  through MNVs alone; none for the CEP290 guides and Cas12a's. Each target's best alignment is at 5
+  or 6 edits for the README guide, TRAC, the ACTGA guide, EMX1, VEGFA site 1 and HPRC, at a CFD of
+  at most 0.0004 for the README guide, 0.0025 for TRAC, 0.0243 for EMX1, 0.052 for the ACTGA guide
+  and 0.11 for VEGFA site 1, and on HPRC of 0 through indels alone (each at 6 edits) and at most
+  0.0164 through an MNV; VEGFA site 3's reach down to 3 edits and up to a CFD of 0.35 (24 sites at
+  0.1 or more), and two of SaCas9's match the guide perfectly. At 6 of the README guide's 7 sites,
+  20 of HPRC's 21 (each of its 5 through indels alone) and 41 of the three repeat-rich guides' 343,
+  no row of the search starts within 5 bp; at the others, rows of other carriers or of other
+  targets stand there. Rebuilt from the VCF, every carrier of 13 of these targets (at 8 sites of
+  five searches; 2,782 listings) holds the target on a haplotype that does not hold it with only
+  one of its indels there, or none; so does every carrier of HPRC's 24 targets (223 listings), with
+  only one of the indels and MNVs that meet the target, or none. No fix is planned yet: the
+  haplotype scan planned for 2.10.1 writes the lines the search writes, one indel per window.
 - **An MNV beside an indel on one haplotype.** No store the search reads holds an MNV (the phased
   indel store keeps records whose REF and ALT differ in length, the SNP tiers SNVs, and the indel
   log lists an MNV's carriers with no phase), so a carrier whose haplotype holding a row's indel
@@ -3562,16 +3567,25 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   times at 94 sites (74 rows and 25 alternative alignments; 232 samples), and 558 times at 73 sites
   at population level (229 samples), each row at a CFD of 0.084 or less (0 in 162 of the 194 CFD
   blocks per sample). Rebuilt from the VCF, the haplotype each carrier is listed for holds the row's
-  target in none of the 1,163, and no target within the search's budget there in 992; of the
-  carriers, 66 hold the row's target on their other haplotype, 172 have their other haplotype
-  unknown there (a missing call, '.') and 925 hold it on neither. The real-data check counts them as
-  `limit-indel-row-mnv` (§8). The indel log cannot settle it: taking off the row every carrier it
+  target in none of the 1,163, and no target within the search's budget there in 992 (in the other
+  171 it holds another, as strong as the row's by mismatches and bulges in 162 and one edit weaker
+  in 9); of the carriers, 66 hold the row's target on their other haplotype, 172 have their other
+  haplotype unknown there (a missing call, '.') and 925 hold it on neither. The real-data check
+  counts them as `limit-indel-row-mnv` (§8). Targets go unreported too: one that a haplotype holds
+  only through an MNV and a second indel-path record, an indel or another MNV, is not generated (one
+  record per fake-indel window: the item above), so no row reports it for that haplotype's carriers.
+  On chr22, the release gate's check of that search counts 16 such sites (18 listings by 8 samples),
+  7 of them through MNVs alone, each target's best alignment at 5 or 6 edits and a CFD of at most
+  0.0164, and 15 of them with no row of the search within 5 bp (`limit-two-indels`; the same at
+  population level). The indel log cannot settle the listings: taking off the row every carrier it
   lists for such an MNV, whatever the slot, would also take off 92 carriers at their sites in that
   per-sample search (34 at population level) whose haplotype holding the indel does not hold the
   MNV. A fix needs the MNVs' phased genotypes in a store built with the panel's Dictionaries, which
   the haplotype scan does not read either (it reads the stores the search reads); 2.10.1 is to build
   that store, with HPRC's Dictionaries rebuilt and its index as it is, and to read an MNV there as a
-  second variant of the slot.
+  second variant of the slot, which takes a carrier off a row of a sequence it does not have: a
+  target held only through an MNV and a second indel-path record stays unreported, as one held
+  through two indels does.
 - **A target wholly inside a tandem repeat.** The merge reads each row's place on the haplotype
   from its own bases, the first place they fit (§4). In a microsatellite that holds a whole
   target, the target's alignments, each with its own bases, can fit different places, so they
