@@ -599,10 +599,11 @@ store the indel post-analysis reads (§4, SNP+indel), as an indel row's second i
   (two indels whose REFs share a base, a SNP alt of the haplotype on a base of an indel's REF); one
   past those bases, or before them, changes none of them and does not stop it, as for an indel row's
   second indel. Up to 2.10.0's release gates such a variant anywhere in the frame on a reading's
-  side stopped it: on the gate's CEP290 search (per sample, HGDP + 1000 Genomes), NA18623 was left
-  off a SNP row at chr14:105,863,639 (IGH), its haplotype holding the row's two SNPs and 105,863,665
-  T>TG, which leaves the target's bases as they are, for a SNP alt on the REF of a deletion 21 bases
-  past the target (105,863,688 AT>A and 105,863,689 T>C on its haplotype);
+  side stopped it: on the gate's VEGFA site 3 search (B10: per sample, HGDP + 1000 Genomes),
+  HGDP01087 was left off the integrated row at chr10:128,732,537 (−), which names 128,732,546 G>A,
+  its haplotype holding that SNP and 128,732,538 C>CCA, a unit of the CA repeat gained at the
+  target's edge, which leaves the target's bases as they are, for a SNP alt on the REF of a deletion
+  about 20 bases past the target (128,732,578 ATG>A and 128,732,580 G>A on its haplotype);
 - a haploid call — a male's on chrX outside PAR — is his one haplotype's, so his calls in a
   window are cis by construction (they make one enumerated haplotype, not every subset of
   them, below) and an indel of his that changes the target takes him off the row, whatever
@@ -909,13 +910,13 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   not those of the carrier's own target, which holds its second indel (no row names two indel-path
   records). Where the second indel pushes a SNP the row names out of the stretch read, the carrier's
   own target does not hold that SNP, and the row names it all the same: a known limit of 2.10.0
-  (§10), which the haplotype scan planned for 2.10.1 is to read on each carrier's own bases. How
-  often depends on the guide and on its repeats: the release gate's genome-wide checks of
-  HGDP + 1000 Genomes at 4 mismatches and 1 DNA and 1 RNA bulge (§8) count carriers listed through a
-  second indel whose own target is not the row's 3 times for the README guide (NRR, per sample) and
-  9,059 times on 435 row blocks, by 3,583 samples, for the three repeat-rich guides per sample,
-  almost all of them VEGFA site 3's in GT repeats (9,022 on 414 row blocks; one alternative
-  alignment at chr2:2,873,200 (+) lists 2,972 carriers so), and §10 gives each search. On 1000
+  (§10), for which no fix is planned yet. How often depends on the guide and on its repeats: the
+  release gate's genome-wide checks of HGDP + 1000 Genomes at 4 mismatches and 1 DNA and 1 RNA bulge
+  (§8) count carriers listed through a second indel whose own target is not the row's 3 times for
+  the README guide (NRR, per sample) and 9,059 times at 435 sites, by 3,583 samples, for the three
+  repeat-rich guides per sample, almost all of them VEGFA site 3's in GT repeats (9,022 at 414
+  sites; one alternative alignment at chr2:2,873,200 (+) lists 2,972 carriers so), and §10 gives
+  each search, with the targets this limit leaves unreported (§8, residuals). On 1000
   Genomes chr22, the search of seven guides at 4 mismatches and 2 DNA and 2 RNA bulges, per sample,
   lists one such carrier: NA20515 on chr22:50,299,296 (+) of VEGFA site 1, whose 50,299,313 C>CG
   pushes the row's 50,299,316 T>G out of its target (its own target holds the insertion 50,299,300
@@ -1877,12 +1878,13 @@ population-level, 1.18 (1.21 against 2.10.0's own search of 2.8.1's mega index).
 on HGDP + 1000 Genomes is the exception:** the README guide with NRG took 2 h 29 min against
 1 h 8 min, 2.20 times 2.8.1's time (2.21 beside the released 2.8.1: 2 h 24 min against 1 h 5 min).
 Its searches take about 2.8.1's time (the reference 537 s against 433 s, the variant genome 2,368 s
-against 2,145 s); its post-analysis of the immunoglobulin loci does not: the SNP post-analysis took
-2,474 s on chr14 (IGH), 1,626 s on chr2 (IGK) and 765 s on chr22 (IGL), and chr14's indel
-post-analysis took 790 s over 49,265,617 lines; the whole search used 1,923% CPU on average, against
-2.8.1's 2,558 to 2,803%. That is the cost of coding every allele: the population-level analysis
-reads no haplotype, so the pre-check skips none of those windows, where per sample it skips the raw
-targets no sample carries. 2.10.0 is released with it (decided on 2026-11-16); a faster
+against 2,145 s); its post-analysis does not, that of the dense loci above all: the SNP
+post-analysis took 2,474 s on chr14 (IGH), 1,626 s on chr2 (IGK), 853 s on chr4 and 765 s on
+chr22 (IGL), and chr14's indel post-analysis took 790 s over 49,265,617 lines (2.8.1's was
+not timed per chromosome); the whole search used 1,923% CPU on average, against 2.8.1's 2,558
+to 2,803%. That is the cost of coding every allele: the population-level analysis reads no
+haplotype, so the pre-check skips none of the dense windows, where per sample it skips the
+raw targets no sample carries. 2.10.0 is released with it (decided on 2026-11-16); a faster
 population-level post-analysis of the dense loci is planned for 2.10.1. On 16 threads, the README
 guide with NRR, the default, took 4 h 16 min to 4 h 32 min per sample and 6 h 13 min to 6 h 27 min
 population-level, on two nodes of the hardware above at different loads (on 8 threads, 4 h 33 min
@@ -2566,11 +2568,14 @@ or when those bases cannot be read (an unphased or missing SNP call, an unphased
 itself change them, or two of its variants that overlap: §4); a carrier whose second indel inside
 the target is unphased cannot be tied to a haplotype and stays listed, PUTATIVE, even when another,
 phased second indel on its indel haplotype changes the target, nor when, as one complex allele split
-into overlapping records, an indel overlaps it at another position. This residual
-is **low-frequency**: raw multi-indel cis co-occurrence is dominated by STR/VNTR repeats (which
-off-target analysis should soft-mask), falling to **~1–2%** of indel loci after repeat-masking and
-deduplication, and the **genuinely-missed** off-targets are **~0.1–0.2%** of indel off-targets — all
-at the edit-budget ceiling (the weakest, ≈0-CFD tier). Windows carrying ≥ 2 cis indels **can** be
+into overlapping records, an indel overlaps it at another position. How many targets this
+residual leaves unreported depends on the guide and on its repeats, and they are not all
+at the edit budget's ceiling: on chr22 of HGDP + 1000 Genomes, per sample at 4 mismatches
+and 1 DNA and 1 RNA bulge, the release gate's checks find 7 sites of such targets for the
+README guide (NRR), held by 1,770 samples, each at 5 or 6 edits and a CFD below 0.0004,
+and 305 for VEGFA site 3, a guide of GT repeats, at 3 to 6 edits and a CFD of up to 0.35
+(24 sites at 0.1 or more); SaCas9's 21-nt guide, at 2 mismatches and no bulge, has two
+that match it perfectly. §10 gives each search. Windows carrying ≥ 2 cis indels **can** be
 flag-all'd for conservative (lossless over-reporting) treatment — a design option the min-edit
 primitive supports (proven lossless in `test_twopass_lynchpin_counterexamples`), **not yet wired
 into the production indel search**. On an index CRISPRitz 2.9.1 or earlier built (every one
@@ -2733,7 +2738,7 @@ the documented limit `limit-two-indels`, not passed (NA20515 above; the release 
 checks count 9,059 listings of the class, with the shape below, on B10's three repeat-rich guides
 per sample and 3 on the README guide's, §10); so is one whose second indel deletes the target's last
 base and whose bases, read up to where that base stood, are the target's, its own target a repeat
-unit away: §10, 6 of B10's lines, on 4 row blocks, which the check failed until it read up to where
+unit away: §10, 6 of B10's lines, at 4 sites, which the check failed until it read up to where
 the last base stood rather than up to the base itself). Two alleles of one slot whose REF spans meet
 — a SNP at an insertion's own position, a SNP on a base a deletion removes, one complex allele split
 into overlapping records, two ALTs at one position phased onto one haplotype — describe one stretch
@@ -3494,40 +3499,62 @@ The limits below are those a user of 2.10.0 can meet, each with its scale where 
 Each is stated where its method is described too. `docs/TROUBLESHOOTING.md` says what a user sees
 of them and what to do: §15 for the rows, §14 for the searches above 1 DNA + 1 RNA bulge, §12
 for the refusal's advice. The haplotype scan of the dense regions, planned for CRISPRme 2.10.1
-with no index rebuild (its engine hooks are in CRISPRitz 2.10.0), is to lift two of them: two
-indels on one haplotype, and the searches above 1 DNA + 1 RNA bulge in dense regions.
+with no index rebuild (its engine hooks are in CRISPRitz 2.10.0), is to lift one of them, in a
+per-sample search: the searches above 1 DNA + 1 RNA bulge in dense regions. It writes there the
+lines the search would write, one indel per fake-indel window, so it leaves the two-indel limit as
+it is; where 2.10.1 plans a fix for another limit, its item says so.
 
-- **Two indels on one haplotype.** A fake-indel window holds one indel, and a carrier is listed
-  on an indel row when its own bases read the row's target through the indel, from the
-  target's first base on or up to its last (§4). Where a second indel of the carrier's
-  haplotype pushes a SNP the row names out of the stretch read, the carrier's own target does
-  not hold that SNP, and it is listed on the row all the same. On 1000 Genomes chr22, the
-  search of seven guides at 4 mismatches and 2 DNA and 2 RNA bulges, per sample, lists one
-  such carrier: NA20515 on chr22:50,299,296 (+) of VEGFA site 1, whose 50,299,313 C>CG pushes
-  the row's 50,299,316 T>G out of its target; no row of the 17 chr22 gate runs of this release's
-  development lists one. The release gate's genome-wide checks (4 mismatches + 1 DNA + 1 RNA bulge)
-  count listings of this limit (`limit-two-indels`, each shape) as follows. On HGDP + 1000 Genomes,
-  the three repeat-rich guides: 9,059 per sample, on 435 row blocks, by 3,583 samples (VEGFA site 3
-  9,022 on 414, in GT repeats, EMX1 30 on 20, VEGFA site 1 7 on 1; one alternative alignment of
-  VEGFA site 3 at chr2:2,873,200 (+) lists 2,972 carriers so), and 128 on 41 at population level;
-  the README guide with NRR: 3 per sample, on 2, and 1 at population level, the same beside the
-  mega; none for the README guide with NRG, TRAC, the CEP290 guides, SaCas9's, Cas12a's and the
-  ACTGA guide. On HPRC, the README guide with NRR: 1 per sample, none at population level. The
-  carrier's own target can also start a repeat unit away from the row's: on the release gate's
-  genome-wide VEGFA site 3 search (B10, per sample, HGDP and 1000 Genomes), HGDP00655 is listed on
-  chr1:21,194,250 and 21,194,251 (+) for 21,194,271 GTGT>G, whose slot also holds 21,194,269 GT>G
-  inside the target and 21,194,275 GGT>G, which deletes its last base: read up to where that base
-  stood, the slot holds the target's bases, and its own target, through both deletions, starts two
-  bases before the row (HG01432 so on chr16:74,355,612 and 74,355,613 (+)). The real-data check
-  counts both shapes as `limit-two-indels` (§8). The haplotype scan of 2.10.1 is to read each
-  carrier's own bases there.
+- **Two indels on one haplotype.** A fake-indel window holds one indel, and a carrier is listed on
+  an indel row when its own bases read the row's target through the indel, from the target's first
+  base on or up to its last (§4). Where a second indel of the carrier's haplotype pushes a SNP the
+  row names out of the stretch read, the carrier's own target does not hold that SNP, and it is
+  listed on the row all the same. On 1000 Genomes chr22, the search of seven guides at 4 mismatches
+  and 2 DNA and 2 RNA bulges, per sample, lists one such carrier: NA20515 on chr22:50,299,296 (+) of
+  VEGFA site 1, whose 50,299,313 C>CG pushes the row's 50,299,316 T>G out of its target; no row of
+  the 17 chr22 gate runs of this release's development lists one. The release gate's genome-wide
+  checks (4 mismatches + 1 DNA + 1 RNA bulge) count listings of this limit (`limit-two-indels`, each
+  shape) at sites (chromosome, start, strand) as follows. On HGDP + 1000 Genomes, the three
+  repeat-rich guides: 9,059 per sample, at 435 sites, by 3,583 samples (VEGFA site 3 9,022 at 414,
+  in GT repeats, EMX1 30 at 20, VEGFA site 1 7 at 1; one alternative alignment of VEGFA site 3 at
+  chr2:2,873,200 (+) lists 2,972 carriers so), and 128 at 41 at population level; the README guide
+  with NRR: 3 per sample, at 2, and 1 at population level, the same beside the mega; none for the
+  README guide with NRG, TRAC, the CEP290 guides, SaCas9's, Cas12a's and the ACTGA guide. On HPRC,
+  the README guide with NRR: 1 per sample, none at population level. The carrier's own target can
+  also start a repeat unit away from the row's: on the release gate's genome-wide VEGFA site 3
+  search (B10, per sample, HGDP and 1000 Genomes), HGDP00655 is listed on chr1:21,194,250 and
+  21,194,251 (+) for 21,194,271 GTGT>G, whose slot also holds 21,194,269 GT>G inside the target and
+  21,194,275 GGT>G, which deletes its last base: read up to where that base stood, the slot holds
+  the target's bases, and its own target, through both deletions, starts two bases before the row
+  (HG01432 so on chr16:74,355,612 and 74,355,613 (+)). The real-data check counts both shapes as
+  `limit-two-indels` (§8). The same limit leaves targets unreported: one that a haplotype holds only
+  through two or more indel-path records is not generated (§8, residuals), so no row reports it for
+  that haplotype's carriers. The release gate's chr22 checks (`--chrom chr22 --mode both`) count
+  such targets (`limit-two-indels`, completeness), here as sites and the (site, sample) listings
+  they leave out. On HGDP + 1000 Genomes, per sample: the README guide with NRR 7 sites (3,425
+  listings by 1,770 samples, where the search's own indel rows stand at 211 sites of chr22), with
+  NRG 3 (1,725 listings), TRAC 9 (31), the ACTGA guide through the general index 2 (3), SaCas9's
+  21-nt guide 9 (125) at 2 mismatches and no bulge and 43 (4,349) at 4 + 1 + 1, and the three
+  repeat-rich guides 343 (25,853 by 4,015 samples, against indel rows at 4,232 sites): VEGFA site 3
+  305, EMX1 30, VEGFA site 1 8; population-level, the README guide 6 with NRR and 3 with NRG, the
+  three repeat-rich guides 95; beside the mega, 7 per sample and 4 population-level; on HPRC, the
+  README guide 21 (223 listings by 110 samples) in either mode; none for the CEP290 guides and
+  Cas12a's. Each target's best alignment is at 5 or 6 edits for the README guide, TRAC, the ACTGA
+  guide, EMX1, VEGFA site 1 and HPRC, at a CFD of at most 0.0004 for the README guide, 0.0025 for
+  TRAC, 0.0164 on HPRC, 0.0243 for EMX1, 0.052 for the ACTGA guide and 0.11 for VEGFA site 1; VEGFA
+  site 3's reach down to 3 edits and up to a CFD of 0.35 (24 sites at 0.1 or more), and two of
+  SaCas9's match the guide perfectly. At 6 of the README guide's 7 sites, 20 of HPRC's 21 and 41 of
+  the three repeat-rich guides' 343, no row of the search starts within 5 bp; at the others, rows of
+  other carriers or of other targets stand there. Rebuilt from the VCF, every carrier of 13 of these
+  targets (at 8 sites of five searches; 2,782 listings) holds the target on a haplotype that does
+  not hold it with only one of its indels there, or none. No fix is planned yet: the haplotype scan
+  planned for 2.10.1 writes the lines the search writes, one indel per window.
 - **An MNV beside an indel on one haplotype.** No store the search reads holds an MNV (the phased
   indel store keeps records whose REF and ALT differ in length, the SNP tiers SNVs, and the indel
   log lists an MNV's carriers with no phase), so a carrier whose haplotype holding a row's indel
   also holds an MNV that changes the target is listed on the indel row for the target that haplotype
   would hold without the MNV, a sequence it does not have (§4); a SNP row keeps such a carrier too
   (§8, residuals): on HPRC's search of the README guide below, per sample, the real-data check's
-  SNP-row report counts 3,334 such listings of SNP rows on 219 row blocks, by all 232 samples
+  SNP-row report counts 3,334 such listings of SNP rows at 219 sites, by all 232 samples
   (`limit-snp-row-mnv`). Of the published panels only HPRC v2.1 has MNVs: 702,193 of the 49,547,631
   records of its VCFs (699,719 of the 12,361,907 records of its indel log); HGDP + 1000 Genomes
   (127,666,429 SNVs and 17,192,381 indels) and `hg38_mega` have none. HPRC's genome-wide search of
@@ -3584,26 +3611,27 @@ indels on one haplotype, and the searches above 1 DNA + 1 RNA bulge in dense reg
   enriched genome: there a run is refused where a chromosome it checks has a split SNP site in
   its VCF and no Q in its variant index of 2.10.0.
 - **Searches above 1 DNA + 1 RNA bulge in dense regions.** On an index that codes every allele
-  (CRISPRitz 2.10.0), the IUPAC search of the immunoglobulin loci and of some tandem repeats
-  grows by orders of magnitude above the default budget, a cost no step after the search
-  removes: on IGL alone (chr22, HGDP + 1000 Genomes, the README guide), the SNP search writes
-  755,963 raw targets at 4 + 1 + 1 and 33,657,519 at 4 + 2 + 2 (27.9 GB of memory), and IGH
-  needed 225 GB at 4 + 2 + 1 (§5). Such a search can run for many hours or run out of memory.
-  `complete-search` warns of it (`Bulge_budget_note`), and every dense window a search meets is
-  listed, one line a window, in `<out>.high_variant_density_regions.bed` (§5). Keep the default
-  1 DNA + 1 RNA bulge there, or a `--max-total-edits` of 3 or less, which keeps a wider budget
-  near the default's cost. The haplotype scan of 2.10.1, which searches the samples' own
-  haplotypes in the dense regions in place of the IUPAC search, is to make such searches
-  exact and tractable.
-- **Population-level searches of a dense panel in the immunoglobulin loci.** Coding every allele
-  makes those loci dense, and the population-level analysis reads no haplotype, so the haplotype
-  pre-check, which skips per sample the raw targets no sample carries, skips none of their windows
-  (§5, search speed): the release gate's genome-wide population-level search of the README guide
-  with NRG on HGDP + 1000 Genomes took 2.20 times 2.8.1's time (2 h 29 min against 1 h 8 min, 32
-  threads), where its per-sample searches took 0.95 to 1.30 times and HPRC's searches 0.90 and 0.96.
-  Its searches take about 2.8.1's time; the SNP post-analysis of chr14 (IGH), chr2 (IGK) and chr22
-  (IGL) took 2,474, 1,626 and 765 s. 2.10.0 is released with it (decided on 2026-11-16); a faster
-  population-level post-analysis of the dense loci is planned for 2.10.1.
+  (CRISPRitz 2.10.0), the IUPAC search of the immunoglobulin loci and of some tandem repeats grows
+  by orders of magnitude above the default budget, a cost no step after the search removes: on IGL
+  alone (chr22, HGDP + 1000 Genomes, the README guide), the SNP search writes 755,963 raw targets at
+  4 + 1 + 1 and 33,657,519 at 4 + 2 + 2 (27.9 GB of memory), and IGH needed 225 GB at 4 + 2 + 1
+  (§5). Such a search can run for many hours or run out of memory. `complete-search` warns of it
+  (`Bulge_budget_note`), and every dense window a search meets is listed, one line a window, in
+  `<out>.high_variant_density_regions.bed` (§5). Keep the default 1 DNA + 1 RNA bulge there, or a
+  `--max-total-edits` of 3 or less, which keeps a wider budget near the default's cost. The
+  haplotype scan of 2.10.1, which searches the samples' own haplotypes in the dense regions in place
+  of the IUPAC search, is to make such searches exact and tractable per sample; a population-level
+  search reads no haplotype and keeps the IUPAC search there.
+- **Population-level searches of a dense panel in its dense loci.** Coding every allele makes some
+  loci dense, the immunoglobulin loci among them, and the population-level analysis reads no
+  haplotype, so the haplotype pre-check, which skips per sample the raw targets no sample carries,
+  skips none of their windows (§5, search speed): the release gate's genome-wide population-level
+  search of the README guide with NRG on HGDP + 1000 Genomes took 2.20 times 2.8.1's time (2 h 29
+  min against 1 h 8 min, 32 threads), where its per-sample searches took 0.95 to 1.30 times and
+  HPRC's searches 0.90 and 0.96. Its searches take about 2.8.1's time; the SNP post-analysis of
+  chr14 (IGH), chr2 (IGK), chr4 and chr22 (IGL) took 2,474, 1,626, 853 and 765 s. 2.10.0 is released
+  with it (decided on 2026-11-16); a faster population-level post-analysis of the dense loci is
+  planned for 2.10.1.
 - **One refusal's advice on a sites-only dataset.** Where a search refuses the INDELS index of a
   sites-only dataset (the mega) whose fake-indel genome is not in place while its VCFs are, the
   refusal says to remove that index and the dataset's enriched genome (and its variant index,
@@ -3613,11 +3641,11 @@ indels on one haplotype, and the searches above 1 DNA + 1 RNA bulge in dense reg
   `seq_script/merge_panels/mega_rebuild.sh` (`docs/TROUBLESHOOTING.md` §12).
 
 Limits stated in other sections, which 2.10.0 keeps: one indel per fake-indel window, so an
-off-target that needs two indels in one protospacer is not generated as a candidate (§8, residuals);
-an MNV is in no phased store, so its carriers are resolved PUTATIVE (§4); an indel row, and each ALT
-of a VCF line that lists several ALTs, gives the record's first ID (§8); and an index of format 1,
-as every archive of 2.8.1, keeps the limits at contig ends and `N` runs of §9 until it is built
-again.
+off-target that needs two indels in one protospacer is not generated as a candidate (§8, residuals;
+its scale on the release gate is in the first item above); an MNV is in no phased store, so its
+carriers are resolved PUTATIVE (§4); an indel row, and each ALT of a VCF line that lists several
+ALTs, gives the record's first ID (§8); and an index of format 1, as every archive of 2.8.1, keeps
+the limits at contig ends and `N` runs of §9 until it is built again.
 
 ---
 

@@ -10,25 +10,29 @@ this file held before is kept at its end, for the record.
 - **The haplotype scan.** In the dense regions of a variant genome that codes every allele (the
   immunoglobulin loci above all), a search above 1 DNA + 1 RNA bulge expands so many IUPAC
   combinations that it runs for hours or out of memory, and 2.10.0 warns of it
-  ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §14). 2.10.1 is to search there the samples' own
-  haplotype sequences, indels included, in place of the IUPAC search: its design was checked on
-  IGL and IGH, up to 4 mismatches + 2 + 2 bulges, where the lines of the IUPAC search that a real
-  haplotype can give are exactly the scan's. The engine's hooks for it (a region skip, keep-only,
-  the skipped-leaf dump and a capability report) ship in CRISPRitz 2.10.0, which 2.10.1 runs on,
-  and the indexes of 2.10.0 serve it as they are: no index is rebuilt.
+  ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §14). 2.10.1 is to search there, per sample, the
+  samples' own haplotype sequences, indels included, in place of the IUPAC search (one indel per
+  fake-indel window, as the search writes them; a population-level search keeps the IUPAC search
+  there): its design was checked on IGL and IGH, up to 4 mismatches + 2 + 2 bulges, where the lines
+  of the IUPAC search that a real haplotype can give are exactly the scan's. The engine's hooks for
+  it (a region skip, keep-only, the skipped-leaf dump and a capability report) ship in CRISPRitz
+  2.10.0, which 2.10.1 runs on, and the indexes of 2.10.0 serve it as they are: no index is rebuilt.
 - **One density pass before the search**, defined by the genome and shared by the scan, the speed
   steps of 2.10.0 and the mega's density guard (in 2.10.0 the dense-region file is written from
   each search's own raw targets).
-- **Known limits of 2.10.0 the scan or the release fixes**
-  ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15): a carrier listed on an indel row for a SNP
-  that a second indel of its haplotype pushes out of its own target (the scan reads each carrier's
-  own bases); one target written as two rows, or twice, in a microsatellite (the merge).
+- **A known limit of 2.10.0 the release fixes** ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15):
+  one target written as two rows, or twice, in a microsatellite (the merge).
 - **The real-data check** (`scripts/check_indel_rows.py`) checks `Variant_info_spacer+PAM` (each
   variant's number in its target) and redundant alternative alignments, which it does not today
   ([`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md), step 4c).
 
 ## Open, no release named
 
+- Two indels on one haplotype: a fake-indel window holds one indel, so a target that a haplotype
+  holds only through two indels is not reported for its carriers, and a carrier whose second indel
+  pushes a SNP the row names out of its own target is listed on that row
+  ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15; METHODS §10 gives the release gate's counts).
+  The haplotype scan does not lift it: it writes, as the search does, one indel per window.
 - An unphased call of two ALTs at one position (`1/2`) is listed on a row that needs the
   reference base there, and on a classic install an unphased carrier only on the row of all its
   variants ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15).

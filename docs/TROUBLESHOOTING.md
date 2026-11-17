@@ -539,7 +539,8 @@ after the search removes that cost.
 keep `--max-total-edits` at 3 or less, which bounds the alignments; or search the reference
 alone, or a chromosome that holds none of those loci. CRISPRme 2.10.1 is planned to search, in
 those regions, the samples' own haplotypes, indels included, in place of the variant genome's
-combinations (the haplotype scan); the indexes of 2.10.0 serve it as they are.
+combinations, in a per-sample search (the haplotype scan); the indexes of 2.10.0 serve it as they
+are.
 
 ## 15. A row that looks wrong: the known limits of 2.10.0
 
@@ -555,8 +556,19 @@ rules behind them.
   alignment, chr2:2,873,200 (+)), 3 for the README guide and none for the other guides checked. Such
   a carrier's own target can also start a repeat unit away from the row: the genome-wide gate search
   of VEGFA site 3 per sample lists two carriers so (HGDP00655 and HG01432 of HGDP + 1000 Genomes, in
-  GT repeats), their bases the row's, through a second deletion. The haplotype scan planned for
-  2.10.1 reads each carrier's own bases.
+  GT repeats), their bases the row's, through a second deletion. No fix is planned yet: the
+  haplotype scan planned for 2.10.1 writes, as the search does, one indel per window.
+- **An off-target missing for a carrier of two indels.** A target that an individual's haplotype
+  holds only through two indels or more is not generated (a fake-indel window holds one), so no row
+  lists that individual for it, and where no other carrier holds it, no row reports it at all. How
+  often depends on the guide and its repeats: on chr22, per sample, the release gate's checks found
+  7 such sites for the README guide (held by 1,770 samples, each target at a CFD below 0.0004), 343
+  for three repeat-rich guides (VEGFA site 3's up to a CFD of 0.35), 21 on HPRC, 9 for TRAC, 9 for
+  SaCas9's 21-nt guide at 2 mismatches (two of them perfect matches) and none for the CEP290 and
+  Cas12a guides; at 6 of the README guide's 7 sites and 20 of HPRC's 21 the search writes no row
+  within 5 bp. To check a site for an individual, read its genotypes in the dataset's VCF around the
+  target; `assembly-search` searches an individual's assembled haplotypes, which hold every indel.
+  No fix is planned yet.
 - **On HPRC, a carrier listed on an indel row whose haplotype holds an MNV there.** No store
   CRISPRme reads holds an MNV (a record of two or more bases replaced by as many), so a carrier
   whose haplotype holding the row's indel also holds an MNV inside the target is listed for the

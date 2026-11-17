@@ -74,10 +74,12 @@ per-score **worst-possible** reconstruction. The min-edit lower bound is proven 
 SNP + bulge + single-indel, but **BREAKS** (verified false-negative even at k=0) for ≥2 cis indels in
 a protospacer and for equal-length MNVs — a size-aware slack / flag-all-multi-indel-windows / `norm -a`
 fix is needed; multi-indel-in-cis is common in raw counts (~17–19% of real indel off-targets), most
-of it in STR/VNTR repeats: ~1–2% of indel loci after repeat-masking, and ~0.1–0.2% of indel
-off-targets genuinely missed (METHODS §8). CFD worst-case is
-already exact via factorization (`twopass_cfd_exact.py`, 0-ULP verified); CRISPR-Bulge would be
-shortlist-only.
+of it in STR/VNTR repeats: ~1–2% of indel loci after repeat-masking (development counts). The
+search writes one indel per fake-indel window, and 2.10.0's release gate measured, per guide on
+chr22, the targets that leaves unreported: none for the CEP290 and Cas12a guides, 7 sites for the
+README guide (each at a CFD below 0.0004), 343 for three repeat-rich guides, up to a CFD of 0.35
+(METHODS §10). CFD worst-case is already exact via factorization (`twopass_cfd_exact.py`, 0-ULP
+verified); CRISPR-Bulge would be shortlist-only.
 
 **Code pointers.** `PostProcess/twopass_cfd_exact.py`, the fixture at commit `113b9b7`; memory note
 `two-pass-dense-search-design` (the lynchpin analysis + caveats). (Was tracking task #175.)

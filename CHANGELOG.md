@@ -47,8 +47,8 @@ major.minor version (Changed). The main changes, each told in its entry below:
   rows against haplotypes it writes from the VCF itself. It is a release gate.
 - **Known limits.** They are stated, with their scale where it was measured, under Changed and in
   METHODS §10 ("Known limits of 2.10.0"). A haplotype scan of the dense regions, planned for
-  CRISPRme 2.10.1 with no index rebuild, is to lift the largest of them: searches above 1 DNA + 1
-  RNA bulge there.
+  CRISPRme 2.10.1 with no index rebuild, is to lift the largest of them in a per-sample search:
+  searches above 1 DNA + 1 RNA bulge there.
 
 ### Added
 - **CRISPRme reads index format 2, the format CRISPRitz writes from 2.10.0.** An index of format
@@ -1037,7 +1037,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
     variant bases than the SNP they carry (chr22:11333697 (−), chr22_11333716_T_G: HG00271,
     HG00318, HG00369, HG00379, HG00864, NA06991, NA06993, NA18547), where the HGDP + 1000
     Genomes run alone lists them on an alignment that holds it (report-only).
-  - Wired in: `PostProcess/test_check_indel_rows.py` (266 unit and mutation tests: a right
+  - Wired in: `PostProcess/test_check_indel_rows.py` (268 unit and mutation tests: a right
     row raises nothing gating, each corruption of it is caught, each documented limit and
     overlapping slot comes out under its own class, the checker's coverage gaps under
     theirs; the refusals; each release's reading of the data, told from a run's records; a
@@ -1299,7 +1299,8 @@ major.minor version (Changed). The main changes, each told in its entry below:
   `<out>.high_variant_density_regions.bed` (Changed). A haplotype scan of those regions, which
   searches the samples' own haplotypes there in place of the IUPAC search, is planned for
   CRISPRme 2.10.1, with no index rebuild (its engine hooks are in CRISPRitz 2.10.0); it is to
-  make such searches exact and tractable.
+  make such searches exact and tractable per sample (a population-level search reads no
+  haplotype, and keeps the IUPAC search there).
 
 ### Changed
 - **The default search budget, 1 DNA + 1 RNA bulge, is every search's.** complete-search (given
@@ -1802,21 +1803,29 @@ major.minor version (Changed). The main changes, each told in its entry below:
     target holds a second indel that pushes a SNP the row names out of the target stays listed on
     that row, which names the SNP its own target does not hold. How often depends on the guide: on
     HGDP + 1000 Genomes the release gate's genome-wide checks (4 + 1 + 1) count 9,059 listings of
-    this limit (the class `limit-two-indels`, each shape) by 3,583 samples for the three repeat-rich
-    guides per sample, almost all VEGFA site 3's in GT repeats (one of its alternative alignments,
-    chr2:2,873,200 (+), lists 2,972 carriers so), 128 at population level, 3 for the README guide
-    per sample and none for the gate's other searches (the README guide with NRG, TRAC, CEP290,
-    SaCas9, Cas12a, the ACTGA guide); on HPRC, 1. On 1000 Genomes chr22, a search of seven guides at
-    4 mismatches and 2 DNA and 2 RNA bulges, per sample, lists one (NA20515 on chr22:50,299,296 (+)
-    of VEGFA site 1). The haplotype scan planned for 2.10.1 is to read each carrier's own bases
-    there.
+    this limit (the class `limit-two-indels`, each shape) at 435 sites by 3,583 samples for the
+    three repeat-rich guides per sample, almost all VEGFA site 3's in GT repeats (one of its
+    alternative alignments, chr2:2,873,200 (+), lists 2,972 carriers so), and 128 at population
+    level; for the README guide with NRR, 3 per sample and 1 at population level, the same beside
+    the mega; none for the gate's other searches (the README guide with NRG, TRAC, CEP290, SaCas9,
+    Cas12a, the ACTGA guide); on HPRC, 1 per sample. On 1000 Genomes chr22, a search of seven
+    guides at 4 mismatches and 2 DNA and 2 RNA bulges, per sample, lists one (NA20515 on
+    chr22:50,299,296 (+) of VEGFA site 1). The same limit leaves targets unreported: a target that a
+    haplotype holds only through two indels or more is not generated, so no row lists that
+    haplotype's carriers for it. The gate's chr22 checks count such targets, per sample, at 7 sites
+    for the README guide with NRR (3,425 listings by 1,770 samples, each at 5 or 6 edits and a CFD
+    below 0.0004), 343 for the three repeat-rich guides (VEGFA site 3's 305 reach a CFD of 0.35, and
+    3 edits), 21 on HPRC, 9 for TRAC and 9 for SaCas9's 21-nt guide at 2 mismatches and no bulge,
+    two of them perfect matches; none for the CEP290 and Cas12a guides (METHODS §10 gives each
+    search). No fix is planned yet: the haplotype scan planned for 2.10.1 writes the lines the
+    search writes, one indel per window.
   - **An MNV beside an indel on one haplotype.** No store the search reads holds an MNV, so a
     carrier whose haplotype holding a row's indel also holds an MNV that changes the target is
     listed for the target that haplotype would hold without it. Of the published panels only HPRC
     v2.1 has MNVs (702,193 of its 49,547,631 records); its genome-wide search of the README guide at
     4 + 1 + 1 lists carriers so 1,163 times at 94 sites per sample (232 samples) and 558 times at 73
     sites at population level (229 samples), each row at a CFD of 0.084 or less, and its SNP rows
-    3,334 times on 219 row blocks (the check's SNP-row report). The real-data check counts them as
+    3,334 times at 219 sites (the check's SNP-row report). The real-data check counts them as
     `limit-indel-row-mnv` and `limit-snp-row-mnv` (the first gated as `variant-missing` until its
     genome-wide run on HPRC). A fix needs the MNVs' phased genotypes in a store built with the
     panel's Dictionaries; 2.10.1 is to build it (HPRC's Dictionaries rebuilt, its index as it is).
@@ -1852,7 +1861,8 @@ major.minor version (Changed). The main changes, each told in its entry below:
   - **Searches above 1 DNA + 1 RNA bulge in dense regions** (the warning under Added). On an
     index that codes every allele, the IUPAC search of the immunoglobulin loci and some tandem
     repeats grows by orders of magnitude above the default budget, and can run for many hours
-    or run out of memory. The haplotype scan planned for 2.10.1 is to make them tractable.
+    or run out of memory. The haplotype scan planned for 2.10.1 is to make them tractable per
+    sample.
   - **One refusal's advice on a sites-only dataset.** Where a search refuses the INDELS index of
     a sites-only dataset (the mega) whose fake-indel genome is not in place while its VCFs are,
     the refusal says to remove that index and the dataset's enriched genome and to build them
@@ -2457,12 +2467,14 @@ major.minor version (Changed). The main changes, each told in its entry below:
     carriers. The real-data checker's SNP-row report reads a slot so too (`snp_row_keeps`).
   - On the release gate, each per-sample search was run again with the change and an analysis that
     also calls the old rule on every SNP-row verdict and logs the calls that differ (gate B's
-    sandbox and install). Of about 213 million verdicts, 3,593 differ, 191 distinct (target,
-    carrier, haplotype, variant set) calls, every one a carrier kept that the old rule dropped: B10
-    (the three repeat-rich guides) 157 of 190,443,762, B1 and B8 (the README guide with NRR) 5 of
-    5,526,903, B3 (with NRG) 5, B5 (TRAC) 6, B13a (CEP290) 2, E2 and E5 (the ACTGA guide through the
-    general index) 7 each, B6 (HPRC) 2, and none in B12a, B12d, B14a and B14c. Rebuilt from the VCF,
-    each of the 189 on HGDP + 1000 Genomes holds the row's target; HPRC's 2 (HG03669 on chr15,
+    sandbox and install). Of about 218 million verdicts, 3,794 differ: 165 distinct (target,
+    carrier, haplotype, variant set) calls by 47 samples, some of them met by several
+    searches, every one a carrier kept that the old rule dropped. By search: B10 (the three
+    repeat-rich guides) 157 of 190,443,762 verdicts, B1 (the README guide with NRR) 5 of
+    5,526,903, B8 (the same beside the mega) the same 5 of 5,522,125, B3 (with NRG) the same
+    5, B5 (TRAC) 6, B13a (CEP290) 2, E2 and E5 (the ACTGA guide through the general index) the
+    same 7, B6 (HPRC) 2, and none in B12a, B12d, B14a and B14c. Rebuilt from the VCF, each of
+    the 163 on HGDP + 1000 Genomes holds the row's target; HPRC's 2 (HG03669 on chr15,
     HG02015 on chrY) hold MNVs inside the target, which no store CRISPRme reads holds (Changed, the
     known limits: an MNV beside an indel). Most of the haplotypes kept change no row: the tables of
     B1, B3, B5, B6, B8, B12a, B12d, B13a, B14a, B14c, E2 and E5 are the same as before (B8's as

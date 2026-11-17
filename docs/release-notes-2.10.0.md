@@ -112,19 +112,19 @@ read ([RELEASING.md](https://github.com/pinellolab/crisprme-plus/blob/v2.10.0/do
 
 Each is stated with its scale in METHODS §10, and TROUBLESHOOTING §14 and §15 say what a user sees.
 The haplotype scan of the dense regions, planned for 2.10.1 with no index rebuild, is to lift the
-bulge limit and the two-indel one; where 2.10.1 plans a fix for another, it says so.
+bulge limit in a per-sample search; where 2.10.1 plans a fix for another limit, its item says so.
 
 - **Searches above 1 DNA + 1 RNA bulge in dense regions** (the immunoglobulin loci, some tandem
   repeats) grow by orders of magnitude on an index that codes every allele: on IGL alone, 0.76
   million raw targets at 4 + 1 + 1 and 33.7 million at 4 + 2 + 2, and IGH needed 225 GB at
   4 + 2 + 1 (measured during development, on fake-indel windows of 25/27). Keep the default budget
   there, or `--max-total-edits` 3 or less.
-- **Population-level searches of HGDP + 1000 Genomes in the immunoglobulin loci.** Coding every
-  allele makes those loci dense, and the population-level analysis, which reads no haplotype, cannot
-  skip their windows as a per-sample one does: the README guide's genome-wide population-level
-  search with NRG took 2.2 times 2.8.1's time (2 h 29 min against 1 h 8 min on 32 threads), where
-  the per-sample searches took 0.95 to 1.3 times. A faster population-level post-analysis of the
-  dense loci is planned for 2.10.1.
+- **Population-level searches of HGDP + 1000 Genomes in dense loci.** Coding every allele makes
+  some loci dense, the immunoglobulin loci among them, and the population-level analysis, which
+  reads no haplotype, cannot skip their windows as a per-sample one does: the README guide's
+  genome-wide population-level search with NRG took 2.2 times 2.8.1's time (2 h 29 min against 1 h
+  8 min on 32 threads), where the per-sample searches took 0.95 to 1.3 times. A faster
+  population-level post-analysis of the dense loci is planned for 2.10.1.
 - **On HPRC, an MNV beside an indel on one haplotype.** No store the search reads holds an MNV's
   phase, so a carrier whose haplotype holding a row's indel also holds an MNV in the target is
   listed for the target that haplotype would have without the MNV: the README guide's genome-wide
@@ -137,7 +137,12 @@ bulge limit and the two-indel one; where 2.10.1 plans a fix for another, it says
   its bases. How often depends on the guide: on the release gate's genome-wide checks of
   HGDP + 1000 Genomes, 9,059 listings of this limit for three repeat-rich guides per sample, almost
   all at VEGFA site 3 in GT repeats (2,972 carriers on one alternative alignment), 3 for the README
-  guide and none for the other guides checked.
+  guide and none for the other guides checked. And a target that a haplotype holds only through two
+  indels is not reported for its carriers: on chr22, the gate's checks find 7 such sites for the
+  README guide (3,425 carrier listings, each target at a CFD below 0.0004), 343 for the three
+  repeat-rich guides (VEGFA site 3's up to a CFD of 0.35), 21 on HPRC, 9 for TRAC, 9 for SaCas9's
+  guide at 2 mismatches (two of them perfect matches) and none for the CEP290 and Cas12a guides. No
+  fix is planned yet: the haplotype scan writes, as the search does, one indel per window.
 - **A target wholly inside a tandem repeat** can be split over two rows or written twice (in a
   model of microsatellites; no search of real data checked has one). A fix is planned for 2.10.1.
 - **An unphased call of two ALTs at one position** is listed, PUTATIVE, on a row that needs the

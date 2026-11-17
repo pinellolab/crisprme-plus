@@ -1330,17 +1330,96 @@ class TheArchiveGateSaysWhereAnEmptyIndelsIndexComesFrom(unittest.TestCase):
 
 class FutureWorkSaysTheShareOfIndelsInCisAsMethodsDoes(unittest.TestCase):
     """FUTURE_WORK §3 said that two or more indels in cis are common, "~17-19% of real indel
-    off-targets": the raw count, mostly repeats, of which METHODS §8 gives ~1-2% of indel loci
-    after repeat-masking, and ~0.1-0.2% of indel off-targets missed (plan 4.1)."""
+    off-targets": the raw count, mostly repeats, beside ~1-2% of indel loci after
+    repeat-masking (plan 4.1). It and METHODS §8 also said that ~0.1-0.2% of indel off-targets
+    are missed, all at the edit budget's ceiling, a development estimate with no basis given,
+    which 2.10.0's release gate contradicts: its chr22 checks count, per guide, the targets the
+    one-indel window leaves unreported, VEGFA site 3's up to a CFD of 0.35 and two perfect
+    matches of SaCas9's 21-nt guide among them (closure review, B-R1-3). Both give the gate's
+    figures now (METHODS §10)."""
 
     def test_the_raw_share_is_said_raw_beside_the_masked_one(self):
         text = " ".join((_REPO / "docs" / "FUTURE_WORK.md").read_text().split())
         self.assertIn("common in raw counts (~17–19% of real indel off-targets), most of it in "
-                      "STR/VNTR repeats: ~1–2% of indel loci after repeat-masking, and ~0.1–0.2% "
-                      "of indel off-targets genuinely missed (METHODS §8)", text)
+                      "STR/VNTR repeats: ~1–2% of indel loci after repeat-masking (development "
+                      "counts)", text)
+
+    def test_the_missed_targets_are_the_release_gates_measured_ones(self):
+        text = " ".join((_REPO / "docs" / "FUTURE_WORK.md").read_text().split())
         methods = " ".join((_REPO / "METHODS.md").read_text().split())
-        self.assertIn("falling to **~1–2%** of indel loci after repeat-masking", methods)
-        self.assertIn("**~0.1–0.2%** of indel off-targets", methods)
+        for doc in (text, methods):
+            self.assertNotIn("0.1–0.2%", doc)
+        self.assertIn("343 for three repeat-rich guides, up to a CFD of 0.35 (METHODS §10)", text)
+        self.assertIn("the release gate's checks find 7 sites of such targets for the README "
+                      "guide (NRR), held by 1,770 samples, each at 5 or 6 edits and a CFD below "
+                      "0.0004", methods)
+        self.assertIn("SaCas9's 21-nt guide, at 2 mismatches and no bulge, has two that match it "
+                      "perfectly", methods)
+        self.assertIn("VEGFA site 3 305, EMX1 30, VEGFA site 1 8", methods)
+
+
+class TheHaplotypeScanIsNotTheTwoIndelLimitsFix(unittest.TestCase):
+    """The docs said that the haplotype scan planned for 2.10.1 would lift the two-indel limit,
+    reading each carrier's own bases. The scan writes, per sample and in the dense regions
+    only, the lines the IUPAC search writes there, one indel per fake-indel window (its design,
+    sections 2.1 and 4.2), and 16 of the 435 sites of the limit on the release gate's B10 lie
+    within 30 bp of a dense window: it is to lift the bulge limit, per sample, and not this one
+    (closure review, B-R1-1). The docs say so, and that no fix of the limit is planned yet; the
+    release notes and TROUBLESHOOTING say too what the limit leaves unreported (B-R1-3)."""
+
+    DOCS = ("METHODS.md", "CHANGELOG.md", "docs/release-notes-2.10.0.md",
+            "docs/TROUBLESHOOTING.md", "docs/ROADMAP.md")
+
+    @staticmethod
+    def _flat(name):
+        return " ".join((_REPO / name).read_text().split())
+
+    def test_no_doc_says_the_scan_lifts_it(self):
+        for name in self.DOCS:
+            text = self._flat(name)
+            for claim in ("carrier's own bases", "the bulge limit and the two-indel one",
+                          "is to lift two of them", "the scan reads each carrier"):
+                self.assertNotIn(claim, text, name)
+
+    def test_the_docs_say_no_fix_is_planned_and_why(self):
+        methods = self._flat("METHODS.md")
+        self.assertIn("so it leaves the two-indel limit as it is", methods)
+        self.assertIn("No fix is planned yet: the haplotype scan planned for 2.10.1 writes the lines "
+                      "the search writes, one indel per window.", methods)
+        self.assertIn("No fix is planned yet: the haplotype scan planned for 2.10.1 writes the lines "
+                      "the search writes, one indel per window.", self._flat("CHANGELOG.md"))
+        self.assertIn("No fix is planned yet: the haplotype scan writes, as the search does, one "
+                      "indel per window.", self._flat("docs/release-notes-2.10.0.md"))
+        self.assertIn("No fix is planned yet: the haplotype scan planned for 2.10.1 writes, as the "
+                      "search does, one indel per window.", self._flat("docs/TROUBLESHOOTING.md"))
+        self.assertIn("The haplotype scan does not lift it: it writes, as the search does, one "
+                      "indel per window.", self._flat("docs/ROADMAP.md"))
+
+    def test_the_users_docs_say_what_it_leaves_unreported(self):
+        notes = self._flat("docs/release-notes-2.10.0.md")
+        self.assertIn("And a target that a haplotype holds only through two indels is not "
+                      "reported for its carriers: on chr22, the gate's checks find 7 such sites for "
+                      "the README guide", notes)
+        trouble = self._flat("docs/TROUBLESHOOTING.md")
+        self.assertIn("**An off-target missing for a carrier of two indels.**", trouble)
+        self.assertIn("at 6 of the README guide's 7 sites and 20 of HPRC's 21 the search writes no "
+                      "row within 5 bp", trouble)
+
+
+class TheTimingGatesNoteCountsTheControlAsAPair(unittest.TestCase):
+    """RELEASE_CHECKLIST's note on 2.10.0's timing gate said that 12 of its 13 pairs were within
+    twice 2.8.1's time; C9 (2.197) and its side-by-side control against the released 2.8.1
+    (2.207) were both over it, so 11 were (closure review, B-R1-2). Its post-analysis is the
+    dense loci's, chr4's among them, not the immunoglobulin loci's alone (B-R1-8)."""
+
+    def test_it_says_eleven_and_names_both(self):
+        text = " ".join((_REPO / "docs" / "RELEASE_CHECKLIST.md").read_text().split())
+        note = text[text.index("**2.10.0's gate** (ml008, 2026-11-15)"):]
+        self.assertNotIn("12 of the 13 pairs", note)
+        self.assertIn("11 of the 13 pairs were within the limit", note)
+        self.assertIn("The two over it are C9, the README guide's population-level search with NRG "
+                      "on HGDP + 1000 Genomes, and its side-by-side control", note)
+        self.assertIn("chr4's 853 s", note)
 
 
 class AGenomeFolderWithASpaceIsRefusedUpFront(unittest.TestCase):

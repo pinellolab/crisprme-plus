@@ -1017,9 +1017,10 @@ Genome-wide, on the rebuilt indexes, the default search (the README guide, NRR) 
 from its parts before the rebuild was 1.5 to 4 h per sample). Against 2.8.1, on 32 threads, a
 per-sample search of HGDP + 1000 Genomes took 0.95 to 1.30 times 2.8.1's time and one of HPRC 0.90
 (0.96 population-level), but the README guide's population-level search of HGDP + 1000 Genomes with
-NRG took 2.2 times 2.8.1's: 2 h 29 min against 1 h 8 min. Its post-analysis of the immunoglobulin
-loci, which reads no haplotype and so skips none of their dense windows, is where the time goes; a
-faster one is planned for 2.10.1 (METHODS.md says how).
+NRG took 2.2 times 2.8.1's: 2 h 29 min against 1 h 8 min. Its searches took about 2.8.1's time;
+its post-analysis, which reads no haplotype and so skips none of the dense windows (the
+immunoglobulin loci's and others'), did not; a faster one is planned for 2.10.1 (METHODS.md says
+how).
 Above 1 DNA + 1 RNA bulge the variant search itself explodes in those loci (IGL alone, at the
 default `--max-total-edits` of 6: 5.1 million SNP raw targets at 4 + 2 + 1, 33.7 million at
 4 + 2 + 2, where the indel search, on windows of 25/27, wrote 204 million and needed 157 GB of
@@ -1027,8 +1028,8 @@ memory; with the cap raised to the budget's sum, 7.9 and 93.8 million SNP raw ta
 `complete-search` warns, unless `--max-total-edits` 3 or less bounds the alignments (6 + 2 + 2 at
 a cap of 3 wrote fewer raw targets there than the default). For a wider search, raise `--mm`
 first. CRISPRme 2.10.1 is planned to search, in those regions, the samples' own haplotypes,
-indels included, in place of the variant genome's combinations (the haplotype scan; CRISPRitz
-2.10.0 already holds what it needs, and the indexes of 2.10.0 serve it as they are).
+indels included, in place of the variant genome's combinations, per sample (the haplotype scan;
+CRISPRitz 2.10.0 already holds what it needs, and the indexes of 2.10.0 serve it as they are).
 See METHODS.md
 [§5](METHODS.md#search-speed-on-indexes-that-code-every-allele-the-haplotype-pre-check-the-k-skip-and-the-post-analysis-in-pieces).
 
