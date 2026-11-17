@@ -18,8 +18,9 @@ describes the methods, §10 the known limits and §11 how the indexes were built
   HGDP + 1000 Genomes. Each panel's Dictionaries and genotype store are published once, beside its
   indexes, and fetched once: the default `20-NRR_3_hg38+hg38_HGDP1kGP` is a 50.1 GB download with
   them, a second index of the panel its own archive alone. `NNN_3` is not built again: the general
-  index serves its searches as fast. The archives of 2.8.1 stay in `lucapinello/crisprme-data`,
-  unchanged, and a download by one of their names says which index of 2.10.0 replaces it.
+  index serves its searches as fast. The archives of 2.8.1 stay in `lucapinello/crisprme-data`
+  (and `lucapinello/crisprme-data-general-index`), unchanged, and a download by one of their names
+  says which index of 2.10.0 replaces it.
 - **What the new indexes hold.** Every allele of a split multi-allelic site is coded: up to 2.9.1
   CRISPRitz coded only the last record's ALT at a position written on several records, so an
   off-target that needs an earlier ALT was missed, or reported lower, without its carriers
@@ -44,13 +45,12 @@ describes the methods, §10 the known limits and §11 how the indexes were built
   variants against phased haplotypes, and the report ranks a combination no haplotype carries
   after the others; it drops no row. The mega is rebuilt from the records the enricher reads, with
   a density guard and a frequency bound that ranks its least likely combinations after the others.
-- **Speed.** Coding every allele makes the immunoglobulin loci dense. An exact haplotype
-  pre-check, a carriers-first check on the indel side and a post-analysis in pieces over the
-  search's threads give the same rows about ten times faster (the README guide's per-sample
-  search of chr22). Genome-wide, on 32 threads,
-  the release gate's per-sample searches took 0.95 to 1.3 times 2.8.1's time on HGDP + 1000
-  Genomes and 0.9 on HPRC (Known limitations: the population-level one). A search above 1 DNA + 1
-  RNA bulge on such an index is warned of.
+- **Speed.** Coding every allele makes the immunoglobulin loci dense. An exact haplotype pre-check,
+  a carriers-first check on the indel side and a post-analysis in pieces over the search's threads
+  give the same rows about ten times faster (the README guide's per-sample search of chr22).
+  Genome-wide, on 32 threads, the release gate's per-sample searches took 0.95 to 1.3 times 2.8.1's
+  time on HGDP + 1000 Genomes and 0.9 on HPRC (Known limitations: the population-level one). A
+  search above 1 DNA + 1 RNA bulge on such an index is warned of.
 - **One index, many PAMs.** A dedicated index serves the PAMs its own holds (an NRR index serves
   NGG, NAG and NRG), pruned, and a search prunes by itself where only such an index serves it.
 - **An independent check of the indel rows on real data**, `scripts/check_indel_rows.py`, which
@@ -66,8 +66,9 @@ describes the methods, §10 the known limits and §11 how the indexes were built
 built: the integrity of every index and its counts against the input VCFs; the independent indel
 checker on genome-wide searches of each panel, whose findings were fixed or documented below until
 none gated; the equivalence of a pruned index with a dedicated one, row for row; and 13 pairs of
-searches timed against 2.8.1 (METHODS §11; `docs/INDEX_PROVENANCE.md` records each archive, its
-inputs and their checksums). What a default install takes: a ~70 GB download, ~150 GB on disk (keep
+searches timed against 2.8.1 ([METHODS §11](https://github.com/pinellolab/crisprme-plus/blob/v2.10.0/METHODS.md#11-index-rebuild-of-2100);
+[INDEX_PROVENANCE.md](https://github.com/pinellolab/crisprme-plus/blob/v2.10.0/docs/INDEX_PROVENANCE.md)
+records each archive, its inputs and their checksums). What a default install takes: a ~70 GB download, ~150 GB on disk (keep
 ~200 GB free); the genome-wide variant search 38 GB of memory on 8 threads, 63 GB on 16 (the
 README's System Requirements).
 

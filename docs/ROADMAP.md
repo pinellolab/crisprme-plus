@@ -7,10 +7,10 @@ this file held before is kept at its end, for the record.
 
 ## CRISPRme+ 2.10.1 (planned)
 
-2.10.1 runs on CRISPRitz 2.10 and on the indexes of 2.10.0: no index is built again (HPRC's
-Dictionaries are, for the MNVs' phase). Each item below is a limit of 2.10.0 that METHODS §10 and
-[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §14 and §15 state with its measured size, or a gap the
-release's gates found.
+2.10.1 is to run on CRISPRitz 2.10 and on the indexes of 2.10.0: no index is to be built again
+(HPRC's Dictionaries are, for the MNVs' phase). Each item below is a limit of 2.10.0 that METHODS
+§10 and [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §14 and §15 state with its measured size, or a
+gap the release's gates found.
 
 - **The MNVs' phase (HPRC).** No store the search reads holds an MNV, so on HPRC v2.1 a carrier
   whose haplotype holding an indel row's indel also holds an MNV in the target is listed for a

@@ -36,8 +36,8 @@ CRISPRitz 2.10.z (Bioconda pins `crispritz >=2.10.0,<2.11`, and CRISPRitz 2.10.0
 A breaking change in either package (an index format, the enricher's output, a command line or a
 file one reads of the other) bumps the minor of both; any other change bumps only the patch of the
 package it changes ([version policy](https://github.com/pinellolab/crisprme-plus/blob/main/docs/RELEASING.md#version-policy)).
-So every index here serves CRISPRme+ 2.10.z; a release that changes the index format publishes its
-own. Every install route of 2.10.0 installs the matching CRISPRitz.
+So every index here serves CRISPRme+ 2.10.z, and a change of the index format would bump the minor
+of both packages. Every install route of 2.10.0 installs the matching CRISPRitz.
 
 ## Names
 

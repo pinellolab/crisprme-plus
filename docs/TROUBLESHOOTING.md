@@ -552,18 +552,19 @@ Each changes no other row; how often each occurs depends on the guide and the pa
 [METHODS.md](../METHODS.md) §10 lists them, with their scale where it was measured, and §4 gives the
 rules behind them.
 
-- **A carrier listed for a SNP that its own target does not hold.** On an indel row, a carrier
-  whose haplotype holds a second indel that pushes one of the row's named SNPs out of the target's
-  bases is listed on the row all the same. How often depends on the guide: the release gate's
-  genome-wide checks found 9,059 listings of this limit for three repeat-rich guides per sample on
-  HGDP + 1000 Genomes, almost all at VEGFA site 3 in GT repeats (2,972 carriers on one alternative
-  alignment, chr2:2,873,200 (+)), 3 for the README guide and none for the other guides checked. Such
-  a carrier's own target can also start one to three repeat units away from the row, its bases the
-  row's: rebuilt from the VCF, the gate's genome-wide searches of the three repeat-rich guides per
-  sample list 6 carriers so, at 8 sites of HGDP + 1000 Genomes (HGDP00655, HG01432, HG01883,
-  HGDP00465 and NA19475 on VEGFA site 3, in GT repeats, and NA20888 on EMX1, in an AAG repeat),
-  through a second deletion or insertion in the repeat. No fix is planned yet: the haplotype scan
-  planned for 2.10.1 writes, as the search does, one indel per window.
+- **A carrier listed for a SNP that its own target does not hold.** On an indel row, a carrier whose
+  haplotype holds a second indel that pushes one of the row's named SNPs out of the target's bases
+  is listed on the row all the same. How often depends on the guide: the release gate's genome-wide
+  checks found 9,059 listings of this limit (each of its shapes; rebuilt from the VCF, 8,693 are of
+  this one) for three repeat-rich guides per sample on HGDP + 1000 Genomes, almost all at VEGFA site
+  3 in GT repeats (2,972 carriers on one alternative alignment, chr2:2,873,200 (+)), 3 for the
+  README guide and none for the other guides checked. Such a carrier's own target can also start one
+  to three repeat units away from the row, its bases the row's: rebuilt from the VCF, the gate's
+  genome-wide searches of the three repeat-rich guides per sample list 6 carriers so, at 8 sites of
+  HGDP + 1000 Genomes (HGDP00655, HG01432, HG01883, HGDP00465 and NA19475 on VEGFA site 3, in GT
+  repeats, and NA20888 on EMX1, in an AAG repeat), through a second deletion or insertion in the
+  repeat. No fix is planned yet: the haplotype scan planned for 2.10.1 writes, as the search does,
+  one indel per window.
 - **An off-target missing for a carrier of two indels.** A target that an individual's haplotype
   holds only through two indels or more is not generated (a fake-indel window holds one), so no row
   lists that individual for it, and where no other carrier holds it, no row reports it at all. How
