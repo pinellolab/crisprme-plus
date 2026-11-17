@@ -35,14 +35,15 @@ it serves for its own guide length (`index_fit.fits`).
 
 1. **One working directory per panel**, every index of the panel built in it (`$HGDP`, `$HPRC`,
    `$MEGA`; `$REF` for the reference indexes), each with hg38 in `Genomes/hg38`, one FASTA per
-   contig, as most of 2.8.1's indexes were built (the contigs of their archives):
-   `$REF`'s and `$HGDP`'s hold all of hg38, as `crisprme.py download --what genome` installs it
-   (455 contigs, chrM and the alt, random and chrUn ones among them, as 2.8.1's reference indexes
-   and its NRR, NGG and NNN indexes of HGDP + 1000 Genomes hold; its NRG index of the panel held
-   chr1-22, X and Y); `$HPRC`'s and `$MEGA`'s hold its chromosomes chr1-22, X and Y alone, the 24
-   contigs of 2.8.1's indexes of those panels. mega's recipe builds every chromosome of the merged
-   VCFs in `$MEGA_SRC` (those 24 in `vcfs/hg38_mega`) and refuses a genome folder that holds any
-   other FASTA. Copy them from the reference's:
+   contig, as most of 2.8.1's indexes were built (the contigs of their archives): `$REF`'s and
+   `$HGDP`'s hold all of hg38, as `crisprme.py download --what genome` installs it (455 contigs,
+   chrM and the alt, random and chrUn ones among them, as 2.8.1's reference indexes and its NRR, NGG
+   and NNN indexes of HGDP + 1000 Genomes hold; its NRG index of the panel held chr1-22, X and Y; an
+   index holds a tree of each contig with a site of its PAM, so the TTTN indexes hold 454:
+   `chrUn_KI270539v1` has no TTTN site); `$HPRC`'s and `$MEGA`'s hold its chromosomes chr1-22, X and
+   Y alone, the 24 contigs of 2.8.1's indexes of those panels. mega's recipe builds every chromosome
+   of the merged VCFs in `$MEGA_SRC` (those 24 in `vcfs/hg38_mega`) and refuses a genome folder that
+   holds any other FASTA. Copy them from the reference's:
 
    ```bash
    mkdir -p $HGDP/Genomes && cp -r $REF/Genomes/hg38 $HGDP/Genomes/

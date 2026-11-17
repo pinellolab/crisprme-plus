@@ -13,13 +13,19 @@ the index builder and a second, non-backward-compatible index family appeared.
 
 ## The indexes of CRISPRme 2.10.0 (index format 2)
 
-The rebuild for 2.10.0 began on 2026-11-14 (ml007 and ml008): the 26 archives of the index set,
-16 indexes, each panel's companions and its enriched-genome kit. Every row ran from one image and
-one commit, so an index's bytes depend on that image and on the thread count alone. What was
-fixed before the first row is recorded here; what each row records once built is marked *after
-the build*, to be filled in from the build's logs before the publish, and the size and SHA-256 of
-each index and companion archive, which exist only once it is published, *after the publish*,
-from the Hub (Each archive, below; the release checklist, Gate D, "Provenance").
+The rebuild for 2.10.0 built the 26 archives of the index set: 16 indexes, the 7 companions of
+the variant panels (each panel's Dictionaries bundle, and the genotype store and phased indel
+genotypes of HGDP + 1000 Genomes and of HPRC) and the 3 enriched-genome kits. It ran on two
+nodes of the same kind (AMD EPYC 7H12, 2 × 64 cores, about 1 TB of RAM): ml008 built HPRC
+(2026-11-14, 03:49 to 06:39 UTC), then the mega and the 7 reference indexes (06:45 to 15:00
+UTC); ml007 built HGDP + 1000 Genomes (2026-11-14 06:45 UTC to 2026-11-15 03:48 UTC). Every row
+ran from one image and one commit, every exit status was 0, and an index's bytes depend on that
+image and on the thread count alone. Gate A, the integrity check of what was built, passed on
+both nodes (below). Nothing is published yet: the size and SHA-256 of each index and companion
+archive as the Hub holds it exist only once it is published, and are filled in then, from the
+Hub (the release checklist, E, step 5); the sizes below are those of each archive packed as
+`publish-index` packs it, measured before the publish (Each archive, below). The methods of the
+rebuild, and how it was checked, are in [METHODS §11](../METHODS.md#11-index-rebuild-of-2100).
 
 ### The build image: the image route, not the release image
 
@@ -45,25 +51,27 @@ release's records.
 | Binaries (md5) | `buildTST` `f6a1c29a246caff13d04efe5bc8eaf1a`, `searchTST` `b16b9e340556f1046bd359420bc0f535`, `searchBruteForce` `eefeb865acdacf5cdd32f84f646feee8`, `enricher` `b2a5d3a78c7713853d6ad259babe383e`, `crispritz.py` `070a462e50c24befde4791b791055912` |
 | Tools | bcftools 1.24, ijson 3.6.0 (yajl2_cffi), huggingface_hub 2.4.0 |
 | Environment | every row under `env -i`, with `PYTHONNOUSERSITE=1` (the image's Python packages, not those of `~/.local`, which the bind of `$HOME` puts first: ijson 3.5.1 there, which parses the dictionaries the same) |
-| Checked | `crisprme.py --version` v2.10.0 in the image, on ml007 and on ml003 (apptainer 1.3.4); the scorer's self-test computes; the smoke (the reference index and HPRC on chr22, mega on chr3, chr4 and chr12) records `built_by` 2.10.0/2.10.0 |
+| Checked | `crisprme.py --version` v2.10.0 in the image, on ml007 and on ml003 (apptainer 1.3.4); the scorer's self-test computes; the smoke (the reference index and HPRC on chr22, mega on chr3, chr4 and chr12) records `built_by` 2.10.0/2.10.0; after the build, Gate A checked again on ml007 and ml008 the sha256, these md5s, the versions and the tree (below) |
 
 At the release, check that the tagged sources that build indexes are those used:
 `git diff --stat 4ded5e6 v2.10.0 -- sourceCode crispritz.py Makefile Makefile_conda conda` in
 CRISPRitz prints nothing, and in CRISPRme `git diff db50986 v2.10.0 -- PAMs
-seq_script/merge_panels seq_script/rebuild/index_set_2.10.0.tsv` prints only comments of the
-recipes, which the docs wave after the build changes (the HPRC recipe's header says v2.1), and
-the name of the repo the set is published in, `lucapinello/crisprme_plus_indices`, made during
-the build under that name (in the index set's header, its `repo` column and every publish
+seq_script/merge_panels seq_script/rebuild/index_set_2.10.0.tsv` prints nothing but comment
+lines and the name of the repo the set is published in, `lucapinello/crisprme_plus_indices`, made
+during the build under that name (in the index set's header, its `repo` column and every publish
 command: each kit's `hf upload` and each index's `publish-index --hf-repo`, which the image of
 `db50986` the publish runs in needs, as its code routes an index of format 2 to the name the plan
 had given the repo, which is no repo's; and in `seq_script/merge_panels/README.md`; no recipe and
-no build command names a repo); the 19 row lines of the build half keep their md5
-(`7389f7e234d4e617860f8f9b34abdc49`: those of `check_index_set.py --commands build` after its
-`# build` line, the `if`, `else` and mark lines around each left out, as
-`check_index_set.half_lines` takes them; the printed script, which holds its checks and those
-lines too, has an md5 of its own); and `git diff db50986 v2.10.0 -- crisprme.py PostProcess`
-changes nothing `build-index-only` runs (the changes after `db50986` are search, download,
-publish and checker code, each named in the CHANGELOG).
+no build command names a repo). At `cb282e83` it prints that name alone: the recipes, their
+comments included, are `db50986`'s, so the HPRC recipe's header still names v2.0's graph, the
+recipe's default `SRC`, where the rebuild gave it v2.1's split as `SRC` (`$HPRC_SRC`, above). The
+19 row lines of the build half keep their md5 (`7389f7e234d4e617860f8f9b34abdc49`: those of
+`check_index_set.py --commands build` after its `# build` line, the `if`, `else` and mark lines
+around each left out, as `check_index_set.half_lines` takes them; the printed script, which holds
+its checks and those lines too, has an md5 of its own); and `git diff db50986 v2.10.0 --
+crisprme.py PostProcess` changes nothing a build writes (the changes after `db50986` are search,
+download, publish and checker code and the text of some refusals, each named in the
+CHANGELOG).
 
 ### Threads
 
@@ -88,18 +96,19 @@ file: each chromosome's tiers are written alone. A user who rebuilds an index fr
 
 ### Inputs
 
-Each input was checked against a list before the build (the lists are kept with the build's
-records; each list's own sha256 is given here):
+Each input was checked against a list of checksums before the build, on the node that read it;
+the lists are kept with the build's records (`checks/` of the rebuild's working folder), and each
+list's own sha256 is given here:
 
-| Input | What | List (sha256 of the list) |
-|---|---|---|
-| hg38 | the 455 FASTAs of `download --what genome`, md5 equal to HF's | `hg38_455.md5` (`58f53f0e9b9dd85cfa597c4925202909094b51871b0074778f2e5d3ca75017ee`) |
-| HGDP + 1000 Genomes | 2.8.1's as-run normalised VCFs, `hgdp1kgp.<chr>.norm.vcf.gz` and `.tbi` (46 files), sha256 equal to HF's `vcfs/hg38_HGDP1kGP`, put in place of the recipe's VCF-PREP (which reproduces them record for record) | `hgdp_vcfs_281.sha256` (`fb91de7fe0e1299290196d0373d9eab9429db2db120a28544e53307103a15b74`) |
-| | the re-phased BCFs the recipe reads first | `hgdp_rp.sha256` (`1891be055ad8a4d6d8c55cee1a31251b7f11ec98612b9a8c9fa166be63b5abf1`) |
-| | gnomAD's metadata, `gnomad_meta_updated.tsv` | `meta.sha256` (`377b549762758217719a0715748b91ca2ec64a4bd4e816399a1d853f61a18946`) |
-| HPRC | HPRC Release 2's Minigraph-Cactus graph **v2.1**, split per chromosome (below) | `hprc_src.sha256` (`83589242e6b7843bf51a657b43d223abb08221114b0e942e0276ec6e16e75350`) |
-| | the samplesID of 1000 Genomes 2021, which names the HPRC samples' populations | `p1kg.sha256` (`fa27a591f71965d76372bf24f93a3a73589579db9993c0445a9e22a2a1a66352`) |
-| mega | the merged VCFs `mega.<chr>.afmax.vcf.gz` and `.tbi` (48 files), sha256 equal to HF's `vcfs/hg38_mega` | `mega_src.sha256` (`a7b9671631fbd0e17f39b2ed7e8afbf74cb14b75d02229007dc75c70e3b6e6da`) |
+| Input | Source and version | Files | List (sha256 of the list) |
+|---|---|---|---|
+| hg38 | the 455 FASTAs of hg38 that `download --what genome` installs from `lucapinello/crisprme-data` (chr1-22, X, Y and M, and the alt, random and unplaced contigs), md5 equal to HF's; the reference indexes and HGDP + 1000 Genomes are built on all 455, HPRC and the mega on chr1-22, X and Y (as 2.8.1's indexes of each panel were) | 455 | `hg38_455.md5` (`58f53f0e9b9dd85cfa597c4925202909094b51871b0074778f2e5d3ca75017ee`) |
+| HGDP + 1000 Genomes, re-phased | gnomAD v3.1.2's joint HGDP + 1000 Genomes callset, re-phased with SHAPEIT5 keeping singletons (`docs/HGDP_1KGP_PHASED_INDEX_METHODS.md`): `hgdp1kg.<chr>.rephased.bcf` and `.csi`, chr1-22 and X, the recipe's first input | 46 | `hgdp_rp.sha256` (`1891be055ad8a4d6d8c55cee1a31251b7f11ec98612b9a8c9fa166be63b5abf1`) |
+| HGDP + 1000 Genomes, normalised | the recipe's VCF-PREP output, `hgdp1kgp.<chr>.norm.vcf.gz` and `.tbi`: 2.8.1's as-run files, sha256 equal to HF's `vcfs/hg38_HGDP1kGP`, put in place of VCF-PREP, which reproduces them record for record; 144,858,810 records (Gate A's census) | 46 | `hgdp_vcfs_281.sha256` (`fb91de7fe0e1299290196d0373d9eab9429db2db120a28544e53307103a15b74`) |
+| META | gnomAD's metadata of the callset, `gnomad_meta_updated.tsv` (`release/3.1/secondary_analyses/hgdp_1kg_v2/metadata_and_qc/`), sha256 `e18e7a29d0567b8063edc1a714bd31e57dc422823ba51af2c63fecef0dbc3cf1`: the panel's samplesID is derived from it | 1 | `meta.sha256` (`377b549762758217719a0715748b91ca2ec64a4bd4e816399a1d853f61a18946`) |
+| HPRC | HPRC Release 2's Minigraph-Cactus graph **v2.1**, split per chromosome (below) | 48 | `hprc_src.sha256` (`83589242e6b7843bf51a657b43d223abb08221114b0e942e0276ec6e16e75350`) |
+| P1KG | the samplesID of 1000 Genomes 2021, `hg38_1000G2021.samplesID.txt` (3,501 rows), which names the HPRC samples' populations, sha256 `93fa520fb185a75814dccc502102fc54201fa5ba3e43d0e3233af04117fa9764` | 1 | `p1kg.sha256` (`fa27a591f71965d76372bf24f93a3a73589579db9993c0445a9e22a2a1a66352`) |
+| mega | the merged sites-only VCFs `mega.<chr>.afmax.vcf.gz` and `.tbi`, chr1-22, X and Y, of five sources (1000 Genomes 2021, HGDP, gnomAD v4.1, TOPMed and All of Us; `seq_script/merge_panels/merge_mega_sites.sh`, `AF_<source>` and `AF_max`), sha256 equal to HF's `vcfs/hg38_mega`; 66,913,681 records, 62,584,776 of them `PASS` or `.` (Gate A's census) | 48 | `mega_src.sha256` (`a7b9671631fbd0e17f39b2ed7e8afbf74cb14b75d02229007dc75c70e3b6e6da`) |
 
 **HPRC v2.1.** The source is `hprc-v2.1-mc-grch38.wave.vcf.gz`, the `vcfwave`-decomposed VCF of
 the GRCh38 graph, from S3
@@ -167,52 +176,171 @@ archives were built from v2.0 (the CHANGELOG, 2.10.0, Changed, gives what differ
 the recipe's normalised output of these files (`hprc.<chr>.norm.vcf.gz`), which the publish hosts
 with the panel's kit (`docs/RELEASE_CHECKLIST.md`, T-35).
 
-### Each archive (after the build, and after the publish)
+The samplesID lists the builds wrote, which each panel's Dictionaries bundle carries:
 
-The node and the threads are fixed. From the build's logs (`rows.status`, each row's `.time` and
-`.out`), once the build is done and before the publish: the wall time and the peak memory of each
-row; and each kit's SHA-256, from the `<dataset>.SHA256SUMS` its row writes beside the tarball, and
-its size, the tarball's (`stat -c %s`), with its member list's own SHA-256 (`<dataset>.members.md5`,
-the md5 of each file the kit holds, which `scripts/kit_members.py` writes, as the tarball itself is
-not byte-reproducible; the list goes beside the kit, `build-inputs/<dataset>.members.md5`). The size
-and SHA-256 of the 16 index archives and the 7 companions are known only once they are published:
-`publish-index` packs each archive at the publish, with a `manifest.json` that records when it was
-packed, uploads it and deletes it, so no build log holds them, and a tarball packed by hand would
-not be the Hub's (the manifest's time, and each file's time that tar records). They are filled in
-after the publish, from the Hub: each SHA-256 from `indexes/SHA256SUMS`, which
-`scripts/hf_sha256sums.py` writes from the Hub's own checksums (the release checklist, E, step 5),
-and each size from the Hub's listing of `indexes/` (`list_repo_tree`).
+| Panel | `samplesIDs/` | Rows | sha256 |
+|---|---|---|---|
+| HGDP + 1000 Genomes | `hg38_HGDP1kGP.samplesID.txt` (2,192 male, 1,899 female; the 7 regions of `gnomad_meta_updated.tsv`) | 4,091 | `f77fd82e837aa7dc6222c7c5dd83f2e5870508cf1309ba9dc7e8313c6ddcf1e1`, equal to 2.8.1's build's |
+| HPRC | `hg38_HPRC.samplesID.txt` (231 individuals and CHM13) | 232 | `9fc1ce527d5390beb2e00fa9541a012c74279ab8925411a9449b00e7056180ff`, equal to 2.8.1's |
+| mega | `hg38_mega.samplesID.txt` (one row per source, no individual) | 5 | `64d2f8077346e8fd31bd9acb950569f60382e876781a08a6d8c6482dc4119634` |
+
+### Each archive
+
+From the build's logs (`rows.status`, each row's `.time` and `.out`): each row's node, threads,
+wall time and peak memory (the maximum resident set size of its largest process, `/usr/bin/time
+-v`, in GiB = 2^30 bytes; a row runs several processes at once, so the node held more: the first
+row of HGDP + 1000 Genomes, whose tiers ran on 3 workers, up to 495 GiB summed over its
+processes). A panel's first row enriches hg38 with the panel, writes its Dictionaries (which its
+companions pack at the publish) and builds its first index; its next rows reuse them and build an
+index alone. Each kit's size is its
+tarball's (`stat -c %s`) and its SHA-256 the one its row wrote in `<dataset>.SHA256SUMS`.
+
+The size of each index and companion archive is that of the archive `publish-index` packs, measured
+on 2026-11-15 by running each publish row of the index set through `publish-index` (CRISPRme
+`72c2c8e`, which packs as `db50986`'s does) with a stand-in for the Hub, each `tar | pigz` stream
+counted in place of being written: the archive the publish uploads differs from it only by the
+times `manifest.json` and a bundle's record give, a few bytes at most. Its SHA-256 exists only once
+it is packed for the upload: `publish-index` packs each archive at the publish, its manifest dated
+then, uploads it and deletes it, so no build log holds it, and a tarball packed by hand would not
+be the Hub's. Both are filled in after the publish, from the Hub: each SHA-256 from
+`indexes/SHA256SUMS`, which `scripts/hf_sha256sums.py` writes from the Hub's own checksums (the
+release checklist, E, step 5), and each size from the Hub's listing of `indexes/`
+(`list_repo_tree`).
 
 | Archive | Node | Threads | Wall time | Peak memory | Size | SHA-256 |
 |---|---|---|---|---|---|---|
-| `20-NRR_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `20-NGG_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `20-NRG_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `20-NNNNNNNN_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `22-NNGRRN_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `TTTN-20_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `TTTN-23_3_hg38` | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `20-NRR_3_hg38+hg38_HGDP1kGP` (the panel's first: its companions) | ml007 | 64 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `20-NGG_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `20-NRG_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `22-NNGRRN_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `TTTN-20_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `TTTN-23_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `dictionaries-bundle_hg38_HGDP1kGP`, `genotypes_hg38_HGDP1kGP`, `indel_genotypes_hg38_HGDP1kGP` | ml007 | (its first build's) | — | — | *after the publish* | *after the publish* |
-| `build-inputs/hg38_HGDP1kGP` | ml007 | (pigz) | *after the build* | *after the build* | *after the build* | *after the build* |
-| `20-NRR_3_hg38+hg38_HPRC` (its companions) | ml008 | 32 | *after the build* (the pilot, with its kit: 03:49-06:39 UTC) | *after the build* | *after the publish* | *after the publish* |
-| `dictionaries-bundle_hg38_HPRC`, `genotypes_hg38_HPRC`, `indel_genotypes_hg38_HPRC` | ml008 | (its first build's) | — | — | *after the publish* | *after the publish* |
-| `build-inputs/hg38_HPRC` | ml008 | (pigz) | *after the build* | *after the build* | *after the build* | *after the build* |
-| `20-NRR_3_hg38+hg38_mega` (its bundle) | ml008 | 16 | *after the build* | *after the build* | *after the publish* | *after the publish* |
-| `dictionaries-bundle_hg38_mega` | ml008 | (its build's) | — | — | *after the publish* | *after the publish* |
-| `build-inputs/hg38_mega` | ml008 | (pigz) | *after the build* | *after the build* | *after the build* | *after the build* |
+| `20-NRR_3_hg38` | ml008 | 16 | 47:01 | 29.2 GiB | 20,169,184,688 | *after the publish* |
+| `20-NGG_3_hg38` | ml008 | 16 | 11:04 | 5.6 GiB | 3,813,713,291 | *after the publish* |
+| `20-NRG_3_hg38` | ml008 | 16 | 21:56 | 12.7 GiB | 8,885,680,168 | *after the publish* |
+| `20-NNNNNNNN_3_hg38` | ml008 | 16 | 2:53:53 | 104.4 GiB | 82,212,406,885 | *after the publish* |
+| `22-NNGRRN_3_hg38` | ml008 | 16 | 14:55 | 7.8 GiB | 5,408,945,221 | *after the publish* |
+| `TTTN-20_3_hg38` | ml008 | 16 | 9:13 | 4.3 GiB | 2,831,074,693 | *after the publish* |
+| `TTTN-23_3_hg38` | ml008 | 16 | 9:53 | 4.9 GiB | 3,085,485,783 | *after the publish* |
+| `20-NRR_3_hg38+hg38_HGDP1kGP` (the panel's first row) | ml007 | 64 | 12:17:13 | 177.2 GiB | 27,842,100,972 | *after the publish* |
+| `20-NGG_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 32:13 | 7.0 GiB | 5,336,725,019 | *after the publish* |
+| `20-NRG_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 53:41 | 13.5 GiB | 12,243,828,677 | *after the publish* |
+| `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 5:38:16 | 104.7 GiB | 110,912,223,721 | *after the publish* |
+| `22-NNGRRN_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 40:27 | 8.5 GiB | 7,517,827,071 | *after the publish* |
+| `TTTN-20_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 29:28 | 5.7 GiB | 4,542,619,330 | *after the publish* |
+| `TTTN-23_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 30:44 | 6.6 GiB | 4,831,243,449 | *after the publish* |
+| `dictionaries-bundle_hg38_HGDP1kGP` | ml007 | (the panel's first row) | — | — | 16,420,012,997 | *after the publish* |
+| `genotypes_hg38_HGDP1kGP` | ml007 | (the panel's first row) | — | — | 5,865,023,573 | *after the publish* |
+| `indel_genotypes_hg38_HGDP1kGP` | ml007 | (the panel's first row) | — | — | 7,638,538,409 | *after the publish* |
+| `build-inputs/hg38_HGDP1kGP` | ml007 | (pigz) | 0:17 | 0.1 GiB | 1,237,137,069 | `00d20b53ff60d2efca9eb779b7a23cc0aad8e7c6ffec5e33ee59e9640463e77d` |
+| `20-NRR_3_hg38+hg38_HPRC` (the panel's first row and its only index) | ml008 | 32 | 2:49:00 | 29.7 GiB | 29,548,088,135 | *after the publish* |
+| `dictionaries-bundle_hg38_HPRC` | ml008 | (the panel's first row) | — | — | 2,443,592,490 | *after the publish* |
+| `genotypes_hg38_HPRC` | ml008 | (the panel's first row) | — | — | 559,741,386 | *after the publish* |
+| `indel_genotypes_hg38_HPRC` | ml008 | (the panel's first row) | — | — | 590,105,968 | *after the publish* |
+| `build-inputs/hg38_HPRC` | ml008 | (pigz) | 0:23 | 0.1 GiB | 1,182,402,681 | `09e9944b1a113fbd6653ef91c09b29f3859ce8723df9f029123fa200d24fdc07` |
+| `20-NRR_3_hg38+hg38_mega` (the panel's first row and its only index) | ml008 | 16 | 3:26:06 | 29.7 GiB | 24,108,874,759 | *after the publish* |
+| `dictionaries-bundle_hg38_mega` | ml008 | (the panel's first row) | — | — | 1,954,090,894 | *after the publish* |
+| `build-inputs/hg38_mega` | ml008 | (pigz) | 0:17 | 0.1 GiB | 1,018,696,857 | `f374afa01c455bb750e178364c040b82443c7e7fc2d617600edff8d3a072ee45` |
 
-| Kit | Its member list | SHA-256 of the list |
-|---|---|---|
-| `build-inputs/hg38_HGDP1kGP` | `build-inputs/hg38_HGDP1kGP.members.md5` | *after the build* |
-| `build-inputs/hg38_HPRC` | `build-inputs/hg38_HPRC.members.md5` | *after the build* |
-| `build-inputs/hg38_mega` | `build-inputs/hg38_mega.members.md5` | *after the build* |
+The 23 index and companion archives add up to 388,761,127,579 bytes (388.76 GB) and the 3 kits to
+3,438,236,607 (3.44 GB). A panel's first index, with the panel's companions, which a download of
+it fetches: HGDP + 1000 Genomes 50.13 GB (27.84 + 16.42 + 5.87; the phased indel genotypes are in
+the bundle too, and their own archive, 7.64 GB, is fetched with the genotype store by `download
+--what genotype-oracle`), HPRC 32.55 GB, the mega 26.06 GB. The rows took 0.82 to 1.03 times the upper end of the plan's
+estimate of each node's groups of rows.
+
+Each kit's member list, `<dataset>.members.md5`, gives the md5 of each file the kit holds, by its
+path in it (`scripts/kit_members.py`): the tarball is not byte-reproducible (tar records each
+file's time, owner and listing order), so its `SHA256SUMS` says that a download is the published
+file, and the list what the kit holds, the same for any packing of the same files. Gate A wrote
+each list from the tarball, with nothing extracted, and found it byte-identical to the one written
+from the working directory's folders; the publish puts it beside its kit
+(`build-inputs/<dataset>.members.md5`; the release checklist, E, step 4):
+
+| Kit | Files | Member list | Its SHA-256 | Its md5 |
+|---|---|---|---|---|
+| `hg38_HGDP1kGP` | 478 (455 enriched FASTAs, 23 fake-indel FASTAs) | `hg38_HGDP1kGP.members.md5` | `ccce7be177fa68c62efea59bb914c6de7a227b1bc9e3a765e894e87eabe79d1b` | `d6a5a65493cfb382b9de1a65155bc2d1` |
+| `hg38_HPRC` | 48 (24 and 24) | `hg38_HPRC.members.md5` | `af381e445a4591d931b449fc3802838311aa548ac398141b98eb1e4604f84c62` | `73c6e0bd98dd75bcd10966ba1e200790` |
+| `hg38_mega` | 48 (24 and 24) | `hg38_mega.members.md5` | `ef62b38bb499a1a9d6a5ce180c82339fef99c4308dcde4666740b25f19a18510` | `29cbaf3d5ac0425039ca0af7a7abbd78` |
+
+What each index holds (`crispritz.py index-info` on every index and sub-index, all of index
+format 2, N = 3, the PAM, side and guide length of its name, `built_by` CRISPRitz 2.10.0 and
+CRISPRme 2.10.0; "Q" counts the `.bin` files whose header flags the four-allele symbol):
+
+| Index | Contigs | `.bin` files (with Q) | `_INDELS` sub-indexes (`.bin` files) |
+|---|---|---|---|
+| `20-NRR_3_hg38` | 455 | 771 | — |
+| `20-NGG_3_hg38` | 455 | 501 | — |
+| `20-NRG_3_hg38` | 455 | 586 | — |
+| `20-NNNNNNNN_3_hg38` | 455 | 1,628 | — |
+| `22-NNGRRN_3_hg38` | 455 | 522 | — |
+| `TTTN-20_3_hg38` | 454 | 488 | — |
+| `TTTN-23_3_hg38` | 454 | 488 | — |
+| `20-NRR_3_hg38+hg38_HGDP1kGP` | 455 | 779 (345) | 23 (95) |
+| `20-NGG_3_hg38+hg38_HGDP1kGP` | 455 | 508 (76) | 23 (23) |
+| `20-NRG_3_hg38+hg38_HGDP1kGP` | 455 | 593 (160) | 23 (40) |
+| `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` | 455 | 1,628 (1,177) | 23 (319) |
+| `22-NNGRRN_3_hg38+hg38_HGDP1kGP` | 455 | 523 (91) | 23 (26) |
+| `TTTN-20_3_hg38+hg38_HGDP1kGP` | 454 | 491 (60) | 23 (34) |
+| `TTTN-23_3_hg38+hg38_HGDP1kGP` | 454 | 491 (60) | 23 (30) |
+| `20-NRR_3_hg38+hg38_HPRC` | 24 | 345 (345) | 24 (279) |
+| `20-NRR_3_hg38+hg38_mega` | 24 | 346 (346) | 24 (87) |
+
+**454 contigs for TTTN.** `chrUn_KI270539v1` (993 bp, GC 0.80) holds no `TTT` and no `AAA`, so it
+has no TTTN site at 20 or 23 nt on either strand, in hg38 or in the panel's enriched genome
+(identical there: no variant of the panel lies on it), and `buildTST` writes no tree for a contig
+with no site. The other PAMs hold sites on it (NRR 636, NGG 417, NRG 537, the general index 1,932,
+NNGRRN 326), and each of their indexes holds it. TTTN-20 and TTTN-23 therefore hold 454 contigs on
+the reference and on HGDP + 1000 Genomes, the other indexes there all 455 (accepted on
+2026-11-14).
+
+And what each panel holds:
+
+| Panel | SNP alleles | Indel-path alleles (indel log rows) | Samples |
+|---|---|---|---|
+| HGDP + 1000 Genomes | 127,666,429 | 17,192,381 | 4,091, phased |
+| HPRC (v2.1) | 36,719,470 | 12,361,907 | 232, phased |
+| mega | 48,731,015 | 13,853,753 | none: sites-only, 5 sources |
+
+The genotyped panels' counts are their `variant_count.json`; the mega's recipe writes none, and its
+counts are the sum of its registry's records and its indel log's rows. HGDP + 1000 Genomes' SNP
+alleles are 2,486,165 more than 2.8.1's 125,180,264, its CRISPRitz 2.9.1 coding only the last
+record of a split site; its indels are the same 17,192,381.
+
+### Gate A: the integrity of what was built
+
+Gate A (the release checklist, E, step 1) checked every index, the panels' Dictionaries and the
+kits before anything else read them, in the image, read-only, each node's results re-derived by a
+second, independent check: on ml008 on 2026-11-14 (from 15:21 UTC: REF, HPRC, the mega), on ml007
+on 2026-11-15 (from 04:21 UTC: HGDP + 1000 Genomes). It passed on both:
+
+- **The image and the commit.** The SIF's sha256 and the md5 of `crisprme.py`, `buildTST`,
+  `searchTST`, the enricher and `crispritz.py` are those above; the tree in the image is `db50986`;
+  the build half's lines keep md5 `7389f7e234d4e617860f8f9b34abdc49`.
+- **Every index** (59 on ml008 and 175 on ml007, sub-indexes included): `crispritz.py
+  index-info` exits 0 and reads format 2, the PAM, side and guide length of its name and N = 3 in
+  every `.bin` header; `.index_meta.json` and `.pam_build` agree; the contigs are as above. The
+  rebuild's `postcheck` gives each variant index's `_INDELS` 23 (HGDP + 1000 Genomes) or 24 (HPRC,
+  the mega) sub-indexes, none empty, `built_by` 2.10.0/2.10.0, and no lower-case base in a
+  fake-indel genome (none in the 1,111,296,669 bases of HGDP + 1000 Genomes').
+- **The counts.** HGDP + 1000 Genomes: a census of the 23 normalised VCFs gives the
+  `variant_count.json` above chromosome by chromosome (127,666,429 distinct single-base SNV alleles
+  with AC > 0 and FILTER `PASS` or `.`; 17,192,381 other records, each one row of the indel log),
+  and every row's log says `Dictless tier emission complete: 23/23`. HPRC: the plan's own count
+  (`hprc_expect.sh`) gives 36,719,470 and 12,361,907, equal to the pilot's; tier emission 24/24.
+  The mega: `verify_mega_chrom` passes on all 24 chromosomes, and an independent recount of its
+  build VCFs equals each chromosome's registry records, by count and record by record; chrY keeps
+  its 177,968 records with `AF_max`.
+- **Case.** The input's records with a lower-case REF or ALT (6 deletions of HGDP + 1000 Genomes,
+  13 records of the mega) are upper case in the indel log and the fake-indel genome, and read so
+  from the stores: the mega's indel frequencies hold them in upper case, and HGDP + 1000 Genomes'
+  indel genotype store keeps the VCF's case, which its readers upper-case on load.
+- **The kits.** `sha256sum -c` of each kit's `SHA256SUMS` passes; each tarball holds only
+  `Genomes/hg38+<dataset>/` and `Genomes/hg38+<dataset>_INDELS/`, and its member list is the one
+  above.
+- **Nothing changed after its row.** No index, Dictionaries folder or kit is newer than its row's
+  end, no build mark is left, and the gate wrote nothing under the working directories.
+
+The only checks that failed were the plan's literal expectation of 455 contigs on every reference
+and HGDP + 1000 Genomes index, on the TTTN indexes (454, above), and one whose pattern matched an
+idle process unrelated to the rebuild (a precise re-check found no process of the rebuild). The
+later gates read these indexes as built (the real-data checker, gate B, read every chromosome of
+every panel as coding every allele, index format 2 and fake-indel windows of 30/30; the timing
+gate; G5; the docs' figures): none of their findings came from the indexes (METHODS §11).
 
 ## The archives of CRISPRme 2.8.1 (index format 1)
 
@@ -558,7 +686,10 @@ compiled into `buildTST`, so it cannot affect index content.
 - **Nothing stamps the builder version into an index.** The provenance above was
   reconstructed from upload dates, build mtimes and source hashes. A
   `.pam_build`-style sidecar recording the CRISPRitz version and git SHA would
-  make this a lookup. Not done in 2.8.1.
+  make this a lookup. Not done in 2.8.1. Done in 2.10.0: every index CRISPRme 2.10.0
+  builds records the CRISPRitz and CRISPRme that built it in its `.index_meta.json`
+  (`built_by`), and each `.bin` of index format 2 its build parameters in its header,
+  which Gate A read on every index of the rebuild (above).
 - **An indel genotype store built by an enricher at or below 2.9.0 from a
   multiallelic VCF** can hold a fabricated compound allele under a real variant's
   rsID (CRISPRitz `cfcb6a6`). Latent on every CRISPRme-supplied VCF, which are

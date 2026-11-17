@@ -1364,8 +1364,10 @@ class TheReleaseDocsOfTheSet(unittest.TestCase):
 
     def test_each_archive_s_size_and_sha256_are_filled_in_where_they_exist(self):
         """B-3: publish-index packs each index and companion archive at the publish, its
-        manifest dated then, and deletes it once uploaded: their size and SHA-256 are the Hub's,
-        known after the publish; a kit's, which its build row writes, after the build."""
+        manifest dated then, and deletes it once uploaded: their SHA-256 is the Hub's, known after
+        the publish; a kit's, which its build row writes, after the build. The build is done
+        (2026-11-15): each kit's size and SHA-256 are given, and each index's and companion's size
+        as packing it measured before the publish (gate D), the Hub's after it (E, step 5)."""
         prov = _read("docs", "INDEX_PROVENANCE.md")
         section = prov[prov.index("### Each archive"):
                        prov.index("## The archives of CRISPRme 2.8.1")]
@@ -1378,10 +1380,16 @@ class TheReleaseDocsOfTheSet(unittest.TestCase):
             if not line.startswith("| `") or len(cells) != len(cols):
                 continue  # (the kits' member lists have a table of their own)
             names = re.findall(r"`([^`]+)`", cells[0])
-            want = "*after the build*" if names[0].startswith("build-inputs/") \
-                else "*after the publish*"
-            self.assertEqual((cells[size], cells[sha]), (want, want), line)
+            self.assertRegex(cells[size], r"^\d{1,3}(,\d{3})+$", line)
+            if names[0].startswith("build-inputs/"):
+                self.assertRegex(cells[sha], r"^`[0-9a-f]{64}`$", line)
+                ds = names[0].split("/", 1)[1]
+                # the kit's own table gives its member list
+                self.assertIn(f"| `{ds}` |", section)
+            else:
+                self.assertEqual(cells[sha], "*after the publish*", line)
             seen.update(names)
+        self.assertNotIn("*after the build*", section)
         self.assertEqual(seen, {r["archive"] for r in self.rows})
         self.assertIn("after the publish, the size and SHA-256 of each of the 23 index and "
                       "companion archives, from the Hub",
