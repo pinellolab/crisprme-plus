@@ -1538,7 +1538,7 @@ class TheFinalDocsOfTheRebuild(unittest.TestCase):
             self.assertNotIn("through a second deletion in a repeat", text, name)
         self.assertIn("list 6 carriers so, at 8 sites of HGDP + 1000 Genomes (HGDP00655, HG01432, "
                       "HG01883, HGDP00465 and NA19475 on VEGFA site 3, in GT repeats, and NA20888 on "
-                      "EMX1, in an AAG repeat), through a second deletion or insertion in the repeat",
+                      "EMX1, in an AAG repeat), through one or two more indels in the repeat",
                       self._flat("docs/TROUBLESHOOTING.md"))
         self.assertIn("8,693 of the 9,059 are of the first shape, and 8 of the second, by 6 carriers",
                       self._flat("docs/release-notes-2.10.0.md"))
@@ -1682,6 +1682,112 @@ class TheFinalDocsReviewFixes(unittest.TestCase):
         self.assertIn("def fasta_layout(path):", checker)
         self.assertNotIn("reads a whole enriched chromosome for each SNV written in lower case",
                          self._flat("docs/ROADMAP.md"))
+
+
+class TheFinalDocsSecondReviewFixes(unittest.TestCase):
+    """The second review of the final docs (finaldocs-review A-r2 and B-r2). In METHODS section 9 a
+    sentence on the release gate's measure of the indexes of 2.10.0 (format 2) stood between "Those
+    indexes are of format 1" and "For them it holds ...", so that the limit at contig ends read as
+    one of 2.10.0's indexes, which format 2 does not have (A-R2-1). The release notes called their
+    list "the known limits of 2.10.0" and left out limits METHODS section 10 states: a refusal's
+    advice on the mega, whose command removes the kit's enriched genome before a build that
+    refuses the mega, and the checker's refusal (exit 2) of a run whose genome's coding it cannot
+    tell (B-R2-1). Two of the 6 carriers whose own target starts a repeat unit away shift through
+    two more deletions each (A-R2-3); the summed memory on 32 threads, 101.66 to 110.98 GiB (109
+    to 119 GB), was measured on the gates' searches of HGDP + 1000 Genomes, not on the README
+    guide's NRR search (A-R2-4); ROADMAP's store condition dropped "less the target's length"
+    (B-R2-2), the README's MNV limit "in the target" (B-R2-3), and its 16-thread advice its basis
+    (B-R2-4); two sentences of METHODS section 4 stood between a sentence and what it refers to
+    (A-R2-2)."""
+
+    @staticmethod
+    def _flat(name):
+        return " ".join((_REPO / name).read_text(encoding="utf-8").split())
+
+    def test_the_format_1_limit_follows_its_indexes(self):
+        methods = self._flat("METHODS.md")
+        self.assertIn("Those indexes are of format 1, built by CRISPRitz 2.9.1 or earlier (below). "
+                      "For them it holds at *L = K*", methods)
+        self.assertIn("Neither holds across guide lengths (below). On the indexes of 2.10.0 "
+                      "(format 2) the release gate measured the equivalence again", methods)
+
+    def test_the_release_notes_do_not_call_their_list_complete(self):
+        notes = (_REPO / "docs" / "release-notes-2.10.0.md").read_text(encoding="utf-8")
+        section = notes[notes.index("\n## Known limitations\n"):
+                        notes.index("\n## Planned for 2.10.1\n")]
+        flat = " ".join(section.split())
+        self.assertNotIn("These are the known limits of 2.10.0.", flat)
+        self.assertIn("These are the main known limits of 2.10.0. METHODS §10 states each, with its "
+                      "scale where it was measured, and the smaller ones too", flat)
+        # the intro counts the list: two of a search's cost, five of the rows, three more
+        self.assertEqual(len(re.findall(r"^- \*\*", section, flags=re.M)), 2 + 5 + 3)
+        self.assertIn("The first two concern a search's cost; the next five the rows", flat)
+        self.assertIn("the last three what the real-data check does not check, one refusal's "
+                      "advice on the mega, and what an index of 2.8.1 keeps", flat)
+        self.assertIn("- **One refusal's advice on the mega.** Who: a data folder that holds the "
+                      "mega's VCFs but not its fake-indel genome", flat)
+        self.assertIn("And it refuses (exit 2), unchecked, a run whose VCF holds a split SNP site",
+                      flat)
+        self.assertIn("The unphased-call limits, which no published index meets, and the refusal's "
+                      "advice on the mega have no release named yet",
+                      self._flat("docs/release-notes-2.10.0.md"))
+        # METHODS section 10 states both as limits of 2.10.0
+        methods = self._flat("METHODS.md")
+        self.assertIn("- **One refusal's advice on a sites-only dataset.**", methods)
+        self.assertIn("- **When the check cannot tell the genome's generation.**", methods)
+
+    def test_the_shifted_carriers_need_one_or_two_more_indels(self):
+        for name in ("docs/TROUBLESHOOTING.md", "docs/release-notes-2.10.0.md", "CHANGELOG.md"):
+            text = self._flat(name)
+            with self.subTest(doc=name):
+                self.assertNotIn("through a second deletion or insertion", text)
+                self.assertIn("through one or two more indels in the repeat", text)
+        self.assertIn("2 bases before the row's start, through two more deletions each",
+                      self._flat("METHODS.md"))
+
+    def test_the_32_thread_summed_memory_is_the_gates(self):
+        for name, places in (("README.md", 2), ("docs/DOCKER_QUICKSTART.md", 1)):
+            text = self._flat(name)
+            with self.subTest(doc=name):
+                self.assertNotIn("110–119", text)
+                self.assertEqual(len(re.findall(r"gates' searches of (?:that panel|HGDP \+ 1000 "
+                                                r"Genomes on 32) took 109–119 GB", text)), places)
+                self.assertEqual(text.count("109–119 GB"), places)
+        # 101.66 GiB (gate C's A2) and 110.98 GiB (gate E's E4), summed, in GB
+        self.assertEqual(round(101.66 * 2 ** 30 / 1e9), 109)
+        self.assertEqual(round(110.98 * 2 ** 30 / 1e9), 119)
+        self.assertIn("threads or fewer within it for the README guide (on 32 threads other guides' "
+                      "largest process took up to a quarter more", self._flat("README.md"))
+        self.assertLessEqual(85.91 / 68.91, 1.25)
+
+    def test_the_readme_and_roadmap_state_the_limits_as_the_others_do(self):
+        readme = (_REPO / "README.md").read_text(encoding="utf-8")
+        section = readme[readme.index("### Known limitations and roadmap"):]
+        section = " ".join(section[:section.index("\n> ")].split())
+        self.assertIn("a carrier whose haplotype holds an MNV in a row's target beside its indel",
+                      section)
+        self.assertNotIn("holds an MNV beside a row's indel", section)
+        for item in ("one refusal's advice on the mega", "a SNP row's carriers beside a long indel",
+                     "one row for a target in a microsatellite"):
+            self.assertIn(item, section)
+        roadmap = self._flat("docs/ROADMAP.md")
+        self.assertIn("adds or deletes more than the 500 bases the store is read around a target, "
+                      "less the target's length", roadmap)
+        self.assertNotIn("more bases than the store is read around a target (500 bases", roadmap)
+        provenance = self._flat("docs/INDEX_PROVENANCE.md")
+        self.assertIn("with the same counts: Gate A", provenance)
+        self.assertNotIn("with the same bytes: Gate A", provenance)
+
+    def test_methods_section_4_sentences_follow_what_they_refer_to(self):
+        methods = self._flat("METHODS.md")
+        self.assertIn("as for an indel row's second indel. Up to 2.10.0's release gates such a "
+                      "variant anywhere in the frame", methods)
+        self.assertIn("(128,732,578 ATG>A and 128,732,580 G>A on its haplotype). And a reading "
+                      "cannot be read whose frame", methods)
+        self.assertIn("whose change lies past a target inside the ALT. On HPRC v2.1, the README "
+                      "guide's search", methods)
+        self.assertIn("111 bases to 76 kb from the overlap. But a second record that puts bases of "
+                      "its own on the bases the first indel deletes or replaces", methods)
 
 
 class AGenomeFolderWithASpaceIsRefusedUpFront(unittest.TestCase):
