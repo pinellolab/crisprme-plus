@@ -7269,6 +7269,131 @@ class ReadUpToWhereTheLastBaseStood(Base):
                          [("variant-missing", "S03")] * 3, found)
 
 
+def world_split_snp_site():
+    """A split SNP site (two lines of one position, each of one ALT) inside the guide's
+    target, beside a deletion that makes it: S01's target through the earlier line's ALT
+    (the guide's base) is a target of the genome only where every allele is coded
+    (CRISPRitz 2.10.0), and a search of no mismatch demands it there (test_every_allele_of_
+    a_split_site_is_read's world). Returns (reference, records, budget)."""
+    seq = PRE + GUIDE[:4] + other(GUIDE[4]) + GUIDE[5:10] + "C" + GUIDE[10:] + "TGG" + POST
+    pos1, snp = len(PRE) + 10, len(PRE) + 5
+    ref_b = seq[snp - 1]
+    third = next(x for x in "ACGT" if x not in (ref_b, GUIDE[4]))
+    recs = [(pos1, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0"}),
+            (snp, ref_b, GUIDE[4], {"S01": "1|0"}),
+            (snp, ref_b, third, {"S02": "1|0"})]
+    return seq, recs, ("0", "0", "0", "0")
+
+
+def record_indexes_in(case, lib):
+    """Make ``case``'s .indexes_searched.txt (as_2100's) name its indexes in the library
+    ``lib``, as a search records the library it read them from: one run in a container
+    records it where the install is mounted (/DATA/genome_library), a path the machine
+    that checks it may not have."""
+    path = os.path.join(case.res, ".indexes_searched.txt")
+    with open(path) as fh:
+        text = fh.read()
+    here = "(in %s)" % os.path.join(case.tmp, "work", "genome_library")
+    assert here in text, text
+    with open(path, "w") as fh:
+        fh.write(text.replace(here, "(in %s)" % lib))
+
+
+class ARunSearchedInAContainer(Base):
+    """The local gate of 2.10.0's release candidate (rc-amd64) ran step 4c's genome-wide
+    searches as the checklist's Docker commands run a search, the install mounted at /DATA,
+    so each run's .indexes_searched.txt names its indexes in /DATA/genome_library, which the
+    host that checks it does not have. The check found the INDELS index under its name in the
+    run's working directory's genome_library, but read the variant index's .bin headers (its
+    four-allele flag, Q) only where the record put it, and the install, linked as a download
+    is, held no enriched genome: nothing told how the genome coded a split SNP site, and every
+    chromosome was refused (exit 2). The variant index is found as its INDELS index is: where
+    the record puts it, else under its name in the run's libraries (its genome_library, then
+    the --index-path its command line gives). Each test but the last fails at 05df5d78."""
+
+    def lay_out(self, tag, **kw):
+        seq, recs, budget = world_split_snp_site()
+        tmp = os.path.join(self.tmp, tag)
+        os.makedirs(tmp)
+        case = as_2100(Case(tmp, seq, recs, []), **kw)
+        mounted = os.path.join(tmp, "DATA", "genome_library")   # the container's path
+        self.assertFalse(os.path.exists(mounted))
+        record_indexes_in(case, mounted)
+        return case, budget
+
+    def reading(self, case):
+        """The run's reading of v on chr21 (run_semantics): True every allele coded, False
+        the last record's, None not told."""
+        sem, why = C.run_semantics(case.res, [C.Vcf(case.vcf)], ["chr21"], ["v"], "hg38")
+        self.assertIsNone(why)
+        return sem.values[("v", "chr21")]
+
+    def test_the_variant_index_is_read_from_the_runs_library(self):
+        """The variant index flags Q: every allele is coded, so S01's target through the
+        earlier line's ALT is demanded and a run without its row fails (exit 1), as where
+        the record's path resolves; at 05df5d78 the run was refused (exit 2)."""
+        case, budget = self.lay_out("q", var_flags=4)
+        read = self.reading(case)
+        self.assertIs(read["all_alleles"], True)
+        self.assertEqual(read["indels"], (2, 2))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc, found = case.run(mode="completeness", budget=budget)
+        self.assertEqual(rc, 1, (found, err.getvalue()))
+        self.assertIn("missing-row", classes(gating(found)), found)
+        self.assertIn("(v on chr21: every allele, store of PASS and '.', INDELS format 2",
+                      err.getvalue())
+
+    def test_a_variant_index_of_format_1_is_read_there_too(self):
+        """An index of format 1 (CRISPRitz 2.9.1, the last record of a split site coded),
+        read in the run's library: the earlier line's target is the known limit
+        limit-last-alt-wins, not demanded (exit 0); at 05df5d78 the run was refused."""
+        case, budget = self.lay_out("f1", var_format=1, var_flags=0, indels_format=1)
+        self.assertIs(self.reading(case)["all_alleles"], False)
+        rc, found = case.run(mode="completeness", budget=budget)
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertIn("limit-last-alt-wins", classes(found), found)
+
+    def test_the_command_lines_index_path_is_a_library_too(self):
+        """A run whose --index-path is a library of its working directory other than
+        genome_library (here lib2, relative, as the command line gives it): its variant
+        index is read there."""
+        case, budget = self.lay_out("ip", var_flags=4)
+        work = os.path.join(case.tmp, "work")
+        os.rename(os.path.join(work, "genome_library"), os.path.join(work, "lib2"))
+        with open(os.path.join(case.res, ".command_line.txt"), "w") as fh:
+            fh.write("input_command\tcrisprme.py complete-search --index-path lib2\n")
+        self.assertIs(self.reading(case)["all_alleles"], True)
+        rc, found = case.run(mode="completeness", budget=budget)
+        self.assertEqual(rc, 1, found)
+        self.assertIn("missing-row", classes(gating(found)), found)
+
+    def test_a_variant_index_found_nowhere_is_said_so(self):
+        """With the variant index in none of the run's libraries either (and no enriched
+        genome), nothing tells the coding: refused (exit 2), and the refusal says that the
+        record names no index found, as it says of an INDELS index."""
+        case, budget = self.lay_out("gone", var_flags=4)
+        shutil.rmtree(os.path.join(case.tmp, "work", "genome_library", "20-NRG_2_hg38+v"))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc, _found = case.run(mode="completeness", budget=budget)
+        self.assertEqual(rc, 2)
+        self.assertIn("neither its variant index (its .indexes_searched.txt names no index "
+                      "found), nor its enriched genome in the working directory, tells",
+                      err.getvalue())
+
+    def test_the_recorded_place_comes_first(self):
+        """Where the recorded path resolves, its index is the one read, though the run's
+        library holds another of that name (here the recorded one is of format 1, the
+        library's of format 2 with Q): the last record's reading."""
+        seq, recs, _budget = world_split_snp_site()
+        case = as_2100(Case(self.tmp, seq, recs, []), var_flags=4)
+        elsewhere = os.path.join(self.tmp, "elsewhere", "genome_library")
+        write_bin(os.path.join(elsewhere, "20-NRG_2_hg38+v", "NRG_chr21_1.bin"), 1)
+        record_indexes_in(case, elsewhere)
+        self.assertIs(self.reading(case)["all_alleles"], False)
+
+
 def shared_runs(a, b, k):
     """The runs of ``k`` or more consecutive lines of ``a`` that ``b`` holds consecutively
     too (code_lines), a run of imports aside: [(length, line in a, line in b, texts)]."""

@@ -206,12 +206,23 @@ for mode in per-sample population-level; do
 done
 #     Genome-wide SOUNDNESS of the README guide and of TRAC: $GW is a genome-wide HGDP + 1000
 #     Genomes install whose Results/readme and Results/trac are the release's per-sample
-#     searches of guide.txt (README) and guide_trac.txt (TRAC), NRG, 4 + 1 + 1. --vcf-dir
-#     is the panel's VCF folder; give it a .tbi per VCF (in a folder you can write: link
-#     the VCFs there and run `tabix -p vcf`), or let the checker index each one in memory
-#     (one decompression of the file, about 28 GB for this panel: the README run took
-#     388 s and 8.3 GB so on 24 processes of a node at load 250 to 300, against 89 s and
-#     4.5 GB with a .tbi).
+#     searches of guide.txt (README) and guide_trac.txt (TRAC), NRG, 4 + 1 + 1, run as the
+#     chr22 searches above are, the install mounted at /DATA. A search records the library
+#     it read each index from (/DATA/genome_library, in its .indexes_searched.txt), and the
+#     check, run on the host, reads each index there or, where that path is not on the
+#     host, under its name in the run's genome_library ($GW/genome_library) or the
+#     --index-path its command line gives. Up to 05df5d78 it so found the INDELS index, but
+#     read the variant index's .bin headers (whose Q flag says every allele is coded) only
+#     where the search recorded it, so on an install that holds no enriched genome (a linked
+#     or downloaded one) nothing told it how the genome coded a split SNP site, and it
+#     refused every chromosome (exit 2): 2.10.0's gate on the amd64 RC met it, and the fixed
+#     check gave the same two searches 426 and 459 findings, none gating, as where /DATA
+#     resolved.
+#     --vcf-dir is the panel's VCF folder; give it a .tbi per VCF (in a folder you can
+#     write: link the VCFs there and run `tabix -p vcf`), or let the checker index each one
+#     in memory (one decompression of the file, about 28 GB for this panel: the README run
+#     took 388 s and 8.3 GB so on 24 processes of a node at load 250 to 300, against 89 s
+#     and 4.5 GB with a .tbi).
 for g in readme:guide.txt trac:guide_trac.txt; do
   python3 "$SRC/scripts/check_indel_rows.py" --results "$GW/Results/${g%%:*}" \
     --reference "$GW/Genomes/hg38" --vcf-dir "$GW/VCFs/hg38_HGDP1kGP" \

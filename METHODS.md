@@ -2847,7 +2847,10 @@ the data otherwise, the check reads which one did from the run's own records, an
 run whose records do not tell where its data makes it matter. A run of CRISPRme 2.10.0 or later
 writes `.indexes_searched.txt` (the indexes that served it); one without it is an earlier
 CRISPRme's, which read indexes CRISPRitz 2.9.1 or earlier built (format 1, the last record of a
-split site) and a phased indel store of every FILTER. Of a run of 2.10.0: the variant genome codes
+split site) and a phased indel store of every FILTER. The check reads each index where that record
+puts it or, where that path is not on the machine that checks (a search run in a container records
+the library where the install was mounted, `/DATA/genome_library` in Docker), under its name in the
+run's `genome_library` or `--index-path`. Of a run of 2.10.0: the variant genome codes
 every allele of a split site where the variant index that served it flags Q in its `.bin` headers,
 or where its enriched genome (`Genomes/<genome>+<dataset>/` of the run's working directory) codes an
 earlier record's ALT at a split site of the VCF, and the last record alone where that index is of

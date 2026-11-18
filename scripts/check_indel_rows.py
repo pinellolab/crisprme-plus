@@ -519,10 +519,16 @@ where its data makes it matter, is REFUSED (exit 2). A run of CRISPRme 2.10.0 or
 writes .indexes_searched.txt (the indexes that served it; and .carrier_gate.json); a run
 without them is an earlier CRISPRme's, whose CRISPRitz (2.9.1 or earlier) coded the last
 record of a split SNP site and built indexes of format 1, and whose phased indel store
-kept the indels of every FILTER. Of a run of 2.10.0: the variant genome codes every allele
-of a split site where the variant index the record names flags Q in its .bin headers, or
-where its enriched genome (Genomes/<genome>+<dataset>/<chrom>.enriched.fa of the run's
-working directory) codes an earlier record's ALT at a split site of the VCF; the last
+kept the indels of every FILTER. The record names the library each index was read from,
+and the check reads each index there (the INDELS index beside its variant index), or, where
+it is not there, the index of that name in the run's working directory's genome_library,
+else in the --index-path its command line gives: a search run in a container records the
+library where the install was mounted (/DATA/genome_library in the checklist's Docker
+commands), which the machine that checks may not have. Of a run of 2.10.0: the variant
+genome codes every allele of a split site where the variant index the record names flags Q
+in its .bin headers, or where its enriched genome
+(Genomes/<genome>+<dataset>/<chrom>.enriched.fa of the run's working directory) codes an
+earlier record's ALT at a split site of the VCF; the last
 record alone where that index is of format 1, or the enriched genome holds the last ALT
 alone there, or an index of format 2 flags no Q while the VCF has a position of four bases
 (refused where nothing tells and the VCF has a split site, two or more lines of an SNV ALT
@@ -3027,8 +3033,10 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
     or later writes .indexes_searched.txt (and .carrier_gate.json); a run without either is
     an earlier CRISPRme's, which read every index with CRISPRitz 2.9.1 or earlier (format
     1, the last record of a split site) and a phased indel store of every FILTER. Of a run
-    of 2.10.0: the INDELS index's format is its .bin files' (the index its
-    .indexes_searched.txt names), else its log's format-1 NOTE; the variant genome codes
+    of 2.10.0 (its indexes those its .indexes_searched.txt names, read where it puts them,
+    else under their names in the run's genome_library or --index-path: a search in a
+    container records where the install was mounted): the INDELS index's format is its .bin
+    files', else its log's format-1 NOTE; the variant genome codes
     every allele where its variant index's .bin files flag Q, or where its enriched genome
     (Genomes/<genome>+<dataset>/<chrom>.enriched.fa in the run's working directory) holds
     an earlier record's ALT at a split site, and the last only where an index of format 1
@@ -3079,6 +3087,18 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
                         else os.path.join(workdir, m.group(1)))
     for ds, vs in by_ds.items():
         var_dir, indels_name = searched.get(ds, (None, None)) if ds else (None, None)
+        # the variant index where the run's record puts it, else, as its INDELS index
+        # below, the index of that name in the run's libraries: a search run in a
+        # container records the library where the install was mounted (/DATA/genome_library
+        # in the checklist's Docker commands), which the machine that checks may not have
+        var_found = None
+        if var_dir and not os.path.isdir(var_dir):
+            name = os.path.basename(var_dir.rstrip("/"))
+            var_found = False
+            for lib in libs:
+                if os.path.isdir(os.path.join(lib, name)):
+                    var_dir, var_found = os.path.join(lib, name), True
+                    break
         indels_dir = None
         if indels_name:
             where = [os.path.dirname(var_dir)] if var_dir else []
@@ -3139,6 +3159,8 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
                     any(four_base_position(v, ch) for v in vs):
                 alls = False   # format 2 with no Q while the VCF has four bases somewhere
             val["all_alleles"] = alls
+            if var_found is False:   # (the refusal, where it matters, says so)
+                val["var_found"] = False
             # an SNV ALT in lower case: coded by CRISPRitz 2.10.0 (index format 2), which
             # reads REF and ALT in upper case, not by 2.9.1 and earlier (format 1); the
             # variant index's format, else the INDELS index's (one enrichment writes both),
@@ -7823,10 +7845,12 @@ def main(argv=None):
             if val.get("all_alleles") is None and split_sites(v, ch, most=1, telling=False):
                 unknown.append("whether the variant genome of %s on %s codes every allele "
                                "of a split SNP site (CRISPRitz 2.10.0) or the last "
-                               "record's (2.9.1 and earlier) -- neither its variant index, "
+                               "record's (2.9.1 and earlier) -- neither its variant index%s, "
                                "nor its enriched genome in the working directory, tells "
                                "-- and %s has such sites there"
-                               % (ds or v.path, ch, v.path))
+                               % (ds or v.path, ch, " (its %s names no index found)"
+                                  % INDEXES_SEARCHED if val.get("var_found") is False
+                                  else "", v.path))
             fmt, pad = val.get("indels") or (None, None)
             window = val.get("window")
             if window is None and sem.release2100 and v.samples is not None:

@@ -750,6 +750,10 @@ major.minor version (Changed). The main changes, each told in its entry below:
     this release built). A run of 2.10.0 writes `.indexes_searched.txt`
     (and `.carrier_gate.json`); one without them is an earlier CRISPRme's (CRISPRitz 2.9.1
     or earlier: index format 1, the last record of a split site, a store of every FILTER).
+    The check reads each index where that record puts it or, where that path is not on the
+    machine that checks (a search run in Docker records the library where the install was
+    mounted, `/DATA/genome_library`), under its name in the run's `genome_library` or
+    `--index-path`.
     Of a run of 2.10.0, the variant genome codes every allele where its variant index's
     `.bin` headers flag Q, or its enriched genome in the working directory codes an earlier
     record's ALT at a split site, and the last record's where that index is of format 1, or
