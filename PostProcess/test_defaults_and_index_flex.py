@@ -1807,13 +1807,15 @@ class TheReleaseCandidatesGateInTheDocs(unittest.TestCase):
     with, which orders their records, and not on the architecture: so an archive's SHA-256 can be
     reproduced only at its row's thread count, while its targets and its searches' rows are the same
     at any (INDEX_PROVENANCE gave the dependence, not what it means for an archive's SHA-256). The two
-    images' CRISPR-Bulge scores differ in about their sixth significant digit (at most 1.8e-5
-    relative on the self-test, 1.4e-4 for the risk scores, and one tie of 632 rows shown with its
-    other alignment), where the README and METHODS section 8 said the images score identically. A
-    SIGINT to crisprme.py alone, under Apptainer, left the worker of the Settings page's jobs holding
-    the web interface's port (ROADMAP's 2.10.1). And RELEASE_CHECKLIST step 4c says where the check
-    finds the indexes of a search run with the install at /DATA, which d8c8dc25 wrote with the fix.
-    Each test fails on ac843ba6's docs but the last, which fails on 05df5d78's."""
+    images' CRISPR-Bulge scores differ in about their sixth significant digit (under 2e-5 relative
+    on the self-test, 1.82e-5 at most, and under 1.5e-4 for the risk scores, 1.41e-4 at most: no
+    bound below the maximum measured, as c96a1737's 1.8e-5 and 1.4e-4 were, ff-review-r1 FF-R1-3;
+    and one tie of 632 rows shown with its other alignment), where the README and METHODS section 8
+    said the images score identically. A SIGINT to crisprme.py alone, under Apptainer, left the
+    worker of the Settings page's jobs holding the web interface's port (ROADMAP's 2.10.1). And
+    RELEASE_CHECKLIST step 4c says where the check finds the indexes of a search run with the
+    install at /DATA, which d8c8dc25 wrote with the fix, and in which library. All four fail on
+    05df5d78's docs and on ac843ba6's, and the second and the last on c96a1737's."""
 
     @staticmethod
     def _flat(name):
@@ -1837,17 +1839,21 @@ class TheReleaseCandidatesGateInTheDocs(unittest.TestCase):
             with self.subTest(doc=name):
                 self.assertNotIn("scores identically", text)
                 self.assertNotIn("numerically identical", text.replace("*", ""))
-                self.assertIn("by at most 1.8 × 10⁻⁵ relative", text)
+                self.assertIn("by less than 2 × 10⁻⁵ relative", text)
+                self.assertNotIn("1.8 × 10⁻⁵", text)
                 self.assertIn(pointer, text)
         troubleshooting = self._flat("docs/TROUBLESHOOTING.md")
         section = troubleshooting[troubleshooting.index("## 5. GPU vs CPU"):
                                   troubleshooting.index("## 6. Download")]
         for said in ("the two images reported the same off-targets with the same CFD columns, "
-                     "and CRISPR-Bulge scores that differed by at most 1.8 × 10⁻⁵ relative (the "
-                     "risk scores, the difference of two scores, by at most 1.4 × 10⁻⁴)",
+                     "and CRISPR-Bulge scores that differed by less than 2 × 10⁻⁵ relative (the "
+                     "risk scores, the difference of two scores, by less than 1.5 × 10⁻⁴)",
                      "one row of 632 did (a score of 1.6 × 10⁻¹⁶",
                      "Compare CRISPR-Bulge scores across machines with a tolerance"):
             self.assertIn(said, section)
+        for bound in ("1.8 × 10⁻⁵", "1.4 × 10⁻⁴"):   # (below the maxima measured)
+            self.assertNotIn(bound, section)
+            self.assertNotIn(bound, self._flat("METHODS.md"))
 
     def test_the_roadmap_plans_the_web_apps_stop_and_the_images_near_ties(self):
         roadmap = self._flat("docs/ROADMAP.md")
@@ -1860,21 +1866,47 @@ class TheReleaseCandidatesGateInTheDocs(unittest.TestCase):
                       "images", plan)
 
     def test_step_4c_says_where_the_check_finds_a_containers_indexes(self):
+        """... and in which library: the one the run's record names, as it is on the host,
+        not one of the index's name elsewhere, which c96a1737's check looked in first
+        (ff-review-r1 FF-R1-1)."""
         checklist = (_REPO / "docs" / "RELEASE_CHECKLIST.md").read_text(encoding="utf-8")
         flat = " ".join(re.sub(r"\n#\s+", " ", checklist).split())
         self.assertIn("A search records the library it read each index from "
                       "(/DATA/genome_library, in its .indexes_searched.txt), and the check, run on "
                       "the host, reads each index there or, where that path is not on the host, "
-                      "under its name in the run's genome_library ($GW/genome_library) or the "
-                      "--index-path its command line gives", flat)
+                      "in the library the record names as it is on the host: of the run's two, its "
+                      "--index-path library where the record names the reference index there, "
+                      "else its genome_library, each in $GW", flat)
+        self.assertIn("never an index of that name in another library, which may be another "
+                      "build's", flat)
         self.assertIn("the fixed check gave the same two searches 426 and 459 findings, none "
                       "gating", flat)
         for name in ("CHANGELOG.md", "METHODS.md"):
+            text = self._flat(name)
             self.assertIn("The check reads each index where that record puts it or, where that "
-                          "path is not on the machine that checks", self._flat(name), name)
-        # the checker does what they say
-        code = (_REPO / "scripts" / "check_indel_rows.py").read_text(encoding="utf-8")
-        self.assertIn("var_dir, var_found = os.path.join(lib, name), True", code)
+                          "path is not on the machine that checks", text, name)
+            self.assertIn("the run's `--index-path` library where the record names its reference "
+                          "index there (a search with `--index-path` reads that one there alone, "
+                          "and a variant index there first), else its `genome_library`", text,
+                          name)
+            self.assertIn("It never reads an index of that name in another library, which may "
+                          "be another build's", text, name)
+        for name, text in (("docs/RELEASE_CHECKLIST.md", flat),
+                           ("CHANGELOG.md", self._flat("CHANGELOG.md")),
+                           ("METHODS.md", self._flat("METHODS.md"))):
+            self.assertNotIn("under its name in the run's", text, name)
+        # the checker does what they say: the checklist's run (--index-path genome_library),
+        # and a run of --index-path lib2, whose record names /DATA/lib2
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "check_indel_rows_step_4c", _REPO / "scripts" / "check_indel_rows.py")
+        check = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(check)
+        gw = os.path.join(os.sep, "host", "gw")
+        for recorded, index_path, want in (("/DATA/genome_library", "genome_library",
+                                            "genome_library"), ("/DATA/lib2", "lib2", "lib2")):
+            self.assertEqual(check.library_here(recorded, gw, index_path, recorded, "/DATA"),
+                             os.path.join(gw, want), recorded)
 
 
 class AGenomeFolderWithASpaceIsRefusedUpFront(unittest.TestCase):

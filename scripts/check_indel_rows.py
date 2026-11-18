@@ -521,10 +521,23 @@ without them is an earlier CRISPRme's, whose CRISPRitz (2.9.1 or earlier) coded 
 record of a split SNP site and built indexes of format 1, and whose phased indel store
 kept the indels of every FILTER. The record names the library each index was read from,
 and the check reads each index there (the INDELS index beside its variant index), or, where
-it is not there, the index of that name in the run's working directory's genome_library,
-else in the --index-path its command line gives: a search run in a container records the
-library where the install was mounted (/DATA/genome_library in the checklist's Docker
-commands), which the machine that checks may not have. Of a run of 2.10.0: the variant
+it is not there, in that library as it is on the machine that checks: a search run in a
+container records the library where the install was mounted (/DATA/genome_library in the
+checklist's Docker commands), which that machine may not have. A search reads a variant
+index from its --index-path library (resolved against its working directory), else from its
+working directory's genome_library, and its reference index from the --index-path library
+alone: so the record names the --index-path library where it names the reference index's
+library there, and genome_library where it does not (of a search with no bulges, which
+records no reference index, the recorded path tells: one that ends in the relative
+--index-path or in genome_library, and one that ends in both, the one whose working
+directory the run's log names, <folder>/Results/<name>/), each taken in the run's working
+directory on the machine that checks, the folder of its Results (an absolute --index-path at
+its place under the folder the log names). Where the records do not tell, or that library
+holds no index of the name, none is read: an index of the name in another library may be
+another build's. A search with no bulges records no variant index; its INDELS index is read
+in the --index-path library where that holds the variant index of its name, else in
+genome_library, the search's order. Where an index is read elsewhere than the path the run
+recorded, the check says so on stderr. Of a run of 2.10.0: the variant
 genome codes every allele of a split site where the variant index the record names flags Q
 in its .bin headers, or where its enriched genome
 (Genomes/<genome>+<dataset>/<chrom>.enriched.fa of the run's working directory) codes an
@@ -3027,6 +3040,143 @@ def split_sites(vcf, chrom, most=12, telling=True):
     return out
 
 
+def index_path_of(resdir):
+    """The --index-path the run's command line gives (its .command_line.txt), as it gives
+    it (a relative one is its working directory's), else None."""
+    p = os.path.join(resdir, ".command_line.txt")
+    if not os.path.isfile(p):
+        return None
+    with open(p, errors="replace") as fh:
+        m = re.search(r"--index-path\s+(\S+)", fh.read())
+    return m.group(1) if m else None
+
+
+def reference_library(resdir):
+    """The library the run's .indexes_searched.txt names its reference index in
+    ('Reference_index\t<name> (in <dir>): built for ...'), None where it names none (a
+    search with no bulges opens none) or the run has no such record."""
+    p = os.path.join(resdir, INDEXES_SEARCHED)
+    if not os.path.isfile(p):
+        return None
+    with open(p, errors="replace") as fh:
+        for line in fh:
+            if line.startswith("Reference_index\t"):
+                m = re.match(r"(\S+) \(in (.*?)\): built for ",
+                             line.rstrip("\n").partition("\t")[2])
+                return m.group(2) if m else None
+    return None
+
+
+def log_root(resdir, log):
+    """The folder the run's log names its results folder in, <it>/Results/<the results
+    folder's name>/... (the search writes paths of its results folder, links resolved, into
+    its log_verbose.txt), where the log names one alone, else None: the run's working
+    directory where its search ran, in a container where the install was mounted (/DATA)."""
+    if not log:
+        return None
+    job = os.path.basename(os.path.normpath(os.path.abspath(resdir)))
+    roots = {m.group(1) for m in re.finditer(
+        r"(?<![^\s'\"(=:,])(/[^\s'\"]*?)/Results/%s(?=[/\s'\"),:]|$)" % re.escape(job), log)}
+    return roots.pop() if len(roots) == 1 else None
+
+
+def _place_under(path, root):
+    """The place of ``path`` under the folder ``root`` (os.curdir for ``root`` itself), else
+    None."""
+    if not root:
+        return None
+    root = os.path.normpath(root)
+    if path == root:
+        return os.curdir
+    return (os.path.relpath(path, root)
+            if path.startswith(root.rstrip(os.sep) + os.sep) else None)
+
+
+def _index_path_here(index_path, workdir, root):
+    """The run's --index-path library on this machine: a relative --index-path (its working
+    directory's) joined to ``workdir``, the run's working directory here (none for one out
+    of it); an absolute one where this machine has it, else its place under ``root`` (the
+    folder the run's log names its results folder in, log_root: where the install was
+    mounted, for a run in a container) joined to ``workdir``; None where none of them is."""
+    if not os.path.isabs(index_path):
+        rel = os.path.normpath(index_path)
+        if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+            return None
+        return os.path.normpath(os.path.join(workdir, rel))
+    if os.path.isdir(index_path):
+        return index_path
+    place = _place_under(os.path.normpath(index_path), root)
+    return os.path.normpath(os.path.join(workdir, place)) if place else None
+
+
+def library_here(recorded, workdir, index_path, reference, root):
+    """Where the index library ``recorded`` -- one the run's .indexes_searched.txt names for
+    a variant index, as its search saw it -- is on this machine, or None where the run's own
+    records do not tell. A search records the library it read an index from: its
+    --index-path (``index_path``, as its command line gives it) resolved against its working
+    directory, links resolved, or <its working directory>/genome_library, which it reads a
+    variant index from where the --index-path library holds none (the search script's
+    _variant_index); a run in a container records them where the install was mounted
+    (/DATA/genome_library in the checklist's Docker commands). The run's working directory on
+    this machine is ``workdir``, the folder of its Results. Which of the two libraries the
+    record names, the record tells: a search with --index-path reads its reference index
+    there alone, so a variant index's record names that library where it names the
+    reference index's (``reference``), and genome_library where it does not. A search with
+    no bulges opens no reference index: then a recorded path that ends in a relative
+    --index-path names that library, one that ends in genome_library the working
+    directory's (with an --index-path given, where the log names that working directory,
+    ``root``, or names none and the path is not the absolute --index-path given), and one
+    that ends in both, the one whose working directory the log names. The library here is
+    the --index-path's (_index_path_here) or ``workdir``'s genome_library. No index is looked
+    for by its name elsewhere: an index of that name in a library the record does not name
+    may be another build's."""
+    rec = os.path.normpath(recorded)
+    home = (os.path.join(workdir, "genome_library")
+            if os.path.basename(rec) == "genome_library" else None)
+    if not index_path:   # (a search without --index-path reads genome_library alone)
+        return home
+    if os.path.isabs(index_path):
+        place = _place_under(rec, root)
+        given = os.path.normpath(os.path.join(workdir, place)) if place else None
+    else:
+        given = _index_path_here(index_path, workdir, root)
+    if reference:
+        return given if rec == os.path.normpath(reference) else home
+    readings = {}   # {library here: the run's working directory the reading puts it in}
+    if os.path.isabs(index_path):
+        if given and rec == os.path.normpath(index_path):
+            readings[given] = root
+    elif given:
+        rel = os.path.normpath(index_path)
+        if rel == os.curdir:
+            readings[given] = rec
+        elif rec.endswith(os.sep + rel):
+            readings[given] = rec[:-len(rel) - 1] or os.sep
+    if home and (os.path.dirname(rec) == root if root else
+                 rec != os.path.normpath(index_path)):
+        readings.setdefault(home, os.path.dirname(rec))
+    if len(readings) > 1:
+        readings = {lib: cwd for lib, cwd in readings.items() if cwd == root}
+    return next(iter(readings)) if len(readings) == 1 else None
+
+
+def scan_indels_library(workdir, index_path, root, indels_name):
+    """The library, on this machine, of the INDELS index ``indels_name`` of a search whose
+    record names no variant index (one with no bulges, which scans the variant genome), or
+    None where the run's records do not tell: the search reads it beside the variant index
+    of its name less _INDELS where its --index-path library holds that one, as the search
+    takes one there first (_variant_index), else in its working directory's genome_library,
+    where it builds one."""
+    home = os.path.join(workdir, "genome_library")
+    if not index_path:
+        return home
+    lib = _index_path_here(index_path, workdir, root)
+    if lib is None:
+        return None
+    name = indels_name[:-len("_INDELS")] if indels_name.endswith("_INDELS") else None
+    return lib if name and os.path.isdir(os.path.join(lib, name)) else home
+
+
 def run_semantics(resdir, vcfs, chroms, datasets, genome):
     """(Semantics, why not) of a run, from its own records -- or (None, why) for one whose
     opt-out of the SNP+indel co-occurrence they record (refused). A run of CRISPRme 2.10.0
@@ -3034,8 +3184,10 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
     an earlier CRISPRme's, which read every index with CRISPRitz 2.9.1 or earlier (format
     1, the last record of a split site) and a phased indel store of every FILTER. Of a run
     of 2.10.0 (its indexes those its .indexes_searched.txt names, read where it puts them,
-    else under their names in the run's genome_library or --index-path: a search in a
-    container records where the install was mounted): the INDELS index's format is its .bin
+    else in the library the record names as it is on this machine, library_here, never one
+    of their names elsewhere: a search in a container records where the install was
+    mounted; the INDELS index beside its variant index, and of a search that records none,
+    scan_indels_library): the INDELS index's format is its .bin
     files', else its log's format-1 NOTE; the variant genome codes
     every allele where its variant index's .bin files flag Q, or where its enriched genome
     (Genomes/<genome>+<dataset>/<chrom>.enriched.fa in the run's working directory) holds
@@ -3077,35 +3229,55 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
     by_ds = defaultdict(list)
     for v in vcfs:
         by_ds[dataset_of.get(v.path)].append(v)
-    libs = [os.path.join(workdir, "genome_library")]
-    p = os.path.join(resdir, ".command_line.txt")
-    if os.path.isfile(p):
-        with open(p, errors="replace") as fh:
-            m = re.search(r"--index-path\s+(\S+)", fh.read())
-        if m:
-            libs.append(m.group(1) if os.path.isabs(m.group(1))
-                        else os.path.join(workdir, m.group(1)))
+    index_path = index_path_of(resdir)
+    reference = reference_library(resdir)
+    root = log_root(resdir, log)
     for ds, vs in by_ds.items():
         var_dir, indels_name = searched.get(ds, (None, None)) if ds else (None, None)
-        # the variant index where the run's record puts it, else, as its INDELS index
-        # below, the index of that name in the run's libraries: a search run in a
-        # container records the library where the install was mounted (/DATA/genome_library
-        # in the checklist's Docker commands), which the machine that checks may not have
-        var_found = None
-        if var_dir and not os.path.isdir(var_dir):
-            name = os.path.basename(var_dir.rstrip("/"))
-            var_found = False
-            for lib in libs:
-                if os.path.isdir(os.path.join(lib, name)):
-                    var_dir, var_found = os.path.join(lib, name), True
-                    break
+        # the variant index where the run's record puts it, else in the library the record
+        # names as it is on this machine: a search run in a container records the library
+        # where the install was mounted (/DATA/genome_library in the checklist's Docker
+        # commands), which the machine that checks may not have. Never one of its name in
+        # another library, which may be another build's (refused where it matters).
+        var_found = missing = recorded = None
+        if var_dir:
+            recorded = os.path.dirname(os.path.normpath(var_dir))
+            name = os.path.basename(os.path.normpath(var_dir))
+            libs = [recorded]   # (where its INDELS index is: beside it, STEP 2.3)
+            if not os.path.isdir(var_dir):
+                here = library_here(recorded, workdir, index_path, reference, root)
+                var_found = False
+                if here and here != recorded:
+                    libs.append(here)
+                if here and os.path.isdir(os.path.join(here, name)):
+                    var_dir, var_found, libs = os.path.join(here, name), True, [here]
+                elif os.path.isdir(recorded):
+                    missing = "no %s in %s%s" % (name, recorded, ", nor in %s, that library "
+                                                 "on this machine" % here
+                                                 if here and here != recorded else "")
+                else:
+                    missing = "no %s in %s, which this machine does not have, %s" % (
+                        name, recorded, "nor in %s, that library on this machine" % here
+                        if here else "and the run's records do not say where that library "
+                        "is on it")
+        else:   # (a search with no bulges: its record names no library)
+            lib = (scan_indels_library(workdir, index_path, root, indels_name)
+                   if indels_name else None)
+            libs = [lib] if lib else []
         indels_dir = None
         if indels_name:
-            where = [os.path.dirname(var_dir)] if var_dir else []
-            for lib in where + libs:
+            for lib in libs:
                 if os.path.isdir(os.path.join(lib, indels_name)):
                     indels_dir = os.path.join(lib, indels_name)
                     break
+        # (the indexes read elsewhere than the library the run recorded, which main says)
+        moved = [what for what, lib in (
+            ("variant index", os.path.dirname(var_dir) if var_found else None),
+            ("INDELS index", os.path.dirname(indels_dir) if indels_dir and recorded else None))
+            if lib and lib != recorded]
+        read_in = (("variant and INDELS indexes" if len(moved) == 2 else moved[0],
+                    os.path.dirname(var_dir if var_found else indels_dir), recorded)
+                   if moved else None)
         for ch in chroms:
             val = {}
             val["store_filter"] = None if log is None else (ds, ch) not in old
@@ -3161,6 +3333,9 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
             val["all_alleles"] = alls
             if var_found is False:   # (the refusal, where it matters, says so)
                 val["var_found"] = False
+                val["var_missing"] = missing
+            if read_in:   # (main says so: the reading does not)
+                val["read_in"] = read_in
             # an SNV ALT in lower case: coded by CRISPRitz 2.10.0 (index format 2), which
             # reads REF and ALT in upper case, not by 2.9.1 and earlier (format 1); the
             # variant index's format, else the INDELS index's (one enrichment writes both),
@@ -7777,6 +7952,13 @@ def main(argv=None):
             "the run is not checked\n" % OPT_OUT)
         return 2
     ctx.sem = sem
+    # an index read on this machine elsewhere than the path the run recorded (a search run
+    # in a container records where the install was mounted): said, as the reading is not
+    for ds, (what, here, there) in sorted(
+            {k[0]: v["read_in"] for k, v in sem.values.items() if v.get("read_in")}.items(),
+            key=lambda kv: str(kv[0])):
+        sys.stderr.write("check_indel_rows: the %s of %s read in %s, the library its run "
+                         "recorded as %s\n" % (what, ds, here, there))
     try:
         ctx.max_degeneracy = int(run_params(args.results)["Max_degeneracy"])
     except (KeyError, ValueError):
@@ -7848,9 +8030,9 @@ def main(argv=None):
                                "record's (2.9.1 and earlier) -- neither its variant index%s, "
                                "nor its enriched genome in the working directory, tells "
                                "-- and %s has such sites there"
-                               % (ds or v.path, ch, " (its %s names no index found)"
-                                  % INDEXES_SEARCHED if val.get("var_found") is False
-                                  else "", v.path))
+                               % (ds or v.path, ch, " (its %s names no index found: %s)"
+                                  % (INDEXES_SEARCHED, val.get("var_missing"))
+                                  if val.get("var_found") is False else "", v.path))
             fmt, pad = val.get("indels") or (None, None)
             window = val.get("window")
             if window is None and sem.release2100 and v.samples is not None:

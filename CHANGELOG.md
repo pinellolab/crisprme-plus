@@ -752,8 +752,17 @@ major.minor version (Changed). The main changes, each told in its entry below:
     or earlier: index format 1, the last record of a split site, a store of every FILTER).
     The check reads each index where that record puts it or, where that path is not on the
     machine that checks (a search run in Docker records the library where the install was
-    mounted, `/DATA/genome_library`), under its name in the run's `genome_library` or
-    `--index-path`.
+    mounted, `/DATA/genome_library`), in the library the record names as it is there: the
+    run's `--index-path` library where the record names its reference index there (a search
+    with `--index-path` reads that one there alone, and a variant index there first), else
+    its `genome_library`, each in the run's working directory on that machine (an absolute
+    `--index-path` at its place under the folder the run's log names its results folder
+    in). It never reads an index of that name in another library, which may be another
+    build's; a run whose records do not say where the library is, is refused where it
+    matters. A search with no bulges records no variant index; its INDELS index is read in
+    the `--index-path` library where that holds the variant index of its name, else in
+    `genome_library`, the search's own order. The check says on stderr where it read an
+    index the run recorded elsewhere.
     Of a run of 2.10.0, the variant genome codes every allele where its variant index's
     `.bin` headers flag Q, or its enriched genome in the working directory codes an earlier
     record's ALT at a split site, and the last record's where that index is of format 1, or

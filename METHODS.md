@@ -2507,8 +2507,8 @@ found x86-64 vs aarch64 scores agree to a maximum absolute difference of
 3.6 × 10⁻⁷ with zero threshold-band changes. The multi-architecture (amd64 + arm64)
 Docker image scores alike on both, not bit for bit: on the self-test of 2.10.0's release
 candidates (`complete-test --chrom chr22`), the amd64 image running its CUDA build on CPU, every
-CFD column was the same on the two images, and the CRISPR-Bulge scores differed by at most
-1.8 × 10⁻⁵ relative (the risk scores, the difference of two scores, by 1.4 × 10⁻⁴); one row of
+CFD column was the same on the two images, and the CRISPR-Bulge scores differed by less than
+2 × 10⁻⁵ relative (the risk scores, the difference of two scores, by less than 1.5 × 10⁻⁴); one row of
 632, a tie at a score of 1.6 × 10⁻¹⁶, showed its REF alignment in the highest-CRISPR-Bulge
 columns on arm64 and its ALT one on amd64 (TROUBLESHOOTING §5). On networks that block
 `conda.anaconda.org`, the environment is built from a mirror (e.g. prefix.dev) via
@@ -2853,8 +2853,16 @@ writes `.indexes_searched.txt` (the indexes that served it); one without it is a
 CRISPRme's, which read indexes CRISPRitz 2.9.1 or earlier built (format 1, the last record of a
 split site) and a phased indel store of every FILTER. The check reads each index where that record
 puts it or, where that path is not on the machine that checks (a search run in a container records
-the library where the install was mounted, `/DATA/genome_library` in Docker), under its name in the
-run's `genome_library` or `--index-path`. Of a run of 2.10.0: the variant genome codes
+the library where the install was mounted, `/DATA/genome_library` in Docker), in the library the
+record names as it is there: the run's `--index-path` library where the record names its reference
+index there (a search with `--index-path` reads that one there alone, and a variant index there
+first), else its `genome_library`, each in the run's working directory on that machine (an absolute
+`--index-path` at its place under the folder the run's log names its results folder in). It never
+reads an index of that name in another library, which may be another build's: a run whose records do
+not say where the library is, is refused where it matters. A search with no bulges records no
+variant index; its INDELS index is read in the `--index-path` library where that holds the variant
+index of its name, else in `genome_library`, the search's own order. The check says on stderr where
+it read an index the run recorded elsewhere. Of a run of 2.10.0: the variant genome codes
 every allele of a split site where the variant index that served it flags Q in its `.bin` headers,
 or where its enriched genome (`Genomes/<genome>+<dataset>/` of the run's working directory) codes an
 earlier record's ALT at a split site of the VCF, and the last record alone where that index is of

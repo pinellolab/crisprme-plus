@@ -210,14 +210,19 @@ done
 #     chr22 searches above are, the install mounted at /DATA. A search records the library
 #     it read each index from (/DATA/genome_library, in its .indexes_searched.txt), and the
 #     check, run on the host, reads each index there or, where that path is not on the
-#     host, under its name in the run's genome_library ($GW/genome_library) or the
-#     --index-path its command line gives. Up to 05df5d78 it so found the INDELS index, but
-#     read the variant index's .bin headers (whose Q flag says every allele is coded) only
-#     where the search recorded it, so on an install that holds no enriched genome (a linked
-#     or downloaded one) nothing told it how the genome coded a split SNP site, and it
-#     refused every chromosome (exit 2): 2.10.0's gate on the amd64 RC met it, and the fixed
-#     check gave the same two searches 426 and 459 findings, none gating, as where /DATA
-#     resolved.
+#     host, in the library the record names as it is on the host: of the run's two, its
+#     --index-path library where the record names the reference index there, else its
+#     genome_library, each in $GW (a relative --index-path, as here, at its path in $GW;
+#     an absolute one at its place under the folder the run's log names its results folder
+#     in), never an index of that name in another library, which may be another build's.
+#     Its stderr says so ("the variant and INDELS indexes of hg38_HGDP1kGP read in
+#     $GW/genome_library, the library its run recorded as /DATA/genome_library"). Up to
+#     05df5d78 the check read the variant index's .bin headers (whose Q flag says every
+#     allele is coded) only where the search recorded it, so on an install that holds no
+#     enriched genome (a linked or downloaded one) nothing told it how the genome coded a
+#     split SNP site, and it refused every chromosome (exit 2): 2.10.0's gate on the amd64
+#     RC met it, and the fixed check gave the same two searches 426 and 459 findings, none
+#     gating, as where /DATA resolved.
 #     --vcf-dir is the panel's VCF folder; give it a .tbi per VCF (in a folder you can
 #     write: link the VCFs there and run `tabix -p vcf`), or let the checker index each one
 #     in memory (one decompression of the file, about 28 GB for this panel: the README run
