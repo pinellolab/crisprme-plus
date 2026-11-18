@@ -63,15 +63,16 @@ describes the methods, §10 the known limits and §11 how the indexes were built
   Retry runs no command read back from a file; a search loads no Python module from the folder it
   is run from. If you serve the web app to other people, upgrade.
 
-**How the indexes were checked.** Before anything is published, the release's gates checked them as
+**How the indexes were checked.** Before anything was published, the release's gates checked them as
 built: the integrity of every index and its counts against the input VCFs; the independent indel
 checker on genome-wide searches of each panel, whose findings were fixed or documented below until
 none gated; the equivalence of a pruned index with a dedicated one, row for row; and 13 pairs of
 searches timed against 2.8.1 ([METHODS §11](https://github.com/pinellolab/crisprme-plus/blob/v2.10.0/METHODS.md#11-index-rebuild-of-2100);
 [INDEX_PROVENANCE.md](https://github.com/pinellolab/crisprme-plus/blob/v2.10.0/docs/INDEX_PROVENANCE.md)
-records each archive, its inputs and their checksums). What a default install takes: a ~70 GB download, ~150 GB on disk (keep
-~200 GB free); the genome-wide variant search 38 GB of memory on 8 threads, 63 GB on 16 (the
-README's System Requirements).
+records each archive, its inputs and their checksums). What a default install takes, measured
+from the Hub: a 71.46 GB download, 153.39 GB on disk and a peak of 159.25 GB while the archives
+unpack (keep ~200 GB free); the genome-wide variant search 38 GB of memory on 8 threads, 63 GB on
+16 (the README's System Requirements).
 
 ## Upgrading from 2.8.1
 

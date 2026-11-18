@@ -137,6 +137,18 @@ HuggingFace's HTTP-429 rate limit; the downloader retries with backoff, and
 authenticating (`hf auth login`) avoids it entirely. See METHODS §2 for
 the genotyped-vs-sites-only distinction and §4 for how each is scanned.
 
+**Fetch the large archives with `crisprme.py download`** (or `hf download
+lucapinello/crisprme_plus_indices indexes/<archive>.tar.gz --repo-type dataset --local-dir .`),
+which go through the Hub's client: in the release's clean install from the Hub (2026-11-18,
+`docs/RELEASE_CHECKLIST.md`, E, step 7), `download --what all` (21.33 GB) took 13 min, and the
+default variant index with its panel's bundle and genotype store (50.13 GB) 24 min. Over plain
+HTTPS (a browser, or `curl` of an archive's `resolve/main` URL), the streams that checked each
+archive from the Hub the same day (step 6) got about 4 to 7 MB/s per connection, and the Hub twice
+reset every long download at once (curl's exit 16, an HTTP/2 reset): the general variant index,
+110.91 GB, would take about 6 hours, with restarts. If you download an archive by hand, resume it
+where it stopped with `curl -fL -C - -O <URL>`, then check it against its line of
+`indexes/SHA256SUMS`.
+
 ### The archives of 2.10.0 and their sizes
 
 The index set's 26 archives, built on 2026-11-14 and 2026-11-15 and checked before the publish
