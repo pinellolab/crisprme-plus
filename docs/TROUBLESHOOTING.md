@@ -157,6 +157,17 @@ when no GPU is available — a CPU-only machine is fully supported. To use a GPU
 GPU helps on large/dense searches; a tiny single-guide run is often faster on CPU
 due to initialization overhead.
 
+**The same search on another machine.** The CRISPR-Bulge scores of the amd64 and arm64 images can
+differ in about their sixth significant digit: each image runs a TensorFlow build of its own (the
+amd64 image's CUDA build, on CPU where no GPU is used, and arm64's CPU build), on another
+processor. On the self-test of 2.10.0's release candidates (`complete-test --chrom chr22`) the two
+images reported the same off-targets with the same CFD columns, and CRISPR-Bulge scores that
+differed by at most 1.8 × 10⁻⁵ relative (the risk scores, the difference of two scores, by at most
+1.4 × 10⁻⁴). Where two alignments of a site tie on the score, this can change which one the
+highest-CRISPR-Bulge columns show: one row of 632 did (a score of 1.6 × 10⁻¹⁶, its REF alignment
+on arm64 and its ALT one on amd64). Compare CRISPR-Bulge scores across machines with a tolerance;
+on one machine, how a chromosome's rows are batched moves them by about as much (METHODS §8).
+
 ---
 
 ## 6. Download / data setup

@@ -95,6 +95,15 @@ The tier emitter's workers (`CRISPRME_TIER_WORKERS`, 3 on ml007) and the enrichm
 file: each chromosome's tiers are written alone. A user who rebuilds an index from its kit
 (`docs/PRECOMPUTED_INDEXES.md`, step 3) gets the published `.bin` files with these counts.
 
+So an archive's SHA-256 can be reproduced only at its row's thread count, which sets the order of
+the records in its `.bin` files: built at another count, the index holds the same targets, and
+its searches give the same rows. The architecture changes neither. From the rebuild's chr22 FASTA
+(md5 `319cba9f…`), the amd64 and arm64 release candidates of 2.10.0 wrote byte-identical `.bin`
+files of an NGG index at 8 threads, and again at 1; the rebuild's `20-NGG_3_hg38` (16 threads)
+has chr22 files of the same sizes and other md5s. Searching those files of the rebuild, built on
+x86, the arm64 engine wrote the amd64 engine's targets file byte for byte: the targets it found in
+the index it had built itself, in another order.
+
 ### Inputs
 
 Each input was checked against a list of checksums before the build, on the node that read it;

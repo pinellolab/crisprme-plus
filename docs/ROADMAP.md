@@ -62,11 +62,17 @@ gap the release's gates found.
   off whole; to name every record a missed target needs in its completeness line, a record past a
   long deletion included; and to tell a run's genome where it refuses one today.
 - **CRISPR-Bulge scores of near-ties.** A CRISPR-Bulge score can move by about 1e-5 with how a
-  chromosome's rows are batched, which flips the order of near-ties in the highest-CRISPR-Bulge
-  column: the scoring is to be made batch-independent, or the gates to compare with a tolerance.
+  chromosome's rows are batched, or between the amd64 and arm64 images
+  ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §5), which flips the order of near-ties in the
+  highest-CRISPR-Bulge column: the scoring is to be made batch-independent, or the gates to compare
+  with a tolerance.
 - **The web app**: temporary folders by name in a shared `CRISPRME_TMPDIR` that is not sticky; the
   History page's reads of a results folder's files through the safe-file reader, and a `Results/`
-  folder that is a link (it answers HTTP 500 today); the reads of headers and PAM files.
+  folder that is a link (it answers HTTP 500 today); the reads of headers and PAM files; and its
+  stop under Apptainer, where a SIGINT sent to the `crisprme.py` process alone (as a script or a
+  service manager sends it) left the worker process of the Settings page's jobs running and
+  holding the port (a Ctrl-C in its terminal, which reaches every process, stops them all; Docker
+  is unaffected, as a container's end stops every process in it).
 - **The rebuild's tooling**: an INDELS index of an exact budget refused early, not late; the
   completeness of `$REF` checked; the checklist's lessons of the 2.10.0 rebuild
   ([`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md), D and E).

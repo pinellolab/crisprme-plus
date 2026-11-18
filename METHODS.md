@@ -2497,16 +2497,20 @@ released **amd64** Docker image bundles the CUDA TensorFlow build, so
 `docker run --gpus all ... --compute-backend cuda` runs CRISPR-Bulge on an NVIDIA GPU with
 transparent CPU fallback; the **arm64** image stays CPU.
 
-The scorer environment is **architecture-aware** and yields **numerically
-identical** CRISPR-Bulge scores across CPU architectures: it installs the same
+The scorer environment is **architecture-aware**: it installs the same
 TensorFlow 2.13.x per-arch (2.13.1 on x86-64/aarch64; 2.13.0 via tensorflow-macos
 on Apple Silicon) — the conda-forge `tensorflow-cpu`/CUDA builds on
 x86-64, `tensorflow-macos` on Apple Silicon, and the PyPI `tensorflow==2.13.1`
 aarch64 wheel on Linux ARM (conda-forge ships `tensorflow-cpu=2.13` only for
 x86-64). A cross-architecture check on a 254-off-target panel (150 with bulges)
 found x86-64 vs aarch64 scores agree to a maximum absolute difference of
-3.6 × 10⁻⁷ with zero threshold-band changes, so the multi-architecture
-(amd64 + arm64) Docker image scores identically on both. On networks that block
+3.6 × 10⁻⁷ with zero threshold-band changes. The multi-architecture (amd64 + arm64)
+Docker image scores alike on both, not bit for bit: on the self-test of 2.10.0's release
+candidates (`complete-test --chrom chr22`), the amd64 image running its CUDA build on CPU, every
+CFD column was the same on the two images, and the CRISPR-Bulge scores differed by at most
+1.8 × 10⁻⁵ relative (the risk scores, the difference of two scores, by 1.4 × 10⁻⁴); one row of
+632, a tie at a score of 1.6 × 10⁻¹⁶, showed its REF alignment in the highest-CRISPR-Bulge
+columns on arm64 and its ALT one on amd64 (TROUBLESHOOTING §5). On networks that block
 `conda.anaconda.org`, the environment is built from a mirror (e.g. prefix.dev) via
 `CONDA_CHANNEL_BASE` / `CRISPRME_CONDA_CHANNEL_BASE` (the Docker build exposes a
 `CONDA_CHANNEL_BASE` build argument).
