@@ -534,10 +534,14 @@ directory the run's log names, <folder>/Results/<name>/), each taken in the run'
 directory on the machine that checks, the folder of its Results (an absolute --index-path at
 its place under the folder the log names). Where the records do not tell, or that library
 holds no index of the name, none is read: an index of the name in another library may be
-another build's. A search with no bulges records no variant index; its INDELS index is read
-in the --index-path library where that holds the variant index of its name, else in
-genome_library, the search's order. Where an index is read elsewhere than the path the run
-recorded, the check says so on stderr. Of a run of 2.10.0: the variant
+another build's. A search with no bulges records the variant index it searched unless its
+variant genome is whole in its working directory (an install of the index alone holds none):
+then it scans that genome and records none ('none: a search with no bulges scans the variant
+genome'), and its INDELS index is read in the --index-path library where that holds the
+variant index of its name, else in genome_library, the search's order, and none where that
+--index-path library is not on the machine that checks (scan_indels_library). Where an index
+is read elsewhere than the path the run recorded, the check says so on stderr. Of a run of
+2.10.0: the variant
 genome codes every allele of a split site where the variant index the record names flags Q
 in its .bin headers, or where its enriched genome
 (Genomes/<genome>+<dataset>/<chrom>.enriched.fa of the run's working directory) codes an
@@ -3162,16 +3166,20 @@ def library_here(recorded, workdir, index_path, reference, root):
 
 def scan_indels_library(workdir, index_path, root, indels_name):
     """The library, on this machine, of the INDELS index ``indels_name`` of a search whose
-    record names no variant index (one with no bulges, which scans the variant genome), or
-    None where the run's records do not tell: the search reads it beside the variant index
-    of its name less _INDELS where its --index-path library holds that one, as the search
-    takes one there first (_variant_index), else in its working directory's genome_library,
-    where it builds one."""
+    record names no variant index (one with no bulges whose variant genome was whole in its
+    working directory, which it scans: 'none: a search with no bulges scans the variant
+    genome'), or None where the run's records do not tell: the search reads it beside the
+    variant index of its name less _INDELS where its --index-path library holds that one,
+    as the search takes one there first (_variant_index), else in its working directory's
+    genome_library, where it builds one. Where that --index-path library is not on this
+    machine (a link only the container resolved, a library mounted apart, one removed
+    since), nothing tells whether it held that variant index: None, not genome_library,
+    which may hold another build's index of the name (refused where it matters)."""
     home = os.path.join(workdir, "genome_library")
     if not index_path:
         return home
     lib = _index_path_here(index_path, workdir, root)
-    if lib is None:
+    if lib is None or not os.path.isdir(lib):
         return None
     name = indels_name[:-len("_INDELS")] if indels_name.endswith("_INDELS") else None
     return lib if name and os.path.isdir(os.path.join(lib, name)) else home
@@ -3239,7 +3247,7 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
         # where the install was mounted (/DATA/genome_library in the checklist's Docker
         # commands), which the machine that checks may not have. Never one of its name in
         # another library, which may be another build's (refused where it matters).
-        var_found = missing = recorded = None
+        var_found = missing = recorded = indels_missing = None
         if var_dir:
             recorded = os.path.dirname(os.path.normpath(var_dir))
             name = os.path.basename(os.path.normpath(var_dir))
@@ -3260,10 +3268,21 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
                         name, recorded, "nor in %s, that library on this machine" % here
                         if here else "and the run's records do not say where that library "
                         "is on it")
-        else:   # (a search with no bulges: its record names no library)
+        else:   # (a search with no bulges that scanned its variant genome, whole in its
+            # working directory: its record names no variant index, so no library)
             lib = (scan_indels_library(workdir, index_path, root, indels_name)
                    if indels_name else None)
             libs = [lib] if lib else []
+            if indels_name and lib is None:   # (its --index-path library not here: refused
+                # where it matters, and the refusal says so)
+                here = _index_path_here(index_path, workdir, root)
+                indels_missing = (
+                    "its --index-path library (%s), where a search with no bulges reads it "
+                    "if that holds the variant index of its name, is not at %s on this "
+                    "machine" % (index_path, here) if here else
+                    "the run's records do not say where its --index-path library (%s), "
+                    "where a search with no bulges reads it if that holds the variant index "
+                    "of its name, is on this machine" % index_path)
         indels_dir = None
         if indels_name:
             for lib in libs:
@@ -3334,6 +3353,8 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
             if var_found is False:   # (the refusal, where it matters, says so)
                 val["var_found"] = False
                 val["var_missing"] = missing
+            if indels_missing:   # (so too where it did not look for the INDELS index)
+                val["indels_missing"] = indels_missing
             if read_in:   # (main says so: the reading does not)
                 val["read_in"] = read_in
             # an SNV ALT in lower case: coded by CRISPRitz 2.10.0 (index format 2), which
@@ -8057,10 +8078,12 @@ def main(argv=None):
                     before + 1 - full_n < (pad or max(args.bdna, args.brna) + 1):
                 unknown.append("the index format of the INDELS index of %s on %s (its "
                                "%s names no index found, and its log no format-1 NOTE of "
-                               "it), and a target of this guide, PAM and budget can lie at "
+                               "it%s), and a target of this guide, PAM and budget can lie at "
                                "a fake-indel window's edge, which an index of format 1 "
-                               "drops and one of format 2 holds" % (ds or v.path, ch,
-                                                                      INDEXES_SEARCHED))
+                               "drops and one of format 2 holds" % (
+                                   ds or v.path, ch, INDEXES_SEARCHED,
+                                   "; %s" % val["indels_missing"]
+                                   if val.get("indels_missing") else ""))
     if unknown:
         sys.stderr.write("ERROR: the run's own records do not say %s: the run is not "
                          "checked\n" % "; nor ".join(dict.fromkeys(unknown)))

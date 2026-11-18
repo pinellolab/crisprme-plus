@@ -759,9 +759,14 @@ major.minor version (Changed). The main changes, each told in its entry below:
     `--index-path` at its place under the folder the run's log names its results folder
     in). It never reads an index of that name in another library, which may be another
     build's; a run whose records do not say where the library is, is refused where it
-    matters. A search with no bulges records no variant index; its INDELS index is read in
-    the `--index-path` library where that holds the variant index of its name, else in
-    `genome_library`, the search's own order. The check says on stderr where it read an
+    matters. A search with no bulges records no reference index, so the path it records for
+    its variant index, and the run's log, tell which of the run's two libraries that path
+    names. It records the variant index it searched unless its variant genome is whole in
+    its working directory (an install of the index alone holds none): then it scans that
+    genome and records no variant index (`none`), and its INDELS index is read in the
+    `--index-path` library where that holds the variant index of its name, else in
+    `genome_library`, the search's own order, and none is read where that `--index-path`
+    library is not on the machine that checks. The check says on stderr where it read an
     index the run recorded elsewhere.
     Of a run of 2.10.0, the variant genome codes every allele where its variant index's
     `.bin` headers flag Q, or its enriched genome in the working directory codes an earlier

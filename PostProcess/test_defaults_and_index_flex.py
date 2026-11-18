@@ -1815,7 +1815,12 @@ class TheReleaseCandidatesGateInTheDocs(unittest.TestCase):
     worker of the Settings page's jobs holding the web interface's port (ROADMAP's 2.10.1). And
     RELEASE_CHECKLIST step 4c says where the check finds the indexes of a search run with the
     install at /DATA, which d8c8dc25 wrote with the fix, and in which library. All four fail on
-    05df5d78's docs and on ac843ba6's, and the second and the last on c96a1737's."""
+    05df5d78's docs and on ac843ba6's, and the second and the last on c96a1737's. A fifth fails on
+    015a57cb's (and on each of those): its CHANGELOG and METHODS section 8 said that a search with
+    no bulges records no variant index (it records the one it searched unless it scanned a variant
+    genome whole in its working directory: ff-review-r2 FF-R2-2), and its check took
+    genome_library for the INDELS index of a search that records none where its --index-path
+    library is not on the machine that checks (FF-R2-1)."""
 
     @staticmethod
     def _flat(name):
@@ -1907,6 +1912,47 @@ class TheReleaseCandidatesGateInTheDocs(unittest.TestCase):
                                             "genome_library"), ("/DATA/lib2", "lib2", "lib2")):
             self.assertEqual(check.library_here(recorded, gw, index_path, recorded, "/DATA"),
                              os.path.join(gw, want), recorded)
+
+    def test_a_search_with_no_bulges_records_its_variant_index_unless_it_scanned(self):
+        """A search with no bulges records no variant index only where it scanned its variant
+        genome, whole in its working directory: on an install of the index alone, which holds
+        none, it searches the variant index and records it (its Variant_index line in
+        submit_job_automated_new_multiple_vcfs.sh), as the checker reads it (ff-review-r2
+        FF-R2-2); and the INDELS index of a search that records none is not read where its
+        --index-path library is not on the machine that checks, which 015a57cb's check took
+        genome_library for (FF-R2-1)."""
+        search = " ".join((_REPO / "PostProcess" / "submit_job_automated_new_multiple_vcfs.sh")
+                          .read_text(encoding="utf-8").split())
+        self.assertIn('if [ "$_no_bulges" = 1 ] && _enriched_genome_whole; then printf '
+                      '"Variant_index:%s\\tnone: a search with no bulges scans the variant genome" '
+                      '"$vcf_name" else printf "Variant_index:%s\\t%s" "$vcf_name" '
+                      '"$(_index_record "$idx_var")"', search)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "check_indel_rows_no_bulges", _REPO / "scripts" / "check_indel_rows.py")
+        check = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(check)
+        for name, text in (("CHANGELOG.md", self._flat("CHANGELOG.md")),
+                           ("METHODS.md", self._flat("METHODS.md")),
+                           ("scripts/check_indel_rows.py", " ".join(check.__doc__.split()))):
+            with self.subTest(doc=name):
+                self.assertNotIn("A search with no bulges records no variant index", text)
+                self.assertIn("the variant index it searched unless its variant genome is whole "
+                              "in its working directory (an install of the index alone holds "
+                              "none): then it scans that genome and records", text)
+                self.assertIn("its INDELS index is read in the --index-path library where that "
+                              "holds the variant index of its name, else in genome_library",
+                              text.replace("`", ""))
+        for name in ("CHANGELOG.md", "METHODS.md"):
+            self.assertIn("and none is read where that `--index-path` library is not on the "
+                          "machine that checks", self._flat(name), name)
+        # the checker does so: genome_library without --index-path; none where the
+        # --index-path library is not on this machine (here no /host/gw/lib2)
+        gw = os.path.join(os.sep, "host", "gw")
+        self.assertFalse(os.path.exists(gw))
+        self.assertEqual(check.scan_indels_library(gw, None, "/DATA", "x_INDELS"),
+                         os.path.join(gw, "genome_library"))
+        self.assertIsNone(check.scan_indels_library(gw, "lib2", "/DATA", "x_INDELS"))
 
 
 class AGenomeFolderWithASpaceIsRefusedUpFront(unittest.TestCase):
