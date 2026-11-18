@@ -537,11 +537,14 @@ holds no index of the name, none is read: an index of the name in another librar
 another build's. A search with no bulges records the variant index it searched unless its
 variant genome is whole in its working directory (an install of the index alone holds none):
 then it scans that genome and records none ('none: a search with no bulges scans the variant
-genome'), and its INDELS index is read in the --index-path library where that holds the
-variant index of its name, else in genome_library, the search's order, and none where that
---index-path library is not on the machine that checks (scan_indels_library). Where an index
-is read elsewhere than the path the run recorded, the check says so on stderr. Of a run of
-2.10.0: the variant
+genome'), and its INDELS index is read in genome_library where the search had no other library
+(no --index-path, or an --index-path that is genome_library), else in the --index-path library
+where that holds the variant index of its name. Where that library holds none on the machine
+that checks, or is not on it, none is read: the search read the INDELS index there if that
+library held one when it ran, else in genome_library, and nothing the run records says which
+(a library bind-mounted inside the container's working directory leaves an empty folder on the
+host; scan_indels_library). Where an index is read elsewhere than the path the run recorded,
+the check says so on stderr. Of a run of 2.10.0: the variant
 genome codes every allele of a split site where the variant index the record names flags Q
 in its .bin headers, or where its enriched genome
 (Genomes/<genome>+<dataset>/<chrom>.enriched.fa of the run's working directory) codes an
@@ -3168,13 +3171,18 @@ def scan_indels_library(workdir, index_path, root, indels_name):
     """The library, on this machine, of the INDELS index ``indels_name`` of a search whose
     record names no variant index (one with no bulges whose variant genome was whole in its
     working directory, which it scans: 'none: a search with no bulges scans the variant
-    genome'), or None where the run's records do not tell: the search reads it beside the
+    genome'), or None where the run's records do not tell. The search reads it beside the
     variant index of its name less _INDELS where its --index-path library holds that one,
     as the search takes one there first (_variant_index), else in its working directory's
-    genome_library, where it builds one. Where that --index-path library is not on this
-    machine (a link only the container resolved, a library mounted apart, one removed
-    since), nothing tells whether it held that variant index: None, not genome_library,
-    which may hold another build's index of the name (refused where it matters)."""
+    genome_library, where it builds one. So it is read in genome_library where the search
+    had no other library (no --index-path, or an --index-path that is genome_library), else
+    in the --index-path library where that holds the variant index of the name here. Where
+    that library holds none here, or is not on this machine (a link only the container
+    resolved, one removed since), nothing tells whether it held one when the search ran: a
+    library bind-mounted inside the container's working directory leaves an empty folder
+    on the host, and a library may have been emptied since. None then, never genome_library,
+    which may hold another build's index of the name: the checker does not guess (refused
+    where it matters, the refusal naming the library)."""
     home = os.path.join(workdir, "genome_library")
     if not index_path:
         return home
@@ -3182,7 +3190,9 @@ def scan_indels_library(workdir, index_path, root, indels_name):
     if lib is None or not os.path.isdir(lib):
         return None
     name = indels_name[:-len("_INDELS")] if indels_name.endswith("_INDELS") else None
-    return lib if name and os.path.isdir(os.path.join(lib, name)) else home
+    if name and os.path.isdir(os.path.join(lib, name)):
+        return lib
+    return home if os.path.normpath(lib) == os.path.normpath(home) else None
 
 
 def run_semantics(resdir, vcfs, chroms, datasets, genome):
@@ -3273,16 +3283,25 @@ def run_semantics(resdir, vcfs, chroms, datasets, genome):
             lib = (scan_indels_library(workdir, index_path, root, indels_name)
                    if indels_name else None)
             libs = [lib] if lib else []
-            if indels_name and lib is None:   # (its --index-path library not here: refused
-                # where it matters, and the refusal says so)
+            if indels_name and lib is None:   # (its --index-path library not here, or here
+                # without the variant index of the name: refused where it matters, and the
+                # refusal says so, naming that library)
                 here = _index_path_here(index_path, workdir, root)
-                indels_missing = (
-                    "its --index-path library (%s), where a search with no bulges reads it "
-                    "if that holds the variant index of its name, is not at %s on this "
-                    "machine" % (index_path, here) if here else
-                    "the run's records do not say where its --index-path library (%s), "
-                    "where a search with no bulges reads it if that holds the variant index "
-                    "of its name, is on this machine" % index_path)
+                where = ("its --index-path library (%s), where a search with no bulges reads "
+                         "it if that holds the variant index of its name, " % index_path)
+                if here is None:
+                    indels_missing = ("the run's records do not say where " + where
+                                      + "is on this machine")
+                elif not os.path.isdir(here):
+                    indels_missing = where + "is not at %s on this machine" % here
+                else:
+                    indels_missing = where + (
+                        "holds no %s at %s on this machine, and the run's records do not say "
+                        "whether that library held one when the search ran -- a library "
+                        "bind-mounted inside the container's working directory leaves an empty "
+                        "folder on the host -- or the search read it in its working "
+                        "directory's genome_library" % (re.sub(r"_INDELS$", "", indels_name),
+                                                         here))
         indels_dir = None
         if indels_name:
             for lib in libs:

@@ -7342,7 +7342,17 @@ class ARunSearchedInAContainer(Base):
     the name there (ff-review-r2 FF-R2-1: a false PASS): nothing tells whether that library
     held the variant index the search reads it beside, and the run is refused where it
     matters, the refusal saying so. The two tests of it fail at 015a57cb, as at c96a1737 and
-    05df5d78."""
+    05df5d78. 408a6df3 still took genome_library where that library is a folder on the
+    machine that checks but holds no variant index of the name (ff-review-r3 FF-R3-1: a
+    library bind-mounted inside the container's working directory leaves its mount point, an
+    empty folder, on the host, and the search read the INDELS index beside the one the mount
+    held; another build's index of the name in genome_library gave a false PASS): the checker
+    does not guess, and reads the INDELS index of such a search in genome_library only where
+    the search had no other library (no --index-path, or one that is genome_library), in its
+    --index-path library only where that holds the variant index of the name; the run is
+    otherwise refused where it matters, the refusal naming the library. The test of the
+    mount point fails at 408a6df3, as do the two of the search's order and of where the
+    INDELS index is here, which took genome_library there."""
 
     def lay_out(self, tag, lib="genome_library", reference=None, **kw):
         """A run of world_split_snp_site laid out by as_2100, its record naming its indexes
@@ -7500,8 +7510,10 @@ class ARunSearchedInAContainer(Base):
         variant genome'; without that genome it searches its variant index and records it),
         and reads the INDELS index beside the variant index of its name in its --index-path
         library, where that holds one, else in genome_library: here lib2's (format 2), not
-        genome_library's of the same name (format 1, which c96a1737 read first); with no such
-        variant index in lib2, genome_library's."""
+        genome_library's of the same name (format 1, which c96a1737 read first). With no such
+        variant index in lib2 now, none: the search read genome_library's if lib2 held none
+        when it ran, lib2's if it held one (a library emptied since, or mounted apart, FF-R3-1),
+        and nothing the run records says which (408a6df3 read genome_library's)."""
         case, _budget = self.lay_out("scan", lib="lib2", var_flags=4)
         work = self.searched_with(case, "lib2")
         write_index_pair(os.path.join(work, "genome_library"), 1, 0, 1, var=False)
@@ -7511,9 +7523,9 @@ class ARunSearchedInAContainer(Base):
                      "genome; its indels: %s_INDELS\n" % NRG_V)
         self.assertEqual(self.reading(case)["indels"], (2, 2))
         shutil.rmtree(os.path.join(work, "lib2", NRG_V))
-        self.assertEqual(self.reading(case)["indels"], (1, 2))
+        self.assertEqual(self.reading(case)["indels"], (None, 2))
 
-    def scan_of_lib2(self, how, absolute=False, log=True):
+    def scan_of_lib2(self, how, absolute=False, log=True, tag=""):
         """The window-edge world (world_window_edge: a SaCas9 target at its fake-indel
         window's first base, which an INDELS index of format 2 holds and one of format 1
         drops) as a search with no bulges (2 + 0 + 0) whose variant genome was whole in its
@@ -7524,10 +7536,11 @@ class ARunSearchedInAContainer(Base):
         container saw it; 'abs' a link to the container's path (<tmp>/DATA/shared/lib),
         which dangles here; 'gone' none, lib2 removed since. The working directory's
         genome_library holds an index pair of the same names of another build (format 1).
-        ``log``: the run's log names its results folder in <tmp>/DATA."""
+        ``log``: the run's log names its results folder in <tmp>/DATA. ``tag``: a name of
+        the run's own, for a test that lays out several."""
         seq, recs, _start = world_window_edge(self.tmp)
-        tmp = os.path.join(self.tmp, "%s%s%s" % (how, "-absolute" if absolute else "",
-                                                 "" if log else "-nolog"))
+        tmp = os.path.join(self.tmp, "%s%s%s%s" % (how, "-absolute" if absolute else "",
+                                                   "" if log else "-nolog", tag))
         os.makedirs(tmp)
         case = as_2100(Case(tmp, seq, recs, [], pam=SA_PAM), indels_format=2, budget=1,
                        guide_len=21, pam="NNGRRT")
@@ -7594,37 +7607,112 @@ class ARunSearchedInAContainer(Base):
                               "window's edge" % ("" if log else "the run's records do not say "
                                                  "where ", index_path, where), err.getvalue())
 
+    def test_a_scans_indels_index_is_not_guessed_where_its_library_was_mounted_apart(self):
+        """ff-review-r3 FF-R3-1, its probe's layouts: a library bind-mounted inside the
+        mounted working directory (docker run -v $W:/DATA -v $SHARED:/DATA/lib2, apptainer
+        --bind alike) leaves its mount point, an empty folder, in the working directory on
+        the host ('mount point'), and a library may lose its indexes after the run, the
+        reference index left ('emptied'): lib2 is a folder here that holds no variant index
+        of the name, yet the search read its INDELS index (format 2) beside the one lib2
+        held. The working directory's genome_library holds another build's pair of the names
+        (format 1), which the search reads where its --index-path library holds none, and
+        nothing the run records says which it read: none is read, and the run is refused
+        (exit 2), the refusal naming lib2 and the index it lacks; with the variant index
+        recorded in /DATA/lib2 (a search of it), refused alike. 408a6df3 read genome_library's
+        for the record 'none' (exit 0, limit-window-edge: a false PASS), with a relative
+        --index-path and an absolute one."""
+        budget = ("2", "0", "0", "2")
+        var = "21-NNGRRT_1_hg38+v"
+        for state in ("mount point", "emptied"):
+            for absolute in (False, True):
+                for recorded in (False, True):
+                    with self.subTest(state=state, absolute=absolute, recorded=recorded):
+                        tag = "-%s-%d" % (state.replace(" ", ""), recorded)
+                        case, lib2, index_path = self.scan_of_lib2("gone", absolute, tag=tag)
+                        os.makedirs(lib2)
+                        if state == "emptied":
+                            os.makedirs(os.path.join(lib2, "21-NNGRRT_1_hg38"))
+                        if recorded:
+                            mounted = os.path.join(case.tmp, "DATA", "lib2")
+                            with open(os.path.join(case.res, ".indexes_searched.txt"),
+                                      "w") as fh:
+                                fh.write("Reference_index\t21-NNGRRT_1_hg38 (in %s): built "
+                                         "for the PAM NNGRRT\n" % mounted)
+                                fh.write("Variant_index:v\t%s (in %s): built for the PAM "
+                                         "NNGRRT on the 3' side of a 21-nt guide, with up to "
+                                         "0 bulge(s) of each type; its indels: %s_INDELS\n"
+                                         % (var, mounted, var))
+                        self.assertEqual(self.reading(case)["indels"], (None, 1))
+                        err = io.StringIO()
+                        with contextlib.redirect_stderr(err):
+                            rc, found = case.run(mode="completeness", budget=budget,
+                                                 guide=G21)
+                        self.assertEqual((rc, found), (2, []), err.getvalue())
+                        self.assertIn("ERROR: the run's own records do not say the index "
+                                      "format of the INDELS index of v on chr21",
+                                      err.getvalue())
+                        if not recorded:
+                            self.assertIn(
+                                "its --index-path library (%s), where a search with no "
+                                "bulges reads it if that holds the variant index of its "
+                                "name, holds no %s at %s on this machine, and the run's "
+                                "records do not say whether that library held one when the "
+                                "search ran -- a library bind-mounted inside the container's "
+                                "working directory leaves an empty folder on the host -- or "
+                                "the search read it in its working directory's "
+                                "genome_library), and a target of this guide"
+                                % (index_path, var, lib2), err.getvalue())
+
     def test_where_a_scans_indels_index_is_here(self):
         """scan_indels_library, (--index-path, the log's folder) -> the library on this
         machine of the INDELS index of a run whose record names no variant index, W its
-        working directory here: genome_library without --index-path; the --index-path
-        library where that holds the variant index of the name, else genome_library; and
-        None where that library is not on this machine or the records do not say where it
-        is (an absolute one with no log to place it, one out of the working directory)."""
+        working directory here: genome_library where the search had no other library (no
+        --index-path, or one that is genome_library, which holds the variant index of the
+        name or not: X's working directory holds none); the --index-path library where that
+        holds the variant index of the name; and None where that library holds none here (an
+        empty folder: a container's mount point, or a library emptied since; one that holds
+        other indexes alone: the search read genome_library's if it held none when it ran,
+        and nothing the run records says so), is not on this machine, or the records do not
+        say where it is (an absolute one with no log to place it, one out of the working
+        directory). 408a6df3 took genome_library for lib3 and lib6."""
         W = os.path.join(self.tmp, "gw")
+        X = os.path.join(self.tmp, "gx")   # (its genome_library holds no variant index)
         D = os.path.join(self.tmp, "DATA")   # (the container's working directory)
         os.makedirs(os.path.join(W, "genome_library", NRG_V))
         os.makedirs(os.path.join(W, "lib2", NRG_V))
         os.makedirs(os.path.join(W, "lib3"))
         os.symlink(os.path.join(D, "lib4"), os.path.join(W, "lib4"))   # (dangles here)
+        os.makedirs(os.path.join(W, "lib6", "20-NRG_2_hg38"))   # (a reference index alone)
+        os.makedirs(os.path.join(W, "lib6", NRG_V + "_INDELS"))   # (and an INDELS index)
+        os.makedirs(os.path.join(X, "genome_library", NRG_V + "_INDELS"))
+        os.makedirs(os.path.join(X, "lib2"))
         self.assertFalse(os.path.exists(D))
         home, lib2 = os.path.join(W, "genome_library"), os.path.join(W, "lib2")
-        for index_path, root, want in (
-                (None, None, home),
-                (None, D, home),
-                ("genome_library", None, home),
-                ("lib2", None, lib2),
-                ("lib2", D, lib2),
-                ("lib3", None, home),    # (no variant index of the name: built there)
-                ("lib4", D, None),       # (a link only the container resolved)
-                ("lib5", D, None),       # (removed since)
-                (D + "/lib2", D, lib2),
-                (D + "/lib3", D, home),
-                (D + "/lib5", D, None),
-                (D + "/lib2", None, None),   # (absolute: the log alone places it)
-                ("../lib2", D, None)):   # (out of the working directory)
-            self.assertEqual(C.scan_indels_library(W, index_path, root, NRG_V + "_INDELS"),
-                             want, (index_path, root))
+        xhome = os.path.join(X, "genome_library")
+        for work, index_path, root, want in (
+                (W, None, None, home),
+                (W, None, D, home),
+                (W, "genome_library", None, home),
+                (W, "lib2", None, lib2),
+                (W, "lib2", D, lib2),
+                (W, "lib3", None, None),    # (an empty folder: a mount point, emptied)
+                (W, "lib3", D, None),
+                (W, "lib6", D, None),       # (no variant index of the name)
+                (W, "lib4", D, None),       # (a link only the container resolved)
+                (W, "lib5", D, None),       # (removed since)
+                (W, D + "/lib2", D, lib2),
+                (W, D + "/lib3", D, None),
+                (W, D + "/lib5", D, None),
+                (W, D + "/lib2", None, None),   # (absolute: the log alone places it)
+                (W, "../lib2", D, None),   # (out of the working directory)
+                (X, None, None, xhome),   # (genome_library, the search's one library)
+                (X, "genome_library", None, xhome),
+                (X, "./genome_library", D, xhome),
+                (X, D + "/genome_library", D, xhome),
+                (X, D + "/genome_library", None, None),   # (the log alone places it)
+                (X, "lib2", D, None)):
+            self.assertEqual(C.scan_indels_library(work, index_path, root, NRG_V + "_INDELS"),
+                             want, (work, index_path, root))
 
     def test_a_variant_index_found_nowhere_is_said_so(self):
         """With the variant index in neither the library the record names nor that library

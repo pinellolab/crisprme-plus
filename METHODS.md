@@ -2863,10 +2863,13 @@ not say where the library is, is refused where it matters. A search with no bulg
 reference index, so the path it records for its variant index, and the run's log, tell which of the
 run's two libraries that path names. It records the variant index it searched unless its variant
 genome is whole in its working directory (an install of the index alone holds none): then it scans
-that genome and records no variant index (`none`), and its INDELS index is read in the
-`--index-path` library where that holds the variant index of its name, else in `genome_library`, the
-search's own order, and none is read where that `--index-path` library is not on the machine that
-checks. The check says on stderr where it read an index the run recorded elsewhere. Of a run of
+that genome and records no variant index (`none`), and its INDELS index is read in `genome_library`
+where the search had no other library (no `--index-path`, or `genome_library` itself), else in the
+`--index-path` library where that holds the variant index of its name. Where that library holds none
+on the machine that checks, or is not on it, none is read: the search read the INDELS index there if
+that library held one when it ran, else in `genome_library`, and nothing the run records says which
+(a library bind-mounted inside the container's working directory leaves an empty folder on the
+host). The check says on stderr where it read an index the run recorded elsewhere. Of a run of
 2.10.0: the variant genome codes
 every allele of a split site where the variant index that served it flags Q in its `.bin` headers,
 or where its enriched genome (`Genomes/<genome>+<dataset>/` of the run's working directory) codes an

@@ -1820,7 +1820,10 @@ class TheReleaseCandidatesGateInTheDocs(unittest.TestCase):
     no bulges records no variant index (it records the one it searched unless it scanned a variant
     genome whole in its working directory: ff-review-r2 FF-R2-2), and its check took
     genome_library for the INDELS index of a search that records none where its --index-path
-    library is not on the machine that checks (FF-R2-1)."""
+    library is not on the machine that checks (FF-R2-1). It fails on 408a6df3's too, whose docs
+    and check took genome_library where that library is on the machine that checks but holds
+    no variant index of the name (ff-review-r3 FF-R3-1: a library bind-mounted inside the
+    container's working directory leaves an empty folder on the host)."""
 
     @staticmethod
     def _flat(name):
@@ -1920,7 +1923,9 @@ class TheReleaseCandidatesGateInTheDocs(unittest.TestCase):
         submit_job_automated_new_multiple_vcfs.sh), as the checker reads it (ff-review-r2
         FF-R2-2); and the INDELS index of a search that records none is not read where its
         --index-path library is not on the machine that checks, which 015a57cb's check took
-        genome_library for (FF-R2-1)."""
+        genome_library for (FF-R2-1), nor where that library is there but holds no variant
+        index of the name, which 408a6df3's took genome_library for (ff-review-r3 FF-R3-1):
+        it is read in genome_library only where the search had no other library."""
         search = " ".join((_REPO / "PostProcess" / "submit_job_automated_new_multiple_vcfs.sh")
                           .read_text(encoding="utf-8").split())
         self.assertIn('if [ "$_no_bulges" = 1 ] && _enriched_genome_whole; then printf '
@@ -1940,19 +1945,42 @@ class TheReleaseCandidatesGateInTheDocs(unittest.TestCase):
                 self.assertIn("the variant index it searched unless its variant genome is whole "
                               "in its working directory (an install of the index alone holds "
                               "none): then it scans that genome and records", text)
-                self.assertIn("its INDELS index is read in the --index-path library where that "
-                              "holds the variant index of its name, else in genome_library",
-                              text.replace("`", ""))
-        for name in ("CHANGELOG.md", "METHODS.md"):
-            self.assertIn("and none is read where that `--index-path` library is not on the "
-                          "machine that checks", self._flat(name), name)
-        # the checker does so: genome_library without --index-path; none where the
-        # --index-path library is not on this machine (here no /host/gw/lib2)
+                flat = text.replace("`", "")
+                self.assertIn("its INDELS index is read in genome_library where the search had "
+                              "no other library (no --index-path, or ", flat)
+                self.assertIn("else in the --index-path library where that holds the variant "
+                              "index of its name. Where that library holds none on the machine "
+                              "that checks, or is not on it, none is read: the search read the "
+                              "INDELS index there if that library held one when it ran, else in "
+                              "genome_library, and nothing the run records says which (a library "
+                              "bind-mounted inside the container's working directory leaves an "
+                              "empty folder on the host", flat)
+                self.assertNotIn("holds the variant index of its name, else in genome_library",
+                                 flat)
+        # the checker does so: genome_library without --index-path, or with one that is
+        # genome_library; none where the --index-path library is not on this machine (here no
+        # /host/gw/lib2), nor where it is here and holds no variant index of the name (lib2 an
+        # empty folder, as a container's mount point leaves it; genome_library holds one)
         gw = os.path.join(os.sep, "host", "gw")
         self.assertFalse(os.path.exists(gw))
         self.assertEqual(check.scan_indels_library(gw, None, "/DATA", "x_INDELS"),
                          os.path.join(gw, "genome_library"))
         self.assertIsNone(check.scan_indels_library(gw, "lib2", "/DATA", "x_INDELS"))
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        here, data = os.path.join(tmp, "gw"), os.path.join(tmp, "DATA")   # (no DATA here)
+        os.makedirs(os.path.join(here, "genome_library", "x"))
+        os.makedirs(os.path.join(here, "genome_library", "x_INDELS"))
+        os.makedirs(os.path.join(here, "lib2"))
+        for index_path in ("lib2", data + "/lib2"):
+            self.assertIsNone(check.scan_indels_library(here, index_path, data, "x_INDELS"),
+                              index_path)
+        for index_path in (None, "genome_library", data + "/genome_library"):
+            self.assertEqual(check.scan_indels_library(here, index_path, data, "y_INDELS"),
+                             os.path.join(here, "genome_library"), index_path)
+        os.makedirs(os.path.join(here, "lib2", "x"))
+        self.assertEqual(check.scan_indels_library(here, "lib2", data, "x_INDELS"),
+                         os.path.join(here, "lib2"))
 
 
 class AGenomeFolderWithASpaceIsRefusedUpFront(unittest.TestCase):
