@@ -261,7 +261,7 @@ GitHub refuses a release body of more than 125,000 characters, and `gh release c
 fails. Where the changelog section is longer, write short notes for the release instead: what
 changes in results, what is new, how to upgrade, and links to the tag's `CHANGELOG.md` and
 `METHODS.md` for the full list. 2.8.1's section was about 322,000 characters, and its release
-went out with 5,012 characters of such notes; 2.10.0's `[Unreleased]` section is about 320,000,
+went out with 5,012 characters of such notes; 2.10.0's section is about 374,000,
 and its short notes are [`docs/release-notes-2.10.0.md`](release-notes-2.10.0.md): `gh release
 create v2.10.0 ... --notes-file docs/release-notes-2.10.0.md`, its links pointing at the tag. Check
 the size first: `wc -c < docs/release-notes-2.10.0.md` under 125,000 (9,280 on 2026-11-14).

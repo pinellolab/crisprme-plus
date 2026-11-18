@@ -519,9 +519,10 @@ To estimate the cost of a large search up front, see `docs/SCALABILITY_ANALYSIS.
 > **Which version do I get?** Every route below installs **CRISPRme+** on Python 3.11.
 > **Docker** (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) above,
 > or §1.2) is the simplest: it runs on any OS and ships the CRISPR-Bulge scorer pre-built.
-> **Bioconda** (§1.1, Linux) has served CRISPRme+ since 2.7.9; a release reaches it shortly after
-> it is tagged, once its recipe update is merged. The original CRISPRme 2.1.x line is still on
-> Bioconda as `crisprme=2.1.14`. If in doubt, use Docker.
+> **Bioconda** (§1.1, Linux) has served CRISPRme+ since 2.7.9; a release reaches it once its
+> recipe update is merged after the tag: 2.10.0 within about 72 h of its tag, after the
+> `crispritz` 2.10.0 recipe it requires. The original CRISPRme 2.1.x line is still on Bioconda
+> as `crisprme=2.1.14`. If in doubt, use Docker.
 >
 > **Which CRISPRitz goes with it?** CRISPRme+ and its search engine CRISPRitz share their
 > major.minor version: CRISPRme 2.10.z runs on CRISPRitz 2.10.z, then 2.11 on 2.11, and so on;

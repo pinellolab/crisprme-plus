@@ -13,6 +13,8 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-11-19
+
 CRISPRme 2.10.0 is released with CRISPRitz 2.10.0, and from this release the two share their
 major.minor version (Changed). The main changes, each told in its entry below:
 
@@ -27,7 +29,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
   `lucapinello/crisprme_plus_indices`. The archives of 2.8.1 stay where they are. The HPRC
   panel is built from HPRC release 2's Minigraph-Cactus graph v2.1, where 2.8.1's was built from
   v2.0 (Changed). The rebuild ran on 2026-11-14 and 2026-11-15, and the release's gates checked
-  what it built before anything is published (Changed; METHODS §11, `docs/INDEX_PROVENANCE.md`).
+  what it built before anything was published (Changed; METHODS §11, `docs/INDEX_PROVENANCE.md`).
 - **The defaults.** SpCas9 NRR is the default PAM and index (it was NRG), and a search given no
   bulges takes 1 DNA + 1 RNA bulge, `assembly-search` included.
 - **Indel rows.** A row that starts inside an insertion starts at the insertion's anchor, and
@@ -1123,8 +1125,9 @@ major.minor version (Changed). The main changes, each told in its entry below:
   beside `mega_build_indels.sh`'s); with one record of each REF>ALT they are unchanged there. On
   chr21 every check passes too (956,135 of 1,046,879 records, 1 of them a second record of one
   deletion, left out; 725,939 SNP and 230,195 indel-path alleles, the indel log a row each), where
-  with both records its log held that deletion twice. Not yet run genome-wide: the rebuild for this
-  release runs it. The rebuild moves some sites: with every allele coded, the chain of rows within
+  with both records its log held that deletion twice. The rebuild for this release ran it
+  genome-wide, and its checks passed on all 24 chromosomes (`docs/INDEX_PROVENANCE.md`, 2.10.0,
+  Gate A). The rebuild moves some sites: with every allele coded, the chain of rows within
   `--merge` bases runs further, so a site the shipped mega reports as a single-variant (or
   reference) row can lie inside a neighbouring site whose row is a combination (five guides, 4
   mismatches and 1 + 1 bulges, population-level, read by the merge's clusters, measured during
@@ -1415,11 +1418,12 @@ major.minor version (Changed). The main changes, each told in its entry below:
   build of 2.8.1 ask for `crispritz >=2.9.0` with no upper bound, and 2.8.1's build 1 for
   `crispritz >=2.9.1,<2.10`. The image fetches the tag or the commit
   `crispritz_ref` names (`git fetch` of the ref, where `git clone --branch` took a tag or a branch
-  alone), so a pull request's CI builds, before CRISPRitz's tag exists, the CRISPRitz commit the
-  release is tested with (`docker-multiarch.yml`'s and `web-e2e.yml`'s image builds pass
-  `crispritz_ref=` CRISPRitz feat/2.10.0 commit 4ded5e6, which reads a VCF's REF and ALT in upper
-  case, below; the branch's later commits change its docs only), each line under a comment
-  `(remove at release)`; the release checklist removes those two lines once the tag is pushed.
+  alone), so a pull request's CI can build, before CRISPRitz's tag exists, the CRISPRitz commit a
+  release is tested with: until CRISPRitz's tag `v2.10.0`, `docker-multiarch.yml`'s and
+  `web-e2e.yml`'s image builds passed `crispritz_ref=` CRISPRitz feat/2.10.0 commit 4ded5e6, which
+  reads a VCF's REF and ALT in upper case, below (the branch's later commits change its docs only),
+  each line under a comment `(remove at release)`, which the release checklist removes once the tag
+  is pushed.
 - **CRISPRitz 2.10.0 reads a VCF's REF and every ALT in upper case, as VCF 4.x does, and so do
   CRISPRme's readers of the VCF itself** (its `docs/MULTIALLELIC_ENRICHMENT.md` §2.1, §2.9 and §6.7;
   an ALT holding `<`, a symbolic allele, as written). Its enricher read them as written up to 2.9.1:
@@ -2170,7 +2174,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
     align: the records whose `AN` is below 232, half the panel's 464 alleles, rise from 605,349 to
     769,017, and a frequency there is one of fewer haplotypes. v2.1 also has records on chrM and
     on 32 random and unplaced contigs, which the panel, built on chr1-22, X and Y, does not read.
-  - Normalised as the recipe normalises it, the panel's registry is to hold 36,719,470
+  - Normalised as the recipe normalises it, the panel's registry holds 36,719,470
     single-base SNV records and its indel log 12,361,907 indels, against 36,554,875 and
     12,103,264 from v2.0 under the same rules of 2.10.0 (2.8.1's index holds 36,307,866 and
     12,103,264). Of the SNV alleles, 35,980,089 are in both, 574,786 in v2.0 alone and 739,381
@@ -2181,8 +2185,9 @@ major.minor version (Changed). The main changes, each told in its entry below:
   - So an HPRC search of 2.10.0 differs from one of 2.8.1 by its data too, not by the code alone,
     and its rows are not to be compared one for one with those of 2.8.1's HPRC indexes.
     `download --what vcf --dataset hg38_HPRC` fetches 2.8.1's input of v2.0 from
-    `lucapinello/crisprme-data`; the publish of the rebuild is to host the normalised VCFs of
-    v2.1 that the index reads.
+    `lucapinello/crisprme-data`; the publish of the rebuild hosts the normalised VCFs of v2.1
+    that the index reads, with its kit (`build-inputs/hg38_HPRC/` of
+    `lucapinello/crisprme_plus_indices`).
   - Elsewhere in this release's notes, a figure of HPRC chr22 that names no version is v2.0's:
     the development of 2.10.0 measured it on v2.0, before this change, as METHODS says of its
     own figures.
@@ -10206,7 +10211,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.8.1...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.10.0...HEAD
+[2.10.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.10.0
 [2.8.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.8.1
 [2.8.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.8.0
 [2.7.10]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.10
