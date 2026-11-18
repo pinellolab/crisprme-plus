@@ -748,8 +748,12 @@ class TestGenerateReport(unittest.TestCase):
         example = self._read(os.path.join(repo, "docs", "example-report.html"))
         # (no assertIn/assertNotIn on the page: their message would print all of it)
         self.assertFalse('href="data/integrated_results.tsv.gz"' in example)  # a slim report
-        out_zip = gr.build_report(result_dir=self._dense_window_run("example_run"),
-                                  samplesid_dir=self.sid_dir,
+        # the example is a --per-sample search, whose legend says how such a search reports a
+        # dense window (by the haplotypes its carriers have, since 2.10.0): so is this one
+        rd = self._dense_window_run("example_run")
+        with open(os.path.join(rd, ".search_mode"), "w") as h:
+            h.write("per-sample")
+        out_zip = gr.build_report(result_dir=rd, samplesid_dir=self.sid_dir,
                                   out_zip=os.path.join(self.tmp, "example_slim.zip"))
         with zipfile.ZipFile(out_zip) as zf:
             slim = zf.read("report.html").decode("utf-8")
@@ -757,16 +761,17 @@ class TestGenerateReport(unittest.TestCase):
         for where in (r'<td class="k">Variant-contributed sites</td><td>.*?</td>',
                       r"The full threshold table above.*?for any assay budget\.",
                       r"Per-threshold subsets \(.*?</p>",
-                      r"Such dense windows are reported greedily \(.*?</div>"):
+                      r"Under <code>--per-sample</code> such a window is reported, as any other, "
+                      r"by the haplotypes its carriers have \(.*?</div>"):
             said = re.findall(where, slim)
             with self.subTest(where=where[:40]):
                 self.assertEqual(len(said), 1, said)
                 forms = [said[0]]
-                if where.startswith("Such dense windows"):
-                    # a search with no dense window near its top sites, as the example's, has
-                    # nothing for --report-full to bundle and says only where the beds are
-                    forms.append("Such dense windows are reported greedily (one representative "
-                                 "alignment is shown; " + gr._hvdr_where() + ").</div>")
+                if where.startswith("Under <code>--per-sample</code>"):
+                    # a search with no dense window near its top sites has nothing for
+                    # --report-full to bundle and says only where the beds are
+                    forms.append(said[0].replace(gr._hvdr_where(hvdr_n_regions=1),
+                                                 gr._hvdr_where()))
                 self.assertTrue(any(f in example for f in forms),
                                 "the example report does not say " + said[0])
         self.assertEqual([gone for gone in self._NO_REPORT_SAYS + self._ONLY_THE_FULL_REPORT_SAYS

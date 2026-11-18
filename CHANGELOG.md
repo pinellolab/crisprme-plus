@@ -2409,6 +2409,13 @@ major.minor version (Changed). The main changes, each told in its entry below:
   once.** It read it once per raw target, a hundred or more of them a dense window: 227 s on
   chr22 and about an hour on IGH for 10,000 to 25,000 distinct spans. Each span is now read once
   (about 4 s on chr22, 27 s on IGH).
+- **The website's example report is 2.10.0's.** `docs/example-report.html`, which the website
+  links ("See an example report"), is the report 2.10.0 writes for the website's example search
+  (`ACTGAAATCTGTAAGCAGGC`, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per sample over HGDP + 1000
+  Genomes), regenerated from a genome-wide search of the indexes of 2.10.0 with the release's
+  code: its 183,207 sites are the rows of G5's NRG search (above), byte for byte, its COSMIC
+  column is empty in every row (no licence is attested), and its footer names 2.10.0 (it named
+  2.8.1).
 
 ### Fixed
 - **A PUTATIVE carrier is listed for its strongest target where two of the reference-first
