@@ -194,7 +194,7 @@ row of HGDP + 1000 Genomes, whose tiers ran on 3 workers, up to 495 GiB summed o
 processes). A panel's first row enriches hg38 with the panel, writes its Dictionaries (which its
 companions pack at the publish) and builds its first index; its next rows reuse them and build an
 index (each rewrites the registry's `variant_count.json` and the samplesID list, with the same
-bytes: Gate A). Each kit's size is its tarball's (`stat -c %s`) and its SHA-256 the one its row
+counts: Gate A). Each kit's size is its tarball's (`stat -c %s`) and its SHA-256 the one its row
 wrote in `<dataset>.SHA256SUMS`.
 
 The size of each index and companion archive is that of the archive `publish-index` packs, measured

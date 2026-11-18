@@ -44,9 +44,9 @@ gap the release's gates found.
   made after the gate.
 - **Known limits of 2.10.0 the release fixes** ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15):
   one target written as two rows, or twice, in a microsatellite (the merge); and a SNP row's carrier
-  left off beside an indel that adds or deletes more bases than the store is read around a target
-  (500 bases: one carrier on two rows of the release gate's HPRC search), the store to be read as
-  far as a haplotype's own indels need.
+  left off beside an indel that adds or deletes more than the 500 bases the store is read around a
+  target, less the target's length (one carrier on two rows of the release gate's HPRC search), the
+  store to be read as far as a haplotype's own indels need.
 - **One rule for a complex record inside an indel's deleted bases.** CRISPRme takes a carrier off
   an indel row where its slot holds a second record, inside the first's deleted or replaced bases,
   that puts bases of its own there (METHODS §4), and the real-data check reads that slot without it

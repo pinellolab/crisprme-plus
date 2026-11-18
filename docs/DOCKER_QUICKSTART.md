@@ -492,9 +492,10 @@ CRISPRme flags onto your `#SBATCH` directives:
 
 - `--thread N` → `#SBATCH --cpus-per-task N` (match the two; e.g. `--thread 8`
   with `#SBATCH --cpus-per-task 8`).
-- Memory → `#SBATCH --mem`. On the indexes of 2.10.0, a genome-wide variant-aware search
-  took **38 GB** in all on 8 threads, 63 GB on 16 and 110–119 GB on 32 (the release's gates;
-  the README's [System Requirements](../README.md#0-system-requirements)), so request e.g.
+- Memory → `#SBATCH --mem`. On the indexes of 2.10.0, the README guide's genome-wide
+  variant-aware search took **38 GB** in all on 8 threads and 63 GB on 16, and the gates' searches
+  of HGDP + 1000 Genomes on 32 took 109–119 GB (the release's gates; the README's
+  [System Requirements](../README.md#0-system-requirements)), so request e.g.
   `#SBATCH --mem=80G` for `--thread 8`, and more for more threads.
 
 ```bash

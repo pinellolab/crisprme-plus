@@ -111,11 +111,12 @@ read ([RELEASING.md](https://github.com/pinellolab/crisprme-plus/blob/v2.10.0/do
 
 ## Known limitations
 
-These are the known limits of 2.10.0. METHODS §10 states each, with its scale where it was
-measured, and TROUBLESHOOTING §14 and §15 say what a user sees and what to do. The first two
-concern a search's cost; the next five the rows (which carriers some list, a target split or written
-twice, targets left unreported), each with its size where it was measured; the last two what the
-real-data check does not check and what an index of 2.8.1 keeps.
+These are the main known limits of 2.10.0. METHODS §10 states each, with its scale where it was
+measured, and the smaller ones too; TROUBLESHOOTING §12, §14 and §15 say what a user sees and what
+to do. The first two concern a search's cost; the next five the rows (which carriers some list, a
+target split or written twice, targets left unreported), each with its size where it was measured;
+the last three what the real-data check does not check, one refusal's advice on the mega, and what
+an index of 2.8.1 keeps.
 
 - **Searches above 1 DNA + 1 RNA bulge in dense regions.** Who: anyone who raises the bulges on a
   variant index. On an index that codes every allele, the search of the immunoglobulin loci and some
@@ -148,12 +149,12 @@ real-data check does not check and what an index of 2.8.1 keeps.
   carriers on one alternative alignment), 3 for the README guide and none for the other guides
   checked. Rebuilt from the VCF, 8,693 of the 9,059 are of the first shape, and 8 of the second, by
   6 carriers (five on VEGFA site 3, one on EMX1), their own target starting one to three repeat
-  units before the row's through a second deletion or insertion; most of the rest hold the row's
-  target with every variant it names. And a target that a haplotype holds only through two indels is
-  not reported for its carriers: on chr22, the gate's per-sample checks find 7 such sites for the
-  README guide (3,425 carrier listings, each target at a CFD below 0.0004; 3 with NRG), 343 for the
-  three repeat-rich guides (VEGFA site 3's up to a CFD of 0.35), 5 on HPRC (each at a CFD of 0; 16
-  more there need an MNV, above), 9 for TRAC, 2 for the ACTGA guide, 9 for SaCas9's guide at 2
+  units before the row's through one or two more indels in the repeat; most of the rest hold the
+  row's target with every variant it names. And a target that a haplotype holds only through two
+  indels is not reported for its carriers: on chr22, the gate's per-sample checks find 7 such sites
+  for the README guide (3,425 carrier listings, each target at a CFD below 0.0004; 3 with NRG), 343
+  for the three repeat-rich guides (VEGFA site 3's up to a CFD of 0.35), 5 on HPRC (each at a CFD of
+  0; 16 more there need an MNV, above), 9 for TRAC, 2 for the ACTGA guide, 9 for SaCas9's guide at 2
   mismatches (two of them perfect matches; 43 at 4 + 1 + 1) and none for the CEP290 and Cas12a
   guides. No fix is planned yet: the haplotype scan writes, as the search does, one indel per
   window.
@@ -177,9 +178,22 @@ real-data check does not check and what an index of 2.8.1 keeps.
 - **What the real-data check does not check.** `scripts/check_indel_rows.py` does not read an
   indel row's `Variant_info_spacer+PAM` (each variant's number in its target), nor whether an
   alternative alignment is one the merge should have folded into a better one; the unit tests and
-  a planted-site oracle check both.
+  a planted-site oracle check both. And it refuses (exit 2), unchecked, a run whose VCF holds a
+  split SNP site on a chromosome it checks where nothing in the run tells whether its genome codes
+  every allele of such a site (METHODS §10 says what tells it).
+- **One refusal's advice on the mega.** Who: a data folder that holds the mega's VCFs but not its
+  fake-indel genome (`Genomes/hg38+hg38_mega_INDELS`). Where a search there refuses the mega's
+  INDELS index (incomplete, or built from other fake-indel windows than its indel logs record), the
+  message ends with a command that removes the index and the mega's enriched genome, then builds
+  them again with `build-index-only`, which refuses the mega, a sites-only dataset: the kit's
+  enriched genome is lost. Do not run it; put the mega's kit back instead
+  ([TROUBLESHOOTING §12](https://github.com/pinellolab/crisprme-plus/blob/v2.10.0/docs/TROUBLESHOOTING.md)).
 - **An index of format 1**, as every archive of 2.8.1, keeps its limits at contig ends and `N`
   runs until it is built again.
+
+Two smaller limits, kept from earlier releases, are in METHODS §10 too: the carriers of an MNV a
+row names are listed PUTATIVE, as no store holds an MNV's phase, and an indel row gives its
+record's first ID, as does each ALT of a VCF line that lists several.
 
 ## Planned for 2.10.1
 
@@ -204,7 +218,8 @@ CRISPRme+ 2.10.1 is to run on CRISPRitz 2.10 and the indexes of 2.10.0, with no 
   History page made to read a `Results/` folder that is a link.
 
 Two indels on one haplotype have no fix planned yet: a fake-indel window holds one indel, and the
-haplotype scan writes the lines the search writes.
+haplotype scan writes the lines the search writes. The unphased-call limits, which no published
+index meets, and the refusal's advice on the mega have no release named yet (ROADMAP).
 
 ## Install
 

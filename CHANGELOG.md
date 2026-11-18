@@ -1861,7 +1861,7 @@ major.minor version (Changed). The main changes, each told in its entry below:
     alternative alignments, chr2:2,873,200 (+), lists 2,972 carriers so; rebuilt from the VCF, 8,693
     of the 9,059, at 260 sites, are of that shape, 8, by 6 carriers at 8 sites, five of VEGFA site 3
     and one of EMX1, are of another, the carrier's own target, its bases the row's, starting one to
-    three repeat units before the row's through a second deletion or insertion in the repeat, 357
+    three repeat units before the row's through one or two more indels in the repeat, 357
     hold the row's target with every variant it names, and in 1 a second deletion takes two bases
     out of the target: METHODS §10), and 128 at population level; for the README guide with NRR, 3
     per sample and 1 at population level, the same beside the mega; none for the gate's other

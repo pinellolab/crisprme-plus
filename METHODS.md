@@ -598,20 +598,19 @@ store the indel post-analysis reads (§4, SNP+indel), as an indel row's second i
   cannot be read where the bases it compares, its stretch on the haplotype and the target's span,
   reach an indel whose slot is unknown, or two records of one base (two indels whose REFs share a
   base, a SNP alt of the haplotype on a base of an indel's REF); one past those bases, or before
-  them, changes none of them and does not stop it, as for an indel row's second indel. Nor can a
-  reading be read whose frame (the target's span and, on either side, its length and the bases the
-  haplotype's indels add or delete, `indel_snp_cis.snp_target_frame`) reaches past the bases of the
-  store the search read: a search reads the store only around the chromosome's SNP targets, each
-  widened by 500 bases on either side (`_SNP_INDEL_MARGIN`, the stretches merged where they meet),
-  so a haplotype whose indels there add or delete more than 500 bases less the target's length
-  leaves the row, whatever its bases, unless other targets near it widened what was read: a known
-  limit of 2.10.0 (§10). Up to 2.10.0's release gates such a variant anywhere in the frame on a
-  reading's side stopped it: on the gate's VEGFA site 3 search (B10: per sample, HGDP + 1000
-  Genomes), HGDP01087 was left off the integrated row at chr10:128,732,537 (−), which names
-  128,732,546 G>A, its haplotype holding that SNP and 128,732,538 C>CCA, a unit of the CA repeat
-  gained at the target's edge, which leaves the target's bases as they are, for a SNP alt on the REF
-  of a deletion about 20 bases past the target (128,732,578 ATG>A and 128,732,580 G>A on its
-  haplotype);
+  them, changes none of them and does not stop it, as for an indel row's second indel. Up to
+  2.10.0's release gates such a variant anywhere in the frame on a reading's side stopped it: on the
+  gate's VEGFA site 3 search (B10: per sample, HGDP + 1000 Genomes), HGDP01087 was left off the
+  integrated row at chr10:128,732,537 (−), which names 128,732,546 G>A, its haplotype holding that
+  SNP and 128,732,538 C>CCA, a unit of the CA repeat gained at the target's edge, which leaves the
+  target's bases as they are, for a SNP alt on the REF of a deletion about 20 bases past the target
+  (128,732,578 ATG>A and 128,732,580 G>A on its haplotype). And a reading cannot be read whose frame
+  (the target's span and, on either side, its length and the bases the haplotype's indels add or
+  delete, `indel_snp_cis.snp_target_frame`) reaches past the bases of the store the search read: a
+  search reads the store only around the chromosome's SNP targets, each widened by 500 bases on
+  either side (`_SNP_INDEL_MARGIN`, the stretches merged where they meet), so a haplotype whose
+  indels there add or delete more than 500 bases less the target's length leaves the row, whatever
+  its bases, unless other targets near it widened what was read: a known limit of 2.10.0 (§10);
 - a haploid call — a male's on chrX outside PAR — is his one haplotype's, so his calls in a
   window are cis by construction (they make one enumerated haplotype, not every subset of
   them, below) and an indel of his that changes the target takes him off the row, whatever
@@ -972,23 +971,23 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   of the slot that keeps the first indel's ALT whole, and the haplotype keeps the row: a variant
   only on bases the indel deletes or replaces is not in the window's sequence and changes nothing,
   and neither does a second indel anchored on the first's last REF base, whose change lies past a
-  target inside the ALT. But a second record that puts bases of its own there, its ALT holding bases
-  its REF does not share at either end (a complex record such as TCC>G, its REF wholly in the first
-  indel's deleted or replaced bases), adds them inside the first indel's REF, as an insertion there
-  does, and takes the haplotype off, whatever its bases (`indel_snp_cis.changes_span`): HPRC v2.1's
+  target inside the ALT. On HPRC v2.1, the README guide's search at 4 mismatches and 1 DNA and 1 RNA
+  bulge, per sample, lists carriers so 220 times (131 samples) at 27 sites (chromosome, start,
+  strand), of 40 records at 11 positions whose REF or ALT is 464 bases to 95 kb long
+  (chr15:52,876,508 TATGTAT replaced by 2,375 bases, beside 52,876,514 T>TAAAAAAA on the same slot;
+  chr6:112,819,048's 95,320 bases replaced by 95,309, beside 112,914,365 CT>C): each haplotype,
+  rebuilt from the VCF, holds its row's target at its start, 111 bases to 76 kb from the overlap.
+  But a second record that puts bases of its own on the bases the first indel deletes or replaces,
+  its ALT holding bases its REF does not share at either end (a complex record such as TCC>G, its
+  REF wholly in those bases), adds them inside the first indel's REF, as an insertion there does,
+  and takes the haplotype off, whatever its bases (`indel_snp_cis.changes_span`): HPRC v2.1's
   normalised VCFs hold 31 such pairs of records on one phased slot, 249 slots in all (29 pairs, 247
   slots, beside a first record that is a deletion), and the real-data check, which reads such a slot
   without the second record, counts what differs as `limit-overlapping-records`, non-gating; which
-  reading is right is to be decided for 2.10.1. On HPRC v2.1, the README guide's search at 4
-  mismatches and 1 DNA and 1 RNA bulge, per sample, lists carriers so 220 times (131 samples) at 27
-  sites (chromosome, start, strand), of 40 records at 11 positions whose REF or ALT is 464 bases to
-  95 kb long (chr15:52,876,508 TATGTAT replaced by 2,375 bases, beside 52,876,514 T>TAAAAAAA on the
-  same slot; chr6:112,819,048's 95,320 bases replaced by 95,309, beside 112,914,365 CT>C): each
-  haplotype, rebuilt from the VCF, holds its row's target at its start, 111 bases to 76 kb from the
-  overlap. Another allele at the indel's own position, an indel or a SNP, is an alternative to it (a
-  haplotype holding both would be one record), so a slot phased with both is a phasing artefact. And
-  an unphased carrier of two overlapping records is a multi-allelic heterozygote, one allele per
-  haplotype. These stay listed;
+  reading is right is to be decided for 2.10.1. Another allele at the indel's own position, an indel
+  or a SNP, is an alternative to it (a haplotype holding both would be one record), so a slot phased
+  with both is a phasing artefact. And an unphased carrier of two overlapping records is a
+  multi-allelic heterozygote, one allele per haplotype. These stay listed;
 - a target of the window that holds **no base of the indel** — none the ALT adds or replaces,
   and not the two bases on either side of the deleted ones — lies wholly in a flank and gives
   **no indel row**, with or without a code: its sequence is reference (or SNP) sequence, which
@@ -3366,34 +3365,34 @@ are identical, 182,369 rows each (MD5 `c76f3490` once the licence-gated COSMIC c
 dedicated arm's fresh install, is set aside; the two PAM-less arms are identical with it, MD5
 `c4586f7a`). The same holds for NRR: 386,012 rows each (MD5 `f810dd76`) over a dedicated index, both
 PAM-less indexes with `--prune-pam`, and the 3-nt one without it. Those indexes are of format 1,
-built by CRISPRitz 2.9.1 or earlier (below). On the indexes of 2.10.0 (format 2) the release gate
-measured it again, with the same guide and budget, each pruned search given a library of the one
-index it prunes: NRG 183,207 rows each over the dedicated index, the general index and the NRR index
-pruned to NRG; NRR 387,782 over the dedicated index and the general index; NGG 85,347 over the
-dedicated index and the NRR index pruned to NGG; in each group every data file is identical but the
-records that name the index searched and the reports' dates (§11). For them it holds at *L = K*, and
-at *K > L* for a guide with no site at a contig's very end or start, as this one has none. The build
-scans a contig for a PAM only where a whole window of *K* bases fits, so with *K > L* a + strand PAM
-with 1 to *K − L* bases after it to the contig's end, and a − strand PAM in the contig's first *K −
-L* bases, are not indexed. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG sites (about
-7.5 × 10⁻⁷ of all), none on a primary chromosome for those PAMs; in two whole-genome searches the
-8-nt flank lost one row each against a dedicated index (27,215 of 27,216 rows for a guide picked for
-its perfect match on `chr11_JH159136v1_alt`, and 216,977 of 216,978 for VEGFA site 3 at 5
-mismatches). A − strand PAM exactly *K − L* bases from the start is indexed in the window at the
-contig's first base, which CRISPRitz 2.9.1's search read as a window of the + strand, as it read
-that of a − strand PAM at a contig's first base (below): it reported that PAM on the + strand at
-another coordinate. CRISPRitz 2.10.0's search reads it right, in an index of either format. A search
-that reads a flank of format 1 wider than its PAM says so: from the command line on stdout and in
-the run's `Params.txt`, from the web in its `log_verbose.txt`; under CRISPRitz 2.9.1 it also says
-that PAM is reported on the + strand. N runs inside a contig are not affected by the width. An index
-of format 2 stores a PAM-less window whose flank runs off the contig, its bases off the contig as
-`N`, which matches no PAM base: with `--prune-pam` it returns the rows of a dedicated index of
-format 2 **built for the same guide length and budget**, for any 3′ PAM of *L ≤ K*, contig ends
-included (CRISPRitz's `docs/INDEX_FORMAT.md`, section 8; through the real CLI on a synthetic genome
-of sites at contig ends and N runs, `test/index_format2/check_boundary_rows.py`, an NGG search off
-an 8-nt flank gives the dedicated index's 13 rows, where of format 1 it gives 5 of 6). Of two
-indexes of format 2 built for one guide length, the one of the larger budget returns a superset of
-the other's rows. Neither holds across guide lengths (below).
+built by CRISPRitz 2.9.1 or earlier (below). For them it holds at *L = K*, and at *K > L* for a
+guide with no site at a contig's very end or start, as this one has none. The build scans a contig
+for a PAM only where a whole window of *K* bases fits, so with *K > L* a + strand PAM with 1 to *K −
+L* bases after it to the contig's end, and a − strand PAM in the contig's first *K − L* bases, are
+not indexed. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG sites (about 7.5 × 10⁻⁷ of
+all), none on a primary chromosome for those PAMs; in two whole-genome searches the 8-nt flank lost
+one row each against a dedicated index (27,215 of 27,216 rows for a guide picked for its perfect
+match on `chr11_JH159136v1_alt`, and 216,977 of 216,978 for VEGFA site 3 at 5 mismatches). A −
+strand PAM exactly *K − L* bases from the start is indexed in the window at the contig's first base,
+which CRISPRitz 2.9.1's search read as a window of the + strand, as it read that of a − strand PAM
+at a contig's first base (below): it reported that PAM on the + strand at another coordinate.
+CRISPRitz 2.10.0's search reads it right, in an index of either format. A search that reads a flank
+of format 1 wider than its PAM says so: from the command line on stdout and in the run's
+`Params.txt`, from the web in its `log_verbose.txt`; under CRISPRitz 2.9.1 it also says that PAM is
+reported on the + strand. N runs inside a contig are not affected by the width. An index of format 2
+stores a PAM-less window whose flank runs off the contig, its bases off the contig as `N`, which
+matches no PAM base: with `--prune-pam` it returns the rows of a dedicated index of format 2 **built
+for the same guide length and budget**, for any 3′ PAM of *L ≤ K*, contig ends included (CRISPRitz's
+`docs/INDEX_FORMAT.md`, section 8; through the real CLI on a synthetic genome of sites at contig
+ends and N runs, `test/index_format2/check_boundary_rows.py`, an NGG search off an 8-nt flank gives
+the dedicated index's 13 rows, where of format 1 it gives 5 of 6). Of two indexes of format 2 built
+for one guide length, the one of the larger budget returns a superset of the other's rows. Neither
+holds across guide lengths (below). On the indexes of 2.10.0 (format 2) the release gate measured
+the equivalence again, with the guide and budget of the first measurement above, each pruned search
+given a library of the one index it prunes: NRG 183,207 rows each over the dedicated index, the
+general index and the NRR index pruned to NRG; NRR 387,782 over the dedicated index and the general
+index; NGG 85,347 over the dedicated index and the NRR index pruned to NGG; in each group every data
+file is identical but the records that name the index searched and the reports' dates (§11).
 
 **Genomic `N`.** This equivalence needs engine support, not just a filter. A genomic `N`
 is stored as a code that intersects nothing, so it fails a PAM match at every position; a

@@ -90,24 +90,26 @@ The main ones:
 - **Population-level searches of HGDP + 1000 Genomes** are slower than 2.8.1's in the dense loci:
   the release's gate timed the README guide's genome-wide one with NRG at 2.2 times 2.8.1's (the
   per-sample searches, this panel's default, at 0.95 to 1.30 times).
-- **On HPRC**, a carrier whose haplotype holds an MNV beside a row's indel is listed for a
-  sequence it does not have (1,163 listings at 94 sites in the README guide's genome-wide
+- **On HPRC**, a carrier whose haplotype holds an MNV in a row's target beside its indel is listed
+  for a sequence it does not have (1,163 listings at 94 sites in the README guide's genome-wide
   search per sample, each row at a CFD of 0.085 or less).
 - **Two indels on one haplotype**: a target held only through two indels is not reported for its
   carriers, and some carriers of a second indel are listed on a row of one indel; most often for
   guides whose sites lie in tandem repeats (the release gate's check counts 9,059 listings under
   this limit for three repeat-rich guides genome-wide, 8,693 of them carriers whose own target lacks
   a SNP the row names, and 3 for the README guide).
-- Smaller ones: a target inside a microsatellite split over two rows, a SNP row's carrier left
-  off beside a long indel, unphased calls of two ALTs (in none of 2.10.0's panels), the real-data
-  checker's unchecked columns.
+- Smaller ones: a target inside a microsatellite split over two rows, a SNP row's carrier left off
+  beside a long indel, unphased calls of two ALTs (in none of 2.10.0's panels), the real-data
+  checker's unchecked columns, and one refusal's advice on the mega, not to be followed
+  ([Troubleshooting](docs/TROUBLESHOOTING.md) §12).
 
 What each is, its measured size and who meets it: the
 [release notes](docs/release-notes-2.10.0.md), [METHODS §10](METHODS.md#10-known-limits-of-2100)
-and [Troubleshooting](docs/TROUBLESHOOTING.md) §14 and §15. What comes next, CRISPRme+ 2.10.1
+and [Troubleshooting](docs/TROUBLESHOOTING.md) §12, §14 and §15. What comes next, CRISPRme+ 2.10.1
 (the MNVs' phase on HPRC, the haplotype scan of the dense regions above 1 + 1 bulges, a faster
-population-level analysis of the dense loci, and the checker's and the web app's hardening), is in
-[`docs/ROADMAP.md`](docs/ROADMAP.md).
+population-level analysis of the dense loci, a SNP row's carriers beside a long indel (the store
+read as far as their indels need), one row for a target in a microsatellite, and the checker's and
+the web app's hardening), is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 > ⚠️ **Note**  
 > The original public CRISPRme web service is no longer available.  
@@ -167,8 +169,8 @@ New to CRISPRme? Get the point-and-click web interface running in a few commands
 
 > **Allocate memory first.** In **Docker Desktop → Settings → Resources → Memory**: the
 > genome-wide HGDP + 1000 Genomes variant search shown here (8 threads) took **38 GB** in all
-> on the indexes of 2.10.0 (29 GB in its largest process), and more on more threads (63 GB on 16,
-> 110–119 GB on 32), so give Docker **64 GB+** for it (32 GB will OOM); smaller searches need less. On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). (On Linux/Docker Engine the
+> on the indexes of 2.10.0 (29 GB in its largest process), and more on more threads (63 GB on 16;
+> on 32, the release gates' searches of that panel took 109–119 GB), so give Docker **64 GB+** for it (32 GB will OOM); smaller searches need less. On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). (On Linux/Docker Engine the
 > container uses host memory directly.) See [System Requirements](#0-system-requirements).
 
 > **In zsh, the default shell of macOS,** run `setopt interactive_comments` once in the terminal
@@ -491,8 +493,10 @@ README and ACTGA guides on the SpCas9 indexes, up to 82.3 for other guides there
 general index pruned, up to 85.7 and 85.9 for SaCas9's and Cas12a's guides on theirs) and, where it
 was measured, about 102 to 111 GiB summed:
 **16 GB or 32 GB will OOM a genome-wide variant search** — allocate 64 GB+, and keep to 16
-threads or fewer within it. The smaller searches took, at 4 mismatches + 1 DNA + 1 RNA bulge (the
-peak of the largest process, on the published indexes, the release's gates):
+threads or fewer within it for the README guide (on 32 threads other guides' largest process took up
+to a quarter more: give them more memory or fewer threads). The smaller searches took, at 4
+mismatches + 1 DNA + 1 RNA bulge (the peak of the largest process, on the published indexes, the
+release's gates):
 
 - **Reference-only.** Genome-wide, `complete-search` of `ACTGAAATCTGTAAGCAGGC` on `20-NRR_3_hg38`
   took 10.5 GiB on 4 threads (the web interface's; 45 min), 17.6 GiB on 8 (the default of
@@ -714,8 +718,9 @@ CRISPRme's searches are memory intensive. By default Docker Desktop caps the
 memory available to containers, which can cause searches to fail with
 out-of-memory errors. Before running large analyses, raise the limit in
 **Docker Desktop → Settings → Resources → Memory**: a genome-wide **variant** search
-needs **64 GB+** (on the indexes of 2.10.0 it took 38 GB in all on 8 threads, 63 GB on 16
-and 110–119 GB on 32), and smaller searches need less
+needs **64 GB+** (on the indexes of 2.10.0 the README guide's took 38 GB in all on 8 threads and
+63 GB on 16, and the release gates' searches of HGDP + 1000 Genomes on 32 took 109–119 GB), and
+smaller searches need less
 ([§0](#0-system-requirements)). On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). CRISPRme prints a non-fatal
 `WARNING:` at the start of a `complete-search` / `complete-test` run when it
 detects less than 32 GB of total memory, reminding you to increase this

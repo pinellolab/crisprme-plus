@@ -563,8 +563,8 @@ rules behind them.
   row, its bases the row's: rebuilt from the VCF, the gate's genome-wide searches of the three
   repeat-rich guides per sample list 6 carriers so, at 8 sites of HGDP + 1000 Genomes (HGDP00655,
   HG01432, HG01883, HGDP00465 and NA19475 on VEGFA site 3, in GT repeats, and NA20888 on EMX1, in an
-  AAG repeat), through a second deletion or insertion in the repeat. No fix is planned yet: the
-  haplotype scan planned for 2.10.1 writes, as the search does, one indel per window.
+  AAG repeat), through one or two more indels in the repeat. No fix is planned yet: the haplotype
+  scan planned for 2.10.1 writes, as the search does, one indel per window.
 - **An off-target missing for a carrier of two indels.** A target that an individual's haplotype
   holds only through two indels or more is not generated (a fake-indel window holds one), so no row
   lists that individual for it, and where no other carrier holds it, no row reports it at all. How
