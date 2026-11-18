@@ -1801,6 +1801,82 @@ class TheFinalDocsSecondReviewFixes(unittest.TestCase):
                       "its own on the bases the first indel deletes or replaces", methods)
 
 
+class TheReleaseCandidatesGateInTheDocs(unittest.TestCase):
+    """What the local gate of 2.10.0's release candidates (rc-amd64 and rc-arm64) found that the
+    docs left out or contradicted. An index's `.bin` files depend on the thread count it was built
+    with, which orders their records, and not on the architecture: so an archive's SHA-256 can be
+    reproduced only at its row's thread count, while its targets and its searches' rows are the same
+    at any (INDEX_PROVENANCE gave the dependence, not what it means for an archive's SHA-256). The two
+    images' CRISPR-Bulge scores differ in about their sixth significant digit (at most 1.8e-5
+    relative on the self-test, 1.4e-4 for the risk scores, and one tie of 632 rows shown with its
+    other alignment), where the README and METHODS section 8 said the images score identically. A
+    SIGINT to crisprme.py alone, under Apptainer, left the worker of the Settings page's jobs holding
+    the web interface's port (ROADMAP's 2.10.1). And RELEASE_CHECKLIST step 4c says where the check
+    finds the indexes of a search run with the install at /DATA, which d8c8dc25 wrote with the fix.
+    Each test fails on ac843ba6's docs but the last, which fails on 05df5d78's."""
+
+    @staticmethod
+    def _flat(name):
+        return " ".join((_REPO / name).read_text(encoding="utf-8").split())
+
+    def test_an_archives_sha256_needs_its_rows_thread_count(self):
+        provenance = self._flat("docs/INDEX_PROVENANCE.md")
+        threads = provenance[provenance.index("### Threads"):provenance.index("### Inputs")]
+        self.assertIn("So an archive's SHA-256 can be reproduced only at its row's thread count, "
+                      "which sets the order of the records in its `.bin` files: built at another "
+                      "count, the index holds the same targets, and its searches give the same rows",
+                      threads)
+        self.assertIn("the amd64 and arm64 release candidates of 2.10.0 wrote byte-identical `.bin` "
+                      "files of an NGG index at 8 threads, and again at 1", threads)
+        self.assertIn("the arm64 engine wrote the amd64 engine's targets file byte for byte", threads)
+
+    def test_the_images_crispr_bulge_scores_differ_in_their_last_digits(self):
+        for name, pointer in (("README.md", "([Troubleshooting](docs/TROUBLESHOOTING.md) §5)"),
+                              ("METHODS.md", "(TROUBLESHOOTING §5)")):
+            text = self._flat(name)
+            with self.subTest(doc=name):
+                self.assertNotIn("scores identically", text)
+                self.assertNotIn("numerically identical", text.replace("*", ""))
+                self.assertIn("by at most 1.8 × 10⁻⁵ relative", text)
+                self.assertIn(pointer, text)
+        troubleshooting = self._flat("docs/TROUBLESHOOTING.md")
+        section = troubleshooting[troubleshooting.index("## 5. GPU vs CPU"):
+                                  troubleshooting.index("## 6. Download")]
+        for said in ("the two images reported the same off-targets with the same CFD columns, "
+                     "and CRISPR-Bulge scores that differed by at most 1.8 × 10⁻⁵ relative (the "
+                     "risk scores, the difference of two scores, by at most 1.4 × 10⁻⁴)",
+                     "one row of 632 did (a score of 1.6 × 10⁻¹⁶",
+                     "Compare CRISPR-Bulge scores across machines with a tolerance"):
+            self.assertIn(said, section)
+
+    def test_the_roadmap_plans_the_web_apps_stop_and_the_images_near_ties(self):
+        roadmap = self._flat("docs/ROADMAP.md")
+        plan = roadmap[roadmap.index("## CRISPRme+ 2.10.1 (planned)"):
+                       roadmap.index("## Open, no release named")]
+        self.assertIn("a SIGINT sent to the `crisprme.py` process alone (as a script or a service "
+                      "manager sends it) left the worker process of the Settings page's jobs "
+                      "running and holding the port", plan)
+        self.assertIn("with how a chromosome's rows are batched, or between the amd64 and arm64 "
+                      "images", plan)
+
+    def test_step_4c_says_where_the_check_finds_a_containers_indexes(self):
+        checklist = (_REPO / "docs" / "RELEASE_CHECKLIST.md").read_text(encoding="utf-8")
+        flat = " ".join(re.sub(r"\n#\s+", " ", checklist).split())
+        self.assertIn("A search records the library it read each index from "
+                      "(/DATA/genome_library, in its .indexes_searched.txt), and the check, run on "
+                      "the host, reads each index there or, where that path is not on the host, "
+                      "under its name in the run's genome_library ($GW/genome_library) or the "
+                      "--index-path its command line gives", flat)
+        self.assertIn("the fixed check gave the same two searches 426 and 459 findings, none "
+                      "gating", flat)
+        for name in ("CHANGELOG.md", "METHODS.md"):
+            self.assertIn("The check reads each index where that record puts it or, where that "
+                          "path is not on the machine that checks", self._flat(name), name)
+        # the checker does what they say
+        code = (_REPO / "scripts" / "check_indel_rows.py").read_text(encoding="utf-8")
+        self.assertIn("var_dir, var_found = os.path.join(lib, name), True", code)
+
+
 class AGenomeFolderWithASpaceIsRefusedUpFront(unittest.TestCase):
     """A genome folder with a space in its path failed later with a misleading path: the
     search takes it into shell commands unquoted (IDX-19), and the working directory's too.
