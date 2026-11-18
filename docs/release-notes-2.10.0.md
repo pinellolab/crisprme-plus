@@ -218,8 +218,8 @@ CRISPRme+ 2.10.1 is to run on CRISPRitz 2.10 and the indexes of 2.10.0, with no 
   History page made to read a `Results/` folder that is a link.
 
 Two indels on one haplotype have no fix planned yet: a fake-indel window holds one indel, and the
-haplotype scan writes the lines the search writes. The unphased-call limits, which no published
-index meets, and the refusal's advice on the mega have no release named yet (ROADMAP).
+haplotype scan writes the lines the search writes. The unphased-call limits, which no index of
+2.10.0 meets, and the refusal's advice on the mega have no release named yet (ROADMAP).
 
 ## Install
 

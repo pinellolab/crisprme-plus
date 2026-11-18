@@ -1728,9 +1728,13 @@ class TheFinalDocsSecondReviewFixes(unittest.TestCase):
                       "mega's VCFs but not its fake-indel genome", flat)
         self.assertIn("And it refuses (exit 2), unchecked, a run whose VCF holds a split SNP site",
                       flat)
-        self.assertIn("The unphased-call limits, which no published index meets, and the refusal's "
-                      "advice on the mega have no release named yet",
-                      self._flat("docs/release-notes-2.10.0.md"))
+        # no index of 2.10.0 meets them, as every other surface says: 2.8.1's archives of HPRC
+        # v2.0, still published, were not measured (finaldocs-review A-r3 and B-r3, FD-A-R3-2,
+        # FD-B-R3-1)
+        notes_flat = self._flat("docs/release-notes-2.10.0.md")
+        self.assertNotIn("which no published index meets", notes_flat)
+        self.assertIn("The unphased-call limits, which no index of 2.10.0 meets, and the refusal's "
+                      "advice on the mega have no release named yet", notes_flat)
         # METHODS section 10 states both as limits of 2.10.0
         methods = self._flat("METHODS.md")
         self.assertIn("- **One refusal's advice on a sites-only dataset.**", methods)
@@ -1746,12 +1750,19 @@ class TheFinalDocsSecondReviewFixes(unittest.TestCase):
                       self._flat("METHODS.md"))
 
     def test_the_32_thread_summed_memory_is_the_gates(self):
+        # measured summed by gates C and E alone (the README guide with NRG, TRAC and the ACTGA
+        # guide); gate B's searches were not, and their largest process reached 85.9 GiB
+        # (Cas12a, B14c), 85.7 (CEP290, B13a) and 82.3 (the repeat-rich guides), so others may
+        # need more (finaldocs-review A-r3, FD-A-R3-1)
+        basis = ("whose summed memory was measured, the README guide with NRG, TRAC and the ACTGA "
+                 "guide, took 109–119 GB, and other searches may need more")
         for name, places in (("README.md", 2), ("docs/DOCKER_QUICKSTART.md", 1)):
             text = self._flat(name)
             with self.subTest(doc=name):
                 self.assertNotIn("110–119", text)
-                self.assertEqual(len(re.findall(r"gates' searches of (?:that panel|HGDP \+ 1000 "
-                                                r"Genomes on 32) took 109–119 GB", text)), places)
+                self.assertEqual(re.findall(r"gates' searches of (?:that panel|HGDP \+ 1000 "
+                                            r"Genomes on 32) took 109–119 GB", text), [])
+                self.assertEqual(text.count(basis), places)
                 self.assertEqual(text.count("109–119 GB"), places)
         # 101.66 GiB (gate C's A2) and 110.98 GiB (gate E's E4), summed, in GB
         self.assertEqual(round(101.66 * 2 ** 30 / 1e9), 109)

@@ -170,7 +170,7 @@ New to CRISPRme? Get the point-and-click web interface running in a few commands
 > **Allocate memory first.** In **Docker Desktop → Settings → Resources → Memory**: the
 > genome-wide HGDP + 1000 Genomes variant search shown here (8 threads) took **38 GB** in all
 > on the indexes of 2.10.0 (29 GB in its largest process), and more on more threads (63 GB on 16;
-> on 32, the release gates' searches of that panel took 109–119 GB), so give Docker **64 GB+** for it (32 GB will OOM); smaller searches need less. On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). (On Linux/Docker Engine the
+> on 32, the release gates' searches of that panel whose summed memory was measured, the README guide with NRG, TRAC and the ACTGA guide, took 109–119 GB, and other searches may need more), so give Docker **64 GB+** for it (32 GB will OOM); smaller searches need less. On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). (On Linux/Docker Engine the
 > container uses host memory directly.) See [System Requirements](#0-system-requirements).
 
 > **In zsh, the default shell of macOS,** run `setopt interactive_comments` once in the terminal
@@ -719,8 +719,9 @@ memory available to containers, which can cause searches to fail with
 out-of-memory errors. Before running large analyses, raise the limit in
 **Docker Desktop → Settings → Resources → Memory**: a genome-wide **variant** search
 needs **64 GB+** (on the indexes of 2.10.0 the README guide's took 38 GB in all on 8 threads and
-63 GB on 16, and the release gates' searches of HGDP + 1000 Genomes on 32 took 109–119 GB), and
-smaller searches need less
+63 GB on 16, and on 32 the release gates' searches of HGDP + 1000 Genomes whose summed memory was
+measured, the README guide with NRG, TRAC and the ACTGA guide, took 109–119 GB, and other searches
+may need more), and smaller searches need less
 ([§0](#0-system-requirements)). On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). CRISPRme prints a non-fatal
 `WARNING:` at the start of a `complete-search` / `complete-test` run when it
 detects less than 32 GB of total memory, reminding you to increase this
