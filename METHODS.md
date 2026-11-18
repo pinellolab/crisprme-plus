@@ -3906,14 +3906,14 @@ findings came from index creation:
    without it (4 h 6 min against 4 h 16 min, on a shared node); the B10 and SNP-row fixes were not
    timed.
 5. **The docs' figures**, measured on the rebuilt indexes: the install's size (computed from the
-   archives' sizes, to be measured from the Hub), the archives' sizes, memory and time genome-wide
-   and on one chromosome at 4, 8, 16 and 32 threads, the general index's cost; the image's size
-   waits for the release's tag.
+   archives' sizes, then measured from the Hub once they were published), the archives' sizes,
+   memory and time genome-wide and on one chromosome at 4, 8, 16 and 32 threads, the general
+   index's cost; the image's size waits for the release's tag.
 
 The checks after the first run of gate B changed the search and the checker, not the indexes: the
 build half's lines are those the rebuild ran (md5 `7389f7e234d4e617860f8f9b34abdc49`), and the
-size and SHA-256 of each archive as the Hub holds it are filled in at the publish (the release
-checklist, E, step 5).
+size and SHA-256 of each archive as the Hub holds it were filled in after the publish (the release
+checklist, E, step 5; `docs/INDEX_PROVENANCE.md`).
 
 ---
 

@@ -1365,35 +1365,78 @@ class TheReleaseDocsOfTheSet(unittest.TestCase):
     def test_each_archive_s_size_and_sha256_are_filled_in_where_they_exist(self):
         """B-3: publish-index packs each index and companion archive at the publish, its
         manifest dated then, and deletes it once uploaded: their SHA-256 is the Hub's, known after
-        the publish; a kit's, which its build row writes, after the build. The build is done
-        (2026-11-15): each kit's size and SHA-256 are given, and each index's and companion's size
-        as packing it measured before the publish (gate D), the Hub's after it (E, step 5)."""
+        the publish; a kit's, which its build row writes, after the build. Both are done: each
+        kit's size and SHA-256 are its build's (2026-11-15), and each index's and companion's the
+        Hub's (2026-11-18, E, step 5), which replaced the "*after the publish*" of its SHA-256 and
+        the size packing measured before the publish (gate D). So every row gives its size in bytes
+        and a SHA-256, no two rows the same one (a checksum copied into another row's cell), the
+        totals the text gives are the rows' sums, and the archive tables of the other docs, in GB,
+        give each archive the size it has here."""
         prov = _read("docs", "INDEX_PROVENANCE.md")
         section = prov[prov.index("### Each archive"):
                        prov.index("## The archives of CRISPRme 2.8.1")]
         header = next(ln for ln in section.splitlines() if ln.startswith("| Archive |"))
         cols = [c.strip() for c in header.strip().strip("|").split("|")]
         size, sha = cols.index("Size"), cols.index("SHA-256")
-        seen = set()
+        seen, sizes, shas = set(), {}, []
         for line in section.splitlines():
             cells = [c.strip() for c in line.strip().strip("|").split("|")]
             if not line.startswith("| `") or len(cells) != len(cols):
                 continue  # (the kits' member lists have a table of their own)
             names = re.findall(r"`([^`]+)`", cells[0])
             self.assertRegex(cells[size], r"^\d{1,3}(,\d{3})+$", line)
+            self.assertRegex(cells[sha], r"^`[0-9a-f]{64}`$", line)
             if names[0].startswith("build-inputs/"):
-                self.assertRegex(cells[sha], r"^`[0-9a-f]{64}`$", line)
                 ds = names[0].split("/", 1)[1]
                 # the kit's own table gives its member list
                 self.assertIn(f"| `{ds}` |", section)
-            else:
-                self.assertEqual(cells[sha], "*after the publish*", line)
+            sizes[names[0]] = int(cells[size].replace(",", ""))
+            shas.append(cells[sha])
             seen.update(names)
-        self.assertNotIn("*after the build*", section)
+        for pending in ("*after the build*", "*after the publish*"):
+            self.assertNotIn(pending, section)
         self.assertEqual(seen, {r["archive"] for r in self.rows})
+        self.assertEqual(len(shas), len(set(shas)))
+        kits = {r["archive"] for r in self.rows if r["kind"] == "build-inputs"}
+        self.assertEqual(3, len(kits))
+        total = re.search(r"The 23 index and companion archives add up to ([\d,]+) bytes "
+                          r"\(([\d.]+) GB\) on the Hub \(([\d,]+) as packing measured them before "
+                          r"the publish\) and the 3 kits to ([\d,]+) \(([\d.]+) GB\)",
+                          _flat(section))
+        self.assertTrue(total, "the totals of the archives")
+        hub = sum(n for a, n in sizes.items() if a not in kits)
+        self.assertEqual(int(total.group(1).replace(",", "")), hub)
+        self.assertEqual(total.group(2), f"{hub / 1e9:.2f}")
+        self.assertEqual(int(total.group(4).replace(",", "")), sum(sizes[k] for k in kits))
+        self.assertEqual(total.group(5), f"{sum(sizes[k] for k in kits) / 1e9:.2f}")
+        # the Hub's sizes are those packing measured within a few bytes: the times its records
+        # give, which the text says
+        self.assertLess(abs(int(total.group(3).replace(",", "")) - hub), 23 * 10)
+        self.assertIn("the Hub's sizes are -3 to +9 bytes from those, the times `manifest.json` "
+                      "and a bundle's record give", _flat(section))
+        # each archive's GB in the other docs' tables (GB = 10^9 bytes, two decimals)
+        for name, doc, heading in (
+                ("PRECOMPUTED_INDEXES", ("docs", "PRECOMPUTED_INDEXES.md"),
+                 "### The archives of 2.10.0 and their sizes"),
+                ("the format-2 card", ("docs", "hf", "crisprme_plus_indices_README.md"),
+                 "## Archives and sizes")):
+            text = _read(*doc)
+            table = text[text.index(heading):]
+            table = table[table.index("| Archive | GB |"):]
+            table = table[:table.index("\n\n")]
+            given = {}
+            for line in table.splitlines()[2:]:
+                cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                for a, gb in zip(cells[0::2], cells[1::2]):
+                    archive = re.search(r"`([^`]+)`", a).group(1)
+                    given[re.sub(r"^indexes/", "", archive)] = gb
+            self.assertEqual(set(given), set(sizes), name)
+            for archive, gb in given.items():
+                self.assertEqual(gb, f"{sizes[archive] / 1e9:.2f}", f"{name}: {archive}")
         self.assertIn("after the publish, the size and SHA-256 of each of the 23 index and "
                       "companion archives, from the Hub",
                       self.gate("Published-index provenance recorded"))
+        self.assertEqual(23, len(sizes) - len(kits))
         self.assertEqual(23, sum(r["kind"] != "build-inputs" for r in self.rows))
 
     def test_the_timing_gate_names_hprc_s_runs_and_their_baseline(self):

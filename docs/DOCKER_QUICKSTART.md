@@ -65,8 +65,8 @@ docker info --format '{{.MemTotal}}' | awk '{printf "%.1f GB\n", $1/1073741824}'
 ```
 
 > **Disk:** the batteries-included (variant-aware) setup is a **~70 GB download → ~150 GB
-> on disk** (measured: 150.0 GB, with 2.8.1's archive of the default index; computed from
-> 2.10.0's archives' sizes: a 71.5 GB download, 153.4 GB installed), and it peaks around
+> on disk** (measured: 150.0 GB, with 2.8.1's archive of the default index; with 2.10.0's,
+> from the Hub on 2026-11-18: a 71.5 GB download, 153.4 GB installed), and it peaks around
 > 160 GB while the archives unpack, so keep **≈ 200 GB free** on the disk that holds your
 > data folder. CRISPRme+ ships a
 > **dict-less** variant index (no per-sample dictionaries). Installed, the genome is ~3 GB,

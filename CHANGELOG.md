@@ -1372,11 +1372,11 @@ major.minor version (Changed). The main changes, each told in its entry below:
   NRG 183,207 rows, NRR 387,782, NGG 85,347). **The timing gate**: 11 of 13 pairs within twice
   2.8.1's time (the Speed summary above; the population-level search of HGDP + 1000 Genomes with NRG
   at 2.20 times, a known limit). **The docs' figures** were measured on these indexes: the install
-  (a 71.46 GB download, 153.39 GB installed, a peak of 159.25 GB while it unpacks: computed from the
-  archives' sizes, to be measured from the Hub; reference-only 21.33 GB and 44.13 GB), memory and
-  time at 4, 8, 16 and 32 threads (README §0), the general index's cost. Nothing is published yet:
-  the SHA-256 of each index and companion archive, and its size as the Hub holds it, are filled in
-  at the publish, from the Hub (`docs/RELEASE_CHECKLIST.md`, E, step 5).
+  (from the Hub on 2026-11-18, a 71.46 GB download, 153.39 GB installed, a peak of 159.25 GB while
+  it unpacks; reference-only 21.33 GB and 44.14 GB), memory and time at 4, 8, 16 and 32 threads
+  (README §0), the general index's cost. The archives were published on 2026-11-18: the SHA-256 of
+  each index and companion archive, and its size as the Hub holds it, are filled in from the Hub in
+  `docs/INDEX_PROVENANCE.md` (`docs/RELEASE_CHECKLIST.md`, E, step 5).
 - **The default search budget, 1 DNA + 1 RNA bulge, is every search's.** complete-search (given
   neither `--bDNA` nor `--bRNA`, up to the bulges an index it
   can use or build holds) and the web form (its simple mode, and its Advanced panel's defaults,
@@ -2065,10 +2065,10 @@ major.minor version (Changed). The main changes, each told in its entry below:
   website, the Quickstart, TROUBLESHOOTING, DATA_LAYOUT, install/README) asks for ~200 GB free (it
   asked for ~150 GB); a reference-only setup takes ~44 GB (it took ~25 GB). Measured with 2.8.1's
   NRR archives (150,048,109,201 bytes installed: indexes 94.2 GB, `Dictionaries/` 52.4 GB, genome
-  3.3 GB; a peak of 161 GB), and computed for 2.10.0's from the sizes of its archives as `download`
+  3.3 GB; a peak of 161 GB), and with 2.10.0's, from the Hub on 2026-11-18, as `download`
   installs them (a 71.46 GB download, 153.39 GB installed: indexes 96.69 GB, `Dictionaries/` 53.30
-  GB, genome 3.27 GB; a peak of 159.25 GB; reference-only 21.33 and 44.13 GB), to be measured from
-  the Hub at the publish. A genome-wide search with NRR takes longer than with NRG, at about the
+  GB, genome 3.27 GB; a peak of 159.25 GB; reference-only 21.33 and 44.14 GB). A genome-wide
+  search with NRR takes longer than with NRG, at about the
   same memory, on the indexes built again for 2.10.0 (the release's gates): `ACTGAAATCTGTAAGCAGGC`
   on HGDP + 1000 Genomes per sample, 4 mismatches + 1 + 1 bulge, 32 threads, 1.57 times NRG's time
   (2 h 19 min against 1 h 29 min), its memory summed over the run's processes 8% higher (110.5

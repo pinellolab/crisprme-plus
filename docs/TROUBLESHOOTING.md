@@ -63,8 +63,8 @@ and only a WARNING in its error log).
 
 The default variant-aware install (`download --what all`, then
 `download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP`) takes **~150 GB** on disk
-before any results (measured: 150.0 GB with 2.8.1's `NRR_3_hg38+hg38_HGDP1kGP`; 153.4 GB computed
-for 2.10.0's archives from their sizes, to be measured from the Hub):
+before any results (measured: 150.0 GB with 2.8.1's `NRR_3_hg38+hg38_HGDP1kGP`; 153.4 GB with
+2.10.0's archives, from the Hub on 2026-11-18):
 
 | Item | Approx size |
 |---|---|
@@ -74,9 +74,9 @@ for 2.10.0's archives from their sizes, to be measured from the Hub):
 | Annotations | ~0.1 GB |
 | Per-run results (grows with mismatches/bulges; which mode writes more depends on the panel: the README guide's genome-wide search wrote 3.0 GB per sample and 22.1 GB population-level on HGDP + 1000 Genomes, 14.4 and 4.3 GB on HPRC) | GB–tens of GB |
 
-The install peaks around 160 GB while the archives unpack (161 GB measured with 2.8.1's archives,
-159.3 GB computed for 2.10.0's). Keep everything on a disk with **~200 GB free** before a first
-variant-aware run.
+The install peaks around 160 GB while the archives unpack (measured: 161 GB with 2.8.1's archives,
+159.3 GB with 2.10.0's, from the Hub). Keep everything on a disk with **~200 GB free** before a
+first variant-aware run.
 Use `CRISPRME_TMPDIR` (Section 1) on the same roomy disk.
 
 **Reclaiming space:** by default `complete-search` removes bulky intermediates when

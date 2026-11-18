@@ -21,11 +21,10 @@ nodes of the same kind (AMD EPYC 7H12, 2 × 64 cores, about 1 TB of RAM): ml008 
 UTC); ml007 built HGDP + 1000 Genomes (2026-11-14 06:45 UTC to 2026-11-15 03:48 UTC). Every row
 ran from one image and one commit, every exit status was 0, and an index's bytes depend on that
 image and on the thread count alone. Gate A, the integrity check of what was built, passed on
-both nodes (below). Nothing is published yet: the size and SHA-256 of each index and companion
-archive as the Hub holds it exist only once it is published, and are filled in then, from the
-Hub (the release checklist, E, step 5); the sizes below are those of each archive packed as
-`publish-index` packs it, measured before the publish (Each archive, below). The methods of the
-rebuild, and how it was checked, are in [METHODS §11](../METHODS.md#11-index-rebuild-of-2100).
+both nodes (below). The archives were published on 2026-11-18, and the size and SHA-256 of each
+index and companion archive below are the Hub's, filled in from it after the publish (the release
+checklist, E, step 5; Each archive, below). The methods of the rebuild, and how it was checked, are
+in [METHODS §11](../METHODS.md#11-index-rebuild-of-2100).
 
 ### The build image: the image route, not the release image
 
@@ -206,49 +205,50 @@ index (each rewrites the registry's `variant_count.json` and the samplesID list,
 counts: Gate A). Each kit's size is its tarball's (`stat -c %s`) and its SHA-256 the one its row
 wrote in `<dataset>.SHA256SUMS`.
 
-The size of each index and companion archive is that of the archive `publish-index` packs, measured
-on 2026-11-15 by running each publish row of the index set through `publish-index` (CRISPRme
-`72c2c8e`, which packs as `db50986`'s does) with a stand-in for the Hub, each `tar | pigz` stream
-counted in place of being written: the archive the publish uploads differs from it only by the
-times `manifest.json` and a bundle's record give, a few bytes at most. Its SHA-256 exists only once
-it is packed for the upload: `publish-index` packs each archive at the publish, its manifest dated
-then, uploads it and deletes it, so no build log holds it, and a tarball packed by hand would not
-be the Hub's. Both are filled in after the publish, from the Hub: each SHA-256 from
-`indexes/SHA256SUMS`, which `scripts/hf_sha256sums.py` writes from the Hub's own checksums (the
-release checklist, E, step 5), and each size from the Hub's listing of `indexes/`
-(`list_repo_tree`).
+The size and SHA-256 of each index and companion archive are the Hub's. Its SHA-256 exists only
+once it is packed for the upload: `publish-index` packs each archive at the publish, its manifest
+dated then, uploads it and deletes it, so no build log holds it, and a tarball packed by hand would
+not be the Hub's. Both were filled in after the publish, from the Hub at its commit `a4d4bc00`
+(2026-11-18, the upload of `indexes/SHA256SUMS`): each SHA-256 from `indexes/SHA256SUMS`, which
+`scripts/hf_sha256sums.py` writes from the Hub's own checksums (the release checklist, E, step 5),
+and each size from the Hub's listing of `indexes/` (`list_repo_tree`). Before the publish, each
+size was measured on 2026-11-15 by running each publish row of the index set through
+`publish-index` (CRISPRme `72c2c8e`, which packs as `db50986`'s does) with a stand-in for the Hub,
+each `tar | pigz` stream counted in place of being written (the release checklist, D): the Hub's
+sizes are -3 to +9 bytes from those, the times `manifest.json` and a bundle's record give.
 
 | Archive | Node | Threads | Wall time | Peak memory | Size | SHA-256 |
 |---|---|---|---|---|---|---|
-| `20-NRR_3_hg38` | ml008 | 16 | 47:01 | 29.2 GiB | 20,169,184,688 | *after the publish* |
-| `20-NGG_3_hg38` | ml008 | 16 | 11:04 | 5.6 GiB | 3,813,713,291 | *after the publish* |
-| `20-NRG_3_hg38` | ml008 | 16 | 21:56 | 12.7 GiB | 8,885,680,168 | *after the publish* |
-| `20-NNNNNNNN_3_hg38` | ml008 | 16 | 2:53:53 | 104.4 GiB | 82,212,406,885 | *after the publish* |
-| `22-NNGRRN_3_hg38` | ml008 | 16 | 14:55 | 7.8 GiB | 5,408,945,221 | *after the publish* |
-| `TTTN-20_3_hg38` | ml008 | 16 | 9:13 | 4.3 GiB | 2,831,074,693 | *after the publish* |
-| `TTTN-23_3_hg38` | ml008 | 16 | 9:53 | 4.9 GiB | 3,085,485,783 | *after the publish* |
-| `20-NRR_3_hg38+hg38_HGDP1kGP` (the panel's first row) | ml007 | 64 | 12:17:13 | 177.2 GiB | 27,842,100,972 | *after the publish* |
-| `20-NGG_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 32:13 | 7.0 GiB | 5,336,725,019 | *after the publish* |
-| `20-NRG_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 53:41 | 13.5 GiB | 12,243,828,677 | *after the publish* |
-| `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 5:38:16 | 104.7 GiB | 110,912,223,721 | *after the publish* |
-| `22-NNGRRN_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 40:27 | 8.5 GiB | 7,517,827,071 | *after the publish* |
-| `TTTN-20_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 29:28 | 5.7 GiB | 4,542,619,330 | *after the publish* |
-| `TTTN-23_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 30:44 | 6.6 GiB | 4,831,243,449 | *after the publish* |
-| `dictionaries-bundle_hg38_HGDP1kGP` | ml007 | (the panel's first row) | — | — | 16,420,012,997 | *after the publish* |
-| `genotypes_hg38_HGDP1kGP` | ml007 | (the panel's first row) | — | — | 5,865,023,573 | *after the publish* |
-| `indel_genotypes_hg38_HGDP1kGP` | ml007 | (the panel's first row) | — | — | 7,638,538,409 | *after the publish* |
+| `20-NRR_3_hg38` | ml008 | 16 | 47:01 | 29.2 GiB | 20,169,184,695 | `5804fe694042be7e958dd51d5ab8781fc4b6e303191102dc2815e519764a8085` |
+| `20-NGG_3_hg38` | ml008 | 16 | 11:04 | 5.6 GiB | 3,813,713,292 | `3ee954d0f5dd5e338c39d221124c86f59255be9812f2befa116944b2be62736d` |
+| `20-NRG_3_hg38` | ml008 | 16 | 21:56 | 12.7 GiB | 8,885,680,169 | `b2880675d289dfa2abeae2bc8c526384eaaaf02ef66b2e0526dd49ac4e8b423e` |
+| `20-NNNNNNNN_3_hg38` | ml008 | 16 | 2:53:53 | 104.4 GiB | 82,212,406,884 | `96a5ae1f9f19a5369f413aaa986fa09a5ae299401848a0f1b3fb88d76fb9bda9` |
+| `22-NNGRRN_3_hg38` | ml008 | 16 | 14:55 | 7.8 GiB | 5,408,945,223 | `05e5fb75c50cb28b72e3acddff765fbe06f72b5ec6f2532008b114e7d17f9ffa` |
+| `TTTN-20_3_hg38` | ml008 | 16 | 9:13 | 4.3 GiB | 2,831,074,694 | `1fa14bf6545dc1b40714c4f2f453a36612ffb4d5bb31218b716c3f09e5554c66` |
+| `TTTN-23_3_hg38` | ml008 | 16 | 9:53 | 4.9 GiB | 3,085,485,783 | `d086308269adb3e35e4888ccb95932f96fb9b234f1064dce0d75f108d5073a35` |
+| `20-NRR_3_hg38+hg38_HGDP1kGP` (the panel's first row) | ml007 | 64 | 12:17:13 | 177.2 GiB | 27,842,100,969 | `b46355ee6b10ef5d1c1e07eee4e61fe08f2a1e3337e6f523be9d2d7e167322e4` |
+| `20-NGG_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 32:13 | 7.0 GiB | 5,336,725,023 | `1f39e06f9b8571db5c836f33606ecf7877a30ed95f39734e32f69cf39793b8af` |
+| `20-NRG_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 53:41 | 13.5 GiB | 12,243,828,684 | `3d6fe5b72675f3d3a682cd415730681a475c202144e91b40c73fd3a3c56db895` |
+| `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 5:38:16 | 104.7 GiB | 110,912,223,728 | `fe5905efd8b49808afca413c2d77030ed98b3eb3235a892f91ca381823b381d9` |
+| `22-NNGRRN_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 40:27 | 8.5 GiB | 7,517,827,068 | `8f1cb7c9803befee64273967b38707a5e3976e4c1cc91ffbd62d2c3e0d4a59bc` |
+| `TTTN-20_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 29:28 | 5.7 GiB | 4,542,619,339 | `9be2336fc721fb44c1990da06daea7eab7321264c5df92a738f56f7fcf73041f` |
+| `TTTN-23_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 30:44 | 6.6 GiB | 4,831,243,457 | `3bcf203f56ad208f2abe58064ae7a03911cbab18969b815698511b3c90a46ebe` |
+| `dictionaries-bundle_hg38_HGDP1kGP` | ml007 | (the panel's first row) | — | — | 16,420,012,995 | `6122341d80535a42db1c03bef6fff76088da333d56c32df9fe2b24c71fc809c6` |
+| `genotypes_hg38_HGDP1kGP` | ml007 | (the panel's first row) | — | — | 5,865,023,573 | `4eb23d82b7a1cdace71601c13eef932db0e7d45d2d45986cee69459e96393bd5` |
+| `indel_genotypes_hg38_HGDP1kGP` | ml007 | (the panel's first row) | — | — | 7,638,538,409 | `d3c30a4927998ec97f6346f97a48f8208f2c2ee9e6435bd8d1813f45f8696ad5` |
 | `build-inputs/hg38_HGDP1kGP` | ml007 | (pigz) | 0:17 | 0.1 GiB | 1,237,137,069 | `00d20b53ff60d2efca9eb779b7a23cc0aad8e7c6ffec5e33ee59e9640463e77d` |
-| `20-NRR_3_hg38+hg38_HPRC` (the panel's first row and its only index) | ml008 | 32 | 2:49:00 | 29.7 GiB | 29,548,088,135 | *after the publish* |
-| `dictionaries-bundle_hg38_HPRC` | ml008 | (the panel's first row) | — | — | 2,443,592,490 | *after the publish* |
-| `genotypes_hg38_HPRC` | ml008 | (the panel's first row) | — | — | 559,741,386 | *after the publish* |
-| `indel_genotypes_hg38_HPRC` | ml008 | (the panel's first row) | — | — | 590,105,968 | *after the publish* |
+| `20-NRR_3_hg38+hg38_HPRC` (the panel's first row and its only index) | ml008 | 32 | 2:49:00 | 29.7 GiB | 29,548,088,135 | `e556e9464345343cd0daded2fe2d854908fe96b14eb502332660d4029a4e98ed` |
+| `dictionaries-bundle_hg38_HPRC` | ml008 | (the panel's first row) | — | — | 2,443,592,495 | `1c7b3af1cdca1822c9dfe739c69674d5f38ae83dc2c5e3c6a1fe349cc4b045fc` |
+| `genotypes_hg38_HPRC` | ml008 | (the panel's first row) | — | — | 559,741,385 | `30be4ab5878925ea88b0c82dbaf8a022d9f2f639bfa0ec52353f256af1f07c40` |
+| `indel_genotypes_hg38_HPRC` | ml008 | (the panel's first row) | — | — | 590,105,972 | `c9988b65e0b15564b69d6a732bf84d4416c1f12a806b9e4d778076abb4345cf8` |
 | `build-inputs/hg38_HPRC` | ml008 | (pigz) | 0:23 | 0.1 GiB | 1,182,402,681 | `09e9944b1a113fbd6653ef91c09b29f3859ce8723df9f029123fa200d24fdc07` |
-| `20-NRR_3_hg38+hg38_mega` (the panel's first row and its only index) | ml008 | 16 | 3:26:06 | 29.7 GiB | 24,108,874,759 | *after the publish* |
-| `dictionaries-bundle_hg38_mega` | ml008 | (the panel's first row) | — | — | 1,954,090,894 | *after the publish* |
+| `20-NRR_3_hg38+hg38_mega` (the panel's first row and its only index) | ml008 | 16 | 3:26:06 | 29.7 GiB | 24,108,874,757 | `466127c4cc8b2fab8df583127a228dac85adacaac348b6114c35c9d245504138` |
+| `dictionaries-bundle_hg38_mega` | ml008 | (the panel's first row) | — | — | 1,954,090,899 | `25d0c4cd822bdfa3707991784b6e36ea23eef475d968fb2a291f79cde29573a5` |
 | `build-inputs/hg38_mega` | ml008 | (pigz) | 0:17 | 0.1 GiB | 1,018,696,857 | `f374afa01c455bb750e178364c040b82443c7e7fc2d617600edff8d3a072ee45` |
 
-The 23 index and companion archives add up to 388,761,127,579 bytes (388.76 GB) and the 3 kits to
-3,438,236,607 (3.44 GB). A panel's first index, with the companions a download of it fetches, its
+The 23 index and companion archives add up to 388,761,127,628 bytes (388.76 GB) on the Hub
+(388,761,127,579 as packing measured them before the publish) and the 3 kits to 3,438,236,607
+(3.44 GB). A panel's first index, with the companions a download of it fetches, its
 reference index aside: HGDP + 1000 Genomes 50.13 GB (27.84 + 16.42 + 5.87; the phased indel
 genotypes are in the bundle too, and their own archive, 7.64 GB, is fetched with the genotype store
 by `download --what genotype-oracle`), HPRC 32.55 GB, the mega 26.06 GB. The rows took 0.82 to 1.03

@@ -140,12 +140,13 @@ the genotyped-vs-sites-only distinction and §4 for how each is scanned.
 ### The archives of 2.10.0 and their sizes
 
 The index set's 26 archives, built on 2026-11-14 and 2026-11-15 and checked before the publish
-(METHODS §11), in `lucapinello/crisprme_plus_indices` once published. Sizes in GB (10⁹ bytes):
+(METHODS §11), in `lucapinello/crisprme_plus_indices` since 2026-11-18. Sizes in GB (10⁹ bytes):
 each index and companion as `publish-index` packs it, measured before the publish (the archive
-the Hub holds differs from it only by the times its records give, a few bytes at most), and each
-kit as built; `docs/INDEX_PROVENANCE.md` gives each to the byte, with how it was built. The
-SHA-256 of each index and companion is the Hub's, in `indexes/SHA256SUMS`, written at the publish
-(`docs/RELEASE_CHECKLIST.md`, E, step 5); each kit's is in its `build-inputs/<dataset>.SHA256SUMS`.
+the Hub holds is -3 to +9 bytes from it, the times its records give, which changes none of these
+figures), and each kit as built; `docs/INDEX_PROVENANCE.md` gives the Hub's to the byte, with how
+each was built. The SHA-256 of each index and companion is the Hub's, in `indexes/SHA256SUMS`,
+written at the publish (`docs/RELEASE_CHECKLIST.md`, E, step 5); each kit's is in its
+`build-inputs/<dataset>.SHA256SUMS`.
 
 | Archive | GB | Archive | GB |
 |---|---|---|---|
@@ -171,11 +172,11 @@ that is not installed (`download --what all` fetches `20-NRR_3_hg38`); a later i
 its own archive (and its PAM's reference index where that is not installed), not the bundle and the
 store again. The `indel_genotypes_` archive is fetched, with the genotype store, by `download --what
 genotype-oracle`, the stores without the index (an index's bundle holds the same indel store).
-Computed from these sizes, as `download` installs them, the default install (`download --what all`,
+Measured from the Hub on a clean install (2026-11-18), the default install (`download --what all`,
 then `20-NRR_3_hg38+hg38_HGDP1kGP`) is a 71.46 GB download and takes 153.39 GB, its peak 159.25 GB
-while the archives unpack (`download --what all` alone: 21.33 GB, 44.13 GB installed); to be
-measured from the Hub at the publish. A panel's enriched-genome kit, its SHA-256 checked (its member
-list, `build-inputs/<dataset>.members.md5`, is beside it on the Hub):
+while the archives unpack (`download --what all` alone: 21.33 GB, 44.14 GB installed). A panel's
+enriched-genome kit, its SHA-256 checked (its member list, `build-inputs/<dataset>.members.md5`, is
+beside it on the Hub):
 
 ```bash
 crisprme.py download --what build-inputs --dataset hg38_HGDP1kGP --path .  # hg38_HPRC, hg38_mega

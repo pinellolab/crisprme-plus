@@ -70,7 +70,13 @@ crisprme-data/
 │   ├── chr1.fa.gz … chrY.fa.gz, chrM.fa.gz     # gzipped; the alt, random and unplaced contigs too (455 files)
 │   └── chr22.fa                                # chr22 also unpacked: complete-test and setup fetch it as is
 ├── annotations/                    # functional + cancer-driver tracks (see below)
-├── pams/                           # 20bp-NRG-SpCas9, 20bp-NGG-SpCas9, 20bp-NNN-NO-PAM (CRISPRme ships 20bp-NRR-SpCas9)
+├── pams/                           # PAM files, all installed by download --what pams (and --what all)
+│   ├── 20bp-NRR-SpCas9.txt                     # SpCas9 NRR: the default PAM since 2.10.0
+│   ├── 20bp-{NRG,NGG}-SpCas9.txt               # SpCas9 NRG (the default before 2.10.0) and NGG
+│   ├── 20bp-NNN-NO-PAM.txt                     # 2.8.1's PAM-less file (the NNN_3 indexes above)
+│   ├── 20bp-NNNNNNNN-NO-PAM.txt                # the general index's (PAM-less, 8-nt flank)
+│   ├── 22bp-NNGRRN-SaCas9.txt, {21,22}bp-NNGRRT-SaCas9.txt   # SaCas9 (2.10.0's NNGRRN indexes serve NNGRRT, pruned)
+│   └── {20,23}bp-{TTTN,TTTV}-Cas12a.txt        # Cas12a (2.10.0's TTTN indexes serve TTTV, pruned)
 ├── samplesIDs/                     # per-dataset sample-id lists
 ├── guides/                         # sg1617.txt: the example guide CTAACAGTTGCTTTTATCACNNN (download does not fetch it)
 └── README.md
