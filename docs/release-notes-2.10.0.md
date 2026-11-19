@@ -19,7 +19,12 @@ describes the methods, §10 the known limits and §11 how the indexes were built
   indexes, and fetched once: after `download --what all`, which installs the reference index
   `20-NRR_3_hg38`, the default `20-NRR_3_hg38+hg38_HGDP1kGP` is a 50.1 GB download with them, and a
   second index of the panel its own archive, with its PAM's reference index where that is not
-  installed. `NNN_3` is not built again: the general index serves its searches as fast. The archives
+  installed. The enriched-genome kits the indexes were built from are published there too, for an
+  index of another PAM (`crisprme.py download --what build-inputs --dataset hg38_HGDP1kGP`,
+  `hg38_HPRC` or `hg38_mega`; 2.8.1's kits, enriched by CRISPRitz 2.9.1, do not match 2.10.0's
+  Dictionaries), and so are the normalised VCFs of HPRC v2.1 that its index reads
+  (`build-inputs/hg38_HPRC/`; `download --what vcf --dataset hg38_HPRC` still fetches 2.8.1's
+  v2.0). `NNN_3` is not built again: the general index serves its searches as fast. The archives
   of 2.8.1 stay in `lucapinello/crisprme-data` (and `lucapinello/crisprme-data-general-index`),
   unchanged, and a download by one of their names says which index of 2.10.0 replaces it.
 - **What the new indexes hold.** Every allele of a split multi-allelic site is coded: up to 2.9.1

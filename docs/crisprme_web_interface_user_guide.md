@@ -93,8 +93,13 @@ pre-downloaded `20-NRR_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
 search variant-aware. Sample-level analyses / named carriers / personal risk cards
 come from the **genotype store bundled with that index** (fetched by `download --what
 index` unless you pass `--no-genotypes`), not from raw VCFs — so a single index
-download covers both. (The default repo also hosts the source VCFs, `hg38_HGDP1kGP`,
-`hg38_HPRC` and `hg38_mega`, which you need only to build an index yourself.)
+download covers both. (The default repo, `lucapinello/crisprme-data`, also hosts the source
+VCFs of the three panels, `hg38_HGDP1kGP`, `hg38_HPRC` and `hg38_mega`, which you need only to
+build an index yourself. Its `hg38_HPRC` is HPRC graph v2.0, the input of 2.8.1's archives:
+2.10.0's HPRC index reads v2.1's normalised VCFs, in `lucapinello/crisprme_plus_indices`
+(`hf download lucapinello/crisprme_plus_indices --include "build-inputs/hg38_HPRC/*" --repo-type
+dataset --local-dir .`; to build from them, put the VCFs and their `.tbi` under
+`VCFs/hg38_HPRC/`), or use its kit (`download --what build-inputs --dataset hg38_HPRC`).)
 
 ### 2b. Start the local server
 
@@ -273,7 +278,8 @@ transcriptomes, non-human genomes, and cancer genome assemblies.
 When variant datasets have been prepared (for example, 1000 Genomes Phase 3 or
 HGDP), the interface presents the option to incorporate them into the search. To add
 your own VCFs in the local offline version, use **Settings → Add a VCF dataset**
-(upload them, register a folder on the server, or download a hosted dataset), picking
+(upload them, register a folder on the server, or download a hosted dataset: the hosted
+`hg38_HPRC` is HPRC graph v2.0, 2.8.1's input, where 2.10.0's HPRC index is of v2.1), picking
 the reference genome they are called against, then build their variant index there
 (*Add a precomputed index / build one*, with the dataset as *Variants*). The dataset
 is then offered here for that genome, with its sample list written from the VCF

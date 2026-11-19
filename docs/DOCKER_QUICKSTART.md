@@ -219,8 +219,13 @@ Sample-level analyses — named carriers, per-sample output, personal risk cards
 come from the **genotype store that ships with the variant index** (`download --what
 index` fetches it alongside the index unless you pass `--no-genotypes`), not from raw
 VCFs. You need the VCFs only to build an index yourself, for example for another PAM.
-The default repo hosts the source VCFs of its three variant panels, `hg38_HGDP1kGP`
-(29 GB), `hg38_HPRC` and `hg38_mega` (about 2 GB each):
+The default repo (`lucapinello/crisprme-data`) hosts the source VCFs of the three panels,
+`hg38_HGDP1kGP` (29 GB), `hg38_HPRC` and `hg38_mega` (about 2 GB each). Its `hg38_HPRC` is HPRC
+graph v2.0, the input of 2.8.1's archives: 2.10.0's HPRC index reads v2.1's normalised VCFs, in
+`lucapinello/crisprme_plus_indices` (`hf download lucapinello/crisprme_plus_indices --include
+"build-inputs/hg38_HPRC/*" --repo-type dataset --local-dir .`; to build from them, put the VCFs
+and their `.tbi` under `VCFs/hg38_HPRC/`), or use its kit (`download --what build-inputs
+--dataset hg38_HPRC`). HGDP + 1000 Genomes' VCFs, for one:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \

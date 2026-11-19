@@ -178,9 +178,15 @@ on one machine, how a chromosome's rows are batched moves them by about as much 
   20-NRR_3_hg38+hg38_HGDP1kGP` (the recommended phased HGDP + 1000 Genomes default, of the
   default SpCas9 NRR PAM, for a 20-nt guide).
 - The public repository ships **prebuilt indexes** that already encode the variants, so
-  you do not need the VCFs to search the shipped datasets. It also hosts their source
-  VCFs (`hg38_HGDP1kGP`, `hg38_HPRC`, `hg38_mega`), for building an index yourself:
-  `crisprme.py download --what vcf --dataset hg38_HGDP1kGP`.
+  you do not need the VCFs to search the shipped datasets. The default repo
+  (`lucapinello/crisprme-data`) also hosts the source VCFs of the three panels
+  (`hg38_HGDP1kGP`, `hg38_HPRC`, `hg38_mega`), for building an index yourself:
+  `crisprme.py download --what vcf --dataset hg38_HGDP1kGP`. Its `hg38_HPRC` is HPRC graph v2.0,
+  the input of 2.8.1's archives: 2.10.0's HPRC index reads v2.1's normalised VCFs, in
+  `lucapinello/crisprme_plus_indices` (`hf download lucapinello/crisprme_plus_indices --include
+  "build-inputs/hg38_HPRC/*" --repo-type dataset --local-dir .`; to build from them, put the VCFs
+  and their `.tbi` under `VCFs/hg38_HPRC/`), or use its kit (`download --what build-inputs
+  --dataset hg38_HPRC`).
 - A partial/interrupted download is re-fetched and structurally verified on the next
   run; set `CRISPRME_VERIFY_DEEP=1` to force a deep re-check, or `SKIP_VERIFY=1` to
   skip verification.
