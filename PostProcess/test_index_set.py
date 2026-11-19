@@ -1363,10 +1363,10 @@ class TheReleaseDocsOfTheSet(unittest.TestCase):
                       verifying)
 
     def test_each_archive_s_size_and_sha256_are_filled_in_where_they_exist(self):
-        """B-3: publish-index packs each index and companion archive at the publish, its
-        manifest dated then, and deletes it once uploaded: their SHA-256 is the Hub's, known after
-        the publish; a kit's, which its build row writes, after the build. Both are done: each
-        kit's size and SHA-256 are its build's (2026-11-15), and each index's and companion's the
+        """B-3: publish-index packs each index and companion archive at the publish, its manifest
+        dated then, and deletes it once uploaded: their SHA-256 is the Hub's, known after the
+        publish; a kit's, which its build row writes, after the build. Both are done: each kit's
+        size and SHA-256 are its build's (2026-11-14 and 15), and each index's and companion's the
         Hub's (2026-11-18, E, step 5), which replaced the "*after the publish*" of its SHA-256 and
         the size packing measured before the publish (gate D). So every row gives its size in bytes
         and a SHA-256, no two rows the same one (a checksum copied into another row's cell), the

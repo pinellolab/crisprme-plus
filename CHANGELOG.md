@@ -472,8 +472,9 @@ major.minor version (Changed). The main changes, each told in its entry below:
   the search without the flag (the gate run as the search runs it, on that search's results).
   Without the oracle the search says so (a `WARNING` line on stdout), and the rows are checked
   against the frequency bound alone (below).
-  Until the Hub has the panel's phased indel genotypes (see Changed), the download says so in one
-  line and installs the SNP genotypes, and an indel inside a target then takes no haplotype off.
+  Where the repository holds no phased indel genotypes (2.8.1's `lucapinello/crisprme-data`), the
+  download says so in one line and installs the SNP genotypes, and an indel inside a target then
+  takes no haplotype off.
   Covered by `PostProcess/test_haplotype_prioritizer.py` and
   `PostProcess/test_web_search_reuse.py`.
 
@@ -2051,10 +2052,11 @@ major.minor version (Changed). The main changes, each told in its entry below:
   IND package: an NRR search also reports the `NGA` and `NAA` sites, and the variant-created ones,
   that an NRG search leaves out, as NRG reports the `NAG` ones NGG leaves out. The PAM file
   `PAMs/20bp-NRR-SpCas9.txt` ships with CRISPRme, and a download of the PAM files (`download --what
-  pams`, and so `--what all`) installs it where the data repo has none (the repo's `pams/` holds the
-  NRG, NGG and PAM-less files). The web form selects it when it is installed (then NRG, then NGG, as
-  before), `download --what all` fetches the reference index `20-NRR_3_hg38` (2.8.1's `NRR_3_hg38`
-  where it cannot), and every surface that names the recommended index names
+  pams`, and so `--what all`) installs it where the data repo has none (the repo's `pams/` held the
+  NRG, NGG and PAM-less files alone until the release uploaded the index set's PAM files,
+  `20bp-NRR-SpCas9.txt` among them). The web form selects it when it is installed (then NRG, then
+  NGG, as before), `download --what all` fetches the reference index `20-NRR_3_hg38` (2.8.1's
+  `NRR_3_hg38` where it cannot), and every surface that names the recommended index names
   `20-NRR_3_hg38+hg38_HGDP1kGP` (and its HPRC and mega panels; 2.8.1's archive was
   `NRR_3_hg38+hg38_HGDP1kGP`): the README's and the website's commands, the one-click installers
   (`docs/install.sh`, `docs/install.ps1`), the Docker Quickstart, the web user guide, the CLI guide,

@@ -170,8 +170,8 @@ gh release create vX.Y.Z \
 GitHub refuses a release body of more than 125,000 characters, and `gh release create` then
 fails. 2.8.1's changelog section was about 322,000 characters, and its release went out with
 5,012 characters of notes written for it: what changes in results, what is new, how to upgrade,
-and links to the tag's `CHANGELOG.md` and `METHODS.md` for the full list. 2.10.0's `[Unreleased]`
-section is about 320,000 characters, so it needs such notes too.
+and links to the tag's `CHANGELOG.md` and `METHODS.md` for the full list. 2.10.0's section is
+about 374,000 characters, so it needs such notes too.
 
 Verify the tarball is now published:
 
