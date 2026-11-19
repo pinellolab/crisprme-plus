@@ -123,7 +123,7 @@ import cb_operating_point as cbop  # noqa: E402  # CRISPR-Bulge sensitive operat
 import window_density as wdens  # noqa: E402  # the hyperdense threshold (single source of truth)
 
 # report-generator version -- bumped here, stamped in the footer provenance line.
-REPORT_GENERATOR_VERSION = "2.4"
+REPORT_GENERATOR_VERSION = "2.5"
 
 # --------------------------------------------------------------------------- #
 # Recommended-validation-panel thresholds (module-level constants, section 4)
