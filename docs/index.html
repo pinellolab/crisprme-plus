@@ -18,7 +18,7 @@
       <img src="crisprme-logo.svg" alt="CRISPRme" class="logo">
     </h1>
     <p class="tagline">Variant-aware CRISPR off-target nomination</p>
-    <p class="tagline" style="font-size:0.9em;color:#2b6cb0">Latest: <strong>v2.10.0</strong> &mdash; rebuilt indexes that code every allele of a multi-allelic site, SpCas9 <code>NRR</code> as the default PAM, an exact haplotype pre-check and a parallel post-analysis that keep variant searches of the new indexes tractable, and many correctness and web-security fixes. <a href="example-report.html">See an example report &rarr;</a></p>
+    <p class="tagline" style="font-size:0.9em;color:#2b6cb0">Latest: <strong>v2.10.0</strong> &mdash; rebuilt indexes that code every allele of a multi-allelic site, SpCas9 <code>NRR</code> as the default PAM, an exact haplotype pre-check and a parallel post-analysis that keep variant searches of the new indexes tractable, and many correctness and web-security fixes. <a href="example-report.html">See an example report &rarr;</a> <a href="https://github.com/pinellolab/crisprme-plus/blob/main/docs/release-notes-2.10.0.md">Release notes and known limitations &rarr;</a></p>
   </header>
 
   <main>
@@ -96,7 +96,10 @@
         variant-aware setup, far less &mdash; ~44&nbsp;GB installed, ~65&nbsp;GB free while it
         unpacks &mdash; for reference-only) on first launch. Prefer the terminal, or want to script /
         batch analyses? The <strong>Docker quickstart below</strong> and the command line both
-        work too.
+        work too. Installed the app with 2.8.1? Its <strong>Update</strong> pulls the new engine
+        only, and your data folder keeps 2.8.1's indexes:
+        <a href="https://github.com/pinellolab/crisprme-plus/blob/main/install/README.md#for-users">the
+        installer's notes</a> say how to move to 2.10.0's.
       </p>
       <p>
         <strong>Hardware:</strong> variant-aware whole-genome search needs
@@ -189,6 +192,11 @@ docker pull pinellolab/crisprme:latest</code></pre>
           <strong>Already have an older image?</strong> Docker won't refresh a tag you
           already have &mdash; run <code>docker pull pinellolab/crisprme:latest</code> again to
           update, or an old image will error with <code>download is not an allowed command</code>.
+          An image of 2.8.1 does not find the indexes of 2.10.0 (step&nbsp;2 stops with
+          <code>No index '20-NRR_3_hg38+hg38_HGDP1kGP' found</code>), and a data folder of 2.8.1
+          keeps its own indexes, which 2.10.0 searches with their limits: see
+          <a href="https://github.com/pinellolab/crisprme-plus/blob/main/docs/release-notes-2.10.0.md#upgrading-from-281">Upgrading
+          from 2.8.1</a> in the release notes.
         </p>
 
         <h3>2 &mdash; Download the data and a ready-made index (minutes, not hours)</h3>
@@ -295,7 +303,9 @@ ssh -N -L 8080:&lt;compute-node&gt;:8080 &lt;user&gt;@&lt;cluster-login&gt;</cod
       </p>
       <p>
         In the browser: enter a guide sequence, pick the PAM and genome, set mismatches
-        and bulges, and click <strong>Submit</strong>. Off-targets are scored with
+        and bulges (on a variant index keep the default 1 DNA + 1 RNA bulge and raise the
+        mismatches first: above it, a search of the dense immunoglobulin loci can run for hours
+        or out of memory), and click <strong>Submit</strong>. Off-targets are scored with
         <strong>CFD</strong> and the <strong>CRISPR-Bulge</strong> machine-learning
         model (Yaish &amp; Orenstein, NAR 2024). Results are saved on your own
         machine, under <code>Results/</code> inside the working folder you chose at
@@ -444,6 +454,8 @@ docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:latest \
         <li><a href="https://github.com/pinellolab/crisprme-plus#228-local-web-interface">Web Interface</a></li>
         <li><a href="https://github.com/pinellolab/crisprme-plus#3-test">Testing</a></li>
         <li><a href="https://github.com/pinellolab/crisprme-plus#4-citation">Citation</a></li>
+        <li><a href="https://github.com/pinellolab/crisprme-plus/blob/main/docs/release-notes-2.10.0.md">Release notes (2.10.0)</a></li>
+        <li><a href="https://github.com/pinellolab/crisprme-plus#known-limitations-and-roadmap">Known limitations</a></li>
       </ul>
     </section>
 

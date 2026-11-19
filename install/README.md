@@ -26,6 +26,15 @@ the reference + variant data automatically (once) and opens the web interface at
 http://localhost:8080; every Start after that is instant. (Manage additional data
 from the web app's own Settings.)
 
+**Installed with 2.8.1?** **Update** pulls the new engine only. Your data folder keeps 2.8.1's
+indexes, which 2.10.0 still searches with their limits, and an app installed by 2.8.1's
+installer downloads 2.8.1's index on a first Start. To move to 2.10.0's indexes: run the
+one-line install command above again (it replaces the app); then **Stop** CRISPRme, rename or
+delete the old data folder, and delete `~/CRISPRme/.data_location` (Windows:
+`%USERPROFILE%\CRISPRme\.data_location`). The next **Start** asks where to put the data and
+downloads 2.10.0's (~70 GB). The README's
+[Upgrading from 2.8.1](../README.md#upgrading-from-281) says what changes.
+
 **Memory:** the **whole-genome variant-aware search** (across 1000G + HGDP) needs
 **~64 GB of RAM** — give Docker Desktop that much under Settings → Resources → Memory.
 On **Windows with the WSL 2 backend there is no memory slider**: set `memory=` in
@@ -50,7 +59,11 @@ guides you if it is missing).
 - The apps are thin managers that shell out to `docker run` and open the browser; the engine is
   the published `pinellolab/crisprme` image, which the scripts pull as **`:latest`** (the release
   CI pushes `:latest`), so the installer tracks the current release automatically and the
-  **Update** button always re-pulls it — no per-release tag bump needed.
+  **Update** button always re-pulls it — no per-release tag bump needed. The first Start's index
+  name is written into the app, though, and Update changes neither the app nor the data folder:
+  where a release changes the default index (2.10.0 did, to `20-NRR_3_hg38+hg38_HGDP1kGP`), an
+  existing app keeps downloading the old one, and its users re-run the installer
+  (**Installed with 2.8.1?**, above).
 - The first-run download (reference data + the default **HGDP + 1000 Genomes** variant index) is
   **~70 GB**, **~150 GB** on disk once installed (keep **~200 GB** free), and the engine image a
   **~5 GB** download (**~1.8 GB** on Apple Silicon) — keep these figures in sync with `README.md`,

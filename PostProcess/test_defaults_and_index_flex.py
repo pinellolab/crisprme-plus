@@ -1775,7 +1775,14 @@ class TheFinalDocsSecondReviewFixes(unittest.TestCase):
         readme = (_REPO / "README.md").read_text(encoding="utf-8")
         section = readme[readme.index("### Known limitations and roadmap"):]
         section = " ".join(section[:section.index("\n> ")].split())
-        self.assertIn("a carrier whose haplotype holds an MNV in a row's target beside its indel",
+        # (an indel row's and a SNP row's: the release notes' and METHODS section 10's sizes of
+        # the limit count both, and the targets it leaves unreported; the docs audit of 2.10.0)
+        self.assertIn("a carrier whose haplotype holds an MNV in a row's target is listed for a "
+                      "sequence it does not have", section)
+        self.assertIn("1,163 times at 94 sites on indel rows (each at a CFD of 0.085 or less) and "
+                      "3,334 times at 219 sites on SNP rows", section)
+        self.assertIn("A target held only through an MNV and another indel or MNV is not reported "
+                      "for its carriers (16 sites on chr22, each at a CFD of 0.0164 or less)",
                       section)
         self.assertNotIn("holds an MNV beside a row's indel", section)
         for item in ("one refusal's advice on the mega", "a SNP row's carriers beside a long indel",
