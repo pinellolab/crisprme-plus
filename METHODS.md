@@ -445,9 +445,10 @@ chr3, chr4, chr5, chr10, chr12, chr18 and chr21 (two on chr21: 41,806,097 and 44
 CRISPRitz 2.10.0 names in upper case in its indel log; the steps above read the VCF so too: read as
 written, they failed the checks of each of those seven chromosomes with it ("indel log alleles ...:
 N more, N missing"; measured by CRISPRitz's MULTIALLELIC §6.7), which pass read so (chr21 and chr18
-measured with the release's engine and readers). The recipe has not yet been run genome-wide; the
-rebuild for this release runs it. Its first step alone, run over the 24 merged VCFs, finds the 8
-duplicated deletions above and chrY's missing `AF_max`, and nothing else of the kind.
+measured with the release's engine and readers). The rebuild for this release ran the recipe
+genome-wide, and its checks passed on all 24 chromosomes (`docs/INDEX_PROVENANCE.md`, 2.10.0,
+Gate A). Its first step alone, run over the 24 merged VCFs, finds the 8 duplicated deletions above
+and chrY's missing `AF_max`, and nothing else of the kind.
 
 The two modes are therefore complementary: the genotyped panel gives phased,
 cis-capable frequencies over a curated sample set; the mega gives one-scan,
