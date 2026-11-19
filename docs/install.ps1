@@ -24,7 +24,7 @@ Write-Host "Docker found." -ForegroundColor Green
 
 # ---- 1b. Pre-pull the engine image (best-effort, visible progress) --------
 # Front-load the engine image now (a ~5 GB download: Docker Desktop on Windows pulls the
-# linux/amd64 one, ~7 GB+ once unpacked) with progress here, so the app's first Start
+# linux/amd64 one, ~16 GB once unpacked) with progress here, so the app's first Start
 # doesn't appear to hang while it pulls. Skipped if the daemon isn't up yet.
 try { docker info *> $null; if ($LASTEXITCODE -eq 0) { Write-Host "Fetching the CRISPRme engine image (~5 GB download, one time)..." -ForegroundColor Cyan; docker pull $Image } } catch {}
 

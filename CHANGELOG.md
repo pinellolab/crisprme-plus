@@ -13,6 +13,21 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Fixed
+- **The docs give the measured size of 2.10.0's image once unpacked, and of its arm64
+  `.sif`.** The one-line installers' comments said "~7 GB+ once unpacked", the README "about
+  7 GB on Apple Silicon, and more on amd64", and the Docker Quickstart's Apptainer step a `.sif`
+  of ~1.8 GB on Apple Silicon. Measured on `pinellolab/crisprme:v2.10.0` after its release, the
+  image takes 7.04 GB on Apple Silicon (`docker images`) and about 15.8 GB on amd64 in the
+  containerd image store of Docker Desktop (and of Docker Engine from version 29, on a fresh
+  install), which keeps the 4.84 GB download beside the unpacked image, or about 10.7 GB in
+  Docker Engine's classic overlay2 store; the arm64 `.sif` is 1.71 GB. The README §1.2 and
+  `install.sh`'s comment now give ~16 GB on amd64 (~11 GB on overlay2) and ~7 GB on Apple
+  Silicon, `install.ps1`'s ~16 GB (Docker Desktop on Windows pulls amd64), the Quickstart
+  ~1.7 GB, and `docs/RELEASE_CHECKLIST.md` records the measurement ("The image's size", D). The
+  download, 4.84 GB on amd64 and 1.82 GB on arm64, and the amd64 `.sif`, 4.51 GB, are the same
+  as 2.8.1's, so the docs' figures for them stand.
+
 ## [2.10.0] - 2026-11-19
 
 CRISPRme 2.10.0 is released with CRISPRitz 2.10.0, and from this release the two share their
