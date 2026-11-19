@@ -138,9 +138,10 @@ sections are memory-mapped and read by direct `O(log n)` bisection on genomic po
 with **no per-lookup decompression**. This is the fastest option — a dense variant search
 does millions of registry lookups (one per candidate off-target window, scattered across a
 chromosome), and measurement showed raw lookups are **~2× faster** than the compressed path
-even with a warm cache. All shipped indexes (the genotyped 1000 Genomes + HGDP and the
-sites-only mega) use this raw format, for consistency and lookup speed ("speed over space").
-The registry has shipped raw since 2.5.3 (still raw as of 2.8.1).
+even with a warm cache. All shipped indexes (the genotyped HGDP + 1000 Genomes and HPRC panels
+and the sites-only mega) use this raw format, for consistency and lookup speed ("speed over
+space"). The registry has shipped raw since 2.5.3, and the rebuild for 2.10.0 wrote every
+registry raw (§11).
 
 **Optional `zlib` compression.** A block-compressed format is available for
 space-constrained storage. Each section is partitioned into 4,096-record blocks,
@@ -321,7 +322,9 @@ protocol, chrX ploidy handling, and validation are documented in
 CRISPRme+ also ships an **HPRC pangenome panel** (`hprc_build.sh`) in this same genotyped,
 cis-capable mode. It is a *single* source rather than a merge: the HPRC Minigraph-Cactus pangenome —
 the **HPRC Release 2 graph `hprc-v2.1-mc-grch38`** (GRCh38; 2.8.1's HPRC indexes were built from
-v2.0, `hprc-v2.0-mc-grch38`, and so were the figures of HPRC's chr22 this document gives) —
+v2.0, `hprc-v2.0-mc-grch38`, and so were the chr22 figures of HPRC measured during development
+that this document gives without naming v2.1; those it gives as v2.1's, the release gate's among
+them (§10, §11), are of v2.1) —
 decomposed to a per-chromosome VCF (`vg deconstruct` → `vcfbub` → `vcfwave`), 232 assembly-derived
 genomes (231 individuals + the CHM13 graph backbone). Because the genotypes are **phased** (each
 sample is two assembled haplotypes), it supports CONFIRMED cis co-occurrence and named per-sample
@@ -519,9 +522,11 @@ The Tier-0 registry holds SNPs only. An indel has, in either mode, the `AF` of t
 log, which CRISPRitz `add-variants` copied from the VCF's `INFO/AF` when it built the index, as
 rounded there; one whose `AF` the log gives as 0, or not at all, has no frequency. The log holds
 none for a record whose `INFO` has `AF` at another place than the VCF's first record on an index
-built by CRISPRitz 2.9.1 or earlier (a known limit of its `add-variants`, §8), and none for any
-indel of the sites-only mega, whose VCF has no `INFO/AF` (only `AF_<dataset>` and `AF_max`, §2): a
-mega indel's per-dataset frequencies are in the `indel_af.tsv` companion.
+built by CRISPRitz 2.9.1 or earlier (a known limit of its `add-variants`, §8), and none for an
+indel of 2.8.1's mega, whose VCF has no `INFO/AF` (only `AF_<dataset>` and `AF_max`, §2). The mega
+rebuilt for 2.10.0 sets `INFO/AF` to `AF_max` in its build input (§2), so each indel of its log
+has its `AF_max`. Either way, a mega indel's per-dataset frequencies are in the `indel_af.tsv`
+companion.
 
 For a multi-variant haplotype off-target, the reported frequency is bounded by
 the **rarest** contributing allele (the haplotype can be no more frequent than
@@ -763,7 +768,8 @@ absolute path, the dataset's enriched and fake-indel genomes, its dictionaries a
 dict-less tiers and every index of it in the working directory's library, those the run builds next
 included (`indel_window.enrichment_stores`; its phased indel genotype store and a sites-only
 registry come from its VCFs alone, and stay: a registry whose manifest says sites-only by its
-`data_type` or, as every published mega's, which has none, by its aggregation of INFO AF fields,
+`data_type` or, as 2.8.1's published mega's, which has none (the registry of 2.10.0's mega records
+`sites-only`), by its aggregation of INFO AF fields,
 `indel_window.registry_data_type`). A dataset enriched anew beside the earlier enrichment's tiers,
 taken as emitted, or its variant index, kept as built, would mix the two enrichments' SNPs: on an
 enrichment of CRISPRitz 2.9.1 of chr22, the README guide's per-sample search then loses a row at a
@@ -2632,10 +2638,12 @@ Genomes 2021 + HGDP, built from such a merge, retired in 2.7.8) has no `AF` for 
 HPRC's chrY is affected, whose VCF has `AF` at five places in `INFO`, after one to five other keys:
 its log has none for 91,950 of its 102,665 indels. The HGDP1kGP index and HPRC's other chromosomes
 have an `AF` for each of their 17,192,381 and 12,000,599 indels, as the self-test's 1000 Genomes
-index (chr22) has for its 64,528 indels and 993,880 SNPs; the mega's VCF has no `INFO/AF` at all
-(§2), so none of its 13,853,761 indels has one, and their per-dataset frequencies are in the
-`indel_af.tsv` companion. CRISPRitz 2.10.0 finds each record's `AF` by its key, so an index it
-builds, as every one rebuilt for CRISPRme 2.10.0, has the `AF` of each record that has one. The
+index (chr22) has for its 64,528 indels and 993,880 SNPs. 2.8.1's mega had no `INFO/AF` in its
+VCF (§2), so none of its 13,853,761 indels had one; the rebuilt mega's build input carries
+`AF_max` as `INFO/AF`, so each of its 13,853,753 has it; either way their per-dataset frequencies
+are in the `indel_af.tsv` companion. CRISPRitz 2.10.0 finds each record's `AF` by its key, so an
+index it builds, as every one rebuilt for CRISPRme 2.10.0, has the `AF` of each record that has
+one. The
 phased indel genotype store leaves out equal-length multi-base records (MNVs), so their carriers are
 resolved with the phase unknown, PUTATIVE (§4): the HGDP + 1000 Genomes index has none, HPRC's chr22
 has 9,079 among its 195,813 indel-search records in v2.0 of its graph (2.8.1's input), 24,656 among
@@ -3235,16 +3243,18 @@ chr22:17325232 A>AT's; an SpCas9 target, 24 nt at most here, never starts there 
 which an index of format 2 holds: the same search of indexes 2.10.0 built reports them all, its row
 at chr22:17325206 (+) listing the insertion's 2,088 carriers. And the phased indel store kept every
 indel whatever its FILTER, so a carrier was taken off a target, and off a SNP row, for an indel no
-fake-indel window of the search holds (the oracle's sites O, Q and Y1 above). It also shows a
-reading no text documents: `hg38_mega`'s SNP rows name SNVs whose FILTER is not `PASS` (on the
-published index also earlier records of split sites: 58 split sites of chr22, 57 of them a `PASS`
-record before a later `PASS` one), where its indel rows and indel log follow CRISPRitz's enricher.
-The variant genome CRISPRitz 2.10.0 builds from that VCF holds no such SNV, but the registry lists
-every ALT of a position and a sites-only dataset's SNP row substitutes each: the fresh per-sample
-search beside it names one of the 74,025 SNVs of chr22 outside `PASS` that no passing record of
-either VCF holds in 1 integrated row and 3,434 alternative alignments (chr22:12810728 (−),
-chr22_12810729_T_C, `ExcHet`, beside the `PASS` T>A the genome codes), the population-level one in
-none. `test/indel_snp_oracle/run_oracle.sh` runs it beside `oracle.py check` in both profiles,
+fake-indel window of the search holds (the oracle's sites O, Q and Y1 above). It also showed a
+reading no text then documented (§2 does now): `hg38_mega`'s SNP rows name SNVs whose FILTER is not
+`PASS` (on the index 2.8.1 published also earlier records of split sites: 58 split sites of chr22,
+57 of them a `PASS` record before a later `PASS` one), where its indel rows and indel log follow
+CRISPRitz's enricher. The variant genome CRISPRitz 2.10.0 builds from that VCF holds no such SNV,
+but a registry read from every record of the VCF lists every ALT of a position and a sites-only
+dataset's SNP row substitutes each: the fresh per-sample search beside it names one of the 74,025
+SNVs of chr22 outside `PASS` that no passing record of either VCF holds in 1 integrated row and
+3,434 alternative alignments (chr22:12810728 (−), chr22_12810729_T_C, `ExcHet`, beside the `PASS`
+T>A the genome codes), the population-level one in none. The registry of the mega rebuilt for
+2.10.0 lists only the records its genome codes (§2), so its rows name none.
+`test/indel_snp_oracle/run_oracle.sh` runs the checker beside `oracle.py check` in both profiles,
 `validate-benchmarks.yml` runs it on the chr22 self-test output after `validate-test`, and
 `docs/RELEASE_CHECKLIST.md` makes it a release gate.
 
@@ -3325,8 +3335,10 @@ reports sites that are not there. CRISPRme therefore takes any index only for a 
 was built for: the side the header of its `.bin` files records, for an index of format 2 (below),
 else the one recorded in its `.pam_build` (written by `build-index-only`, and by a search that
 builds an index). A dedicated index of format 1 without one is used as before. A PAM-less index
-without one is taken for a 3′ build at the published widths, 3 and 8 (the K = 8 archive has no
-`.pam_build`), or under the search PAM's own name, and at no other width: a search before 2.8.1
+without one is taken for a 3′ build at the published widths, 3 and 8 (2.8.1's K = 8 archive,
+`NNNNNNNN_3_hg38` in `lucapinello/crisprme-data-general-index`, has no `.pam_build`; 2.10.0's
+`20-NNNNNNNN_3_hg38` says its side in its name, its `.bin` headers and its `.pam_build`), or under
+the search PAM's own name, and at no other width: a search before 2.8.1
 built one of any width from a 5′ PAM file and recorded nothing. A search, and `build-index-only`,
 build an index under a name that says its side (since 2.10.0; **Index names** below), so an index of
 the older name for the other side is left beside it, and never searched for this side;
@@ -3484,11 +3496,17 @@ was built in, read from its own `.bin` files; an index CRISPRme builds records i
 PAM, side, flank and guide length, in its `.index_meta.json` (a sub-index with no `.bin` has no
 other record of it).
 
-**Cost.** A PAM-less index is much larger, because no site is excluded at build time: the
-reference index is 71 GB against 9 GB for a dedicated NRG index, and the HGDP + 1000
-Genomes variant index 110 GB against 28 GB (download sizes, GB = 10⁹ bytes). Pruning
-happens at leaf time, so a PAM-less search is not faster than a dedicated one — the gain
-is that one index answers many PAMs.
+**Cost.** A PAM-less index is much larger, because no site is excluded at build time. 2.10.0's
+general index (an 8-nt flank) is 82.21 GB for the reference against 8.89 GB for the dedicated NRG
+index, and 110.91 GB for HGDP + 1000 Genomes against 12.24 GB (download sizes, GB = 10⁹ bytes;
+an index archive of 2.10.0 holds no Dictionaries, which the panel's bundle carries); 2.8.1's
+`NNN_3` archives were 71.5 and 109.5 GB, against NRG's 8.9 and 27.7 GB, Dictionaries included.
+Pruning happens at leaf time, so a PAM-less search is not faster than a dedicated one: the
+general index's search took 2.7 times a dedicated NGG index's and 1.9 times the NRR index's
+(genome-wide on the published reference indexes, the engine's search on 32 threads). A 3-nt and
+an 8-nt flank cost the same search time (every position is a site), which is why 2.10.0
+publishes only the 8-nt one, and serves every search of 2.8.1's `NNN_3` with it at the same
+speed. The gain is that one index answers many PAMs.
 
 **Guide length.** An index name of the older form carries no guide length (one of the 2.10.0
 form says it, **Index names** above); each tree records the one it was built for, as the second
@@ -3676,8 +3694,8 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   reaches 1,388 bases from the target, and no other row of that search lies within 4 kb. The
   real-data check's SNP-row report finds it (6 report-only `carrier-missing` lines) and no such
   carrier on the per-sample searches of HGDP + 1000 Genomes; a row the rule takes off whole, which
-  the report cannot see, is not counted. 2.10.1 is to read the store over the frame a haplotype's
-  own indels need.
+  the report cannot see, is not counted (the check of SNP rows for completeness planned for 2.10.1
+  sees it). 2.10.1 is to read the store over the frame a haplotype's own indels need.
 - **A target wholly inside a tandem repeat.** The merge reads each row's place on the haplotype
   from its own bases, the first place they fit (§4). In a microsatellite that holds a whole
   target, the target's alignments, each with its own bases, can fit different places, so they
@@ -3714,7 +3732,7 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   `Variant_info_spacer+PAM`, nor whether an alternative alignment is one the merge should have
   folded into a better one of the same target (a redundant fold). A variant numbered at the
   wrong place, or a redundant alternative alignment, passes it; the unit tests and the
-  SNP+indel oracle's planted sites check both.
+  SNP+indel oracle's planted sites check both. 2.10.1 is to check both (`docs/ROADMAP.md`).
 - **When the check cannot tell the genome's generation.** The check reads how a run's variant
   genome was coded from the run's own records (§8, Releases, gives each rule). Where they do not
   tell whether it codes every allele of a split site, a run whose VCF holds a split SNP site (two
@@ -3725,7 +3743,8 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   where an earlier line holds an ALT the last line does not (two lines of one SNV REF>ALT, case
   twins such as `C>g` beside `C>G` among them, never tell), and an index download holds no
   enriched genome: there a run is refused where a chromosome it checks has a split SNP site in
-  its VCF and no Q in its variant index of 2.10.0.
+  its VCF and no Q in its variant index of 2.10.0. 2.10.1 is to tell the run's genome where the
+  check refuses one today.
 - **Searches above 1 DNA + 1 RNA bulge in dense regions.** On an index that codes every allele
   (CRISPRitz 2.10.0), the IUPAC search of the immunoglobulin loci and of some tandem repeats grows
   by orders of magnitude above the default budget, a cost no step after the search removes: on IGL

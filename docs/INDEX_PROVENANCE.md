@@ -35,8 +35,10 @@ an image made by the image route of the D7 readiness audit: the environment of `
 release candidate of 2.8.1 that was never published, with CRISPRme's tree replaced by the commit
 below and CRISPRitz compiled inside it, from the commit below, with the Dockerfile's `g++` lines.
 `rc281f.sif`'s Dockerfile equals v2.8.1's, and its own `crisprme.py` (md5 `4c527335…`, not v2.8.1's
-`1fbc9c9f…`) is replaced; its conda environment is v2.8.1's (2.10.0's `environment.yml` adds
-`pigz` alone, which the image holds). That image, and its
+`1fbc9c9f…`) is replaced; its conda environment is v2.8.1's (at the build commit, `db50986`,
+2.10.0's `environment.yml` added `pigz` alone, which the image holds; after the build it added
+conda-forge's GNU `coreutils` too, for Ubuntu 26.04, whose part the image's Debian GNU coreutils
+play: 2.10.0's Dockerfile installs the same conda packages as 2.8.1's). That image, and its
 `.provenance.txt`, are the only artifacts that reproduce these indexes' bytes: keep them with the
 release's records.
 

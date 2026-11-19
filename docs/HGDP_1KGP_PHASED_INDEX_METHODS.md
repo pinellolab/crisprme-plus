@@ -1,14 +1,15 @@
 # gnomAD HGDP + 1kGP re-phased variant index — methods & validation record
 
-> **Living document.** This records the rationale, source-data provenance, verification, and
-> (once finalized) the validated build recipe for a new **default** CRISPRme+ variant index built
-> from the gnomAD v3.1.x HGDP + 1000 Genomes joint callset. **Once the recipe is finalized and
-> validated, sections 5–7 are folded into `METHODS.md` and the CRISPRme+ manuscript Methods**
-> (this is a key methodological contribution: a fully-phased, singleton-inclusive, uniformly-processed
-> HGDP+1kGP haplotype panel enabling CONFIRMED-cis co-occurrence across BOTH cohorts).
->
-> Nothing is built genome-wide or pushed to HuggingFace until every section is verified spotless and
-> Luca signs off. Status log at the bottom.
+> **Record of the HGDP + 1000 Genomes panel's re-phasing and build.** This records the rationale,
+> source-data provenance, verification and validated build recipe of the **default** CRISPRme+
+> variant panel, built from the gnomAD v3.1.x HGDP + 1000 Genomes joint callset (a fully-phased,
+> singleton-inclusive, uniformly-processed HGDP+1kGP haplotype panel enabling CONFIRMED-cis
+> co-occurrence across BOTH cohorts). The recipe of §7 built the default index of CRISPRme 2.7.0 to
+> 2.8.1 (`NRG_3_hg38+hg38_HGDP1kGP`, published 2026-10-07 in `lucapinello/crisprme-data`). With
+> CRISPRitz 2.10.0 it built the seven HGDP + 1000 Genomes indexes of 2.10.0, the default among
+> them (`20-NRR_3_hg38+hg38_HGDP1kGP`), published 2026-11-18 in `lucapinello/crisprme_plus_indices`
+> (`docs/INDEX_PROVENANCE.md`). `METHODS.md` §2 and §11 give the method. The status log (§8)
+> records the first build; the decision of §4c was taken on 2026-09-29: singletons kept.
 
 ## 1. Rationale
 
@@ -400,6 +401,14 @@ split site, METHODS §2; 2.10.0's build, whose CRISPRitz 2.10.0 codes every alle
 **127,666,429 SNP alleles + 17,192,381 indels**, `docs/INDEX_PROVENANCE.md`; `phased:true`);
 every `reg_<chrom>.idx` carries `data_type=genotyped-phased`.
 
+The command above is the NRG build of 2.7.0 to 2.8.1. For 2.10.0 the index set
+(`seq_script/rebuild/index_set_2.10.0.tsv`) runs `hgdp1kgp_build.sh` with
+`PAM=PAMs/20bp-NRR-SpCas9.txt` for the panel's first row, which writes its Dictionaries and the
+default `20-NRR_3_hg38+hg38_HGDP1kGP`. It then runs it with the NGG, NRG, general
+(`20bp-NNNNNNNN-NO-PAM.txt`), NNGRRN (22 nt) and TTTN (20 and 23 nt) PAM files on the same
+enriched genome, 64 threads, CRISPRitz 2.10.0 (`METHODS.md` §11). All use 2 DNA + 2 RNA bulges,
+a RAW registry and SNP+indel co-occurrence ON, as the other production indexes do.
+
 ### 7.4 chrX pseudoautosomal (PAR) ploidy — a correctness requirement
 chrX is hemizygous in males ONLY outside the pseudoautosomal regions. On GRCh38: PAR1
 chrX:10,001–2,781,479, PAR2 chrX:155,701,383–156,030,895, non-PAR core chrX:2,781,480–155,701,382.
@@ -522,13 +531,14 @@ reads the same field), the indel and each SNP alt as a forward-strand `chrom_pos
 (same format the SNP path emits, so `resultIntegrator` parses and strand-corrects them
 identically), and its `Samples` column is the individuals whose own haplotype has that sequence.
 The indel post-analysis writes the indel first, with the `rsID` / `MAF` lists 1:1 with the tokens,
-but the merge of a cluster's rows (`remove_contiguous_samples.py`), as on SNP rows, sorts and
-deduplicates the token, `rsID` and `MAF` lists each on its own, so the results tables and the
-report keep neither the order nor that pairing: a SNP token can come before the indel's, and equal
-values show once, so a list can be shorter than the token list (two variants with one MAF give one
-MAF). A slot whose phase cannot be read (unphased, a missing allele, no phased indel genotype) gets
-the strongest target its own alleles allow, and a sites-only panel (mega) the strongest target the
-codes allow, listing the indel log's carriers; the `*.indel_snp_cooc.tsv` sidecar marks those
+and the merge of a cluster's rows (`remove_contiguous_samples.py`), as on SNP rows, writes each
+variant once, its tokens sorted as text, so a SNP token can come before the indel's. Since 2.10.0
+the `rsID` and `MAF` lists follow the tokens one to one, and two variants of one frequency give it
+each. Up to 2.8.1 the merge sorted and deduplicated the three lists each on its own and kept
+neither the pairing nor equal values (METHODS §8). A slot whose phase cannot be read (unphased, a
+missing allele, no phased indel genotype) gets the strongest target its own alleles allow, and a
+sites-only panel (mega) the strongest target the codes allow, listing the indel log's carriers;
+the `*.indel_snp_cooc.tsv` sidecar marks those
 PUTATIVE (the anti-chimera contract of §9c: no individual is listed for an allele it does not
 carry). Up to 2.8.0 the indel row's sequence was instead resolved column by column without
 genotypes, and a PUTATIVE call stayed in the sidecar while the row kept that guide-optimistic
