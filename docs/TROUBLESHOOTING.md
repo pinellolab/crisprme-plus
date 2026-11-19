@@ -258,8 +258,11 @@ What holds wherever you run it, since 2.10.0:
   name leads nowhere the web app writes. A link is followed only where no one else can have
   put it: a link of yours in a folder only you can write (or a sticky one of yours), such as
   a genome linked to a shared copy, a VCF dataset registered from a server folder, or
-  `Results/` or `Settings/` linked onto a volume; in a folder your group can write, the web
-  app refuses those too, and below `Results/` and `Settings/` it follows none. A Settings
+  `Results/` or `Settings/` linked onto a volume (but in 2.10.0 the History page answers HTTP 500
+  where `Results/` itself is a link, to be fixed in 2.10.1, [ROADMAP](ROADMAP.md); until then keep
+  `Results/` a folder: in Docker, mount the volume there, `-v <volume>:/DATA/Results`); in a
+  folder your group can write, the web app refuses those too, and below `Results/` and `Settings/`
+  it follows none. A Settings
   job's folder is writable by you alone, and the cache of the results tables, pickles that
   Flask-Caching loads, is in a folder of the server's own in the temporary folder (in memory
   when that folder is not private or sticky), no longer in `Cache/` of the data folder, which

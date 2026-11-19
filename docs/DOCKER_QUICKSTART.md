@@ -149,9 +149,11 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 
 ## 4. Download a prebuilt index (one time, minutes — skips a long build)
 
-Bulge-enabled searches need a genome **index**. Building it yourself takes ~10
-minutes of CPU; instead, download the ready-made SpCas9 NRR (NGG, NAG, NGA, NAA) index,
-the default PAM's since 2.10.0 (it was NRG = NGG + NAG).
+Bulge-enabled searches need a genome **index**. Building it yourself takes a while (a search
+builds a missing one; the published `20-NRR_3_hg38`, built for up to 2 + 2 bulges, took 47 min on
+16 threads, with 29 GiB of memory, in the release's rebuild, and longer on fewer threads);
+instead, download the ready-made SpCas9 NRR (NGG, NAG, NGA, NAA) index, the default PAM's since
+2.10.0 (it was NRG = NGG + NAG).
 
 > **On hg38 you already have this one** — `--what all` in step 3 downloads
 > `20-NRR_3_hg38` for you. Change `--index-name` in the command below to add a
@@ -522,7 +524,8 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
     --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 8
 ```
 
-> **Do NOT run the ~75 GB genome-wide variant search on a login node.** It will
+> **Do NOT run a genome-wide variant search on a login node** (on the indexes of 2.10.0 it took
+> 38 GB on 8 threads, 63 GB on 16 and over 100 GB on 32). It will
 > exhaust shared login-node memory and be killed (and disrupts other users).
 > Submit it with `sbatch`, or use an interactive compute-node session.
 
@@ -530,7 +533,8 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
 
 ## Installing more indexes (as you need them)
 
-An index is specific to a **PAM + bulge count + genome**. Download whichever you
+An index is built for a **PAM + bulge count + genome** (it also serves a PAM its own PAM holds,
+pruned, and fewer bulges: an NRR index serves NGG, NAG, NGA and NRG). Download whichever you
 need by its **exact published name** — for example the five-source sites-only
 **mega** index (a useful complement to the default genotyped HGDP + 1000 Genomes index):
 
@@ -545,9 +549,10 @@ are in `lucapinello/crisprme-data` and, PAM-less with an 8-nt flank,
 `--index-name`, and `download` picks the repo for you.
 
 If an index you need is **not** published, build it once: every later search reuses it.
-A web search builds a missing **reference** index itself, from the installed genome
-(about 20 to 35 minutes for hg38), before it searches. A **variant** index it does not
-build for bulges: the search form offers a variant panel only the bulges its installed
+A web search builds a missing **reference** index itself, from the installed genome, before it
+searches (for hg38 with NRR, the default PAM, 47 min on 16 threads in the release's rebuild, and
+longer on the 4 threads a web search uses; NGG 11 and NRG 22 min on 16). A **variant** index it
+does not build for bulges: the search form offers a variant panel only the bulges its installed
 index supports (0 when it has none yet, and that first 0-bulge search prepares the
 variant genome and the index of its indels from the panel's VCF files, one per chromosome,
 which can take hours on a full genome; a panel added as a single multi-chromosome VCF file

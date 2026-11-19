@@ -264,6 +264,20 @@ If your nuclease is not listed, define it in **Settings → Define a nuclease / 
 Section 5 of the CLI guide. It is in the dropdown the next time you open the search
 page; no restart is needed.
 
+**With the general (PAM-less) index installed** (`20-NNNNNNNN_3_hg38`, or
+`20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` for the dataset selected), a picker appears under the PAM
+list. It says what the index serves: any 3′ PAM of a 20-nt guide up to 8 nt, pruned to it by the
+search, more slowly than an index of that PAM. It lists the PAMs of common nucleases (SpCas9 NRR
+first, the default, then NRG, NGG, SpG, SpRY, VQR, VRER, xCas9, ...), those it cannot serve
+greyed out with the reason, and a field for an IUPAC PAM of your own, checked when you leave it.
+**Use this PAM** writes that PAM's file into `PAMs/` and selects it, and the search prunes the
+index to it by itself. An online deployment of the web app writes nothing into the data folder:
+there the picker only selects a PAM file already installed. The picker is not shown on the
+Personal assembly tab.
+
+Any installed index serves the PAMs its own holds: with the NRR index installed, an NGG, NAG, NGA
+or NRG search uses it, pruned (its `log_verbose.txt` says so), and builds nothing.
+
 ### Step 2: Genome selection and threshold configuration
 
 This step defines the search space and the alignment stringency.
@@ -330,9 +344,11 @@ asks for more than 1 bulge of each type.) CRISPRme 2.10.1 is planned to search, 
 the samples' own haplotypes in place of the variant genome's combinations, in a per-sample search
 (the haplotype scan), with the same indexes ([Troubleshooting](TROUBLESHOOTING.md) §14).
 
-Bulge searches need a genome index. If no installed **reference** index supports the
-bulges you ask for, the search first builds one from the installed genome (once: about
-20 to 35 minutes for hg38), and later searches reuse it. A **variant** panel offers only
+Bulge searches need a genome index. If no installed **reference** index serves the PAM and the
+bulges you ask for (an index of that PAM, of a PAM that holds it, or the general index), the
+search first builds one from the installed genome (once: for hg38 with NRR, the default PAM, 47
+min on 16 threads in the release's rebuild, and longer on the 4 threads a web search uses; NGG
+11 and NRG 22 min on 16), and later searches reuse it. A **variant** panel offers only
 the bulges its installed variant index supports: with no variant index yet, only a
 0-bulge search, and the first one prepares the variant genome and the index of its indels
 (this can take hours on a full genome; a search with no bulges scans the variant genome

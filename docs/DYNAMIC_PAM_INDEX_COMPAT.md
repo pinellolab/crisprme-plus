@@ -16,7 +16,8 @@
 > side and guide length from the header of a format-2 index's `.bin` files (CRISPRitz 2.10.0
 > and later), which make the index self-describing. Another record is `.pam_build`, the PAM
 > file an index was built from, which `build-index-only` writes into a reference or variant
-> index, and a search into one it builds (the published 8-nt-flank archives have none).
+> index, and a search into one it builds (2.8.1's 8-nt-flank archives have none; every index
+> archive of 2.10.0, the general index's included, holds both `.pam_build` and `.index_meta.json`).
 > Up to 2.8.1 `NNN_3` was published in `lucapinello/crisprme-data` and the 8-nt-flank indexes
 > in `lucapinello/crisprme-data-general-index`, where 2.8.1's archives stay; 2.10.0 publishes
 > every index in `lucapinello/crisprme_plus_indices`, the general index `20-NNNNNNNN_3`

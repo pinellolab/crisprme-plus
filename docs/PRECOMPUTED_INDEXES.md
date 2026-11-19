@@ -602,16 +602,18 @@ read from the working directory, so a library kept elsewhere needs those there (
 are fine). A search builds no index in an `--index-path` library: a variant index found
 there without its `_INDELS` index beside it stops the search with a message.
 
-## Building a new-PAM index for a published dataset (HGDP+1kGP, mega)
+## Building a new-PAM index for a published dataset (HGDP+1kGP, HPRC, mega)
 
 The prebuilt indexes above cover **NRR**, **NGG**, **NRG**, SaCas9 **NNGRRN** (22 nt) and Cas12a
 **TTTN** (20 and 23 nt) (not each on every panel) plus the general PAM-less index, which serves
 any other 3′ PAM of up to 8 nt through `--prune-pam`, as an NRR index serves the PAMs it holds.
-To screen a **different nuclease / PAM or guide length** with a dedicated index (a 5′ PAM other
-than a TTTN one, a guide of another length, any IUPAC motif, or NGG on mega, the one of these two
-panels it is not published for) against the same re-phased **HGDP+1kGP** or sites-only **mega**
-variant data, you build that one index once and reuse it for every later search — you do
-**not** re-derive the variant data.
+To screen a **different nuclease / PAM or guide length** with a dedicated index against the same
+re-phased **HGDP+1kGP**, phased **HPRC** or sites-only **mega** variant data, you build that one
+index once and reuse it for every later search — you do **not** re-derive the variant data. On
+HGDP + 1000 Genomes that is a 5′ PAM the TTTN indexes do not hold, a guide length the rule above
+does not serve, or a faster index of a PAM the general index serves; on HPRC and mega, whose only
+published index is NRR's, any PAM NRR does not hold (NRR serves NGG, NAG, NGA, NAA and NRG, pruned;
+SaCas9 NNGRRN, Cas12a TTTN and the general index are published for HGDP + 1000 Genomes alone).
 
 ### What's reusable vs. what you rebuild
 
@@ -711,14 +713,20 @@ PAM-specific index directly from the IUPAC-enriched FASTA — **no re-enrichment
 NGG index off the HGDP+1kGP enriched genome builds in seconds per chromosome):
 
 ```bash
-# SNP index -> genome_library/<PAM>_<N>_hg38+hg38_<ds>/ (the engine writes the older name; rename it
-# to the name build-index-only gives it, <guide>-<PAM>_<N>_... or <PAM>-<guide>_<N>_...)
+# SNP index -> genome_library/<PAM>_<N>_hg38+hg38_<ds>/ (the engine writes the older name, which a
+# search resolves as it is)
 # -bMax = N = max(bDNA,bRNA)+1 = 3 (the same N as in the index name, e.g. 20-NRG_3)
 crispritz.py index-genome hg38+hg38_<ds> Genomes/hg38+hg38_<ds>/ PAMs/<NEW_PAM>.txt \
   -bMax 3 -th <T>
 # indel index -> genome_library/<PAM>_<N>_hg38+hg38_<ds>_INDELS/
 python PostProcess/pool_index_indels.py \
   Genomes/hg38+hg38_<ds>_INDELS/ PAMs/<NEW_PAM>.txt <PAM_MOTIF> hg38 hg38_<ds> 3 <T>
+# optional: build-index-only's name, <guide>-<PAM>_<N>_... (<PAM>-<guide>_<N>_... for a 5' PAM),
+# given to both indexes, as a search pairs a variant index only with <its name>_INDELS (renamed
+# alone, a search builds its INDELS index again, or stops where it reads it from an --index-path);
+# for a 20-nt guide and a 3' PAM:
+mv genome_library/<PAM>_3_hg38+hg38_<ds> genome_library/20-<PAM>_3_hg38+hg38_<ds>
+mv genome_library/<PAM>_3_hg38+hg38_<ds>_INDELS genome_library/20-<PAM>_3_hg38+hg38_<ds>_INDELS
 ```
 
 Here `<PAM_MOTIF>` is the PAM region token itself — the IUPAC motif without the spacer `N`s
@@ -892,8 +900,9 @@ reported twice, the second time as a reference row on the alt contig.
    `build-index-only` without `--samplesID` for the SNP index). Every check passes too on chr21,
    chr18, chr10 and chr5, four of the seven chromosomes whose merged VCF holds a record written in
    lower case (chr3, chr4, chr5, chr10, chr12, chr18 and chr21), which the recipe reads in upper
-   case, as CRISPRitz 2.10.0 does (read as written, they failed the checks). Run it genome-wide
-   only after the release's readiness audit. Design rationale:
+   case, as CRISPRitz 2.10.0 does (read as written, they failed the checks). The rebuild for
+   2.10.0 ran it genome-wide, and its checks passed on all 24 chromosomes
+   ([`INDEX_PROVENANCE.md`](INDEX_PROVENANCE.md), 2.10.0, Gate A). Design rationale:
    [`docs/DESIGN_mega_index.md`](DESIGN_mega_index.md).
 
    The recipe builds the dataset whole, its VCFs, registry and indel frequencies too, in a
@@ -984,8 +993,9 @@ names its panel's companions by name and fingerprint:
   "pam": "NRR",
   "guide_len": 20,
   "pam_side": "3prime",
-  "index_bmax": "3",
+  "index_bmax": "hg38+hg38",
   "genome": "HGDP1kGP",
+  "indel_window": [30, 30],
   "has_registry": true,
   "has_indel_genotypes": true,
   "dictless": true,
@@ -1000,12 +1010,13 @@ names its panel's companions by name and fingerprint:
 (An archive of 2.8.1 has the older name, no `index_format` or companions, and its
 `Dictionaries/` inside.)
 
-> **Note:** `pam` / `index_bmax` / `genome` are parsed from the index *name* and are
-> only meaningful for a **reference** index. For a **variant/merged** index the name
-> is `<pam>_<N>_<ref>+<vcf>`, so this name-splitting makes `genome` the last VCF token
-> (here `HGDP1kGP`), not the reference assembly — a harmless artifact. The authoritative
-> dict-less descriptors are the boolean flags: `dictless`, `has_registry`,
-> `has_genotypes`, `has_samplesids`.
+> **Note:** `index_bmax` and `genome` are split from the index *name* and are meaningful
+> only for a **reference** index: for a variant index (`20-NRR_3_hg38+hg38_HGDP1kGP`) they
+> come out as `hg38+hg38` and `HGDP1kGP`, not N and the reference assembly — a harmless
+> artifact. `pam`, `guide_len` and `pam_side` are read from a 2.10.0 name of either kind, and
+> `index_meta`, read from the `.bin` headers, is authoritative. The authoritative dict-less
+> descriptors are the boolean flags: `dictless`, `has_registry`, `has_genotypes`,
+> `has_samplesids`.
 
 - `has_registry` — the Dictionaries (the bundle; an archive of 2.8.1: its main tarball) carry
   the Tier-0 `registry_<vcf>/`.
@@ -1034,8 +1045,10 @@ itself is what `complete-search` consumes.
 
 ## Notes
 
-- An index is only valid for a matching `--genome`/`--pam`/`--bDNA`/`--bRNA`;
-  a different PAM or a higher bulge count needs its own index.
+- An index serves a search of its genome with its own PAM or a PAM its PAM holds (pruned by the
+  search itself: an NRR index serves NGG, NAG, NGA and NRG; the general index any 3′ PAM of up to
+  8 nt), up to its bulges (N − 1 of each type: 2 + 2 for every published index), within the
+  guide-length rule above. Another PAM, or more bulges, needs an index of its own.
 - Variant-enriched (genome + VCF) indexes are dataset-specific. The default
   HGDP + 1000 Genomes enriched index (`20-NRR_3_hg38+hg38_HGDP1kGP`) is prebuilt and
   hosted alongside the reference index; for any other cohort, build and publish the
