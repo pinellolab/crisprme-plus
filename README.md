@@ -136,7 +136,8 @@ irm https://pinellolab.github.io/crisprme-plus/install.ps1 | iex
 Then open **CRISPRme** (Applications on macOS; Desktop / Start Menu on Windows) — a
 small window with three buttons: **Start**, **Update**, **Stop**. Click **Start**: the
 first time it downloads the reference + variant data automatically (~70 GB download, once;
-~150 GB on disk once installed — keep ~200 GB free; a reference-only setup is far smaller, ~44 GB), then
+~150 GB on disk once installed — keep ~200 GB free; a reference-only setup is far smaller: ~44 GB
+installed, ~65 GB free while it unpacks), then
 opens the web interface at http://localhost:8080; every Start after that is instant.
 (Memory: give the **whole-genome *variant-aware* search** **~64 GB of RAM** — on the indexes of
 2.10.0 it took 38 GB in all on 8 threads and 63 GB on 16, and more on more threads
@@ -478,7 +479,7 @@ Memory scales with the search — pick your tier (measured figures):
 
 | Search | RAM | Disk |
 |---|---|---|
-| **Reference-only** (no variant dataset) | grows with `--thread`: 17.6 GiB genome-wide on 8 threads, the default (below) | ~44 GB (reference-only install) |
+| **Reference-only** (no variant dataset) | grows with `--thread`: 17.6 GiB genome-wide on 8 threads, the default (below) | ~44 GB (reference-only install; keep ~65 GB free while it unpacks) |
 | **Variant-aware, one chromosome or region** | up to 12.6 GiB on chr22, and 27.3 GiB on the whole of chr14, which holds IGH, with NRR, the default (8 threads; below) | what its genome and indexes take |
 | **Whole-genome, variant-aware** (e.g. HGDP + 1000 Genomes (`20-NRR_3_hg38+hg38_HGDP1kGP`); the web/Quickstart default) | **64 GB**: 38 GB in all on 8 threads, the default, 63 GB on 16, and more on more threads (below); far more above 1 DNA + 1 RNA bulge ([Troubleshooting](docs/TROUBLESHOOTING.md) §14) | ~150 GB (full variant-aware install; keep ~200 GB free) |
 

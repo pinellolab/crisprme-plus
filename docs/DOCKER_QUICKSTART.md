@@ -78,7 +78,8 @@ docker info --format '{{.MemTotal}}' | awk '{printf "%.1f GB\n", $1/1073741824}'
 > panel's Dictionaries bundle and genotype store (27.8 + 16.4 + 5.9 GB), which 2.10.0 publishes
 > once, beside the panel's indexes; the sites-only **mega** (five-source) index 26.1 GB with its
 > bundle ([`PRECOMPUTED_INDEXES.md`](PRECOMPUTED_INDEXES.md) lists every archive). A
-> reference-only setup is far smaller (~44 GB).
+> reference-only setup is far smaller: ~44 GB installed (measured from the Hub: a 21.3 GB
+> download, 44.1 GB installed), with a peak of 64.3 GB while it unpacks, so keep ~65 GB free.
 
 Check Docker works, then pull the CRISPRme+ image:
 
