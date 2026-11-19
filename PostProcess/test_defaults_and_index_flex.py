@@ -1256,6 +1256,45 @@ class TheImageIsBuiltOnAPinnedBase(unittest.TestCase):
         self.assertRegex(froms[0], r"^FROM mambaorg/micromamba:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$")
 
 
+class TheImageKeepsNoPackageCache(unittest.TestCase):
+    """2.10.0's image kept the package caches its installs filled: `micromamba clean --all
+    --yes` keeps the folder of every package an environment uses, and in it each file the
+    environment holds a copy of (1.35 GB of the amd64 image's /opt/conda/pkgs, linked into no
+    environment), and on arm64 pip kept its cache of the scorer env's TensorFlow wheel (308 MB of
+    /root/.cache/pip). Each RUN that installs an environment removes the whole cache, in that
+    RUN, so that no layer keeps it, and the scorer env's pip writes none."""
+
+    @staticmethod
+    def runs():
+        """The Dockerfile's RUN instructions, each with its continuation lines (a comment line
+        inside one, which Docker drops, left out)."""
+        runs, run = [], None
+        for line in (_REPO / "Dockerfile").read_text().splitlines():
+            if run is None:
+                if not line.startswith("RUN "):
+                    continue
+                run = []
+            elif line.lstrip().startswith("#"):
+                continue
+            run.append(line)
+            if not line.endswith("\\"):
+                runs.append("\n".join(run))
+                run = None
+        return runs
+
+    def test_each_install_removes_the_whole_cache_in_its_run(self):
+        installs = [run for run in self.runs()
+                    if re.search(r"micromamba (install|create)|build_all\(", run)]
+        self.assertEqual(len(installs), 2)  # the main env's, the scorer env's
+        for run in installs:
+            with self.subTest(run=run.splitlines()[0][:40]):
+                self.assertIn("micromamba clean --all --force-pkgs-dirs --yes", run)
+
+    def test_the_scorer_env_s_pip_keeps_no_cache(self):
+        scorer = next(run for run in self.runs() if "build_all(" in run)
+        self.assertIn(" PIP_NO_CACHE_DIR=1 python -c ", scorer)
+
+
 class ASelfTestOfASourceInstallSaysNoNoise(unittest.TestCase):
     """Messages a source or Bioconda install printed that the image does not (install P10):
     the Hub's "You are sending unauthenticated requests to the HF Hub" on every anonymous
