@@ -110,7 +110,8 @@ class APullRequestBuildsOneEngine(unittest.TestCase):
 
     def test_the_changelog_names_the_commit(self):
         # by the CRISPRitz branch and the commit: a pull request's head moves with the branch's
-        # later commits (CRISPRitz's docs-only commits after 4ded5e6), the pin does not
+        # later commits (CRISPRitz's commits after 4ded5e6 change none of its engine: its docs,
+        # and one CI job's runner), the pin does not
         found = {sha for shas in self.pins().values() for sha in shas}
         changelog = read(REPO / "CHANGELOG.md")
         for sha in found:

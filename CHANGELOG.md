@@ -1421,9 +1421,9 @@ major.minor version (Changed). The main changes, each told in its entry below:
   alone), so a pull request's CI can build, before CRISPRitz's tag exists, the CRISPRitz commit a
   release is tested with: until CRISPRitz's tag `v2.10.0`, `docker-multiarch.yml`'s and
   `web-e2e.yml`'s image builds passed `crispritz_ref=` CRISPRitz feat/2.10.0 commit 4ded5e6, which
-  reads a VCF's REF and ALT in upper case, below (the branch's later commits change its docs only),
-  each line under a comment `(remove at release)`, which the release checklist removes once the tag
-  is pushed.
+  reads a VCF's REF and ALT in upper case, below (the branch's later commits change none of its
+  engine: its docs, and one CI job's runner), each line under a comment `(remove at release)`,
+  which the release checklist removes once the tag is pushed.
 - **CRISPRitz 2.10.0 reads a VCF's REF and every ALT in upper case, as VCF 4.x does, and so do
   CRISPRme's readers of the VCF itself** (its `docs/MULTIALLELIC_ENRICHMENT.md` §2.1, §2.9 and §6.7;
   an ALT holding `<`, a symbolic allele, as written). Its enricher read them as written up to 2.9.1:
