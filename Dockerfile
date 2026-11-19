@@ -2,14 +2,16 @@
 # ^ false positive: HF_HUB_DISABLE_IMPLICIT_TOKEN is a boolean flag (=1), not a
 #   secret — buildkit's lint only pattern-matches the substring "TOKEN" in the
 #   name. Skipping it keeps the build output clean.
-# CRISPRme+ 2.8.1 — Python 3.11 image, built FROM SOURCE.
+# CRISPRme+ 2.10.0 — Python 3.11 image, built FROM SOURCE.
 #
 # crispritz is compiled from source at a pinned GitHub tag (crispritz_ref) so the image
 # gets the exact, reproducible build we want -- including the latest fixes -- without
 # waiting on the Bioconda autobump lag. (Bioconda crispritz is for `conda install` users.)
-# v2.9.1 carries --prune-pam (which this release documents, and which a build without it
+# The tag must carry --prune-pam (which this release documents, and which a build without it
 # would silently drop, running the search unpruned), the genomic-N flank fix, the non-.bin
-# index-dir crash fix, and the enricher multiallelic-indel fix. crisprme
+# index-dir crash fix and the enricher multiallelic-indel fix (all in v2.9.1 and later), and,
+# from v2.10.0, index format 2, which this release reads (an older engine refuses such an
+# index, and this release says so). crisprme
 # is installed from this build context. The dependency
 # pins mirror the from-scratch Python-3.11 validation on ml007 (see PR #131):
 #   - numerical stack: MODERNIZED now that the legacy RandomForest scorer is retired.
@@ -24,11 +26,17 @@
 #   - matplotlib-base ceiling dropped (was < 3.9); numpy >= 1.26 satisfies mpl >= 3.9.
 #   - Dash 2.x web stack (dash >= 2.14 bundles the old dash-core/html/renderer/
 #     table sub-packages, so those are intentionally dropped)
-FROM mambaorg/micromamba
+# The base image, by its tag and its digest: unpinned, a build took whatever micromamba
+# image was latest that day (C20). 2.10.0 (Debian 13) is the one 2.8.1's image was built on;
+# a newer one is a change of its own, made here.
+FROM mambaorg/micromamba:2.10.0@sha256:e1476182cd40eb1f7c0cfae4adec9bfd78f3d7f05c61368306abfdc8939c1198
 
 LABEL org.opencontainers.image.authors="ManuelTgn, lucapinello"
 
-ARG crispritz_ref=v2.9.1
+# The CRISPRitz pin: the exact tag this release was tested with, of CRISPRme's own major.minor
+# (docs/RELEASING.md, Version policy; install_from_source.sh's CRISPRITZ_REF default equals it).
+# The Bioconda recipe's range, crispritz >=X.Y.0,<X.(Y+1), can start below it (decision D5).
+ARG crispritz_ref=v2.10.0
 ENV SHELL=bash
 ENV PREFIX=/opt/conda
 # Quiet the noisy-but-harmless startup warnings so a clean copy-paste run shows no
@@ -73,10 +81,12 @@ RUN micromamba install -y -n base \
 
 ARG MAMBA_DOCKERFILE_ACTIVATE=1
 
-# ---- Build crispritz 2.9.1 from source and install into the env ------------
-RUN git clone --depth 1 --branch ${crispritz_ref} \
-        https://github.com/pinellolab/CRISPRitz.git /opt/crispritz-src \
+# ---- Build crispritz (the ref crispritz_ref names: a tag, or a commit, as a pull request's CI
+# passes the engine's commit before its tag) from source and install it into the env
+RUN git init -q /opt/crispritz-src \
     && cd /opt/crispritz-src \
+    && git fetch -q --depth 1 https://github.com/pinellolab/CRISPRitz.git ${crispritz_ref} \
+    && git -c advice.detachedHead=false checkout -q FETCH_HEAD \
     && g++ -std=c++11 -O3 -fopenmp \
         sourceCode/CRISPR-Cas-Tree/mainParallel.cpp -o buildTST \
     && g++ -std=c++11 -O3 -fopenmp \
@@ -167,4 +177,9 @@ import scorer_env; ok, rep = scorer_env.build_all(gpu=('${BACKEND}'=='gpu')); \
     fi
 
 WORKDIR /root
+# `docker stop` stops a container the way Ctrl-C does: crisprme.py, its first process,
+# handles SIGINT (the web interface stops its server and exits; a search or a build ends as
+# its Ctrl-C does), and SIGTERM, which nothing in it handled, cost the 10 s wait of a stop
+# and then a SIGKILL (exit 137; C16)
+STOPSIGNAL SIGINT
 CMD ["crisprme.py"]

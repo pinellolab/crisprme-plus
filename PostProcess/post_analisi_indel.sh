@@ -23,6 +23,8 @@ final_res_alt=${12}
 key=${13}
 # the search's cap on total edits (mismatches + bulges), -1 for none
 max_total_edits=${14:--1}
+# 2.10.0, option P: all (default), cluster or finish (analisi_indels_NNN.sh)
+stage=${15:-all}
 
 # process indel targets on chromosome $key
 chrom=$key
@@ -31,6 +33,14 @@ fakechrom="fake${chrom}"
 # reference and alternative crispritz targets files
 targets_tsv_ref="$output_folder/crispritz_targets/${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
 targets_tsv_alt="${output_folder}/crispritz_targets/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
+targets_chrom_prefix="${output_folder}/${fakechrom}_${pam_name}_${guide_name}_${annotation_name}_${mm}_${bDNA}_${bRNA}"
+if [ "$stage" = "finish" ]; then
+    # the steps after the analysis, once the pool has merged its pieces
+    ./analisi_indels_NNN.sh "" "" "$targets_chrom_prefix" "$annotation_file" \
+        "${dict_folder}/log_indels_${vcf_name}" "${ref_folder}/${chrom}.fa" "$mm" "$bDNA" "$bRNA" \
+        "$guide_file" "$pam_file" "$output_folder" "$max_total_edits" finish
+    exit $?
+fi
 
 
 echo "Processing INDELs results for $key, starting post-analysis"
@@ -65,6 +75,15 @@ if [ ! -s "$targets_tsv_alt_chrom" ]; then
     echo "WARNING: no indel targets matched '$fakechrom' in $targets_tsv_alt -- the per-chromosome indel subset for $chrom is EMPTY (see GitHub issue #172 if unexpected)."
 fi
 
+# the sites-only density guard (sites_only_guard.py, CRISPRme 2.10.0): of a sites-only
+# dataset (the mega), the indel candidates whose window on the fake-indel contig spells
+# 2^bits sequences or more (CRISPRME_SITES_ONLY_GUARD, 20 by default) leave the targets
+# before the post-analysis reads them, and their regions are listed in the BED; a
+# genotyped dataset's are untouched (after the check above: a subset it withholds whole
+# is no issue #172)
+python sites_only_guard.py indel "$targets_tsv_alt_chrom" "$dict_folder" "$vcf_name" "$chrom" \
+    "${output_folder}/${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}_${chrom}.indel.sites_only_density_guard.bed"
+
 # adjust targets header
 #
 # Only ever prepend an actual header. If an upstream filter dropped the header
@@ -89,7 +108,6 @@ case "$header" in
 esac
 
 # perform targets analysis by chromosome (scores, annotation, etc.)
-targets_chrom_prefix="${output_folder}/${fakechrom}_${pam_name}_${guide_name}_${annotation_name}_${mm}_${bDNA}_${bRNA}"
 ./analisi_indels_NNN.sh \
     "$targets_tsv_ref_chrom" \
     "$targets_tsv_alt_chrom" \
@@ -101,7 +119,8 @@ targets_chrom_prefix="${output_folder}/${fakechrom}_${pam_name}_${guide_name}_${
     "$guide_file" \
     "$pam_file" \
     "$output_folder" \
-    "$max_total_edits"
+    "$max_total_edits" \
+    "$stage"
 
 # remove chrom-specific targets tsv files
 rm $targets_tsv_ref_chrom $targets_tsv_alt_chrom

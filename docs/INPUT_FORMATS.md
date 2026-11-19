@@ -160,7 +160,8 @@ pam_char = pam_file.readline()
 (`crisprme.py`, in the `complete_search` PAM setup — a single `readline`.) So `complete-search`
 refuses a PAM file holding a second non-empty line, rather than search line 1 alone, in one line
 before it does anything (`Error: Only one PAM motif per file is supported; ...`, exit 1). It
-refuses one whose first line is not `<motif> <length>` the same way, with its own message
+refuses one whose first line is not `<motif> <length>`, the two fields one space apart (a blank
+first line, the length alone, or a third field), the same way, with its own message
 (`Error: The PAM file '...' must hold the motif and the PAM's length on its first line, ...`,
 exit 1).
 
@@ -233,9 +234,19 @@ carriers). CRISPRme treats the two differently, by design:
   computed during the variant analysis in `PostProcess/new_simple_analysis.py`
   (the `found_creation` check): the search runs on the IUPAC-enriched variant
   genome, so a variant-created PAM is indexed on the enriched genome and found.
-  Note this requires a **real PAM** at index/search time — a degenerate/“pamless”
-  `NNN` index cannot detect PAM creation (the `found_creation` test can never
-  fire when every PAM base is `N`), which is why CRISPRme uses per-PAM indices.
+  Note this requires a **real search PAM**: a search with an all-`N` PAM (the
+  `20bp-NNN-NO-PAM.txt` file itself) cannot detect PAM creation (the
+  `found_creation` test can never fire when every PAM base is `N`). A PAM-less
+  index searched for a real PAM, pruned to it (`--prune-pam`, which a search
+  passes by itself since 2.10.0), reports it as the dedicated index of that PAM
+  does.
+  On an indel row, a PAM made wholly of the bases an insertion adds, in every
+  placement of the insertion in its repeat, is created, even where the reference
+  holds a valid PAM beside the protospacer (since 2.10.0). A tandem duplication of
+  the PAM's own bases, which only shifts the reference's PAM, is not created, and a
+  PAM that holds reference bases in some placement is created only where the
+  reference PAM beside the protospacer is not a valid one (METHODS §4,
+  `PAM_creation`).
 
 - **PAM disruption is _not_ reported (known limitation).** When a variant
   *removes* a reference PAM (e.g. `TGG` → `TGA`), the site is not flagged as a
@@ -317,15 +328,18 @@ CRISPRme normalizes it.
 
 For a variant-aware search, each VCF record needs:
 
-- a **`FILTER`** value — use `PASS` (records not marked `PASS` may be dropped by
-  filtering);
-- **`INFO/AF`** — a **numeric** allele frequency, at **one place in `INFO` in every record**:
-  CRISPRitz `add-variants` reads each record's `AF` where the first record has it, so a record
-  that has it elsewhere gets none: its indel has no frequency, nor, on an index without the
-  dict-less tiers, its SNP (a known limit, to be fixed in the next CRISPRitz release:
+- a **`FILTER`** value of `PASS` or `.`: CRISPRitz's enricher reads only those lines, so a
+  record with any other `FILTER` is in no part of the index (the enriched genome, its
+  dictionaries, the indel log and fake-indel windows) and, since 2.10.0, in no store CRISPRme
+  builds from the VCF either (the phased indel genotypes, the mega recipe's registry);
+- **`INFO/AF`** — a **numeric** allele frequency. CRISPRitz 2.10.0, which CRISPRme 2.10.0
+  installs, finds each record's `AF` by its key. Up to 2.9.1 `add-variants` reads each record's
+  `AF` where the first record has it, so on an index such a CRISPRitz built a record that has it
+  elsewhere gets none: its indel has no frequency, nor, on an index without the dict-less tiers,
+  its SNP (a known limit:
   [METHODS §8](../METHODS.md#8-off-target-scoring-assumptions-and-limitations)). A VCF merged
   with `seq_script/merge_panels/merge_vcf_panels.sh` has such records; this prints one line for
-  a VCF that has none:
+  a VCF that has `AF` at one place in `INFO` in every record:
 
   ```bash
   bcftools query -f '%INFO\n' your.vcf.gz \
@@ -339,6 +353,17 @@ For a variant-aware search, each VCF record needs:
   **only indels** works fine — the missing category simply yields an empty
   branch of results.
 - **`complex` and `mnp` records are treated as indels.**
+- **REF and ALT are read whatever their case** (VCF 4.x reads them alike): CRISPRitz 2.10.0,
+  which CRISPRme 2.10.0 installs, reads a record's REF and every ALT in upper case (an ALT
+  holding `<`, a symbolic allele, as written), so an SNV whose ALT is written in lower case is
+  coded and searched as any other, and CRISPRme names every record in upper case in its results.
+  Two lines of one REF>ALT written in two cases are one allele, their carriers merged: an SNV's
+  (`C>G` beside `c>g`) and an indel's (`TG>T` beside `tg>t`, as HPRC's panel, normalised against
+  the soft-masked reference, writes some). An index built with CRISPRitz 2.9.1 or earlier
+  (CRISPRme 2.8.1's) codes no SNV ALT written in lower case, though its dictionary lists the
+  carriers, so such an SNV is never searched on it: build the index again with CRISPRme 2.10.0,
+  or write REF and ALT in upper case (below). The published panels hold no SNV written in lower
+  case.
 - **Structural variants are not supported.** Symbolic ALT alleles such as
   `<DEL>`, `<INS>`, `<DUP>` are skipped, and breakend (BND) notation can corrupt
   parsing — **remove SV records before running.**
@@ -354,7 +379,15 @@ bcftools view -f PASS input.vcf.gz \
   -Oz -o clean.vcf.gz
 ```
 
-and confirm every record carries a numeric `INFO/AF` and a `FORMAT/GT` field.
+and confirm every record carries a numeric `INFO/AF` and a `FORMAT/GT` field. A VCF that
+writes some REF or ALT in lower case (which CRISPRitz 2.10.0 reads in upper case, and an index
+of CRISPRitz 2.9.1 or earlier does not) can be written in upper case so:
+
+```bash
+gzip -dc input.vcf.gz | awk 'BEGIN{FS=OFS="\t"} !/^#/{$4=toupper($4); $5=toupper($5)} 1' \
+  | bgzip > upper.vcf.gz
+```
+
 See §9 for catching these problems before a long run.
 
 ---
@@ -373,7 +406,8 @@ sample-ID mismatch, or a chromosome-naming mismatch.
 > `--full_input_validate` (the `--full_input_validate` flag in `crisprme.py`) to
 > run a full per-VCF-record check — chromosome coverage,
 > `AF`/`FILTER` consistency, `POS` bounds, and a multiallelic/breakend/duplicate/
-> phasing survey — before the search starts (slower, so it is opt-in).
+> phasing survey (a REF>ALT repeated at a position, in one case or in two) — before the
+> search starts (slower, so it is opt-in).
 >
 > Optional extra checks you can run yourself if you want to eyeball a VCF:
 >
@@ -416,7 +450,11 @@ Search cost grows **combinatorially** with mismatches and DNA/RNA bulges, and
 again with local variant density. Allowing **more than one bulge in both DNA and
 RNA simultaneously** is especially expensive: a single chromosome at mm6 + 2 DNA +
 2 RNA bulges has produced **~207 GB of intermediate files and OOMed** the
-analysis (see the header of `PostProcess/search_budget.py`).
+analysis (see the header of `PostProcess/search_budget.py`). On the indexes of
+2.10.0, which code every allele of a split site, more than 1 DNA + 1 RNA bulge
+makes the variant search of the immunoglobulin loci explode, and `complete-search`
+warns: keep the default 1 + 1 and raise `--mm` first
+([TROUBLESHOOTING.md](TROUBLESHOOTING.md) §14).
 
 **Estimate before you launch.** A dependency-light heuristic ships in the repo:
 

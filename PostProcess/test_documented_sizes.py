@@ -13,6 +13,17 @@ free; TROUBLESHOOTING gave ~3 + 40 + 50 GB and ~150 GB free. Measured with `du -
 0.72 GB), and the install peaks at ~103 GB while the genotype store unpacks beside its archive.
 So ~100 GB free was full before the first result was written.
 
+2.10.0 makes NRR the default index. Measured the same way on ml003 (2026-11-06), twice, with
+`NRR_3_hg38+hg38_HGDP1kGP`: 150,048,109,201 bytes (genome 3.27 GB, indexes 94.20 GB,
+Dictionaries/ 52.44 GB, annotations 0.13 GB), sampled every 10 s at a peak of 161.0 GB while
+the archives unpack; a ~70 GB download. So ~150 GB on disk, and ~200 GB free.
+
+The reference-only setup (`download --what all` alone) was sized at ~44 GB, its installed size,
+by every surface that sizes it, and nothing more: measured from the Hub on a clean install of
+2.10.0 (2026-11-18), it is a 21.33 GB download and 44,135,032,082 bytes installed, with a peak of
+64.30 GB while the archives unpack, so a disk with 44 to 64 GB free fails partway through. Those
+surfaces give both, ~44 GB and ~65 GB free while it unpacks.
+
 Read as text. A re-measure changes the constants below and every surface together.
 """
 
@@ -22,13 +33,19 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
-INSTALLED_GB = "98"   # the default variant-aware install, on disk
-FREE_GB = "150"       # what every surface asks a user to keep free for it
+INSTALLED_GB = "150"  # the default variant-aware install, on disk
+FREE_GB = "200"       # what every surface asks a user to keep free for it
 
 # Every surface that sizes the default variant-aware install.
 SURFACES = ("README.md", "docs/index.html", "docs/DOCKER_QUICKSTART.md", "docs/DATA_LAYOUT.md",
             "docs/TROUBLESHOOTING.md", "install/README.md", "docs/install.sh", "docs/install.ps1")
 INSTALLERS = ("docs/install.sh", "docs/install.ps1")
+
+REF_ONLY_GB = "44"       # the reference-only setup (download --what all alone), installed
+REF_ONLY_FREE_GB = "65"  # what a surface asks to keep free while it unpacks (its peak: 64.30)
+# Every surface that sizes the reference-only setup.
+REF_ONLY_SURFACES = ("README.md", "docs/index.html", "docs/DOCKER_QUICKSTART.md",
+                     "docs/DATA_LAYOUT.md")
 
 
 def text(name):
@@ -94,7 +111,9 @@ class EverySurfaceGivesTheMeasuredInstallSize(unittest.TestCase):
         for name in SURFACES:
             with self.subTest(surface=name):
                 said = set(re.findall(r"(\d+) GB free", text(name)))
-                self.assertEqual(said, {FREE_GB})
+                # (and the reference-only setup's, where a surface sizes it)
+                self.assertEqual(said, {FREE_GB, REF_ONLY_FREE_GB}
+                                 if name in REF_ONLY_SURFACES else {FREE_GB})
 
     def test_every_installed_size_figure_is_the_same(self):
         for name in SURFACES:
@@ -106,7 +125,7 @@ class EverySurfaceGivesTheMeasuredInstallSize(unittest.TestCase):
         for name in SURFACES:
             body = text(name)
             for stale in ("~85 GB", "≈ 100 GB", "~100 GB free", "~45 GB free",
-                          "store ~45 GB of data"):
+                          "store ~45 GB of data", "~98 GB", "~45 GB download"):
                 with self.subTest(surface=name, stale=stale):
                     self.assertNotIn(stale, body)
 
@@ -118,6 +137,30 @@ class EverySurfaceGivesTheMeasuredInstallSize(unittest.TestCase):
                          "indel logs"):
                 with self.subTest(surface=name, part=part):
                     self.assertIn(part, body)
+
+
+class TheReferenceOnlySetupIsSizedWithItsPeak(unittest.TestCase):
+    """Each surface that sizes the reference-only setup gives its installed size and the free
+    space it needs while it unpacks, the same figures."""
+
+    def test_each_gives_the_installed_size_and_the_free_space_it_unpacks_in(self):
+        for name in REF_ONLY_SURFACES:
+            with self.subTest(surface=name):
+                body = text(name)
+                self.assertIn(f"~{REF_ONLY_GB} GB", body)
+                self.assertIn(f"~{REF_ONLY_FREE_GB} GB free", body)
+                self.assertIn("while it unpacks", body)
+
+    def test_no_surface_gives_the_installed_size_alone_as_what_to_keep_free(self):
+        for name in REF_ONLY_SURFACES:
+            with self.subTest(surface=name):
+                said = set(re.findall(r"~(\d+) GB free", text(name)))
+                self.assertNotIn(REF_ONLY_GB, said)
+
+    def test_the_constants_are_the_measurement(self):
+        # 44,135,032,082 bytes installed, a peak of 64.30 GB (GB = 10^9 bytes)
+        self.assertEqual(round(44_135_032_082 / 1e9), int(REF_ONLY_GB))
+        self.assertGreaterEqual(int(REF_ONLY_FREE_GB), 64.30)
 
 
 if __name__ == "__main__":

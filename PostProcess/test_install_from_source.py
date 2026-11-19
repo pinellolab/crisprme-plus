@@ -232,6 +232,25 @@ class TheVersionSweepComparesLikeWithLike(unittest.TestCase):
         self.assertIn("its `ARG crispritz_ref` is the CRISPRitz pin", sweep)
         self.assertIn("must equal `install_from_source.sh`'s `CRISPRITZ_REF` default", sweep)
 
+    def test_the_recipe_s_lower_bound_is_not_the_tested_crispritz(self):
+        """Decision D5 (Luca, 2026-11-08): the image and the source install pin the exact
+        CRISPRitz the release was tested with, and the recipe's range stays X.Y.0 to the next
+        minor, its lower bound moved up only to a CRISPRitz patch that fixes something CRISPRme
+        depends on. The sweep and the release skill made crispritz_ref the recipe's lower
+        bound, a rule that breaks at the first CRISPRitz patch (stage-1 review, round 1 N3).
+        Each release doc now gives D5's rule."""
+        sweep = next(ln for ln in (REPO / "docs" / "RELEASE_CHECKLIST.md").read_text(
+            encoding="utf-8").splitlines() if ln.startswith("- [ ] **Version sweep**"))
+        self.assertNotIn("the lower bound of the Bioconda recipe's bounded `crispritz` pin",
+                         sweep)
+        for doc in (REPO / "docs" / "RELEASING.md", REPO / "docs" / "RELEASE_CHECKLIST.md",
+                    REPO / ".claude" / "skills" / "release-crisprme" / "SKILL.md"):
+            text = " ".join(doc.read_text(encoding="utf-8").split())
+            with self.subTest(doc=doc.name):
+                self.assertNotIn("default and the lower bound of the recipe's", text)
+                self.assertIn("exact CRISPRitz tag the release was tested with", text)
+                self.assertIn("below `crispritz_ref`, never above it", text)
+
     def test_the_dockerfile_header_names_the_release_crisprme_py_is(self):
         """The Dockerfile pins no CRISPRme version, but its header comment names the release,
         bumped at every release since 2.7.9 (it named 2.4.0 at every tag from v2.5.0 to

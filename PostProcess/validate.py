@@ -16,6 +16,7 @@ from utils import download, compute_md5, CRISPRME_DIRS
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+import requests
 
 import json
 import sys
@@ -120,9 +121,34 @@ def check_variant_dataset(chrom: str) -> None:
         )
 
 
-def download_brute_force_targets(base_url: str, reference: str, expected_md5: str) -> str:
+def release_base_url(base_url: str, version: Optional[str]) -> Optional[str]:
+    """``base_url``, the registry's folder of the references on the main branch, at the tag
+    of the CRISPRme release ``version`` (v<version>), or None where it names no main branch
+    or no version is known."""
+    if not version:
+        return None
+    for main in ("/refs/heads/main/", "/main/"):
+        if main in base_url:
+            return base_url.replace(main, f"/v{version}/", 1)
+    return None
+
+
+def _url_exists(url: str) -> bool:
+    """Whether ``url`` answers (a HEAD request, redirects followed); False on any error."""
+    try:
+        return requests.head(url, allow_redirects=True, timeout=30).status_code == 200
+    except requests.RequestException:
+        return False
+
+
+def download_brute_force_targets(base_url: str, reference: str, expected_md5: str,
+                                 version: Optional[str] = None) -> str:
     """Resolve a brute-force reference: prefer the copy committed in the repo,
-    then a local cache, then download. Verifies the MD5 in every case."""
+    then a local cache, then download. Verifies the MD5 in every case. A download is of
+    this release's reference, at its tag (release_base_url), as the md5 recorded with it:
+    the main branch regenerates one now and then, which failed validate-test of every
+    installed release that day (C11/P7). A version with no tag yet (a release in the
+    making) downloads from ``base_url``, the main branch, as before."""
     os.makedirs(BFDIR, exist_ok=True)
     # 1. repo-committed reference (works in CI / offline / for branch-only refs)
     repo_ref = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
@@ -136,6 +162,13 @@ def download_brute_force_targets(base_url: str, reference: str, expected_md5: st
         sys.stderr.write(f"Using cached brute-force reference: {local}\n")
         return local
     url = f"{base_url.rstrip('/')}/{reference}"
+    tagged = release_base_url(base_url, version)
+    if tagged:
+        if _url_exists(f"{tagged.rstrip('/')}/{reference}"):
+            url = f"{tagged.rstrip('/')}/{reference}"
+        else:
+            sys.stderr.write(f"No {reference} at the tag v{version} (a release in the making?): "
+                             f"downloading the main branch's\n")
     sys.stderr.write(f"Downloading brute-force reference: {url}\n")
     path = download(BFDIR, http_url=url)
     if not path or not os.path.isfile(path):
@@ -234,15 +267,16 @@ def validate(name: str, crisprme_targets: pd.DataFrame, bf_targets: pd.DataFrame
     return False
 
 
-def run_test_validation(chrom: str) -> None:
+def run_test_validation(chrom: str, version: Optional[str] = None) -> None:
     """Validate every registered benchmark that has complete-test output present, on a
-    chromosome its brute-force reference covers."""
+    chromosome its brute-force reference covers. ``version``: the CRISPRme release that
+    runs, whose own references are downloaded (download_brute_force_targets)."""
     check_variant_dataset(chrom)
     registry = load_benchmarks()
     global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
     base_url = registry["reference_base_url"]
-    # Mirror complete_test.py: with CRISPRME_SKIP_HEAVY=1, the opt-out for a very small
-    # machine, the "heavy" bulge-2 benchmarks are not run, so don't try to validate them
+    # Mirror complete_test.py: with CRISPRME_SKIP_HEAVY=1, the opt-out that saves time on a
+    # slow machine, the "heavy" bulge-2 benchmarks are not run, so don't try to validate them
     # (avoids a misleading "targets not found" skip). Unset, all cases validate.
     skip_heavy = os.environ.get("CRISPRME_SKIP_HEAVY") == "1"
     validated = failed = skipped = 0
@@ -284,7 +318,7 @@ def run_test_validation(chrom: str) -> None:
             skipped += 1
             continue
         ref_path, alt_path = targets
-        bf_path = download_brute_force_targets(base_url, ref_rel, md5)
+        bf_path = download_brute_force_targets(base_url, ref_rel, md5, version)
         crisprme_targets, bf_targets = load_targets(ref_path, alt_path, bf_path, chrom)
         if validate(name, crisprme_targets, bf_targets):
             validated += 1
@@ -303,7 +337,8 @@ def run_test_validation(chrom: str) -> None:
 
 
 def main():
-    run_test_validation(sys.argv[1])
+    # (crisprme.py validate-test passes the chromosome and its own version)
+    run_test_validation(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
 
 
 if __name__ == "__main__":

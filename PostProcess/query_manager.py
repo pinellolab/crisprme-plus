@@ -19,6 +19,8 @@ from dash import dash_table
 import pandas as pd
 import sqlite3
 
+import safe_files  # (PostProcess/: the job's database opened read only, with no link followed)
+
 guide_column = "Spacer+PAM"
 
 
@@ -61,7 +63,9 @@ def shold(
 
     path = current_working_directory + "/Results/" + url + "/." + url + ".db"
 
-    conn = sqlite3.connect(path)
+    # read only, with no link followed (safe_files): url is the job id of the address, and
+    # a link another user put at the job's .db (or a step to it) was opened
+    conn = safe_files.sqlite_connect(path, current_working_directory)
     c = conn.cursor()
     param = [
         guide,
@@ -148,7 +152,9 @@ def noshold(
     url = url_job[5:]
     path = current_working_directory + "/Results/" + url + "/." + url + ".db"
 
-    conn = sqlite3.connect(path)
+    # read only, with no link followed (safe_files): url is the job id of the address, and
+    # a link another user put at the job's .db (or a step to it) was opened
+    conn = safe_files.sqlite_connect(path, current_working_directory)
     c = conn.cursor()
     param = [
         guide,

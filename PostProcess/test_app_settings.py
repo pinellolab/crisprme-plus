@@ -11,10 +11,12 @@ import ast
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import types
 import unittest
 from unittest import mock
@@ -505,6 +507,90 @@ class TestWebProcessBiopythonWarning(unittest.TestCase):
             web = start("import index")
             self.assertEqual(web.returncode, 0, web.stderr)
             self.assertNotIn(_SOURCE_TREE_WARNING, web.stderr)
+
+
+class TestTheWebInterfaceListensOnThePortGiven(unittest.TestCase):
+    """`crisprme.py web-interface` listened on 8080 alone: where another program holds it, a
+    shared node for one, an Apptainer or source install could not start it (Docker remaps it
+    with -p; C19). `--port` gives another, which the server listens on and its notification
+    links and start message name."""
+
+    def web_interface(self, *args, timeout=60):
+        """crisprme.py web-interface run from a data folder of its own, in a session of its
+        own: (the process, the folder)."""
+        workdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, workdir, ignore_errors=True)
+        run = subprocess.Popen(
+            [sys.executable, os.path.join(_REPO_ROOT, "crisprme.py"), "web-interface", *args],
+            cwd=workdir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            start_new_session=True)
+        self.addCleanup(lambda: run.poll() is None and os.killpg(run.pid, signal.SIGKILL))
+        return run, workdir
+
+    @unittest.skipUnless(_importable("Bio"), "runs crisprme.py, which imports Biopython "
+                         "(the image has it)")
+    def test_a_port_that_is_no_number_is_refused(self):
+        for value in ("x", "0", "70000", "-1"):
+            with self.subTest(value=value):
+                run, _ = self.web_interface("--port", value)
+                _out, err = run.communicate(timeout=120)
+                self.assertEqual(run.returncode, 1)
+                self.assertEqual(err.splitlines()[-1], "Error: --port takes the number of a "
+                                 "port, from 1 to 65535, as in --port 8090")
+
+    @unittest.skipUnless(_importable("dash") and _importable("Bio"),
+                         "needs the web stack and Biopython (the image has both)")
+    def test_it_listens_on_the_port_given(self):
+        import socket
+        import urllib.request
+        with socket.socket() as probe:  # (a port no one holds)
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        run, _ = self.web_interface("--port", str(port))
+        status, deadline = None, time.time() + 240
+        while status is None and time.time() < deadline and run.poll() is None:
+            try:
+                status = urllib.request.urlopen(f"http://127.0.0.1:{port}/index",
+                                                timeout=5).status
+            except OSError:
+                time.sleep(1)
+        os.killpg(run.pid, signal.SIGINT)
+        _out, err = run.communicate(timeout=120)
+        self.assertEqual(status, 200, err[-2000:])
+        self.assertIn(f"GO TO http://127.0.0.1:{port} TO USE THE WEB APP", err)
+        self.assertIn(f"starting web server on 0.0.0.0:{port}", err)
+
+    @unittest.skipUnless(_importable("dash") and _importable("Bio"),
+                         "needs the web stack and Biopython (the image has both)")
+    def test_the_image_s_stop_signal_ends_it_at_once(self):
+        # docker stop signals the container's first process alone, crisprme.py: with
+        # SIGTERM, which nothing handled, it waited the 10 s of a stop and SIGKILLed the
+        # container (exit 137; C16). The image stops it with SIGINT, which crisprme.py
+        # takes as a Ctrl-C: it ends the server and exits
+        with open(os.path.join(_REPO_ROOT, "Dockerfile")) as fh:
+            self.assertIn("\nSTOPSIGNAL SIGINT\n", fh.read())
+        import socket
+        import urllib.request
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        run, _ = self.web_interface("--port", str(port))
+        status, deadline = None, time.time() + 240
+        while status is None and time.time() < deadline and run.poll() is None:
+            try:
+                status = urllib.request.urlopen(f"http://127.0.0.1:{port}/index",
+                                                timeout=5).status
+            except OSError:
+                time.sleep(1)
+        self.assertEqual(status, 200)
+        stopped = time.time()
+        os.kill(run.pid, signal.SIGINT)  # (crisprme.py alone, as docker stop does)
+        _out, err = run.communicate(timeout=60)
+        self.assertLess(time.time() - stopped, 5)
+        self.assertEqual(run.returncode, 0, err[-2000:])
+        self.assertEqual(err.splitlines()[-1], "Web interface stopped")
+        with socket.socket() as again:  # (no server left holding the port)
+            again.bind(("127.0.0.1", port))
 
 
 if __name__ == "__main__":

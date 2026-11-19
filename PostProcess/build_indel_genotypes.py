@@ -8,9 +8,13 @@ carrier. The SNP side already has this (Tier-1 genotypes); this module produces
 the indel-side equivalent.
 
 It streams the build-time VCF (the same VCFs ``add-variants`` consumed), and for
-every INDEL alt (len(REF) != len(alt)) emits, keyed by ``<pos>_<REF>_<ALT>``, the
-per-carrier phased genotype NORMALIZED to a biallelic "this-indel vs not" call
-(so it is directly comparable to a SNP's biallelic phased GT when checking cis).
+every INDEL alt (len(REF) != len(alt)) of a record whose FILTER is PASS or '.' emits,
+keyed by ``<pos>_<REF>_<ALT>``, the per-carrier phased genotype NORMALIZED to a
+biallelic "this-indel vs not" call (so it is directly comparable to a SNP's biallelic
+phased GT when checking cis). A record of any other FILTER is skipped, as CRISPRitz's
+enricher skips it: no fake-indel window holds its indel, so a carrier is never taken
+off a row for it (from 2.10.0; a store written before kept every indel of the VCF,
+and build-index-only writes such a store again: store_is_current).
 
 STDLIB ONLY (gzip). Runs at build time; the reader loads one chromosome's indels
 into a dict (indels are ~10x fewer than SNPs, so this is cheap). Gated behind
@@ -21,6 +25,17 @@ import errno
 import os
 import sys
 import gzip
+
+import site_alleles
+
+# The FILTER values whose records the store holds: those CRISPRitz's enricher reads
+# (Enrichment/enricher.py and enricher.cpp, `if line[6] not in ('PASS', '.')`, the line
+# skipped; validate_inputs.ENRICHER_PASS_VALUES), so that every indel of the store is one
+# a fake-indel window holds.
+PASS_FILTERS = ("PASS", ".")
+# The second line of a store's .done marker (after its record count) from 2.10.0: the
+# store holds only the records of PASS_FILTERS. A store written before has no such line.
+FILTER_MARK = "FILTER\tPASS,."
 
 
 def _is_indel(ref, alt):
@@ -62,9 +77,10 @@ def iter_indel_genotypes(vcf_path, keep_samples=None):
     """Stream a (b)gzipped or plain VCF and yield, per indel alt:
     ``(pos:int, ref:str, alt:str, {sample_id: normalized_gt})``.
 
-    Multiallelic sites emit one tuple per indel ALT (SNP alts are skipped).
-    ``keep_samples`` (a set) restricts the emitted carriers to that panel; None
-    keeps all. Only carriers (normalize_gt_for_alt != None) are stored.
+    Multiallelic sites emit one tuple per indel ALT (SNP alts are skipped), and a record
+    whose FILTER is not PASS_FILTERS emits none. ``keep_samples`` (a set) restricts the
+    emitted carriers to that panel; None keeps all. Only carriers (normalize_gt_for_alt !=
+    None) are stored.
     """
     opener = gzip.open if vcf_path.endswith(".gz") else open
     with opener(vcf_path, "rt") as fh:
@@ -78,7 +94,7 @@ def iter_indel_genotypes(vcf_path, keep_samples=None):
             if sample_cols is None:
                 continue
             c = line.rstrip("\n").split("\t")
-            if len(c) < 10:
+            if len(c) < 10 or c[6] not in PASS_FILTERS:
                 continue
             pos, ref, alt_field = c[1], c[3], c[4]
             gts = c[9:]
@@ -129,12 +145,33 @@ def store_is_complete(out_path):
         return False
 
 
+def store_reads_filter(out_path):
+    """True iff the store at ``out_path`` was written under the FILTER rule of 2.10.0 (its
+    records of PASS_FILTERS only): its .done marker, as new as the store, says so
+    (FILTER_MARK). A store written before 2.10.0, or adopted without a marker, does not."""
+    marker = _done_marker(out_path)
+    try:
+        if os.path.getmtime(marker) < os.path.getmtime(out_path):
+            return False
+        with open(marker) as m:
+            return FILTER_MARK in m.read().splitlines()[1:]
+    except OSError:
+        return False
+
+
+def store_is_current(out_path):
+    """True iff the store at ``out_path`` is complete (store_is_complete) and written under
+    the FILTER rule (store_reads_filter): one a build need not write again."""
+    return store_is_complete(out_path) and store_reads_filter(out_path)
+
+
 def compile_indel_genotypes(vcf_path, out_path, keep_samples=None):
     """Write the phased indel genotype store for one chromosome's VCF.
 
     Format (gzipped TSV, one line per indel alt):
         <pos>_<REF>_<ALT> \t sample:gt,sample:gt,...
-    Returns the number of indel records written.
+    Returns the number of indel records written. The .done marker holds that count, then
+    FILTER_MARK.
 
     The write is ATOMIC: rows stream into ``<out_path>.tmp`` and the temp file is
     ``os.replace``d onto the final path only after a clean close, then a ``.done``
@@ -164,7 +201,7 @@ def compile_indel_genotypes(vcf_path, out_path, keep_samples=None):
         raise
     try:
         with open(marker, "w") as m:
-            m.write(f"{n}\n")
+            m.write(f"{n}\n{FILTER_MARK}\n")
     except OSError as err:
         # a marker the disk could not take is no marker; on a full disk or an I/O
         # error (ends_the_build) its store goes too, as the build ends on it, for the
@@ -213,25 +250,69 @@ def compile_indel_genotypes_safe(vcf_path, out_path, keep_samples=None):
         return -1
 
 
+def merge_store_carriers(earlier, later):
+    """The carriers ("sample:gt,...") of one indel that two lines of the store give, the
+    earlier line's first: two VCF records of one REF>ALT at a position are one allele
+    (decision B2, as CRISPRitz 2.10.0's enricher merges two listings of one SNV), so every
+    carrier of either is kept, and a carrier of both gets its two calls merged as the
+    enricher merges them (site_alleles.merge_gt: a slot holds the indel where either call
+    puts it there when they are phased alike; else the call with more copies, the earlier
+    on a tie). The store writes one line per record, and up to 2.10.0's integration every
+    reader kept the later line alone, so a carrier only the earlier line listed lost its
+    phased genotype: CRISPRme listed it on no row of the indel, or on some alignments only.
+    The readers key both lines in upper case (store_key), so two lines in two cases are
+    merged too. HPRC chr22 writes 179 indels on two lines: 39 in one case (1,400 listings on
+    the earlier only, which every reader lost) and 140 in two (read as two indels before)."""
+    if not earlier:
+        return later
+    if not later:
+        return earlier
+    a, b = {}, {}
+    for into, toks in ((a, earlier), (b, later)):
+        for t in toks.split(","):
+            sid, sep, gt = t.partition(":")
+            if sid and sep:
+                into[sid] = site_alleles.merge_gt(into[sid], gt) if sid in into else gt
+    return ",".join("%s:%s" % (s, g) for s, g in site_alleles.merge_carriers(a, b).items())
+
+
+def store_key(pos, ref, alt):
+    """The key a reader of the store gives an indel: ``<pos>_<REF>_<ALT>`` with REF and
+    ALT in upper case. The store writes each record's key as its VCF line does, and VCF
+    4.x reads REF and ALT whatever their case, as the fake-indel window does (CRISPRitz
+    writes the ALT in place of the REF, the search reads the window in upper case), so
+    two lines of one indel in two cases (tg>t beside TG>T) are one allele here as two
+    lines written alike are (merge_store_carriers); the rows name it in upper case
+    (indel_snp_cis.record_name)."""
+    return f"{pos}_{ref}_{alt}".upper()
+
+
 class IndelGenotypeReader(object):
     """Read a phased indel genotype store (one chromosome) into a dict keyed by
-    ``<pos>_<REF>_<ALT>``. Small enough to hold in memory (indels << SNPs)."""
+    ``<pos>_<REF>_<ALT>``, REF and ALT in upper case (store_key). Small enough to hold
+    in memory (indels << SNPs). ``reads_filter``: whether the store holds only the
+    records of PASS_FILTERS (store_reads_filter); one written before 2.10.0 may hold the
+    others too. A key the store holds twice (an indel the VCF writes on two lines, in
+    one case or in two) is one allele, its carriers merged (merge_store_carriers)."""
 
-    __slots__ = ("_by_key",)
+    __slots__ = ("_by_key", "reads_filter")
 
     def __init__(self, store_path):
         self._by_key = {}
+        self.reads_filter = store_reads_filter(store_path)
         opener = gzip.open if store_path.endswith(".gz") else open
         with opener(store_path, "rt") as fh:
             for line in fh:
                 key, _, toks = line.rstrip("\n").partition("\t")
                 if not key:
                     continue
-                self._by_key[key] = toks
+                key = key.upper()  # store_key: the position is digits
+                prev = self._by_key.get(key)
+                self._by_key[key] = toks if prev is None else merge_store_carriers(prev, toks)
 
     def carriers(self, pos, ref, alt):
         """Return "sample:gt" tokens (comma-joined) for the indel, or "" if absent."""
-        return self._by_key.get(f"{pos}_{ref}_{alt}", "")
+        return self._by_key.get(store_key(pos, ref, alt), "")
 
     def carriers_dict(self, pos, ref, alt):
         """Return {sample_id: normalized_gt} for the indel (empty if absent)."""

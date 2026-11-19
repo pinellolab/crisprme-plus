@@ -33,6 +33,7 @@ from __future__ import annotations
 import gzip
 import json
 
+import site_alleles
 import tier0_registry as t0
 
 # Optional streaming JSON parser. If present we stream the (huge, genome-wide)
@@ -43,6 +44,9 @@ try:  # pragma: no cover - availability depends on the environment
 except Exception:  # pragma: no cover
     ijson = None
     _HAVE_IJSON = False
+
+# the four bases: a position whose reference base and SNP ALTs hold them all is coded Q
+_ACGT = frozenset("ACGT")
 
 
 # --------------------------------------------------------------------------- #
@@ -210,7 +214,11 @@ def parse_entry(entry):
                 sid, gt = tok.split(":", 1)
             else:
                 sid, gt = tok, ""
-            carrier_gts[sid.strip()] = gt.strip()
+            sid, gt = sid.strip(), gt.strip()
+            # a sample listed twice (two records of this allele in one entry): a slot
+            # carries the allele if either says so
+            carrier_gts[sid] = (site_alleles.merge_gt(carrier_gts[sid], gt)
+                                if sid in carrier_gts else gt)
     return ref, alt, rsid, carrier_gts
 
 
@@ -245,7 +253,11 @@ def iter_dict_records(dict_path, chrom):
 
 
 def _emit_key(key, value, prefix):
-    """Yield parsed records for one dict key/value ('$'-joined entries)."""
+    """Yield parsed records for one dict key/value ('$'-joined entries): one per
+    REF>ALT, each genotype read against that ALT's own allele index, two records of
+    one REF>ALT merged (``site_alleles.read_records``). A record that lists several ALTs
+    on one VCF line keeps its raw genotype (1|2) under each ALT; read as it is, the
+    second ALT's carriers counted as reference and its haplotypes were lost."""
     if not key.startswith(prefix):
         return
     try:
@@ -254,11 +266,14 @@ def _emit_key(key, value, prefix):
         return
     if not value:
         return
+    records = []
     for entry in str(value).split("$"):
         parsed = parse_entry(entry)
         if parsed is None:
             continue
         ref, alt, rsid, carrier_gts = parsed
+        records.append((ref, alt, rsid, None, carrier_gts))
+    for ref, alt, rsid, _af, carrier_gts in site_alleles.read_records(records):
         yield pos, ref, alt, rsid, carrier_gts
 
 
@@ -280,6 +295,9 @@ def compile_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
       out_bin, out_idx: output registry binary + json manifest paths.
       alt_index: the genotype token denoting each record's alt (default "1", the
         bcftools norm -m- biallelic convention). Passed through to the aggregator.
+        ``iter_dict_records`` reads every genotype against its own record's allele
+        index first, a record listing several ALTs on one line included, so "1" is
+        right for every record it yields.
       subpop_field: "superpopulation" (Phase-1 default) or "population".
 
     SNP-first: Phase 1 supports single-character alts only. Non-SNP alts (multi-
@@ -287,9 +305,17 @@ def compile_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
     carrier set is empty after parsing (no listed carriers) produce no group and
     are skipped too (they carry no off-target signal).
 
+    CRISPRitz codes such an ALT all the same, and writes Q where a position's
+    reference base and SNP ALTs hold all four bases. The manifest lists those
+    positions (``four_base_positions``, sorted), each of the position's ALTs counted,
+    one no sample carries included, so that a reader of a Q column can tell such a
+    position from one ``alts_at`` gives three bases (``RegistryReader.four_base``).
+    A chromosome without one gets no list: its registry is the bytes it was.
+
     Returns a dict of build stats:
       {"manifest": <manifest dict>, "n_written": int, "n_skipped_indel": int,
-       "n_skipped_empty": int, "n_positions": int, "overlaps": [sample_id, ...]}.
+       "n_skipped_empty": int, "n_positions": int, "n_four_base": int,
+       "overlaps": [sample_id, ...]}.
     """
     sample_meta, overlaps = build_sample_meta(db_to_samplesid,
                                               subpop_field=subpop_field,
@@ -320,8 +346,10 @@ def compile_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
         "n_positions": 0,
     }
     seen_positions = set()
+    four_base = []
 
     def record_stream():
+        at, held = None, set()
         for (pos, ref, alt, rsid, carrier_gts) in iter_dict_records(dict_path, chrom):
             seen_positions.add(pos)
             # SNP-first: a real single-base substitution only. Skip indels
@@ -331,6 +359,13 @@ def compile_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
                     or alt.upper() not in ("A", "C", "G", "T"):
                 stats["n_skipped_indel"] += 1
                 continue
+            # The bases of the position, its records read together (one dictionary
+            # key): the reference base and every SNP ALT, one no sample carries too.
+            if pos != at:
+                at, held = pos, {(ref or "").upper()}
+            held.add(alt.upper())
+            if _ACGT <= held and (not four_base or four_base[-1] != pos):
+                four_base.append(pos)
             if not carrier_gts:
                 # No listed carriers -> no group -> nothing to write.
                 stats["n_skipped_empty"] += 1
@@ -338,13 +373,17 @@ def compile_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
             stats["n_written"] += 1
             yield (pos, ref, alt, rsid, carrier_gts)
 
+    records = list(record_stream())
+    four_base.sort()
     manifest = t0.compile_registry_panel(
-        record_stream(), sample_meta, None, ploidy_of, out_bin, out_idx,
+        records, sample_meta, None, ploidy_of, out_bin, out_idx,
         alt_index=alt_index, panel_index=panel_index, compress=compress,
         regime_for_pos=regime_for_pos,
+        manifest_extra={"four_base_positions": four_base} if four_base else None,
     )
 
     stats["n_positions"] = len(seen_positions)
+    stats["n_four_base"] = len(four_base)
     stats["manifest"] = manifest
     stats["overlaps"] = overlaps
     return stats

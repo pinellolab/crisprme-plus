@@ -10,10 +10,18 @@ columns, so that gate never passes and the fake-indel genome comes out empty ->
 indels are not searchable on the index.
 
 Every record in the mega merge is *observed* (it survived a MAF threshold), so a
-blanket presence genotype ``0/1`` on a single synthetic sample is correct and
-lets the enricher build the fake-indel genome. REF/ALT/INFO (all the per-dataset
-AF / AF_max fields) are preserved verbatim, so the downstream AF annotation is
-unchanged.
+blanket presence genotype on a single synthetic sample is correct and lets the
+enricher build the fake-indel genome: ``0/1`` on a line of one ALT, and on a line
+listing several, a genotype holding every one of them (``1/2/3`` for three), so the
+enricher windows each of its indel-path ALTs, as it reads every allele of a line
+(``0/1`` carried only the first: the others got no window). REF/ALT/INFO (all the
+per-dataset AF / AF_max fields) are preserved verbatim, so the downstream AF annotation
+is unchanged.
+
+The header gains ``##CRISPRme_sites_only=...`` (SITES_ONLY_MARK): the VCF's one sample is
+this presence genotype, not an individual, so ``crisprme.py build-index-only`` reads the
+dataset as sites-only (its registry and indel frequencies come from the INFO AF fields,
+build_mega_registry.py and build_mega_indel_af.py, not from --samplesID).
 
 A ``.vcf.gz`` output is written as **BGZF** (blocked gzip) via pysam, not plain
 ``gzip`` -- the enricher recipe `tabix`-indexes this file, and tabix REJECTS a
@@ -23,6 +31,17 @@ Usage:  synth_sites_gt.py IN.vcf[.gz] OUT.vcf.gz [SAMPLE_NAME]
 """
 import gzip
 import sys
+
+# The header line that tells a VCF's one sample is this script's presence genotype, not an
+# individual (crisprme.py build-index-only reads the dataset as sites-only by it).
+SITES_ONLY_MARK = "##CRISPRme_sites_only=presence genotype synthesized by synth_sites_gt.py"
+
+
+def presence_genotype(alt):
+    """The presence genotype of a record of ALT column ``alt``: 0/1 for one ALT, and every
+    ALT's number for several (1/2/3), so the enricher reads each allele as carried."""
+    n = len(alt.split(","))
+    return "0/1" if n == 1 else "/".join(str(k) for k in range(1, n + 1))
 
 
 def _open_read(path):
@@ -63,6 +82,7 @@ def synth(inp, out, sample="MEGA"):
                         'Description="Synthesized presence genotype for a sites-only '
                         'aggregate panel (every record is observed by MAF threshold)">\n'
                     )
+                    emit(SITES_ONLY_MARK + "\n")
                     cols = line.rstrip("\n").split("\t")
                     # sites-only has 8 fixed columns (no FORMAT/sample); add both.
                     emit("\t".join(cols[:8] + ["FORMAT", sample]) + "\n")
@@ -70,8 +90,9 @@ def synth(inp, out, sample="MEGA"):
                 if not line.strip():
                     continue
                 row = line.rstrip("\n").split("\t")
-                # keep the 8 fixed columns verbatim; append FORMAT=GT + presence 0/1
-                emit("\t".join(row[:8] + ["GT", "0/1"]) + "\n")
+                # keep the 8 fixed columns verbatim; append FORMAT=GT + the presence of
+                # every ALT of the line
+                emit("\t".join(row[:8] + ["GT", presence_genotype(row[4])]) + "\n")
                 n_records += 1
     finally:
         w.close()

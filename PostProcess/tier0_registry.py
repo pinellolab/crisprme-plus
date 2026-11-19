@@ -789,7 +789,7 @@ def compile_registry(records, sample_meta, taxonomy, ploidy_of, out_bin, out_idx
 def compile_registry_panel(records, sample_meta, taxonomy, ploidy_of, out_bin,
                            out_idx, alt_index="1", panel_index=None,
                            compress=False, block_records=DEFAULT_BLOCK_RECORDS,
-                           regime_for_pos=None):
+                           regime_for_pos=None, manifest_extra=None):
     """Compile records with FULL-PANEL AN (``aggregate_record_panel``).
 
     Identical binary format + manifest to ``compile_registry``, but every emitted
@@ -800,7 +800,8 @@ def compile_registry_panel(records, sample_meta, taxonomy, ploidy_of, out_bin,
     Args are the same as ``compile_registry``; ``records`` here carry
     CARRIER-ONLY genotype dicts (the legacy dict semantics). A ``PanelIndex`` is
     built once from ``sample_meta``/``ploidy_of`` (or reuse a prebuilt one via
-    ``panel_index``).
+    ``panel_index``). ``manifest_extra`` adds its keys to the manifest
+    (``_write_registry``).
     """
     recs = list(records)
     recs.sort(key=lambda r: (int(r[0]), r[2]))
@@ -824,7 +825,8 @@ def compile_registry_panel(records, sample_meta, taxonomy, ploidy_of, out_bin,
 
     return _write_registry(recs, agg, sample_meta, taxonomy, out_bin, out_idx,
                            alt_index=alt_index, aggregation="panel",
-                           compress=compress, block_records=block_records)
+                           compress=compress, block_records=block_records,
+                           manifest_extra=manifest_extra)
 
 
 # --------------------------------------------------------------------------- #
@@ -875,7 +877,8 @@ def _af_only_counts(af, an_nominal, n_called):
 
 def compile_registry_from_info_af(records, dataset_meta, out_bin, out_idx,
                                   compress=False,
-                                  block_records=DEFAULT_BLOCK_RECORDS):
+                                  block_records=DEFAULT_BLOCK_RECORDS,
+                                  manifest_extra=None):
     """Compile a SITES-ONLY merged VCF's per-dataset AF INFO fields into the
     mmap registry (the "mega" all-source index) -- NO genotypes required.
 
@@ -897,6 +900,8 @@ def compile_registry_from_info_af(records, dataset_meta, out_bin, out_idx,
         allele-number denominator shown for that dataset (use each cohort's true
         2N so the displayed AN is meaningful and AF is precise).
       out_bin/out_idx: registry binary + json manifest paths.
+      manifest_extra: a dict whose keys the manifest gains (build_mega_registry: which
+        records of the VCF the registry holds).
 
     Returns the manifest dict (also written to out_idx).
     """
@@ -947,7 +952,8 @@ def compile_registry_from_info_af(records, dataset_meta, out_bin, out_idx,
 
     return _write_registry(recs, _af_groups, {}, taxonomy, out_bin, out_idx,
                            alt_index="1", aggregation="info_af",
-                           compress=compress, block_records=block_records)
+                           compress=compress, block_records=block_records,
+                           manifest_extra=manifest_extra)
 
 
 def _choose_count_width(max_count):
@@ -1016,10 +1022,13 @@ def _classify_data_type(aggregation, per_db_phased):
 
 def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
                     alt_index="1", aggregation="carriers",
-                    compress=False, block_records=DEFAULT_BLOCK_RECORDS):
+                    compress=False, block_records=DEFAULT_BLOCK_RECORDS,
+                    manifest_extra=None):
     """Shared binary writer. ``aggregate_fn(alt_genotypes, alt_index)`` returns
     dict[group_id]->Counts for one (pos, alt) record (either the carriers-only
     ``aggregate_record`` path or the full-panel ``aggregate_record_panel`` path).
+    ``manifest_extra`` (a dict) adds its keys to the manifest, e.g. the
+    ``four_base_positions`` of ``tier0_compile.compile_from_dict``.
 
     v2 compact encoding: group_ids are interned into a per-file group-code table
     (u8/u16 code, not a 4-byte string-pool offset) stored ONCE in the manifest;
@@ -1165,6 +1174,8 @@ def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
         "databases": taxonomy,
         "groups": group_taxonomy,
     }
+    if manifest_extra:
+        manifest.update(manifest_extra)
 
     if compress:
         _emit_v3(out_bin, manifest, record_array, group_blob_bytes,
@@ -1792,6 +1803,21 @@ class RegistryReader(object):
                 prev = a
             i += 1
         return alts
+
+    def four_base(self, pos):
+        """True when the reference base and the SNP ALTs at ``pos`` hold A, C, G and T,
+        an ALT that no sample carries included: CRISPRitz 2.10.0 codes such a position
+        Q. The registry holds no record of an ALT no sample carries (it has no group),
+        so ``alts_at`` cannot tell; the manifest lists these positions, sorted
+        (``four_base_positions``, written by ``tier0_compile.compile_from_dict``).
+        False on a registry without the list (compiled before CRISPRme 2.10.0, or a
+        sites-only one)."""
+        listed = self.manifest.get("four_base_positions")
+        if not listed:
+            return False
+        pos = int(pos)
+        i = bisect.bisect_left(listed, pos)
+        return i < len(listed) and listed[i] == pos
 
     def lookup(self, pos, alt):
         """Return dict[group_id]->Counts for (pos, alt), or None if absent."""

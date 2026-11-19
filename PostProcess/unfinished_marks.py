@@ -15,6 +15,9 @@ submit_job_automated_new_multiple_vcfs.sh.)
 
 import os
 
+import index_fit
+from indel_window import quote
+
 
 def indel_snp_on() -> bool:
     """Whether the SNP+indel co-occurrence is on (CRISPRME_INDEL_SNP, on unless set to
@@ -29,14 +32,10 @@ def is_marked(directory: str) -> bool:
 
 def _pam_serves(pam: str, motif: str, prune: bool, three_prime: bool) -> bool:
     """Whether an index built for PAM ``pam`` serves a search for PAM ``motif``: the
-    motif itself, or an all-N PAM of its width, or -- under --prune-pam, for a 3' PAM
-    only -- a wider all-N one (the search script's _resolve_index_dir, and
-    crisprme.py's _installed_index_bulge_cap)."""
-    if pam == motif:
-        return True
-    if not pam or set(pam) != {"N"}:
-        return False
-    return len(pam) == len(motif) or (prune and three_prime and len(pam) > len(motif))
+    motif itself, or an all-N PAM of its width, or -- under --prune-pam -- a dedicated
+    PAM that holds it, or, for a 3' PAM only, a wider all-N one (index_fit.pam_serves:
+    the search script's _resolve_index_dir, and crisprme.py's _installed_index_bulge_cap)."""
+    return index_fit.pam_serves(pam, motif, prune, three_prime) is not None
 
 
 def indels_index_in_place(library: str, dataset: str, motif: str, n_want: int,
@@ -57,10 +56,12 @@ def indels_index_in_place(library: str, dataset: str, motif: str, n_want: int,
     for name in names:
         if not name.endswith(suffix) or name.startswith("."):
             continue
-        pam, sep, n_str = name[: -len(suffix)].partition("_")
-        if not sep or not n_str.isdigit() or int(n_str) < n_want:
+        parsed = index_fit.parse_index_name(name)  # either form of the name
+        if not parsed or "_" + parsed[2] != suffix or parsed[1] < n_want:
             continue
-        if not _pam_serves(pam, motif, prune, three_prime):
+        if parsed[4] and (parsed[4] == 3) != three_prime:  # a name that says its side
+            continue
+        if not _pam_serves(parsed[0], motif, prune, three_prime):
             continue
         index = os.path.join(library, name)
         indels = index + "_INDELS"
@@ -96,12 +97,12 @@ def dataset_parts(workdir: str, genome: str, vcf: str, indels_in_place: bool) ->
     rerun = f"Run build-index-only again with {vcf}"
     parts = [(reg, f"the dict-less tiers of {vcf}",
               f"{rerun} and its --samplesID, which finishes them, or remove them to "
-              f"search without them (rm -rf '{reg}' '{gt}')")]
+              f"search without them (rm -rf {quote(reg)} {quote(gt)})")]
     if indel_snp_on():
         igt = _real(os.path.join(dicts, f"indel_genotypes_{vcf}"))
         parts.append((igt, f"the phased indel genotype store of {vcf}",
                       f"{rerun}, which finishes it, or remove it to search without it "
-                      f"(rm -rf '{igt}')"))
+                      f"(rm -rf {quote(igt)})"))
     enriched = os.path.join(workdir, "Genomes", f"{genome}+{vcf}")
     parts.append((_real(enriched), f"the enrichment of {vcf}", f"{rerun}, which enriches it again"))
     if not indels_in_place:

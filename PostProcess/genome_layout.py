@@ -197,6 +197,25 @@ def find_unclean_fastas(genomedir: str, deep: bool = False) -> Dict[str, str]:
     return found
 
 
+def find_unterminated_fastas(genomedir: str) -> List[str]:
+    """The FASTA files of ``genomedir`` whose last line has no line end (LF). The index
+    build drops such a line with no error: a search lost the off-targets of its bases,
+    all of a sequence written as one line (LP unterminated-last-line-dropped). Cheap: one
+    byte a file."""
+    found: List[str] = []
+    for fname in sorted(os.listdir(genomedir)):
+        path = os.path.join(genomedir, fname)
+        if not fname.endswith(FASTA_EXTENSIONS) or not os.path.isfile(path):
+            continue
+        with open(path, "rb") as handle:
+            if handle.read(1) != b">":  # (no FASTA: check_genome_fasta says so)
+                continue
+            handle.seek(-1, os.SEEK_END)
+            if handle.read(1) != b"\n":
+                found.append(fname)
+    return found
+
+
 def find_pattern_clashes(genomedir: str) -> Dict[str, List[str]]:
     """Maps each ``.fa`` file of ``genomedir`` whose name, read as a shell pattern (it
     holds ``*``, ``?`` or ``[``), matches the names of other ``.fa`` files there to those
@@ -257,8 +276,10 @@ def split_multi_fasta(path: str, dest_dir: Optional[str] = None) -> List[str]:
     (default: the file's own directory) and removes the original. A FASTA of one
     record goes the same way: it is renamed after its record id.
 
-    Each header is written as ``>id``, and every line with no CR; the rest is copied
-    verbatim, so the sequence of the pieces is byte-for-byte the original's. Refuses
+    Each header is written as ``>id``, and every line with no CR (a CR that ends a line
+    alone ends it with LF), and each piece ends with LF; the rest is copied verbatim, so
+    the sequence of the pieces is the original's. (The index build drops a last line
+    with no LF: lone CRs deleted, not turned into LF, left a line of tens of kb with none.) Refuses
     (before anything is put in place) if two records share an id, an id is not a
     usable file name or holds what the pipeline cannot take, or the file's lines end in
     CR alone, and never overwrites an existing file other than the original itself (the
@@ -283,6 +304,7 @@ def split_multi_fasta(path: str, dest_dir: Optional[str] = None) -> List[str]:
     tmp_names: List[Tuple[str, str]] = []
     try:
         with open(path, "rb") as fin:
+            ended = True  # (whether what the piece holds so far ends in LF)
             for line in fin:
                 if line.startswith(b">"):
                     if b"\r" in line.rstrip(b"\n")[:-1]:
@@ -292,6 +314,8 @@ def split_multi_fasta(path: str, dest_dir: Optional[str] = None) -> List[str]:
                             "convert them to LF (tr '\\r' '\\n') and retry"
                         )
                     if out is not None:
+                        if not ended:
+                            out.write(b"\n")
                         out.close()
                     rid_bytes = line[1:].split(None, 1)[0]
                     rid = rid_bytes.decode("utf-8", errors="replace")
@@ -299,9 +323,18 @@ def split_multi_fasta(path: str, dest_dir: Optional[str] = None) -> List[str]:
                     out = open(tmp, "wb")
                     tmp_names.append((tmp, targets[rid]))
                     out.write(b">" + rid_bytes + b"\n")
+                    ended = True
                 elif out is not None:
-                    out.write(line.replace(b"\r", b""))
+                    # a CR between bases ends a line (a file of lone-CR line ends); any
+                    # other is dropped, as with CRLF line ends
+                    line = re.sub(rb"(?<=[^\r\n])\r+(?=[^\r\n])", b"\n",
+                                  line.replace(b"\r\n", b"\n")).replace(b"\r", b"")
+                    if line:
+                        out.write(line)
+                        ended = line.endswith(b"\n")
         if out is not None:
+            if not ended:
+                out.write(b"\n")
             out.close()
             out = None
         os.remove(path)  # before the renames: a piece may reuse the original's name
@@ -324,8 +357,8 @@ def split_multi_record_fastas(genomedir: str, deep: bool = True) -> Dict[str, Li
     ``>chr1`` becomes ``chr1.fa``): CRISPRme takes a file for the sequence it is
     named after, so every search of such a folder found its off-targets and then
     dropped them all. Each file it writes, and each other file whose header is not
-    exactly ``>id`` or whose lines end in CR, then reads ``>id`` with no CR. A file
-    that needs none of this is not touched. Returns ``{original file name: [new file
+    exactly ``>id``, whose lines end in CR, or whose last line has no LF, then reads
+    ``>id`` with no CR, and ends with LF. A file that needs none of this is not touched. Returns ``{original file name: [new file
     paths]}`` (empty if nothing needed it). Deep by default: this is a one-off fix, not
     a per-search check."""
     result: Dict[str, List[str]] = {}
@@ -334,6 +367,8 @@ def split_multi_record_fastas(genomedir: str, deep: bool = True) -> Dict[str, Li
     for fname in find_name_mismatched_fastas(genomedir):
         result[fname] = split_multi_fasta(os.path.join(genomedir, fname), genomedir)
     for fname in find_unclean_fastas(genomedir, deep=deep):
+        result[fname] = split_multi_fasta(os.path.join(genomedir, fname), genomedir)
+    for fname in find_unterminated_fastas(genomedir):  # (each piece ends with LF)
         result[fname] = split_multi_fasta(os.path.join(genomedir, fname), genomedir)
     return result
 
@@ -352,10 +387,10 @@ def describe_problem(genomedir: str, fname: str, ids: List[str]) -> str:
 def describe_header_problems(genomedir: str, deep: bool = False, reported=()) -> List[str]:
     """Human-readable errors, each with its fix, for the ``.fa`` files of ``genomedir``
     (those a search reads) that the search cannot use though they hold one sequence named
-    after it: a header that is not exactly ``>id``, CR line ends, an id the pipeline
-    cannot take, an id that matches, read as a shell pattern, another of their names. One
-    message per kind, whatever the number of files; none for the files in ``reported``,
-    as holding several sequences, whose fix is the same."""
+    after it: a header that is not exactly ``>id``, CR line ends, a last line with no LF,
+    an id the pipeline cannot take, an id that matches, read as a shell pattern, another
+    of their names. One message per kind, whatever the number of files; none for the
+    files in ``reported``, as holding several sequences, whose fix is the same."""
     genome = os.path.basename(os.path.normpath(genomedir))
     errors: List[str] = []
     unclean = {f: why for f, why in find_unclean_fastas(genomedir, deep).items()
@@ -374,6 +409,20 @@ def describe_header_problems(genomedir: str, deep: bool = False, reported=()) ->
             f"genomes Genomes/{genome}+*), which keeps those names, and run build-index-only "
             f"again. (A genome uploaded from the web Settings page is written this way: "
             f"remove this one there, with the indexes built on it, and upload it again.)"
+        )
+    unended = [f for f in find_unterminated_fastas(genomedir)
+               if f.split(".")[-1] == "fa" and f not in reported and f not in unclean]
+    if unended:
+        more = f" ({len(unended) - 1} more file(s) here too)" if len(unended) > 1 else ""
+        errors.append(
+            f"{unended[0]}: its last line has no line end (LF){more}. The index build drops "
+            f"a last line with none, so every search of this folder loses the off-targets "
+            f"of its bases (all of a sequence written on one line), with no error. End it "
+            f"with one with:\n"
+            f"    python PostProcess/genome_layout.py --split {genomedir}\n"
+            f"Then remove each index built from the folder as it was "
+            f"(genome_library/*_{genome}, genome_library/*_{genome}+*, and the variant "
+            f"genomes Genomes/{genome}+*), and run build-index-only again."
         )
     held = started = None  # (the first file of each kind)
     for fname in sorted(os.listdir(genomedir)):
@@ -422,14 +471,43 @@ def describe_header_problems(genomedir: str, deep: bool = False, reported=()) ->
     return errors
 
 
+def describe_name_problems(genomedir: str, reported=()) -> List[str]:
+    """The error, with its fix, for the ``.fa`` files of ``genomedir`` that hold one
+    sequence and are named otherwise (walkone.fa holding >chr1), but those in
+    ``reported``: a search takes each file for the sequence it is named after, so it finds
+    that sequence's off-targets and drops them all. One message, whatever the number of
+    files. The search, which runs this module's check first, ran its whole course for none,
+    then said to run the check, which passed such a file (M1)."""
+    misnamed = {f: rid for f, rid in find_name_mismatched_fastas(genomedir).items()
+                if f.split(".")[-1] == "fa" and f not in reported}
+    if not misnamed:
+        return []
+    genome = os.path.basename(os.path.normpath(genomedir))
+    fname, rid = next(iter(misnamed.items()))
+    more = f" ({len(misnamed) - 1} more file(s) here too)" if len(misnamed) > 1 else ""
+    return [
+        f"{fname}: holds the sequence {rid} and is named otherwise{more}. CRISPRme reads a "
+        f"sequence from the file named after it ({rid}.fa), so a search of this folder finds "
+        f"that sequence's off-targets and then drops them all, with no error. Name each file "
+        f"after its sequence with:\n"
+        f"    python PostProcess/genome_layout.py --split {genomedir}\n"
+        f"An index built from the folder as it was is named after the sequence, and serves "
+        f"once the files are renamed. (A genome uploaded from the web Settings page is named "
+        f"this way: remove this one there, with the indexes built on it, and upload it again.)"
+    ]
+
+
 def _indexes_of(library: str, genome: str) -> List[str]:
     """The folders of the genome library named as an index of ``genome``:
-    ``<PAM>_<N>_<genome>``, or ``<PAM>_<N>_<genome>+<dataset>`` of a variant one."""
+    ``<PAM>_<N>_<genome>``, or ``<PAM>_<N>_<genome>+<dataset>`` of a variant one, or a
+    name of the form a build writes since 2.10.0, which carries the guide length and the
+    side (``20-NRR_3_<genome>``, ``TTTV-23_3_<genome>``: index_fit.parse_index_name)."""
     try:
         names = sorted(os.listdir(library))
     except OSError:
         return []
-    named = re.compile(r"[A-Za-z]+_[0-9]+_" + re.escape(genome) + r"(\+.*)?\Z")
+    named = re.compile(r"(?:[0-9]+-[A-Za-z]+|[A-Za-z]+(?:-[0-9]+)?)_[0-9]+_"
+                       + re.escape(genome) + r"(\+.*)?\Z")
     return [name for name in names if named.match(name)]
 
 
@@ -474,6 +552,7 @@ def main(argv: List[str]) -> int:
     problems = find_multi_record_fastas(genomedir, deep=deep)
     if split:
         unclean = find_unclean_fastas(genomedir, deep=True)
+        unended = find_unterminated_fastas(genomedir)
         try:
             done = split_multi_record_fastas(genomedir)
         except (ValueError, OSError) as err:
@@ -487,7 +566,9 @@ def main(argv: List[str]) -> int:
                 print(f"Renamed {fname} to {os.path.basename(pieces[0])} in {genomedir}")
             if fname in unclean:
                 print(f"Wrote {fname}'s header as >id and its lines with no CR ({unclean[fname]})")
-        if problems or unclean:
+            if fname in unended and fname not in unclean:
+                print(f"Ended {fname}'s last line with a line end (LF)")
+        if problems or unclean or unended:
             print(
                 "NOTE: any CRISPRitz index built from the old layout must be rebuilt "
                 "(delete it and re-run build-index-only)."
@@ -497,6 +578,7 @@ def main(argv: List[str]) -> int:
                 print(f"NOTE: in {library}, built on this genome: {', '.join(built)}")
         return 0
     header_problems = describe_header_problems(genomedir, deep, problems)
+    header_problems += describe_name_problems(genomedir, problems)
     header_problems += describe_index_problems(library, genome)
     if not problems and not header_problems:
         return 0

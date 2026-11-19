@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Tests for build_mega_registry -- the sites-only merged-VCF -> registry driver.
 
-Covers the INFO AF parser (per-dataset AF_<ds>, AF_max skipped, multiallelic-comma
-guard, non-positive AF drop) and build() end to end (synthetic gzip VCF -> registry
--> RegistryReader round-trip). STDLIB only.
+Covers the INFO AF parser (per-dataset AF_<ds>, AF_max skipped, a comma list read per
+ALT, non-positive AF drop) and build() end to end (synthetic gzip VCF -> registry
+-> RegistryReader round-trip; a record listing several ALTs read one ALT at a time), and
+the records it reads, as CRISPRitz 2.10.0's enricher reads them: FILTER PASS or '.', the
+SNP ALTs it codes, one REF>ALT on two records merged into the more frequent. STDLIB only.
 """
 import gzip
 import os
@@ -46,12 +48,14 @@ class TestParseInfoAfs(unittest.TestCase):
 
 
 def _write_vcf(path, rows):
-    """rows: list of (chrom, pos, id, ref, alt, info)."""
+    """rows: list of (chrom, pos, id, ref, alt, info[, FILTER]) (FILTER PASS by default)."""
     with gzip.open(path, "wt") as fh:
         fh.write("##fileformat=VCFv4.2\n")
         fh.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n")
-        for c, p, i, r, a, info in rows:
-            fh.write("\t".join([c, str(p), i, r, a, ".", "PASS", info]) + "\n")
+        for row in rows:
+            c, p, i, r, a, info = row[:6]
+            filt = row[6] if len(row) > 6 else "PASS"
+            fh.write("\t".join([c, str(p), i, r, a, ".", filt, info]) + "\n")
 
 
 class TestBuildEndToEnd(unittest.TestCase):
@@ -67,26 +71,55 @@ class TestBuildEndToEnd(unittest.TestCase):
              "AF_AoU=0.004;AF_max=0.004"),
             ("chr22", 999, ".", "G", "A",     # no rsID; comma-AF -> float() drops
              "AF_HGDP=0.01,0.02"),
-            ("chr22", 1200, ".", "G", "A,T",  # comma-ALT guard -> whole row skipped
+            ("chr22", 1200, ".", "G", "A,T",  # two ALTs, one AF -> neither has its own
              "AF_HGDP=0.5"),
+            ("chr22", 1300, "rs7;rs8", "G", "A,T",  # two ALTs: each its AF and its ID
+             "AF_HGDP=0.5,0.25;AF_gnomAD=.,0.01;AF_max=0.5,0.25"),
+            ("chr22", 1400, "rs11", "G", "C,GT",  # a SNP and an indel on one line
+             "AF_HGDP=0.2,0.3"),
             ("chr22", 2000, "rs9", "T", "TA",  # insertion -> counted as indel, not
              "AF_gnomAD=0.03;AF_max=0.03"),    #   in the SNP registry
-            ("chr22", 3000, "rs10", "c", "t",  # lowercase SNP -> uppercased, counted
-             "AF_gnomAD=0.02;AF_max=0.02"),    #   as a SNP (not misfiled as indel)
+            ("chr22", 3000, "rs10", "c", "t",  # a lower-case REF and ALT: read in upper
+             "AF_gnomAD=0.02;AF_max=0.02"),    #   case, as CRISPRitz 2.10.0 codes it: C>T
         ])
 
         manifest, binp, idxp, stats = bmr.build(vcf, "chr22", d)
         self.assertEqual(manifest["aggregation"], "info_af")
-        # full accounting: 4 SNPs (3 upper + 1 lowercase), 1 indel, 1 multiallelic
-        # (the A,T ALT), 1 no-AF (the comma-AF at 999). Nothing silently dropped.
-        self.assertEqual(stats["snps"], 4)
-        self.assertEqual(stats["indels"], 1)
-        self.assertEqual(stats["multiallelic"], 1)
-        self.assertEqual(stats["no_af"], 1)
+        # full accounting, per ALT: 10 SNP alleles read (3 upper, the comma-AF at 999, the
+        # two of 1200 and of 1300, the C of 1400, the c>t at 3000), 7 of them written (3
+        # no-AF: the comma-AF at 999, both ALTs of 1200), 2 indels (2000, the GT of 1400),
+        # no ALT CRISPRitz does not code; 3 records listed several ALTs. Nothing silently
+        # dropped.
+        self.assertEqual(stats["snps"], 10)
+        self.assertEqual(stats["written"], 7)
+        self.assertEqual(stats["indels"], 2)
+        self.assertEqual(stats["not_coded"], 0)
+        self.assertEqual(stats["multiallelic"], 3)
+        self.assertEqual(stats["no_af"], 3)
         reader = RegistryReader(binp, idxp)
 
-        # the lowercase SNP (c>t) is in the registry, uppercased to (C>T)
-        self.assertIn(db_group_id("gnomAD"), reader.lookup(3000, "T"))
+        # a record listing several ALTs: each ALT its own AF (the k-th of each list)
+        # and its own ID (one per ALT in the ID column); it was skipped whole
+        self.assertEqual(reader.alts_at(1300), ["A", "T"])
+        ga, gt = reader.lookup(1300, "A"), reader.lookup(1300, "T")
+        self.assertLessEqual(abs(ga[db_group_id("HGDP")].allele_freq() - 0.5), 1e-3)
+        self.assertNotIn(db_group_id("gnomAD"), ga)
+        self.assertLessEqual(abs(gt[db_group_id("HGDP")].allele_freq() - 0.25), 1e-3)
+        self.assertLessEqual(abs(gt[db_group_id("gnomAD")].allele_freq() - 0.01), 1e-3)
+        self.assertEqual((reader.rsid(1300, "A"), reader.rsid(1300, "T")), ("rs7", "rs8"))
+        self.assertEqual(reader.alts_at(1400), ["C"])
+        self.assertLessEqual(
+            abs(reader.lookup(1400, "C")[db_group_id("HGDP")].allele_freq() - 0.2), 1e-3)
+        self.assertEqual(reader.rsid(1400, "C"), "rs11")
+
+        # the lower-case SNP (c>t) is C>T: CRISPRitz 2.10.0's enricher reads REF and ALT
+        # in upper case and codes it (up to 2.9.1 it coded no lower-case ALT, and the
+        # registry of this release held none until the engine's case rule)
+        self.assertEqual(reader.alts_at(3000), ["T"])
+        self.assertIsNone(reader.lookup(3000, "t"))
+        self.assertLessEqual(
+            abs(reader.lookup(3000, "T")[db_group_id("gnomAD")].allele_freq() - 0.02), 1e-3)
+        self.assertEqual(reader.rsid(3000, "T"), "rs10")
 
         g1 = reader.lookup(10516173, "G")
         self.assertEqual(set(g1), {db_group_id("HGDP"), db_group_id("TOPMed"),
@@ -104,8 +137,9 @@ class TestBuildEndToEnd(unittest.TestCase):
         # pos 999 has a comma-AF (malformed for biallelic) -> the float() drops it,
         # leaving no AF -> record absent.
         self.assertIsNone(reader.lookup(999, "A"))
-        # pos 1200 ALT "A,T" -> comma guard skips the whole record.
+        # pos 1200 ALT "A,T" with one AF value: no ALT has an AF of its own.
         self.assertIsNone(reader.lookup(1200, "A"))
+        self.assertIsNone(reader.lookup(1200, "T"))
         # pos 2000 T>TA is an indel -> not in the SNP registry.
         self.assertIsNone(reader.lookup(2000, "TA"))
 
@@ -136,6 +170,112 @@ class TestChromFilterAndGlobal(unittest.TestCase):
         _, binp, idxp, _ = bmr.build(vcf, "chr1", d)
         gg = RegistryReader(binp, idxp).lookup(700, "T")[GLOBAL_GROUP_ID]
         self.assertLessEqual(abs(gg.allele_freq() - 0.0377889), 1e-4)  # == the AF_max token
+
+
+class TestReadAsTheEnricher(unittest.TestCase):
+    """The registry holds the SNP alleles CRISPRitz 2.10.0's enricher codes, read as it
+    reads the VCF: the hg38_mega VCFs carry HGDP-2019's FILTER (LOW_VQSLOD, ExcHet) onto
+    merged records, which the enricher skips, while the registry of CRISPRme 2.8.1 held
+    them and its SNP rows named them (2,442,989 SNVs genome-wide)."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, self.d, True)
+        self.vcf = os.path.join(self.d, "mega.chr22.build.vcf.gz")
+
+    def build(self, rows):
+        _write_vcf(self.vcf, rows)
+        manifest, binp, idxp, stats = bmr.build(self.vcf, "chr22", self.d)
+        return manifest, RegistryReader(binp, idxp), stats
+
+    def test_records_outside_pass_are_left_out(self):
+        _m, reg, stats = self.build([
+            ("chr22", 100, "rs1", "A", "G", "AF_HGDP=0.1;AF_max=0.1", "LOW_VQSLOD"),
+            ("chr22", 200, "rs2", "C", "T", "AF_HGDP=0.2;AF_max=0.2", "ExcHet;LOW_VQSLOD"),
+            ("chr22", 300, "rs3", "G", "A", "AF_HGDP=0.3;AF_max=0.3", "."),
+            ("chr22", 400, "rs4", "T", "C", "AF_HGDP=0.4;AF_max=0.4", "PASS"),
+            ("chr22", 400, "rs5", "T", "G", "AF_gnomAD=0.01;AF_max=0.01", "pass"),
+        ])
+        self.assertIsNone(reg.lookup(100, "G"))
+        self.assertIsNone(reg.lookup(200, "T"))
+        self.assertIsNone(reg.lookup(400, "G"))  # "pass" is not PASS
+        self.assertIsNotNone(reg.lookup(300, "A"))
+        self.assertIsNotNone(reg.lookup(400, "C"))
+        self.assertEqual(reg.alts_at(400), ["C"])
+        self.assertEqual((stats["filtered"], stats["written"]), (3, 2))
+
+    def test_alts_the_enricher_does_not_code(self):
+        # the '*' of a spanning deletion, an N (in either case): no code, no record; every
+        # ALT it codes of the same line is read, a lower-case base too (CRISPRitz 2.10.0
+        # reads it in upper case: A>g codes G), as is the base of a symbolic allele's line
+        _m, reg, stats = self.build([
+            ("chr22", 100, ".", "G", "A,*", "AF_HGDP=0.1,0.05;AF_max=0.1,0.05"),
+            ("chr22", 200, ".", "C", "N", "AF_HGDP=0.2;AF_max=0.2"),
+            ("chr22", 250, ".", "C", "n", "AF_HGDP=0.2;AF_max=0.2"),
+            ("chr22", 300, ".", "A", "g", "AF_HGDP=0.3;AF_max=0.3"),
+            ("chr22", 400, ".", "T", "c,<DEL>", "AF_HGDP=0.4,0.1;AF_max=0.4,0.1"),
+        ])
+        self.assertEqual(reg.alts_at(100), ["A"])
+        self.assertEqual(reg.alts_at(200), [])
+        self.assertEqual(reg.alts_at(250), [])
+        self.assertEqual(reg.alts_at(300), ["G"])
+        self.assertEqual(reg.alts_at(400), ["C"])
+        self.assertEqual((stats["written"], stats["not_coded"]), (3, 4))
+
+    def test_an_alt_in_lower_case_is_its_upper_case_allele(self):
+        """CRISPRitz 2.10.0 reads REF and every ALT in upper case, as VCF 4.x does (its
+        docs/MULTIALLELIC_ENRICHMENT.md sections 2.1 and 2.3): c>g is coded as G, and a
+        record C>G beside c>g (or C>g) at one position is one allele, one dictionary entry,
+        which takes the frequencies and ID of the more frequent record. The registry held
+        no record of c>g (a G the genome codes: its SNP rows named no frequency there) and
+        kept C>G beside it as another allele."""
+        _m, reg, stats = self.build([
+            ("chr22", 100, "rsLow", "c", "g", "AF_HGDP=0.3;AF_max=0.3;AF=0.3"),
+            ("chr22", 200, "rsA", "C", "G", "AF_HGDP=0.01;AF_max=0.01;AF=0.01"),
+            ("chr22", 200, "rsB", "c", "g", "AF_gnomAD=0.04;AF_max=0.04;AF=0.04"),
+            ("chr22", 300, "rsC", "T", "A", "AF_HGDP=0.2;AF_max=0.2;AF=0.2"),
+            ("chr22", 300, "rsD", "T", "a", "AF_TOPMed=0.1;AF_max=0.1;AF=0.1"),
+        ])
+        self.assertEqual(reg.alts_at(100), ["G"])
+        self.assertEqual(reg.rsid(100, "G"), "rsLow")
+        self.assertLessEqual(abs(reg.lookup(100, "G")[db_group_id("HGDP")].allele_freq()
+                                 - 0.3), 1e-3)
+        # one allele each: the more frequent record's frequencies and ID
+        self.assertEqual(reg.alts_at(200), ["G"])
+        self.assertEqual(set(reg.lookup(200, "G")), {db_group_id("gnomAD"), GLOBAL_GROUP_ID})
+        self.assertEqual(reg.rsid(200, "G"), "rsB")
+        self.assertEqual(reg.alts_at(300), ["A"])
+        self.assertEqual(set(reg.lookup(300, "A")), {db_group_id("HGDP"), GLOBAL_GROUP_ID})
+        self.assertEqual(reg.rsid(300, "A"), "rsC")
+        self.assertEqual(len(reg), 3)
+        self.assertEqual((stats["snps"], stats["merged"], stats["written"]), (5, 2, 3))
+
+    def test_one_allele_on_two_records_is_the_more_frequent(self):
+        # the enricher merges one REF>ALT of two records into one entry, which takes the
+        # AF and ID of the more frequent record (the higher INFO/AF, found by its key;
+        # on a tie, the earlier)
+        _m, reg, stats = self.build([
+            ("chr22", 100, "rsA", "A", "G", "AF_HGDP=0.01;AF_max=0.01;AF=0.01"),
+            ("chr22", 100, "rsB", "A", "G", "AF_gnomAD=0.03;AF_max=0.03;AF=0.03"),
+            ("chr22", 200, "rsC", "C", "T", "AF_HGDP=0.2;AF_max=0.2;AF=0.2"),
+            ("chr22", 200, "rsD", "C", "T", "AF_TOPMed=0.1;AF_max=0.1;AF=0.1"),
+            ("chr22", 300, "rsE", "G", "C", "AF_HGDP=0.05;AF_max=0.05"),  # no INFO/AF:
+            ("chr22", 300, "rsF", "G", "C", "AF_AoU=0.5;AF_max=0.5"),     # a tie
+        ])
+        self.assertEqual(len(reg), 3)
+        g = reg.lookup(100, "G")
+        self.assertEqual(set(g), {db_group_id("gnomAD"), GLOBAL_GROUP_ID})
+        self.assertEqual(reg.rsid(100, "G"), "rsB")
+        g = reg.lookup(200, "T")
+        self.assertEqual(set(g), {db_group_id("HGDP"), GLOBAL_GROUP_ID})
+        self.assertEqual(reg.rsid(200, "T"), "rsC")
+        self.assertEqual(reg.rsid(300, "C"), "rsE")
+        self.assertEqual(stats["merged"], 3)
+
+    def test_the_manifest_says_which_records(self):
+        manifest, _reg, _stats = self.build([("chr22", 100, ".", "A", "G", "AF_HGDP=0.1")])
+        self.assertIn("PASS", manifest["vcf_records"])
+        self.assertIn("CRISPRitz 2.10.0", manifest["vcf_records"])
 
 
 if __name__ == "__main__":

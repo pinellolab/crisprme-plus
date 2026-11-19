@@ -220,13 +220,17 @@ def add_copy_annotations(
     ).drop(columns=["_cluster_id"])
 
 
-def find_results_prefix(results_dir: str) -> str:
+def find_results_prefix(results_dir: str, safe_root: Optional[str] = None) -> str:
     """Derives a haplotype's CRISPRme results filename prefix by locating its
     `*_integrated_results.tsv` file, rather than reconstructing CRISPRme's
     internal naming convention (guide+PAM+genome+mm+bMax) by hand.
 
     Args:
         results_dir: A `complete-search` output folder.
+        safe_root: The web results pages' data folder: the folder is then
+            listed as safe_files reaches it from there, with no link another
+            user put in it followed at any step and no `..` (the pages name it
+            from a file of a job folder, which another user can write).
 
     Returns:
         The filename prefix shared by `<prefix>_integrated_results.tsv` and
@@ -237,7 +241,12 @@ def find_results_prefix(results_dir: str) -> str:
             is found (e.g. a multi-guide run, not yet supported here).
     """
     suffix = "_integrated_results.tsv"
-    matches = glob.glob(os.path.join(results_dir, f"*{suffix}"))
+    if safe_root is not None:
+        import safe_files  # (PostProcess/, as this module)
+
+        matches = safe_files.glob(results_dir, f"*{suffix}", safe_root)
+    else:
+        matches = glob.glob(os.path.join(results_dir, f"*{suffix}"))
     if len(matches) != 1:
         raise FileNotFoundError(
             f"Expected exactly one *{suffix} file in {results_dir}, found "
@@ -687,6 +696,49 @@ def stamp_built_haplotype_indexes(cwd: str, genome_view: str, present_before: Li
             print(f"Note: could not record which genome {os.path.basename(index_dir)} holds ({e})")
 
 
+def haplotype_genome_source(cwd: str, genome_view: str) -> Dict:
+    """Which genome a search of `genome_view` reads, as an index records it
+    (`.genome_source`): the genome folder and its `genome_fingerprint`.
+
+    Raises:
+        OSError: When the genome folder cannot be read.
+    """
+    return {"genome": _genome_identity(cwd, genome_view),
+            "fingerprint": genome_fingerprint(genome_view)}
+
+
+def record_haplotype_source(results_dir: str, source: Optional[Dict]) -> None:
+    """Writes into a haplotype's finished result folder which genome it was searched from,
+    `source` (`haplotype_genome_source`, taken as the search began), as its
+    `.genome_source`, as an index records it. Never fails the run: a result that records
+    none is searched again by the next run (`haplotype_source_matches`)."""
+    if source is None:
+        return
+    try:
+        _write_index_source(results_dir, source)
+    except OSError as e:
+        print(f"Note: could not record which genome {os.path.basename(results_dir)} was "
+              f"searched from ({e}): the next run searches it again")
+
+
+def haplotype_source_matches(cwd: str, results_dir: str, genome_view: str) -> bool:
+    """Whether the finished haplotype result in `results_dir` was searched from the genome
+    `genome_view` holds now: its `.genome_source` names that genome folder and its
+    `genome_fingerprint` of now. `haplotype_params_match` compares the folder's path
+    alone, so the result of a bundle whose FASTA files changed under that path (imported
+    again, say) was reused (R4-6). A result that records none, one of an earlier CRISPRme,
+    is not: whether the files changed since cannot be told."""
+    record = _read_index_source(results_dir)
+    if record is None:
+        return False
+    try:
+        now = haplotype_genome_source(cwd, genome_view)
+    except OSError:
+        return False
+    return (record.get("genome"), record.get("fingerprint")) == (now["genome"],
+                                                                 now["fingerprint"])
+
+
 def stamp_index_source(cwd: str, genome_dir: str, index_dir: str) -> None:
     """Writes into `index_dir`, an index a complete-search has just built from
     `genome_dir`, which genome it holds (`.genome_source`, as
@@ -895,7 +947,8 @@ def load_chrom_alias(chrom_alias_file: str) -> Tuple[Dict[str, str], Dict[str, s
 
 
 def load_crisprme_predictions(
-    results_dir: str, prefix: str, merge_bp: int, cols: Optional[List[str]] = None
+    results_dir: str, prefix: str, merge_bp: int, cols: Optional[List[str]] = None,
+    safe_root: Optional[str] = None,
 ) -> pd.DataFrame:
     """Loads one haplotype's CRISPRme output into one deduplicated,
     one-row-per-genomic-locus table.
@@ -936,6 +989,8 @@ def load_crisprme_predictions(
         merge_bp: Passed to `cluster_collapse` -- should match the `--merge`
             value used for this haplotype's `complete-search` run.
         cols: Result columns to keep. Defaults to `PRED_COLS`.
+        safe_root: The web results pages' data folder: the file is then read
+            as safe_files reaches it from there (see `find_results_prefix`).
 
     Returns:
         One row per genomic locus, with a stable `off_target_id` column.
@@ -944,7 +999,16 @@ def load_crisprme_predictions(
         cols = PRED_COLS
 
     integrated_file = os.path.join(results_dir, f"{prefix}_integrated_results.tsv")
-    combined = pd.read_csv(integrated_file, sep="\t", usecols=cols)
+    if safe_root is not None:
+        # the web results pages: each folder from the data folder down opened in turn with
+        # no link followed, and the file a regular one (safe_files): a link another user put
+        # in Results/ under the name a job's .Params.txt gives, or a '..' in that name, was
+        # followed, and another user's results, or any file of the user's, shown
+        import safe_files  # (PostProcess/, as this module)
+
+        combined = safe_files.read_csv(integrated_file, safe_root, sep="\t", usecols=cols)
+    else:
+        combined = pd.read_csv(integrated_file, sep="\t", usecols=cols)
 
     mmb = (
         pd.to_numeric(combined["Mismatches_(fewest_mm+b)"], errors="coerce")

@@ -28,7 +28,9 @@ import csv
 import argparse
 from Bio import SeqIO
 
-# IUPAC ambiguity codes (variant-enriched genomes encode SNVs as IUPAC bases)
+# IUPAC ambiguity codes (variant-enriched genomes encode SNVs as IUPAC bases, and a position
+# whose reference base and SNP ALTs hold all four bases as Q, CRISPRitz 2.10.0; N is a gap
+# in a genome, any base in a guide or PAM)
 iupac_dict = {
     "A": {"A"}, "C": {"C"}, "G": {"G"},
     "T": {"T", "U"}, "U": {"T", "U"},
@@ -38,6 +40,7 @@ iupac_dict = {
     "B": {"C", "G", "T"}, "D": {"A", "G", "T"},
     "H": {"A", "C", "T"}, "V": {"A", "C", "G"},
     "N": {"A", "C", "G", "T"},
+    "Q": {"A", "C", "G", "T"},
 }
 
 

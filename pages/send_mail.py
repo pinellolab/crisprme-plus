@@ -40,6 +40,14 @@ import smtplib
 from email import policy
 from email.message import EmailMessage
 
+# PostProcess/ (beside pages/), for safe_files: the search runs this file as a script, whose
+# folder alone is on sys.path, and the search form imports it from pages/
+_POSTPROCESS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "PostProcess")
+if _POSTPROCESS not in sys.path:
+    sys.path.insert(0, _POSTPROCESS)
+import safe_files  # noqa: E402  (no link another user put in the data folder is followed)
+
 # default mail-server settings (used when neither the config file nor the
 # environment override them). gmail over implicit SSL.
 _DEFAULT_HOST = "smtp.gmail.com"
@@ -100,9 +108,9 @@ def _load_config(output_folder: str) -> dict:
     config_path = os.path.join(data_dir, ".email.json")
     file_password = False
     try:
-        if os.path.isfile(config_path):
-            with open(config_path) as fh:
-                filecfg = json.load(fh)
+        if os.path.lexists(config_path):
+            # (it holds the password: read with no link another user put followed)
+            filecfg = json.loads(safe_files.read_text(config_path, data_dir))
             if isinstance(filecfg, dict):
                 if filecfg.get("smtp_host"):
                     cfg["host"] = str(filecfg["smtp_host"])
@@ -157,9 +165,10 @@ def send_mail() -> None:
             "or set CRISPRME_SMTP_PSW) - skipping notification."
         )
         return
-    try:
-        with open(os.path.join(output_folder, "email.txt"), "r") as e:
-            all_content = e.read().strip().split(_ENTRY_SEPARATOR)
+    try:  # (no link another user put in the job's folder followed: safe_files)
+        all_content = safe_files.read_text(
+            os.path.join(output_folder, "email.txt"),
+            safe_files.job_root(output_folder.rstrip("/"))).strip().split(_ENTRY_SEPARATOR)
     except OSError as exc:
         print(f"No email recipients to notify ({exc}).")
         return

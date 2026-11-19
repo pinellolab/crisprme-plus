@@ -31,6 +31,7 @@ from .pages_utils import (
     get_available_PAM,
     get_available_CAS,
     get_all_vcf_datasets,
+    vcf_reference_genome,
     get_custom_annotations,
     get_available_liftover_files,
     installed_assemblies,
@@ -53,6 +54,7 @@ from .pages_utils import (
 import personal_assembly
 import assembly_reconcile  # (PostProcess/, as personal_assembly)
 import genome_in_use  # (PostProcess/, as personal_assembly)
+import safe_files  # (PostProcess/, as personal_assembly: no link another user put is followed)
 import safe_tar  # (PostProcess/, as personal_assembly)
 
 from dash import Input, Output, State, html, dcc, no_update
@@ -61,9 +63,11 @@ import dash_bootstrap_components as dbc
 from flask import request
 
 from typing import List, Optional
+import contextlib
 import subprocess
 import tarfile
 import tempfile
+import zipfile
 import string
 import random
 import re
@@ -96,7 +100,7 @@ _MAX_UPLOAD_BYTES = 50 * 1024**3
 # received index continues the same .part file.
 def _uploads_dir() -> str:
     d = os.path.join(current_working_directory, SETTINGS_DIR, "uploads")
-    os.makedirs(d, exist_ok=True)
+    safe_files.makedirs(d, current_working_directory)  # (a link at a step refused)
     return d
 
 
@@ -132,10 +136,39 @@ def _unsafe_tar_member(tar: tarfile.TarFile, dest_dir: str) -> Optional[str]:
 def _genome_upload_assembly(name: str) -> str:
     """The genome an upload of the file ``name`` installs: its name less the FASTA or
     archive extension (Genomes/<assembly>/)."""
-    for ext in (".chromFa.tar.gz", ".fa.gz", ".fasta.gz", ".tar.gz", ".fa", ".fasta"):
+    for ext in (".chromFa.tar.gz", ".fa.gz", ".fasta.gz", ".tar.gz", ".tgz", ".fa", ".fasta"):
         if name.endswith(ext):
             return name[: -len(ext)]
     return name
+
+
+# What a genome upload goes in as (_install_uploaded_genome): a FASTA file, gzipped or not,
+# or a .tar.gz of them. Anything else, an NCBI Datasets .zip for one, was taken for a FASTA
+# file and refused only once whole, for its first line, the archive's bytes (WEB-9).
+_GENOME_UPLOAD_EXTENSIONS = (".fa", ".fasta", ".fa.gz", ".fasta.gz", ".tar.gz", ".tgz")
+
+
+def _genome_upload_kind_problem(name: str, head: bytes) -> Optional[str]:
+    """Why a genome upload of the file ``name``, whose first bytes are ``head``, cannot be
+    one: a name of no kind a genome goes in as, or bytes not of the kind its name says (a
+    gzip file for .gz and .tgz, FASTA text, a '>' header first, for .fa and .fasta). None
+    when it can be. Checked on the first chunk, before a multi-GB upload streams in."""
+    if not name.endswith(_GENOME_UPLOAD_EXTENSIONS):
+        return (f"{name} is not a file a genome goes in as: upload a FASTA file (.fa, .fasta, "
+                f".fa.gz or .fasta.gz) or a .tar.gz of them")
+    if name.endswith((".gz", ".tgz")):
+        if head[:2] != b"\x1f\x8b":
+            return f"{name} is not gzip-compressed, as its name says"
+    elif head.lstrip()[:1] != b">":
+        return f"{name} is not FASTA text: a FASTA file opens with a '>' header line"
+    return None
+
+
+# What an upload's finalize raises for what was sent, not for a failure of the server: the
+# client's to fix, as the refusals of its first chunk (its packing, its members, what it
+# holds; a bundle, what its metadata.json names), answered 400 with the reason (WEB-9).
+_UPLOAD_REFUSALS = (ValueError, EOFError, tarfile.TarError, zipfile.BadZipFile,
+                    gzip.BadGzipFile, personal_assembly.BundleError)
 
 
 def _built_on_genome(assembly: str) -> List[str]:
@@ -179,21 +212,31 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
     from genome_layout import split_multi_record_fastas
 
     genomes = os.path.dirname(dest_dir)
-    os.makedirs(genomes, exist_ok=True)
-    stage = tempfile.mkdtemp(prefix=f".upload_{assembly}_", dir=genomes)
-    try:
+    # Genomes/ a folder, or a link the user made (safe_files: one another user put in a data
+    # folder they can write is refused); the stage in it is the web app's alone, used through
+    # its descriptor and removed at the end (safe_files.private_dir): one mkdtemp made there
+    # was used by its name, which whoever can write Genomes/ could rename away and put a link
+    # in place of, to a folder of the user's that the upload was then unpacked into
+    safe_files.makedirs(genomes, current_working_directory)
+    with safe_files.private_dir(genomes, current_working_directory,
+                                f".upload_{assembly}_") as stage_dir:
+        stage = stage_dir.path
         unpacked = os.path.join(stage, "unpacked")
         os.makedirs(unpacked)
+        # (the upload's .part read, and moved, with no link followed: safe_files)
         if name.endswith((".tar.gz", ".tgz")):
-            with gzip.open(part_path, "rb") as fin, tarfile.open(fileobj=fin, mode="r") as tar:
+            with safe_files.open_read(part_path, current_working_directory, "rb") as raw, \
+                    gzip.GzipFile(fileobj=raw) as fin, \
+                    tarfile.open(fileobj=fin, mode="r") as tar:
                 safe_tar.extract(tar, unpacked)
         elif name.endswith(".gz"):
-            with gzip.open(part_path, "rb") as fin, open(
-                os.path.join(unpacked, f"{assembly}.fa"), "wb"
-            ) as fout:
+            with safe_files.open_read(part_path, current_working_directory, "rb") as raw, \
+                    gzip.GzipFile(fileobj=raw) as fin, open(
+                        os.path.join(unpacked, f"{assembly}.fa"), "wb") as fout:
                 shutil.copyfileobj(fin, fout)
-        else:
-            os.replace(part_path, os.path.join(unpacked, f"{assembly}.fa"))
+        else:  # (into the stage, which only this process can write: move_into)
+            safe_files.move_into(part_path, current_working_directory,
+                                 os.path.join(unpacked, f"{assembly}.fa"))
         # not a hidden file: macOS tar puts each file's extended attributes in a
         # ._<name> member beside it (._chr1.fa), which every search read as a chromosome
         # and failed on (a search lists a genome's chromosomes as every .fa file there)
@@ -204,7 +247,16 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
             if f.endswith((".fa", ".fasta")) and not f.startswith(".")
         )
         if not fastas:
-            raise ValueError(f"no .fa or .fasta file in {name}")
+            # (an archive of gzipped FASTA files, as UCSC and the data repo serve them:
+            # say so, it was refused with no hint, M3)
+            gzipped = sorted(
+                f for _root, _dirs, files in os.walk(unpacked) for f in files
+                if f.endswith((".fa.gz", ".fasta.gz")) and not f.startswith("."))
+            raise ValueError(
+                f"no .fa or .fasta file in {name}"
+                + (f": it holds gzipped ones ({', '.join(gzipped[:3])}"
+                   f"{', ...' if len(gzipped) > 3 else ''}): gunzip them and pack the .fa "
+                   f"files, or upload one .fa.gz a sequence" if gzipped else ""))
         seen = {}  # the name each goes in under -> the file
         for fa in fastas:
             fname = os.path.splitext(os.path.basename(fa))[0] + ".fa"
@@ -240,8 +292,6 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
                 elif os.path.isdir(old):
                     os.rename(old, dest_dir)
             raise
-    finally:
-        shutil.rmtree(stage, ignore_errors=True)
 
 
 def _vcf_upload_problem(name: str, dataset: str) -> Optional[str]:
@@ -277,11 +327,11 @@ def _finalize_upload(
             raise ValueError("annotation upload must be a .bed file")
         verr = validate_annotation_bed(part_path)  # reject malformed BEDs
         if verr:
-            os.remove(part_path)
+            safe_files.remove(part_path, current_working_directory)
             raise ValueError(f"invalid annotation BED: {verr}")
         dest_dir = os.path.join(current_working_directory, "Annotations")
-        os.makedirs(dest_dir, exist_ok=True)
-        os.replace(part_path, os.path.join(dest_dir, name))
+        safe_files.makedirs(dest_dir, current_working_directory)
+        safe_files.rename(part_path, os.path.join(dest_dir, name), current_working_directory)
         return name
     if target == "genome":
         assembly = _genome_upload_assembly(name)
@@ -290,15 +340,17 @@ def _finalize_upload(
             raise ValueError(err)
         dest_dir = os.path.join(current_working_directory, "Genomes", assembly)
         if name.endswith((".tar.gz", ".tgz")):
-            with gzip.open(part_path, "rb") as fin, tarfile.open(fileobj=fin, mode="r") as tar:
+            with safe_files.open_read(part_path, current_working_directory, "rb") as raw, \
+                    gzip.GzipFile(fileobj=raw) as fin, \
+                    tarfile.open(fileobj=fin, mode="r") as tar:
                 # the member names are client data: vet them all first, so a bad
                 # archive is refused before anything (dest_dir too) is written
                 err = _unsafe_tar_member(tar, dest_dir)
                 if err:
                     raise ValueError(err)
         _install_uploaded_genome(part_path, name, assembly, dest_dir)
-        if os.path.exists(part_path):
-            os.remove(part_path)
+        if os.path.lexists(part_path):
+            safe_files.remove(part_path, current_working_directory)
         return assembly
     if target == "vcf":
         # (the last chunk's names: each chunk sends its own)
@@ -306,12 +358,13 @@ def _finalize_upload(
         if err:
             raise ValueError(err)
         dest_dir = os.path.join(current_working_directory, "VCFs", dataset)
-        os.makedirs(dest_dir, exist_ok=True)
+        safe_files.makedirs(dest_dir, current_working_directory)
         # and once the folder is there: one registered under its name meanwhile is a link
+        # (which safe_files refuses too)
         err = _vcf_upload_problem(name, dataset)
         if err:
             raise ValueError(err)
-        os.replace(part_path, os.path.join(dest_dir, name))
+        safe_files.rename(part_path, os.path.join(dest_dir, name), current_working_directory)
         _write_vcf_marker(dataset, genome)  # record the reference genome
         try:
             _write_dataset_samplesid(dataset)
@@ -322,15 +375,15 @@ def _finalize_upload(
         if not name.endswith((".chain", ".chain.gz")):
             raise ValueError("chain upload must be a .chain or .chain.gz file")
         dest_dir = os.path.join(current_working_directory, LIFTOVER_DIR)
-        os.makedirs(dest_dir, exist_ok=True)
-        os.replace(part_path, os.path.join(dest_dir, name))
+        safe_files.makedirs(dest_dir, current_working_directory)
+        safe_files.rename(part_path, os.path.join(dest_dir, name), current_working_directory)
         return name
     if target == "chromalias":
         if not name.endswith(".chromAlias.txt"):
             raise ValueError("chromAlias upload must be a .chromAlias.txt file")
         dest_dir = os.path.join(current_working_directory, LIFTOVER_DIR)
-        os.makedirs(dest_dir, exist_ok=True)
-        os.replace(part_path, os.path.join(dest_dir, name))
+        safe_files.makedirs(dest_dir, current_working_directory)
+        safe_files.rename(part_path, os.path.join(dest_dir, name), current_working_directory)
         return name
     if target == "assembly-bundle":
         # Bring-your-own personal assembly: a .zip/.tar.gz whose single
@@ -342,12 +395,17 @@ def _finalize_upload(
             raise personal_assembly.BundleError(
                 "personal-assembly bundle must be a .zip or .tar.gz/.tgz archive")
         scratch = part_path + ext  # import_archive picks zip vs tar by extension
-        os.replace(part_path, scratch)
+        safe_files.rename(part_path, scratch, current_working_directory)
         try:
-            return personal_assembly.import_archive(scratch, current_working_directory)
+            # (read with no link followed, from the descriptor opened here: import_archive
+            # opened it by name, in a folder others can write, where another user could put
+            # a link meanwhile)
+            with safe_files.open_read(scratch, current_working_directory, "rb") as archive:
+                return personal_assembly.import_archive(scratch, current_working_directory,
+                                                        fileobj=archive)
         finally:
-            if os.path.exists(scratch):
-                os.remove(scratch)
+            if os.path.lexists(scratch):
+                safe_files.remove(scratch, current_working_directory)
     raise ValueError(f"unknown upload target {target!r}")
 
 
@@ -383,6 +441,10 @@ def _settings_upload_chunk():
         verr = _genome_upload_problem(assembly)
         if verr:
             return (verr, 400)
+        # nor a file of a kind a genome does not go in as
+        verr = _genome_upload_kind_problem(name, request.get_data()[:64])
+        if verr:
+            return (verr, 400)
     if idx == 0 and target == "vcf":
         verr = _validate_name(dataset)
         if verr:
@@ -402,12 +464,19 @@ def _settings_upload_chunk():
         elif not os.path.isfile(os.path.join(current_working_directory, "VCFs", f".{dataset}.refgenome")):
             return ("select the reference genome this VCF is called against first", 400)
     part = os.path.join(_uploads_dir(), name + ".part")
-    with open(part, "wb" if idx == 0 else "ab") as fout:
+    # never through a link another user put in Settings/uploads/ under the name: the chunks,
+    # which a request sends, went into the file it named (safe_files)
+    try:
+        opened = (safe_files.open_write(part, current_working_directory, "wb") if idx == 0
+                  else safe_files.open_append(part, current_working_directory, "ab"))
+    except safe_files.RefusedPath as e:
+        return (f"upload refused: {e.why}", 400)
+    with opened as fout:
         fout.write(request.get_data())
     # size ceiling: never let an unbounded upload fill the disk
     try:
-        if os.path.getsize(part) > _MAX_UPLOAD_BYTES:
-            os.remove(part)
+        if safe_files.getsize(part, current_working_directory) > _MAX_UPLOAD_BYTES:
+            safe_files.remove(part, current_working_directory)
             return (f"upload exceeds the {_fmt_size(_MAX_UPLOAD_BYTES)} limit", 413)
     except OSError:
         pass
@@ -415,11 +484,11 @@ def _settings_upload_chunk():
         try:
             result = _finalize_upload(target, part, name, dataset, genome)
         except Exception as e:
-            if os.path.exists(part):
-                os.remove(part)
-            if isinstance(e, personal_assembly.BundleError):
-                # a bundle refused, saying why (its packing, its members, what its
-                # metadata.json names): the client's to fix, as the refusals above
+            with contextlib.suppress(OSError):
+                safe_files.remove(part, current_working_directory)
+            if isinstance(e, _UPLOAD_REFUSALS):
+                # what was sent refused, saying why: the client's to fix, as the
+                # refusals above
                 return (str(e), 400)
             return (f"finalize failed: {e}", 500)
         return (f"complete:{result}", 200)
@@ -432,12 +501,12 @@ def _settings_upload_chunk():
 def _new_job_id(prefix: str = "set") -> str:
     """A short unique job id, checked against existing Settings/ job dirs."""
     settings_root = os.path.join(current_working_directory, SETTINGS_DIR)
-    os.makedirs(settings_root, exist_ok=True)
+    safe_files.makedirs(settings_root, current_working_directory)
     while True:
         jid = prefix + "_" + "".join(
             random.choice(string.ascii_uppercase + string.digits) for _ in range(10)
         )
-        if not os.path.isdir(os.path.join(settings_root, jid)):
+        if not os.path.lexists(os.path.join(settings_root, jid)):
             return jid
 
 
@@ -450,21 +519,29 @@ _JOB_ID_RE = re.compile(r"set_[A-Z0-9]{10}")
 def _settings_jobdir(job_id) -> Optional[str]:
     """``<cwd>/Settings/<job_id>`` for an id `_new_job_id` could have made, else
     None. Refuses a traversal (``../x``), an absolute path, a non-string, and a
-    job dir whose real path leaves Settings/ (a symlink), so the callbacks that
-    read a job's logs or re-run its cmd.json (Retry, shell=True) never act on a
-    directory outside Settings/."""
+    job dir that is a link (wherever it leads) or not a folder, so the callbacks
+    that read a job's logs or decide whether Retry may re-run it never act on a
+    directory outside Settings/. Settings/ itself may be a link the user made onto a
+    volume (safe_files' rule for the data folder's own folders). The files in the
+    folder are read through safe_files, which follows no link there either."""
     if not isinstance(job_id, str) or not _JOB_ID_RE.fullmatch(job_id):
         return None
-    root = os.path.realpath(os.path.join(current_working_directory, SETTINGS_DIR))
     jobdir = os.path.join(current_working_directory, SETTINGS_DIR, job_id)
-    real = os.path.realpath(jobdir)
-    if real == root or os.path.commonpath([root, real]) != root:
+    try:
+        safe_files.check_dir(jobdir, current_working_directory)
+    except FileNotFoundError:  # (not made yet: its first poll may come first)
+        try:
+            safe_files.check_dir(os.path.dirname(jobdir), current_working_directory)
+        except OSError:
+            return None
+    except OSError:  # a link, or not a folder
         return None
     return jobdir
 
 
-def _run_settings_job(cmd: str, jobdir: str, stage: str) -> None:
-    """Run a data-management shell command, recording stage markers.
+def _run_settings_job(argv: List[str], jobdir: str, stage: str) -> None:
+    """Run a data-management command, an argv run without a shell (_launch_job_cmd),
+    recording stage markers.
 
     Module-level (picklable) so it can be submitted to the ProcessPoolExecutor.
     Success/failure is decided by the process exit code — NOT by whether stderr
@@ -474,18 +551,24 @@ def _run_settings_job(cmd: str, jobdir: str, stage: str) -> None:
     logtxt = os.path.join(jobdir, "log.txt")
     logerr = os.path.join(jobdir, "log_error.txt")
     logverb = os.path.join(jobdir, "log_verbose.txt")
+    # The logs are written with no link followed (safe_files): the job's folder is its own
+    # (_launch_job_cmd makes it, writable by the web app's user alone), but Settings/ is as
+    # writable as the data folder, and a link another user put where a log goes was written
+    # through, over a file of the user's elsewhere (the review of lane S, round 5, S-R5-2).
+    cwd = current_working_directory
     try:
         # mark the actual subprocess start (launch_settings_job wrote "Queued" at
         # submit time; the single-slot executor may hold it queued for a while).
-        with open(logtxt, "a") as lt:
+        with safe_files.open_append(logtxt, cwd) as lt:
             lt.write(f"{stage}\tStart\n")
         # Point the download's progress emitter (crisprme_hf._ProgressReporter) at
         # this job's progress.json so refresh_settings_job can render a real % bar.
         # Harmless for jobs that don't emit progress (they simply never write it).
         env = dict(os.environ)
         env["CRISPRME_PROGRESS_FILE"] = os.path.join(jobdir, "progress.json")
-        with open(logverb, "w") as vout, open(logerr, "w") as eout:
-            proc = subprocess.Popen(cmd, shell=True, stdout=vout, stderr=eout, env=env)
+        with safe_files.open_write(logverb, cwd) as vout, \
+                safe_files.open_write(logerr, cwd) as eout:
+            proc = subprocess.Popen(list(argv), stdout=vout, stderr=eout, env=env)
             # heartbeat: bump log.txt's mtime every 60s while the subprocess runs
             # so refresh_settings_job's stale detector doesn't mistake a long,
             # output-quiet stage (e.g. a big extraction) for a dead worker.
@@ -495,74 +578,86 @@ def _run_settings_job(cmd: str, jobdir: str, stage: str) -> None:
                     break
                 except subprocess.TimeoutExpired:
                     try:
-                        os.utime(logtxt, None)
+                        safe_files.touch(logtxt, cwd)
                     except OSError:
                         pass
             rc = proc.returncode
-        with open(logtxt, "a") as lt:
+        with safe_files.open_append(logtxt, cwd) as lt:
             lt.write(f"{stage}\tEnd\n" if rc == 0 else f"{stage}\tFAILED\n")
-    except Exception as e:  # pragma: no cover - defensive
-        with open(logerr, "a") as eout:
-            eout.write(f"\n{e}\n")
-        with open(logtxt, "a") as lt:
-            lt.write(f"{stage}\tFAILED\n")
+    except Exception as e:  # a log refused (safe_files), or the command not run
+        with contextlib.suppress(OSError):
+            with safe_files.open_append(logerr, cwd) as eout:
+                eout.write(f"\n{e}\n")
+        with contextlib.suppress(OSError):
+            with safe_files.open_append(logtxt, cwd) as lt:
+                lt.write(f"{stage}\tFAILED\n")
 
 
-def _launch_job_cmd(cmd: str, stage: str) -> str:
+# The command of each job this server launched, by job id: what Retry re-runs. Kept in the
+# server's memory only, never read back from a file to be run: the files of Settings/ are as
+# writable as the data folder (by its group, under a umask of 002), and up to 2.10.0 Retry
+# ran through a shell the command a job's cmd.json held, so a member of that group could put
+# a command there for the web app's user to run (the review of lane S, round 4, S-R4-2). A
+# job this server did not launch (one of before its last start) is started again from its
+# card.
+_LAUNCHED_JOBS = {}
+_LAUNCHED_JOBS_LOCK = threading.Lock()
+
+
+def _launch_job_cmd(argv: List[str], stage: str) -> str:
     """Shared job-tracking setup (id, jobdir, Queued marker, executor submit)
     behind both `launch_settings_job` (crisprme.py subcommands) and
-    `launch_settings_job_raw` (an arbitrary shell command, e.g.
-    download_hprc_assembly.py) -- same polling contract either way via
-    :func:`refresh_settings_job`.
+    `launch_settings_job_raw` (another program, e.g. download_hprc_assembly.py)
+    -- same polling contract either way via :func:`refresh_settings_job`.
+
+    ``argv`` is run as it is, without a shell, and kept in memory by job id
+    (_LAUNCHED_JOBS) for a Retry of the job. Its folder is its own: made here,
+    never one that was there already.
     """
-    job_id = _new_job_id()
-    jobdir = os.path.join(current_working_directory, SETTINGS_DIR, job_id)
-    os.makedirs(jobdir, exist_ok=True)
+    argv = [str(a) for a in argv]
+    while True:
+        job_id = _new_job_id()
+        jobdir = os.path.join(current_working_directory, SETTINGS_DIR, job_id)
+        try:
+            # writable by the web app's user alone: no one else puts a file or a link in it
+            safe_files.mkdir(jobdir, current_working_directory, 0o700)
+        except FileExistsError:  # made since _new_job_id looked: take another id
+            continue
+        break
     # "Queued" at submit time; _run_settings_job appends "Start" when the single-slot
     # executor actually begins running it, so the banner can distinguish the two.
-    with open(os.path.join(jobdir, "log.txt"), "w") as lt:
-        lt.write(f"{stage}\tQueued\n")
-    # Persist the exact command + stage so a failed download can be RE-LAUNCHED
-    # verbatim from the web "Retry" button without the page having to reconstruct
-    # the argv (crisprme_hf resumes partial transfers, so a retry is cheap).
-    try:
-        import json
-        with open(os.path.join(jobdir, "cmd.json"), "w") as cf:
-            json.dump({"cmd": cmd, "stage": stage}, cf)
-    except OSError:
-        pass
-    settings_executor.submit(_run_settings_job, cmd, jobdir, stage)
+    safe_files.write_text(os.path.join(jobdir, "log.txt"), current_working_directory,
+                          f"{stage}\tQueued\n")
+    # so a failed download can be RE-LAUNCHED from the web "Retry" button with the same
+    # command (crisprme_hf resumes partial transfers, so a retry is cheap)
+    with _LAUNCHED_JOBS_LOCK:
+        _LAUNCHED_JOBS[job_id] = (argv, stage)
+    settings_executor.submit(_run_settings_job, argv, jobdir, stage)
     return job_id
 
 
 def launch_settings_job(argv: List[str], stage: str) -> str:
-    """Launch ``crisprme.py <argv...> --path <cwd>`` as a detached job.
+    """Launch ``crisprme.py <argv...> --path <cwd>`` as a detached job (no shell).
 
     Returns the job id; progress is polled by :func:`refresh_settings_job`.
     """
     # crisprme.py is on PATH inside the activated env; append --path so data
     # lands under the app's working directory.
-    quoted = " ".join(_shlex_quote(a) for a in argv)
-    cmd = f"crisprme.py {quoted} --path {_shlex_quote(current_working_directory)}"
-    return _launch_job_cmd(cmd, stage)
+    return _launch_job_cmd(
+        ["crisprme.py"] + list(argv) + ["--path", current_working_directory], stage
+    )
 
 
-def launch_settings_job_raw(cmd: str, stage: str) -> str:
-    """Launch an arbitrary shell command as a detached, pollable job -- same
-    tracking/logging contract as `launch_settings_job`, but for tools that
+def launch_settings_job_raw(argv: List[str], stage: str) -> str:
+    """Launch another program's ``argv`` (no shell) as a detached, pollable job --
+    same tracking/logging contract as `launch_settings_job`, but for tools that
     aren't a `crisprme.py <subcommand>` (e.g. download_hprc_assembly.py,
     which isn't routed through crisprme.py's own CLI dispatch -- kept as an
     independent script, same reasoning as the rest of assembly-search's web
     integration: build parallel code paths rather than growing crisprme.py's
     core dispatch for something this self-contained).
     """
-    return _launch_job_cmd(cmd, stage)
-
-
-def _shlex_quote(s: str) -> str:
-    import shlex
-
-    return shlex.quote(str(s))
+    return _launch_job_cmd(argv, stage)
 
 
 def _validate_name(name: str) -> Optional[str]:
@@ -626,13 +721,13 @@ def _error_tail(logerr_path: str, n: int = 3) -> str:
     real error under them. Prefer the last ``n`` NON-benign lines; fall back to
     the raw tail if everything looks benign.
     """
-    if not os.path.isfile(logerr_path):
-        return ""
-    try:
-        with open(logerr_path) as eh:
-            lines = [ln.strip() for ln in eh.read().splitlines() if ln.strip()]
+    try:  # (no link followed: safe_files; a refused file is said so, not shown)
+        text = safe_files.read_text(logerr_path, current_working_directory)
+    except safe_files.RefusedPath as e:
+        return f"(log_error.txt not shown: {e.why})"
     except OSError:
         return ""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if not lines:
         return ""
     meaningful = [ln for ln in lines if not any(p in ln for p in _BENIGN_ERR_PATTERNS)]
@@ -653,12 +748,9 @@ _PROGRESS_STALE_SECONDS = 120
 def _read_progress(jobdir: str) -> Optional[dict]:
     """Parsed <jobdir>/progress.json, or None if absent / unreadable / stale."""
     path = os.path.join(jobdir, "progress.json")
-    if not os.path.isfile(path):
-        return None
-    try:
+    try:  # (no link followed: safe_files)
         import json
-        with open(path) as fh:
-            data = json.load(fh)
+        data = json.loads(safe_files.read_text(path, current_working_directory))
     except (OSError, ValueError):
         return None
     if not isinstance(data, dict):
@@ -728,14 +820,17 @@ def _full_job_log(jobdir: str, verbose_tail: int = 400) -> str:
         ("log_verbose.txt (tail)", "log_verbose.txt", verbose_tail),
     ):
         path = os.path.join(jobdir, fname)
-        if not os.path.isfile(path):
+        try:  # no link followed (safe_files): one another user put there is not read
+            text = safe_files.read_text(path, current_working_directory, errors="replace")
+        except FileNotFoundError:
             continue
-        try:
-            with open(path, "r", errors="replace") as fh:
-                lines = fh.readlines()
+        except safe_files.RefusedPath as exc:
+            sections.append(f"===== {label} =====\n(not shown: {exc.why})")
+            continue
         except OSError as exc:
             sections.append(f"===== {label} =====\n(could not read: {exc})")
             continue
+        lines = text.splitlines(keepends=True)
         if tail and len(lines) > tail:
             lines = [f"... (showing last {tail} lines) ...\n"] + lines[-tail:]
         body = "".join(lines).rstrip() or "(empty)"
@@ -793,11 +888,8 @@ def _genotypes_degraded_warning(jobdir: str):
     index' job is checked (refresh_settings_job): a build or a publish prints other
     lines that name the genotype store."""
     verb = os.path.join(jobdir, "log_verbose.txt")
-    if not os.path.isfile(verb):
-        return None
-    try:
-        with open(verb, "r", errors="replace") as fh:
-            text = fh.read()
+    try:  # (no link followed: safe_files)
+        text = safe_files.read_text(verb, current_working_directory, errors="replace")
     except OSError:
         return None
     # crisprme_hf's own notes: the companion failed to fetch or is absent ("...
@@ -828,16 +920,20 @@ def _build_dirs_left_warning(jobdir: str):
     run is in another container, which cannot tell whether that build still runs
     there, so it leaves it and says so on stdout (crisprme.py _reclaim_build_dirs):
     a line the page shows only after a failure."""
-    try:
-        with open(os.path.join(jobdir, "log_verbose.txt"), errors="replace") as fh:
-            left = [line[len("Leaving "):].split(": ", 1)[0]
-                    for line in fh if line.startswith("Leaving ")]
+    try:  # (no link followed: safe_files)
+        text = safe_files.read_text(os.path.join(jobdir, "log_verbose.txt"),
+                                    current_working_directory, errors="replace")
     except OSError:
         return None
+    left = [line[len("Leaving "):].split(": ", 1)[0]
+            for line in text.splitlines() if line.startswith("Leaving ")]
     root = os.path.join(current_working_directory, "")
     shown = []
     for path in dict.fromkeys(left):
-        if os.path.isdir(path):
+        # a folder of the data folder only, reached as safe_files reaches one: the line
+        # is read from a file, and the page says how much each one holds
+        if path.startswith(root) and safe_files.is_dir(path, current_working_directory,
+                                                       links=safe_files.LINKS_OWN):
             name = path[len(root):] if path.startswith(root) else path
             shown.append(f"{name} ({_fmt_size(_dir_size(path))})")
     if not shown:
@@ -859,9 +955,8 @@ def _job_failed(jobdir: str) -> bool:
     """Whether the job's log.txt is in the state refresh_settings_job renders as
     the FAILED banner (its first marker's stage FAILED, not End) -- the only
     place the page offers Retry."""
-    try:
-        with open(os.path.join(jobdir, "log.txt")) as handle:
-            log = handle.read()
+    try:  # (no link followed: safe_files)
+        log = safe_files.read_text(os.path.join(jobdir, "log.txt"), current_working_directory)
     except (OSError, ValueError):
         return False
     stage = "Operation"
@@ -873,32 +968,27 @@ def _job_failed(jobdir: str) -> bool:
 
 
 def _relaunch_job(job_id: str) -> Optional[str]:
-    """Re-launch the download recorded in <job_id>/cmd.json (the Retry action);
-    returns the NEW job id, or None if the original command can't be recovered
-    or may not be re-run. The id is client data, so the server re-checks what
-    the page implies: the job FAILED, and a 'Publish index' job, which the page's
-    Publish ran in maintainer mode before 2.8.1, is never re-run: the page does not
-    publish (_publish_index_section)."""
+    """Re-launch a failed job (the Retry action) with the command this server
+    launched it with, kept in its memory (_LAUNCHED_JOBS): never one read from a
+    file of the job's folder, which others may write (a cmd.json there is not
+    read). Returns the NEW job id, or None if this server did not launch the job
+    (one of before its last start) or it may not be re-run. The id is client
+    data, so the server re-checks what the page implies: the job FAILED, and a
+    'Publish index' job, which the page's Publish ran in maintainer mode before
+    2.8.1, is never re-run: the page does not publish (_publish_index_section)."""
     jobdir = _settings_jobdir(job_id)
-    if not jobdir:  # not a Settings job id: never read or run that cmd.json
+    if not jobdir:  # not a Settings job id
         return None
     if not _job_failed(jobdir):  # queued, running, done, or no log at all
         return None
-    cmd_path = os.path.join(jobdir, "cmd.json")
-    if not os.path.isfile(cmd_path):
+    with _LAUNCHED_JOBS_LOCK:
+        rec = _LAUNCHED_JOBS.get(job_id)
+    if rec is None:  # not launched by this server since it started
         return None
-    try:
-        import json
-        with open(cmd_path) as cf:
-            rec = json.load(cf)
-    except (OSError, ValueError):
-        return None
-    cmd, stage = rec.get("cmd"), rec.get("stage") or "Retry download"
-    if not cmd:
-        return None
+    argv, stage = rec
     if stage == "Publish index":  # it uploaded an index with the server's token
         return None
-    return _launch_job_cmd(cmd, stage)
+    return _launch_job_cmd(argv, stage)
 
 
 def _write_vcf_marker(dataset: str, genome: str) -> None:
@@ -907,10 +997,10 @@ def _write_vcf_marker(dataset: str, genome: str) -> None:
     if not dataset or not genome:
         return
     vdir = os.path.join(current_working_directory, "VCFs")
-    os.makedirs(vdir, exist_ok=True)
-    try:
-        with open(os.path.join(vdir, f".{dataset}.refgenome"), "w") as fh:
-            fh.write(genome.replace(" ", "_"))
+    try:  # (a link at the marker's name replaced, never written through: safe_files)
+        safe_files.makedirs(vdir, current_working_directory)
+        safe_files.write_text(os.path.join(vdir, f".{dataset}.refgenome"),
+                              current_working_directory, genome.replace(" ", "_"))
     except OSError:
         pass
 
@@ -944,8 +1034,13 @@ def _vcf_header_samples(vcf_dir: str) -> Optional[List[str]]:
     their #CHROM header lines, each once, in the order first seen (files by name).
     [] for a sites-only dataset; None when there is no .vcf.gz, or one has no
     readable header."""
+    # (read as safe_files reads the folders where links are a layout: a dataset registered
+    # from a server folder is a link the web app made, followed; one another user put in a
+    # folder they can write is not)
+    own = safe_files.LINKS_OWN
     try:
-        files = sorted(f for f in os.listdir(vcf_dir) if f.endswith(".vcf.gz"))
+        files = sorted(f for f in safe_files.listdir(vcf_dir, current_working_directory, own)
+                       if f.endswith(".vcf.gz"))
     except OSError:
         return None
     if not files:
@@ -954,7 +1049,9 @@ def _vcf_header_samples(vcf_dir: str) -> Optional[List[str]]:
     for fname in files:
         header = None
         try:
-            with gzip.open(os.path.join(vcf_dir, fname), "rt", errors="replace") as fh:
+            with safe_files.open_read(os.path.join(vcf_dir, fname), current_working_directory,
+                                      "rb", links=own) as raw, \
+                    gzip.open(raw, "rt", errors="replace") as fh:
                 for line in fh:
                     if line.startswith("#CHROM"):
                         header = line
@@ -983,12 +1080,12 @@ def _own_list(dataset: str) -> Optional[str]:
     now (its SHA-256 is one _own_lists_record names), else None: for a list from
     anywhere else (yours, a download's, one you have edited since), and when there is
     none."""
-    try:
-        with open(os.path.join(current_working_directory, "samplesIDs",
-                               f"{dataset}.samplesID.txt"), "rb") as fh:
-            data = fh.read()
-        with open(_own_lists_record(dataset)) as fh:
-            written = fh.read().split()
+    try:  # (no link followed: safe_files)
+        data = safe_files.read_bytes(os.path.join(current_working_directory, "samplesIDs",
+                                                  f"{dataset}.samplesID.txt"),
+                                     current_working_directory)
+        written = safe_files.read_text(_own_lists_record(dataset),
+                                       current_working_directory).split()
     except OSError:
         return None
     if hashlib.sha256(data).hexdigest() not in written:
@@ -999,16 +1096,10 @@ def _own_list(dataset: str) -> Optional[str]:
 def _record_own_lists(dataset: str, *texts: Optional[str]) -> None:
     """Records ``texts`` (None skipped) as lists this page wrote for ``dataset``
     (_own_lists_record), through a hidden temporary file renamed into place."""
-    path = _own_lists_record(dataset)
-    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
-    try:
-        with open(tmp, "w") as out:
-            out.write("".join(hashlib.sha256(t.encode("utf-8")).hexdigest() + "\n"
-                              for t in texts if t is not None))
-        os.replace(tmp, path)
-    finally:
-        if os.path.lexists(tmp):
-            os.remove(tmp)
+    # (a temporary name of its own, made with no link followed: safe_files)
+    safe_files.write_text(_own_lists_record(dataset), current_working_directory,
+                          "".join(hashlib.sha256(t.encode("utf-8")).hexdigest() + "\n"
+                                  for t in texts if t is not None))
 
 
 def _installed_sample_metadata(skip: str) -> dict:
@@ -1019,9 +1110,10 @@ def _installed_sample_metadata(skip: str) -> dict:
     gives no superpopulation (unknown, NA) gives nothing: it is what a list writes for
     a sample it has no metadata for, as this page does."""
     sdir = os.path.join(current_working_directory, "samplesIDs")
+    own = safe_files.LINKS_OWN  # (a list linked in by the user is read: safe_files)
     try:
         names = sorted(
-            f for f in os.listdir(sdir)
+            f for f in safe_files.listdir(sdir, current_working_directory, own)
             if (f.endswith(".samplesID.txt") or (f.startswith("samplesID") and f.endswith(".txt")))
             and ".config." not in f and os.path.join(sdir, f) != skip
         )
@@ -1030,7 +1122,8 @@ def _installed_sample_metadata(skip: str) -> dict:
     meta = {}
     for fname in names:
         try:
-            with open(os.path.join(sdir, fname), errors="replace") as fh:
+            with safe_files.open_read(os.path.join(sdir, fname), current_working_directory,
+                                      links=own, errors="replace") as fh:
                 for line in fh:
                     cols = line.rstrip("\r\n").split("\t")
                     if (len(cols) < 3 or not cols[0] or cols[0].startswith("#")
@@ -1047,9 +1140,9 @@ def _listed_samples(path: str) -> List[str]:
     """The samples the list ``path`` names: the first column of its rows, a header
     line and blank lines skipped, as the tiers read one (tier0_compile.read_samplesid).
     [] when it cannot be read."""
-    try:
-        with open(path, errors="replace") as fh:
-            lines = fh.read().splitlines()
+    try:  # (a list linked in by the user is read; one another user linked is not: safe_files)
+        lines = safe_files.read_text(path, current_working_directory, errors="replace",
+                                     links=safe_files.LINKS_OWN).splitlines()
     except OSError:
         return []
     if lines and (lines[0].startswith("#") or "SAMPLE_ID" in lines[0].upper()):
@@ -1082,8 +1175,8 @@ def _write_dataset_samplesid(dataset: str) -> Optional[str]:
             # sites-only, or no VCF to read: no list is written or passed. A list of this
             # page's goes, as it names samples the files no longer have; any other stays
             if samples == [] and ours is not None:
-                os.remove(target)
-                os.remove(_own_lists_record(dataset))
+                safe_files.remove(target, current_working_directory)
+                safe_files.remove(_own_lists_record(dataset), current_working_directory)
             return None
         if exists and ours is None:
             return target if set(_listed_samples(target)) & set(samples) else None
@@ -1094,21 +1187,13 @@ def _write_dataset_samplesid(dataset: str) -> Optional[str]:
         )
         if text == ours:
             return target
-        os.makedirs(sdir, exist_ok=True)
+        safe_files.makedirs(sdir, current_working_directory)
         # recorded as this page's before and after it goes in, so that the list there is
-        # one whatever stops this; through a hidden temporary file (this thread's) renamed
-        # into place, as the search side writes a combined list
-        # (main_page._ensure_samplesid): never one cut short
+        # one whatever stops this; through a hidden temporary file of its own renamed into
+        # place, as the search side writes a combined list (main_page._ensure_samplesid):
+        # never one cut short, and never written through a link (safe_files)
         _record_own_lists(dataset, ours, text)
-        tmp = os.path.join(sdir, f".{dataset}.samplesID.txt.{os.getpid()}."
-                                 f"{threading.get_ident()}.tmp")
-        try:
-            with open(tmp, "wb") as out:
-                out.write(text.encode("utf-8"))
-            os.replace(tmp, target)
-        finally:
-            if os.path.lexists(tmp):
-                os.remove(tmp)
+        safe_files.write_bytes(target, current_working_directory, text.encode("utf-8"))
         _record_own_lists(dataset, text)
     return target
 
@@ -1119,8 +1204,8 @@ def _samplesid_listing(dataset: str) -> str:
     build-index-only reads a listing (one samplesID file name a line, resolved under
     samplesIDs/)."""
     path = os.path.join(current_working_directory, "samplesIDs", f".{dataset}.samplesID.list")
-    with open(path, "w") as fh:
-        fh.write(f"{dataset}.samplesID.txt\n")
+    # (a link at its name replaced, never written through: safe_files)
+    safe_files.write_text(path, current_working_directory, f"{dataset}.samplesID.txt\n")
     return path
 
 
@@ -1135,6 +1220,17 @@ _HG38_CHROM_SIZES = {"chr1": 248956422, "chr2": 242193529, "chrX": 156040895}
 
 
 def _open_maybe_gzip(path: str):
+    # a liftover file of the data folder, read as safe_files reads the folders where links
+    # are a layout (one another user linked in a folder they can write is refused); a file
+    # elsewhere (a path given whole) as it is
+    root = os.path.join(current_working_directory, "")
+    if path.startswith(root):
+        fd = safe_files.open_fd(path, current_working_directory)
+        try:  # (gzip leaves a file object it is given open: it opens its own, of this file)
+            return gzip.open(safe_files.fd_path(fd), "rt") if path.endswith(".gz") else open(
+                safe_files.fd_path(fd), "rt")
+        finally:
+            os.close(fd)
     return gzip.open(path, "rt") if path.endswith(".gz") else open(path, "rt")
 
 
@@ -1187,7 +1283,7 @@ def _read_chrom_alias_ucsc_to_genbank(chromalias_path: str) -> dict:
     genbank. Lines starting with '#' (including the real header row) are
     skipped, matching every other reader of this file format in this repo."""
     mapping = {}
-    with open(chromalias_path) as fh:
+    with _open_maybe_gzip(chromalias_path) as fh:
         for line in fh:
             if line.startswith("#") or not line.strip():
                 continue
@@ -1445,9 +1541,22 @@ def _render_assembly_rows() -> List[str]:
     return rows
 
 
+def _index_listed(name: str) -> str:
+    """How the Installed indexes list and the Remove card name the index folder ``name``:
+    with the display name given it (its .display_label: build-index-only --name, or the
+    Display name of this page's build), which neither showed (P15.3), else as the folder."""
+    try:  # (as safe_files reads the folders where links are a layout)
+        shown = safe_files.read_text(
+            os.path.join(current_working_directory, "genome_library", name, ".display_label"),
+            current_working_directory, links=safe_files.LINKS_OWN).strip()
+    except OSError:
+        shown = ""
+    return f"{shown} ({name})" if shown and shown != name else name
+
+
 def _render_all_tables() -> html.Div:
     genomes = [g["value"] for g in get_available_genomes()]
-    indexes = [i["value"] for i in get_available_indexes()]
+    indexes = [_index_listed(i["value"]) for i in get_available_indexes()]
     vcfs = [v["value"] for v in get_all_vcf_datasets()]
     anns = [a["value"] for a in get_custom_annotations()]
     cas = [c["label"] for c in get_available_CAS()]
@@ -1491,7 +1600,8 @@ def _deletable_options() -> List:
     for g in get_available_genomes():
         opts.append({"label": f"Genome: {g['value']}", "value": f"genome:{g['value']}"})
     for i in get_available_indexes():
-        opts.append({"label": f"Index: {i['value']}", "value": f"index:{i['value']}"})
+        opts.append({"label": f"Index: {_index_listed(i['value'])}",
+                     "value": f"index:{i['value']}"})
     for v in get_all_vcf_datasets():
         opts.append({"label": f"VCF dataset: {v['value']}", "value": f"vcf:{v['value']}"})
     for a in get_custom_annotations():
@@ -2658,6 +2768,38 @@ def add_index_hf(n, name):
     return _start(launch_settings_job(argv, "Download index"))
 
 
+def _dataset_genome(vcf: Optional[str]) -> Optional[str]:
+    """The genome VCF dataset ``vcf`` belongs to, as Settings recorded it when the dataset
+    was added (VCFs/.<dataset>.refgenome, read by vcf_reference_genome), or None without
+    a record: the search form pairs such a dataset with that genome alone. None too for a
+    value that is no dataset the build form offers: a request can send any, and it names
+    the record read, so './' and '../' reached a file outside the data folder."""
+    if (not vcf or vcf not in [v["value"] for v in get_all_vcf_datasets()]
+            or not os.path.isfile(
+                os.path.join(current_working_directory, "VCFs", f".{vcf}.refgenome"))):
+        return None
+    return vcf_reference_genome(vcf)
+
+
+@app.callback(
+    [Output("index-build-genome", "options"), Output("index-build-genome", "value")],
+    [Input("index-build-vcf", "value")],
+    [State("index-build-genome", "value")],
+    prevent_initial_call=True,
+)
+def build_genomes_of_dataset(vcf, genome):
+    """The genomes the build form offers: every one installed, but for a VCF dataset whose
+    genome Settings recorded (_dataset_genome) that genome alone, selected, as the search
+    form pairs them. It offered every genome, and a build of the dataset on another ended
+    in the enricher's crash (FV :328)."""
+    genomes = get_available_genomes()
+    own = _dataset_genome(vcf)
+    mine = [g for g in genomes if g["value"].replace(" ", "_") == own]
+    if mine:
+        return mine, mine[0]["value"]
+    return genomes, genome if genome in [g["value"] for g in genomes] else None
+
+
 @app.callback(
     [
         Output("settings-active-job", "data", allow_duplicate=True),
@@ -2685,6 +2827,15 @@ def build_index(n, genome, pam, bdna, brna, vcf, display_name):
         return no_update, no_update, "Select an installed genome and PAM."
     if vcf and vcf not in [v["value"] for v in get_all_vcf_datasets()]:
         return no_update, no_update, "Select an installed VCF dataset, or reference only."
+    own = _dataset_genome(vcf)
+    if own and own != genome.replace(" ", "_"):
+        # its VCFs are in another genome's coordinates: the enricher stopped on the first
+        # position past a chromosome's end (std::out_of_range, SIGABRT)
+        installed = own in [g["value"].replace(" ", "_") for g in get_available_genomes()]
+        return no_update, no_update, (
+            f"{vcf} is a VCF dataset of {own}, as recorded when it was added: build its "
+            f"index on {own}" + ("." if installed else f", which is not installed (add it "
+                                                      "under Reference genomes first)."))
     if int(bdna or 0) == 0 and int(brna or 0) == 0:
         # build-index-only no-ops for zero bulges; tell the user up front rather
         # than launching a job that reports "done" without producing an index.
@@ -2850,15 +3001,8 @@ def fetch_from_hprc(n, sample_id):
     script = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "download_hprc_assembly.py"
     )
-    cmd = " ".join(
-        [
-            _shlex_quote(sys.executable),
-            _shlex_quote(script),
-            _shlex_quote(sample_id),
-            "--data-dir", _shlex_quote(current_working_directory),
-        ]
-    )
-    job_id = launch_settings_job_raw(cmd, f"Fetch {sample_id} from HPRC")
+    argv = [sys.executable, script, sample_id, "--data-dir", current_working_directory]
+    job_id = launch_settings_job_raw(argv, f"Fetch {sample_id} from HPRC")
     return _start(job_id)
 
 
@@ -2892,16 +3036,19 @@ def _add_annotation(contents, filename):
         _content_type, content_string = contents.split(",", 1)
         data = base64.b64decode(content_string)
         anndir = os.path.join(current_working_directory, "Annotations")
-        os.makedirs(anndir, exist_ok=True)
+        safe_files.makedirs(anndir, current_working_directory)
         dest = os.path.join(anndir, filename)
-        tmp = dest + ".uploading"
-        with open(tmp, "wb") as fout:
-            fout.write(data)
-        verr = validate_annotation_bed(tmp)  # reject malformed BEDs before accepting
-        if verr:
-            os.remove(tmp)
-            return _fb_refresh(f"Invalid annotation BED: {verr}")
-        os.replace(tmp, dest)
+        # checked in a temporary folder of the web app's own, then renamed (or copied) over
+        # the name with no link followed (safe_files): the upload went to Annotations/
+        # <name>.uploading first, through a link another user put there under that name
+        with tempfile.TemporaryDirectory(prefix="crisprme-annotation-") as tmpdir:
+            tmp = os.path.join(tmpdir, filename)
+            with open(tmp, "wb") as fout:
+                fout.write(data)
+            verr = validate_annotation_bed(tmp)  # reject malformed BEDs before accepting
+            if verr:
+                return _fb_refresh(f"Invalid annotation BED: {verr}")
+            safe_files.replace_from(tmp, dest, current_working_directory)
     except Exception as e:
         return _fb_refresh(f"Upload failed: {e}")
     genomes = [g["value"] for g in get_available_genomes()]
@@ -2968,7 +3115,13 @@ def _cosmic_license_save(n, value):
     if n is None or ONLINE:
         raise PreventUpdate
     attested = bool(value) and "attested" in value
-    ok = set_cosmic_license(attested, "attested via web Settings" if attested else "")
+    try:
+        ok = set_cosmic_license(attested, "attested via web Settings" if attested else "")
+    except OSError as e:  # (a link another user put in the way, refused, or no write access)
+        return html.Span(
+            f"Could not save the COSMIC setting ({e}); it is as it was.",
+            style={"color": "#b00"},
+        )
     if not ok:
         return html.Span(
             "Could not persist the COSMIC setting (licence helper unavailable); "
@@ -3108,10 +3261,11 @@ def add_pam(n, name, length, motif, position):
         token = motif + "N" * glen
         pos = -len(motif)
     filename = f"{glen}bp-{motif}-{name}.txt"
-    try:
-        os.makedirs(os.path.join(current_working_directory, "PAMs"), exist_ok=True)
-        with open(os.path.join(current_working_directory, "PAMs", filename), "w") as fout:
-            fout.write(f"{token} {pos}\n")
+    try:  # (a link at its name replaced, never written through: safe_files)
+        safe_files.makedirs(os.path.join(current_working_directory, "PAMs"),
+                            current_working_directory)
+        safe_files.write_text(os.path.join(current_working_directory, "PAMs", filename),
+                              current_working_directory, f"{token} {pos}\n")
     except OSError as e:
         return _fb_refresh(f"Could not write PAM: {e}")
     return _fb_refresh(
@@ -3139,10 +3293,10 @@ def refresh_settings_job(n, job_id):
     if not jobdir:  # no active job, or not a Settings job id
         raise PreventUpdate
     logtxt = os.path.join(jobdir, "log.txt")
-    if not os.path.isfile(logtxt):
+    try:  # (no link followed: safe_files)
+        log = safe_files.read_text(logtxt, current_working_directory)
+    except (OSError, ValueError):
         raise PreventUpdate
-    with open(logtxt) as handle:
-        log = handle.read()
     # stage name comes from the first marker (Queued or Start)
     stage = "Operation"
     for line in log.splitlines():
@@ -3154,7 +3308,7 @@ def refresh_settings_job(n, job_id):
         # If an index download installed a variant index but its genotypes companion
         # fetch failed, the index detects off-targets but per-sample Samples are
         # degraded — surface that as a visible warning, not a quiet stdout NOTE.
-        # (A Retry keeps the stage cmd.json recorded.) And the build directories a
+        # (A Retry keeps the stage the job was launched with.) And the build directories a
         # stopped build left, which this run could not reclaim.
         done = html.Div(f"{stage}: done.", style={"color": "green"})
         degraded = _genotypes_degraded_warning(jobdir) if stage == "Download index" else None
@@ -3190,8 +3344,10 @@ def refresh_settings_job(n, job_id):
     newest = 0.0
     for fn in ("log.txt", "log_verbose.txt", "log_error.txt"):
         fp = os.path.join(jobdir, fn)
-        if os.path.isfile(fp):
-            newest = max(newest, os.path.getmtime(fp))
+        try:
+            newest = max(newest, safe_files.stat_file(fp, current_working_directory).st_mtime)
+        except OSError:
+            pass
     if newest and (time.time() - newest) > _JOB_STALE_SECONDS:
         return (
             html.Div(
@@ -3266,8 +3422,9 @@ def _toggle_settings_full_log(n, currently_hidden, failed_job):
     prevent_initial_call=True,
 )
 def _retry_settings_job(n, failed_job):
-    """Re-launch the failed download (same command, via cmd.json) and resume
-    polling. crisprme_hf resumes partial transfers, so a retry is cheap."""
+    """Re-launch the failed download (the same command, as this server launched
+    it: _relaunch_job) and resume polling. crisprme_hf resumes partial transfers,
+    so a retry is cheap."""
     if not n or ONLINE or not failed_job:
         raise PreventUpdate
     new_job = _relaunch_job(failed_job)
@@ -3276,8 +3433,8 @@ def _retry_settings_job(n, failed_job):
             no_update,
             no_update,
             html.Div(
-                "Could not retry: the original download command was not found. "
-                "Please start the download again from its card above.",
+                "Could not retry: the server re-runs only a job it launched since it "
+                "last started. Please start the download again from its card above.",
                 style={"color": "#b00"},
             ),
         )
@@ -3363,18 +3520,23 @@ def do_delete(n, item):
     except ValueError as e:
         return html.Span(str(e), style={"color": "#b00"}), no_update, no_update
     freed, removed = 0, 0
+    # each removed within the folder that holds it, reached as safe_files reaches the folders
+    # where links are a layout: a folder another user renamed into a step of the path, or a
+    # link they put there, is never removed in its place (a link at the path itself is
+    # removed, never what it names)
+    cwd, own = current_working_directory, safe_files.LINKS_OWN
     try:
         for path in targets:
             if os.path.islink(path):
-                os.unlink(path)  # registered folder / alias: drop only the link
+                safe_files.remove(path, cwd, own)  # registered folder / alias: only the link
                 removed += 1
             elif os.path.isdir(path):
                 freed += _dir_size(path)
-                shutil.rmtree(path)
+                safe_files.rmtree(path, cwd, own)
                 removed += 1
             elif os.path.isfile(path):
                 freed += os.path.getsize(path)
-                os.remove(path)
+                safe_files.remove(path, cwd, own)
                 removed += 1
     except OSError as e:
         return html.Span(f"Delete failed: {e}", style={"color": "#b00"}), no_update, no_update

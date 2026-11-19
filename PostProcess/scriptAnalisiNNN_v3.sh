@@ -35,8 +35,20 @@ pam_file=${11}
 # sampleID=${12}
 
 output_folder=${12}
+# 2.10.0, option P (pool_post_analisi_snp.py): "all" (the default) runs every step; "cluster"
+# stops after the clustering and writes the analysis' arguments to $CRISPRME_POSTPROC_MANIFEST
+# (the pool then runs new_simple_analysis.py in pieces and merges them, merge_pieces.py);
+# "finish" runs the steps after the analysis
+stage=${13:-all}
 
 echo $jobid
+if [ "$stage" = "finish" ]; then
+    echo 'Sorting and adjusting results'
+    ./adjust_cols.py $jobid.bestCFD.txt
+    ./adjust_cols.py $jobid.bestmmblg.txt
+    ./adjust_cols.py $jobid.bestCRISPR_BULGE.txt
+    exit 0
+fi
 # 1) Rimozione duplicati, estrazione semicommon e unique e creazione file total
 #echo 'Creazione file .total.txt'
 ./extraction.sh $REFtargets $ENRtargets $jobid # OUTPUT    $jobid.common_targets.txt -> Non usato
@@ -59,6 +71,12 @@ rm $jobid.semi_common_targets.minmaxdisr.txt
 # 3) Clustering
 ./cluster.dict.py $jobid.total.txt 'no' 'True' 'True' "$guide_file" 'total' 'orderChr' # OUTPUT     $jobid.total.cluster.txt
 rm $jobid.total.txt
+if [ "$stage" = "cluster" ]; then
+    # new_simple_analysis.py's arguments, one a line, for the pool
+    printf '%s\n' "$referencegenome" "$dictionaries" "$jobid.total.cluster.txt" "${pam_file}" \
+        "$jobid" "$mismatch" > "${CRISPRME_POSTPROC_MANIFEST:?}"
+    exit 0
+fi
 
 #sed -i ':a;N;$!ba;s/\n/\tn\tn\tn\n/g' $jobid.total.cluster.txt
 #sed -i '$s/$/\tn\tn\tn/g' $jobid.total.cluster.txt
@@ -131,8 +149,8 @@ echo 'Sorting and adjusting results'
 # sed -i '1s/.*/_#Bulge_type\t_crRNA\t_DNA\t_Reference\t_Chromosome\t_Position\t_Cluster_Position\t_Direction\t_Mismatches\t_Bulge_Size\t_Total\t_PAM_gen\t_Var_uniq\t_Samples\t_Annotation_Type\t_Real_Guide\t_rsID\t_AF\t_SNP\t_#Seq_in_cluster\t_CFD\t_CFD_ref/' $jobid.bestmmblg.txt
 # sed -i '1s/.*/_#Bulge_type\t_crRNA\t_DNA\t_Reference\t_Chromosome\t_Position\t_Cluster_Position\t_Direction\t_Mismatches\t_Bulge_Size\t_Total\t_PAM_gen\t_Var_uniq\t_Samples\t_Annotation_Type\t_Real_Guide\t_rsID\t_AF\t_SNP\t_#Seq_in_cluster\t_CFD\t_CFD_ref/' $jobid.altmmblg.txt
 
-# pr -m -t -J $jobid.bestCFD.txt $jobid.bestmmblg.txt >$jobid.bestMerge.txt
-# pr -m -t -J $jobid.altCFD.txt $jobid.altmmblg.txt > $jobid.altMerge.txt
+# paste $jobid.bestCFD.txt $jobid.bestmmblg.txt >$jobid.bestMerge.txt
+# paste $jobid.altCFD.txt $jobid.altmmblg.txt > $jobid.altMerge.txt
 
 # rm $jobid.bestCFD.txt
 # rm $jobid.altCFD.txt

@@ -326,11 +326,19 @@ class PerHaplotypeCases(unittest.TestCase):
         self.assertEqual(got, [("A", 0, ("S1",)), ("c", 1, ("S3",)), ("t", 1, ("S1", "S2"))])
 
     def test_two_alts_on_one_slot_is_not_a_haplotype(self):
+        """Two ALTs of one position on the indel's slot: PUTATIVE, among those ALTs -- its
+        two ALT copies fill a diploid's slots, so the reference is no option (METHODS
+        section 4); the indel on the other slot, which holds the reference, is exact."""
         guide = GUIDE + "NNN"
         target = GUIDE[:5] + "y" + GUIDE[6:] + "TGG"
         cols = [_col(5, "C", {"A": {"S1": "1|0"}, "T": {"S1": "1|0"}}, "Y")]
         rows = _resolve(guide, target, cols, {"S1": "1|0"})
         self.assertEqual([r["phase"] for r in rows], [isc.PUTATIVE])
+        cols = [_col(5, "C", {"A": {"S1": "1|0", "S2": "1|0"},
+                              "T": {"S1": "1|0", "S2": "1|0"}}, "Y")]
+        exact, putative = isc.resolve_carriers(cols, {"S1": "1|0", "S2": "0|1"})
+        self.assertEqual(putative, {(frozenset("AT"),): {"S1"}})
+        self.assertEqual(exact, {("C",): [{"S2"}, 1]})
 
     def test_changes_span(self):
         cs = isc.changes_span
@@ -360,8 +368,8 @@ class PerHaplotypeCases(unittest.TestCase):
         A>ACTT at 148517302, whose only carrier HG00344 also holds T>TC at 148517301
         on the same slot (a C inserted next to the anchor, inside the target)."""
         dna = "AgTaAGAAgMaGTAAG-AGGCTRG"
-        real_of = isc.build_offset_to_real(dna, 48764595, "-", 48764590, 148517276,
-                                           "A", "ACTT")
+        real_of = isc.build_offset_to_real(dna, 48764595, "-", 48764590, 148517302,
+                                           148517276, "A", "ACTT")
         reals = [r for r in real_of if r is not None]
         self.assertEqual((min(reals), max(reals)), (148517281, 148517300))
         self.assertFalse(isc.changes_span(148517301, "T", "TC", 148517281, 148517300))
@@ -374,6 +382,41 @@ class PerHaplotypeCases(unittest.TestCase):
         # a target with no ALT base (a flank, or a bulge column) is its own bases
         self.assertEqual(isc.target_ref_span("AC-T", [10, 11, None, 12], 40, "A"), (10, 12))
         self.assertIsNone(isc.target_ref_span("--", [None, None], 40, "A"))
+
+    def test_an_indel_on_a_complex_alleles_last_bases(self):
+        """METHODS section 4 (gate B of 2.10.0, HPRC v2.1): an indel overlapping the
+        window's indel at another position takes a carrier's slot off only when it changes
+        the reference bases the target covers -- for a target inside the ALT, the indel's
+        whole REF -- and a base the indel replaces does not count. chr15:52876508 TATGTAT
+        replaced by 2,375 bases (an ALT written here as A, C..., A) with HG02965's row at
+        ALT offset 821; on its slot, 52876514 T>TAAAAAAA, anchored on the REF's last base.
+        Its haplotype holds the row's target: this pins the rule, on CRISPRme's side."""
+        pos1, ref, alt = 52876508, "TATGTAT", "A" + "C" * 2373 + "A"
+        start = pos1 - 1 - 30                    # the window's real start (30-base flank)
+        fake0 = 1000                             # the window's start on the fake contig
+        gone = (pos1 - 1, pos1 - 2 + len(ref))   # _other_indels: every REF base, replaced
+
+        def span(offset):
+            dna = "ACGT" * 5 + "AGG"
+            real_of = isc.build_offset_to_real(dna, fake0 + 30 + offset, "+", fake0, pos1,
+                                               start, ref, alt)
+            return isc.target_ref_span(dna, real_of, pos1, ref)
+        inside = span(821)
+        self.assertEqual(inside, (52876507, 52876513))   # the whole REF, the ALT's bases
+        self.assertFalse(isc.changes_span(52876514, "T", "TAAAAAAA", *inside, gone))
+        across = span(len(alt) - 10)                     # the ALT's last 10, then the flank
+        self.assertEqual(across, (52876507, 52876526))
+        self.assertTrue(isc.changes_span(52876514, "T", "TAAAAAAA", *across, gone))
+        # an insertion between two bases the ALT replaces has no place on the haplotype
+        self.assertTrue(isc.changes_span(52876510, "A", "AG", *inside, gone))
+        # chr14:57945439 ATGTGTGTG>A past chr14:57945431 CAATGATAA>2,850 bp; chrY:22286864
+        # TGGCACATG>T, which deletes the REF's last base and bases past it, beside
+        # chrY:22286408 458>6,305 bp; chr6:112914365 CT>C inside chr6:112819048
+        # 95,320>95,309 bp: none changes a base a target inside the ALT covers
+        for (p, r, a), (lo, hi) in ((((57945439, "ATGTGTGTG", "A")), (57945430, 57945438)),
+                                    (((22286864, "TGGCACATG", "T")), (22286407, 22286864)),
+                                    (((112914365, "CT", "C")), (112819047, 112914366))):
+            self.assertFalse(isc.changes_span(p, r, a, lo, hi, (lo, hi)), p)
 
     def test_overlapping_indels(self):
         """A second indel inside the target on the SAME slot: that slot does not
@@ -925,9 +968,360 @@ class MultiAllelicRecordsOnOneLine(unittest.TestCase):
         self.assertIn(rows[0]["seq"][5], "ct")
 
 
+class TheStrongestPastFactorsOfZero(unittest.TestCase):
+    """indel_snp_cis.worst_case_bases (2.10.0, gate B5): a PUTATIVE carrier gets the
+    strongest target its own alleles allow, the CFD's maximum, even where the
+    reference-first picks score 0 at two columns. CFD factors per column, so each column
+    is chosen alone where the others' factors are above 0. Up to 72c2c8e the columns were
+    changed one at a time from those picks: with two of them at 0 every trial scored 0,
+    and the carrier kept a target of CFD 0 (B5, TRAC on HGDP + 1000 Genomes,
+    chr14:105,863,798 (+) in IGH, HG04076, whose split records put two or three ALTs of
+    one position on the insertion's slot). Each test fails at 72c2c8e."""
+
+    # a guide whose C at position 14 and A at position 16 the CFD table scores 0 against
+    # a G (rC:dC,14) and a T (rA:dA,16); against a T and a G it scores 0.733 and 0.192
+    G14 = "ACTGAAATCTGTACGAAGGC"
+
+    def test_two_reference_picks_of_cfd_zero(self):
+        """An unphased carrier of the indel and of both SNP alts (the reference stays
+        possible beside one ALT copy): its strongest target holds both alts."""
+        guide = self.G14 + "NNN"
+        target = self.G14[:13] + "K" + self.G14[14] + "K" + self.G14[16:] + "TGG"
+        cols = [_col(13, "G", {"T": {"S": "0/1"}}, "K"),
+                _col(15, "T", {"G": {"S": "0/1"}}, "K")]
+        rows = _resolve(guide, target, cols, {"S": "0/1"})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["phase"], isc.PUTATIVE)
+        self.assertEqual(rows[0]["bases"], ("T", "G"))
+        self.assertEqual(rows[0]["seq"][13] + rows[0]["seq"][15], "tg")
+        self.assertGreater(_cfd(guide, rows[0]["seq"]), 0.1)
+        # the reference-first picks the old passes kept score 0
+        self.assertEqual(_cfd(guide, isc.realize(target, guide, cols, ("G", "T"))), 0.0)
+
+    def test_every_choice_of_cfd_zero_keeps_the_reference_first(self):
+        """Where no choice scores above 0 (the guide's G at position 15 left as an RNA
+        bulge, which the table scores 0: rG:d-,15), every choice ties and the
+        reference-first order decides, as before."""
+        g = self.G14
+        guide = g + "NNN"
+        target = g[:13] + "K" + "-" + "K" + g[16:] + "TGG"
+        cols = [_col(13, "G", {"T": {"S": "0/1"}}, "K"),
+                _col(15, "T", {"G": {"S": "0/1"}}, "K")]
+        motif_at = isc.pam_columns(len(target), "NRG")
+
+        def score(bases):
+            return _cfd(guide, isc.realize(target, guide, cols, bases))
+
+        cands = (frozenset("GT"), frozenset("GT"))
+        self.assertEqual(max(score(b) for b in itertools.product("GT", "GT")), 0.0)
+        self.assertEqual(isc.worst_case_bases(cols, cands, guide, motif_at, score),
+                         ("G", "T"))
+        rows = _resolve(guide, target, cols, {"S": "0/1"}, bulges=1)
+        self.assertEqual([r["bases"] for r in rows], [("G", "T")])
+
+    def test_hg04076_at_igh(self):
+        """B5's row block, HG04076's alleles from the HGDP + 1000 Genomes VCF (two or
+        three ALTs of one position on the slot of chr14_105863799_G_GC, so the reference
+        is out there; one ALT at 105,863,807 and at 105,863,816): on the alignment
+        CTCT-CAGCTGGTACACGGCANNN / CTCTACcGgTGGTcgACGGC-GAG CRISPRme listed it for the
+        target of CFD 0 the reference-first order gives (A at the DNA bulge, then C, G, C,
+        G), while its alleles give C, G, A, G, T (CFD 0.0009); METHODS section 4 lists it
+        for that one."""
+        guide = "CTCT-CAGCTGGTACACGGCANNN"
+        target = "CTCTACcGgTGGTcgACGGC-GAG"
+        ref = {801: "G", 802: "G", 803: "T", 804: "G", 805: "A", 807: "G", 808: "A",
+               809: "C", 810: "T", 811: "C", 812: "A", 813: "C", 814: "C", 815: "T",
+               816: "G", 817: "A", 818: "G", 819: "G", 820: "A", 821: "G"}
+        alleles = {801: "ACT", 802: "ACT", 803: "ACG", 804: "ACT", 805: "CGT", 807: "AG",
+                   808: "CGT", 809: "GT", 810: "ACG", 811: "AGT", 812: "CGT", 813: "GT",
+                   814: "AGT", 815: "ACG", 816: "CG", 817: "CGT", 818: "ACT", 819: "G",
+                   820: "A", 821: "G"}
+        # the target's bases in + order: the inserted C, then 105,863,800 to 105,863,821
+        tcols = [j for j, ch in enumerate(target) if ch != "-"]
+        cols, cands = [], []
+        for i, j in enumerate(tcols[1:], start=1):
+            p = 799 + i
+            if p in ref:
+                cols.append(isc.SnpColumn(j, 105863000 + p - 1, ref[p], {}, "N", "+"))
+                cands.append(frozenset(alleles[p]))
+        motif_at = isc.pam_columns(len(target), "NRG")
+
+        def score(bases):
+            return _cfd(guide, isc.realize(target, guide, cols, bases))
+
+        got = isc.worst_case_bases(cols, tuple(cands), guide, motif_at, score)
+        by_pos = {c.pos1 - 105863000: b for c, b in zip(cols, got)}
+        self.assertEqual([by_pos[p] for p in (803, 805, 807, 812, 813)],
+                         ["C", "G", "A", "G", "T"])
+        self.assertEqual(isc.realize(target, guide, cols, got), "CTCTCCgGaTGGTgtACGGC-GAG")
+        # the brute force over the five columns where the guide's base is not an allele
+        free = [k for k, c in enumerate(cols) if c.col not in motif_at
+                and guide[c.col].upper() not in cands[k]]
+        best = 0.0
+        for combo in itertools.product(*[sorted(cands[k]) for k in free]):
+            bases = list(got)
+            for k, b in zip(free, combo):
+                bases[k] = b
+            best = max(best, score(tuple(bases)))
+        self.assertAlmostEqual(score(got), best, places=15)
+        self.assertGreater(score(got), 0.0)
+        old = list(got)
+        for k, b in zip(free, ("A", "C", "G", "C", "G")):
+            old[k] = b
+        self.assertEqual(isc.realize(target, guide, cols, tuple(old)), target)
+        self.assertEqual(score(tuple(old)), 0.0)
+
+    def test_the_strongest_against_a_brute_force(self):
+        """Random guides with codes on the columns the CFD table can score 0 (positions 14
+        and 16, a DNA bulge), and elsewhere: the PUTATIVE worst case (no genotypes, the
+        code's alleles) reaches the brute force's highest CFD, and where that is 0 keeps
+        the reference-first order. The draw holds cases the old passes missed."""
+        rng = random.Random(2100)
+        zero14 = {"C": "G", "T": "G"}            # rC:dC,14 and rU:dC,14
+        zero16 = {"A": "TC", "G": "TC"}          # rA:dA/dG,16 and rG:dA/dG,16
+        trapped = checked = 0
+        for _ in range(600):
+            g = [rng.choice("ACGT") for _ in range(20)]
+            g[13] = rng.choice("CT")
+            g[15] = rng.choice("AG")
+            t = list(g)
+            refs = {13: zero14[g[13]], 15: rng.choice(zero16[g[15]])}
+            for j in rng.sample([j for j in range(20) if j not in refs], rng.randint(0, 3)):
+                refs[j] = rng.choice([b for b in "ACGT" if b != g[j]])
+            for j, b in refs.items():
+                t[j] = b
+            gs, ts = "".join(g), "".join(t) + rng.choice("ACGT") + "GG"
+            bulge = rng.random() < 0.4
+            if bulge:
+                at = rng.randint(2, 12)
+                gs = gs[:at] + "-" + gs[at:]
+                ts = ts[:at] + rng.choice("ACGT") + ts[at:]
+                refs = {(j + 1 if j >= at else j): b for j, b in refs.items()}
+                refs[at] = ts[at]
+            guide = gs + "NNN"
+            code_at = sorted(refs)
+            codes = {}
+            for j in code_at:
+                others = rng.sample([b for b in "ACGT" if b != ts[j]], rng.randint(1, 2))
+                codes[j] = next(c for c, bs in MOTIF_BASES.items()
+                                if set(bs) == {ts[j]} | set(others) and len(c) == 1
+                                and c not in "ACGT")
+            target = "".join(codes.get(j, ch) for j, ch in enumerate(ts))
+            cols = [_col(j, ts[j], None, codes[j], known=False) for j in code_at]
+            rows = _resolve(guide, target, cols, None, max_mm=20)
+            motif = isc.pam_columns(len(target), "NRG")
+            best, first = 0.0, None
+            for combo in itertools.product(*[MOTIF_BASES[codes[j]] for j in code_at]):
+                seq = isc.realize(target, guide, cols, combo)
+                if not isc.pam_satisfied(seq, motif):
+                    continue
+                best = max(best, _cfd(guide, seq))
+            # the guide's base where it is an allele, else the reference first, then A,
+            # C, G, T: the choice every tie keeps
+            order = tuple(guide[j] if guide[j] in MOTIF_BASES[codes[j]] else
+                          sorted(MOTIF_BASES[codes[j]],
+                                 key=lambda b, r=ts[j]: (b != r, "ACGT".find(b)))[0]
+                          for j in code_at)
+            if best > 0 and _cfd(guide, isc.realize(target, guide, cols, order)) == 0.0:
+                trapped += 1
+            self.assertEqual(len(rows), 1, (guide, target))
+            if best > 0:
+                self.assertAlmostEqual(_cfd(guide, rows[0]["seq"]), best, places=12,
+                                       msg=(guide, target))
+            else:
+                self.assertEqual(rows[0]["bases"], order, (guide, target))
+            checked += 1
+        self.assertGreater(checked, 500)
+        self.assertGreater(trapped, 50)
+
+
 # --------------------------------------------------------------------------- #
 # (c) the analyzer routes every overlaid target through the resolver
 # --------------------------------------------------------------------------- #
+class _Reference(object):
+    """A chromosome's bases from ``at`` on (0-based), "N" elsewhere, as genomeStr reads."""
+
+    def __init__(self, at, seq, length=250000000):
+        self.at, self.seq, self.length = at, seq, length
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, q):
+        i = q - self.at
+        return self.seq[i] if 0 <= i < len(self.seq) else "N"
+
+
+class _Store(object):
+    """The phased indel store's reader (build_indel_genotypes.IndelGenotypeReader):
+    {(POS, REF, ALT): {sample: genotype}}."""
+
+    def __init__(self, records):
+        self.records = records
+
+    def indels(self):
+        return sorted(self.records)
+
+    def carriers_dict(self, pos, ref, alt):
+        return dict(self.records.get((pos, ref, alt), {}))
+
+
+class AVariantPastTheStretch(unittest.TestCase):
+    """analisi_indels_NNN._breaking_slots, run as the analyzer defines it: a slot carrying
+    the window's indel and a second one inside the target keeps the target when its bases
+    read it, from the target's first base on or up to its last, each way reading the
+    slot's variants it can reach (METHODS section 4). A variant a way cannot read -- two
+    records of one base, a SNP alt on a base of an indel's REF, a call that cannot be put
+    on the slot -- stops it only where its stretch on the slot, or the target's bases on
+    the window (read with the slot's own alleles), reach a base of that variant's REF.
+    Up to a640d92 one anywhere in the frame on the way's side stopped it: on the gate's
+    B10 (VEGFA site 3, per sample, HGDP + 1000 Genomes) six carriers whose slot holds the
+    target's bases at the row's start were left off (39 gating carrier-missing findings).
+    HG03120 on chr5:146,361,254 (+), hg38 bases: GGTGT>G at 146,361,255 makes the target
+    (GGTGtGTGtGTGTGaGtGTGTGAG, a DNA bulge), the slot's A>AGTGT at 146,361,281 inserts
+    GTGT at its last base, which reads only the first of those bases, the G the repeat
+    goes on with, and the slot holds 146,361,314 GGGA>G and 146,361,315 GGA>G, two
+    records of one base 33 bases past the target's last base. Each "kept" fails at
+    a640d92."""
+
+    SEQ = ("CTGGATCTTTCTTGTATAGACCAAAGGGTAGAAATCCATGGCATTGGAGTACAGGGTGTGTGTGTGTGTGTGAGTGTGTG"
+           "AGTGTGTGTGTGTGTGAAAGAGAGAGAAAGAGGGGGAGAGAGAGAGAGAGAGAGAGAGAG")
+    AT = 146361200
+    WINDOW = (146361255, "GGTGT", "G")
+    SECOND = (146361281, "A", "AGTGT")
+    PAIR = [(146361314, "GGGA", "G"), (146361315, "GGA", "G")]
+    NAMES = ("_store_indels", "_other_indels", "_on_slot", "_slot_allele", "_frame",
+             "_breaking_slots", "_cache_put")
+
+    def _analyzer(self, records, snps=None, seq=None, at=None):
+        import ast
+        path = os.path.join(HERE, "analisi_indels_NNN.py")
+        with open(path) as fh:
+            tree = ast.parse(fh.read())
+        body = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in self.NAMES]
+        self.assertEqual(sorted(n.name for n in body), sorted(self.NAMES))
+        snps = snps or {}
+        ns = {"bisect": __import__("bisect"), "_isc": isc, "_jgt_cache": {},
+              "_cache_held": {}, "_CACHE_CARRIERS": 1000000, "_indel_index": None,
+              "_indel_starts": [], "_indel_maxref": 0, "_indelgt": _Store(records),
+              "genomeStr": _Reference(at or self.AT, seq or self.SEQ),
+              "_snp_record": lambda pos1: snps.get(pos1, {})}
+        exec(compile(ast.Module(body=body, type_ignores=[]), path, "exec"), ns)
+        return ns
+
+    def _kept(self, slot_records, sample="HG03120", gt="0|1", snps=None):
+        """Whether the slot of ``sample`` holding the window's indel and ``slot_records``
+        (each on the same slot as the window's, ``gt``; a record given with a genotype of
+        its own keeps it) keeps the row's target: _breaking_slots takes the slot out of
+        the second indel's carriers when it does."""
+        for (p, r, _a) in [self.WINDOW, self.SECOND] + [x[:3] for x in slot_records]:
+            self.assertEqual(self.SEQ[p - 1 - self.AT:p - 1 - self.AT + len(r)], r)
+        records = {self.WINDOW: {sample: gt}, self.SECOND: {sample: gt}}
+        for x in slot_records:
+            records[x[:3]] = {sample: x[3] if len(x) > 3 else gt}
+        ns = self._analyzer(records, snps)
+        ipos, iref, ialt = self.WINDOW
+        istart = ipos - 1 - 30
+        offsets, span = (30, 53), (146361254, 146361281)  # the row's target on the window
+        found = ns["_other_indels"](span[0], span[1], ipos, iref, ialt)
+        self.assertIn(self.SECOND, [k for k, _g, _o in found])
+        out = ns["_breaking_slots"](found, offsets, span, ipos, iref, ialt, istart,
+                                    isc.IndelCarriers({sample: gt}))
+        left = dict((k, g) for k, g, _o in out)[self.SECOND]
+        return sample not in left
+
+    def test_two_records_of_one_base_past_the_target(self):
+        """HG03120: kept (at a640d92 the pair made the way from the first base on
+        unreadable, and the way up to the last base does not find the target's bases
+        through the indel)."""
+        self.assertTrue(self._kept(self.PAIR))
+
+    def test_a_snp_alt_on_a_base_of_an_indel_past_the_target(self):
+        """The shape of chr11:127,948,555 (+) and chr10:63,652,969 (-): an indel past the
+        target whose REF holds a SNP alt of the slot (two records of one base)."""
+        snp = {146361317: {"C": {"HG03120": "0|1"}}}  # an A>C on GGGA>G's last base
+        self.assertTrue(self._kept(self.PAIR[:1], snps=snp))
+
+    def test_an_unphased_indel_past_the_target(self):
+        self.assertTrue(self._kept([self.PAIR[0] + ("0/1",)]))
+
+    def test_without_them(self):
+        self.assertTrue(self._kept([]))
+
+    def test_a_variant_the_stretch_reaches_still_stops_it(self):
+        """A SNP alt on the second indel's own anchor, which the stretch reads (as
+        METHODS section 4 has it); and the same pair moved into the target."""
+        snp = {146361281: {"G": {"HG03120": "0|1"}}}
+        self.assertFalse(self._kept([], snps=snp))
+        self.assertFalse(self._kept([(146361262, "GT", "G"), (146361262, "GTGT", "G")]))
+
+    def test_a_variant_on_the_targets_own_bases_still_stops_it(self):
+        """HGDP01092 on chr1:7,231,326 of 7,231,327 ATG>A (B10, hg38 bases): its slot's
+        7,231,348 T>TGA puts GA into the target, so the stretch read from the first base on
+        ends at 7,231,348; the slot also holds 7,231,350 T>A and T>TGTGTGTGTGA, two records
+        of one base past that stretch but on the target's own bases on the window, where
+        the bases compared are the slot's alleles: no one sequence there, so the slot stays
+        off, as at a640d92 (the stretch alone, as at d7a1eadf, kept it, listed for the SNP
+        T>A that its own target does not hold)."""
+        seq = ("ACTGCGTGACCCCAGCATTCATCACATACTGGCTTAATGTGTGTGTGTGTGTGTGTGTGTGAGAGAGAGAGAGAG"
+               "AGAGAGAGGTTTTATTTTTTTTGAAAGAGTCTCGCTCTGTCGCCCAGGCTGGAGT")
+        at, sample, gt = 7231290, "HGDP01092", "0|1"
+        window, second, third = (7231327, "ATG", "A"), (7231348, "T", "TGA"), \
+            (7231350, "T", "TGTGTGTGTGA")
+        for p, r, _a in (window, second, third):
+            self.assertEqual(seq[p - 1 - at:p - 1 - at + len(r)], r)
+        records = {window: {sample: gt}, second: {sample: gt}, third: {sample: gt}}
+        snps = {7231350: {"A": {sample: gt}}}
+        ns = self._analyzer(records, snps, seq=seq, at=at)
+        offsets, span = (30, 52), (7231326, 7231350)  # the target on the window, as B10 had it
+        found = ns["_other_indels"](span[0], span[1], *window)
+        self.assertEqual(sorted(k for k, _g, _o in found), [second, third])
+        out = ns["_breaking_slots"](found, offsets, span, window[0], window[1], window[2],
+                                    window[0] - 1 - 30, isc.IndelCarriers({sample: gt}))
+        self.assertEqual({k: g for k, g, _o in out}, {second: {sample: gt}, third: {sample: gt}})
+
+    def test_a_long_deletion_inside_the_target_as_the_second_indel(self):
+        """HGDP00478 on chr5:141,655,179 (-) of 141,655,182 TAC>T (B10, hg38 bases; the
+        target tGTGtGTGtGTGTGTGtGT-AGG, CCTACACACACACACACACACA on the + strand). The slot's
+        second indel there is no repeat unit at the target's edge: it is 141,655,188's
+        deletion of 37 bases, (AC)13 and the linker CCTGATGGCCT (which the reference also
+        holds at 141,655,172 to 182, whose last three bases are the target's first), which
+        starts after the target's seventh base on the + strand, runs past its reference end
+        and joins two AC runs, so the slot holds the window's bases. The slot also holds
+        141,655,259 C>CA and C>CACACACA, two records of one base 19 bases past the target's
+        last base on it. Kept; at a640d92 the way from the first base on met those two, and
+        the way up to the last base does not find the target's bases through the indel, so
+        the slot was taken off."""
+        seq = ("TCTCTCTGTCCTGTCCCTCTCCCTCTCCCTTTTCCTCGCTCTCCCTCTCTCTCTCTCACACACACACACACCCTGATGGC"
+               "CTACACACACACACACACACACACACACACACACCCTGATGGCCTACACACACACACACACACACACACACACACACACC"
+               "CCCTGATGGCCTACATGAGGAAAACAGCACACCCGGGGCT")
+        at, sample, gt = 141655100, "HGDP00478", "0|1"
+        window = (141655182, "TAC", "T")
+        second = (141655188, "C" + "AC" * 13 + "CCTGATGGCCT", "C")
+        pair = [(141655259, "C", "CA"), (141655259, "C", "CACACACA")]
+        for p, r, _a in [window, second] + pair:
+            self.assertEqual(seq[p - 1 - at:p - 1 - at + len(r)], r)
+        self.assertEqual(seq[141655172 - 1 - at:141655183 - 1 - at], "CCTGATGGCCT")
+        records = {window: {sample: gt}, second: {sample: gt}}
+        records.update((x, {sample: gt}) for x in pair)
+        ns = self._analyzer(records, seq=seq, at=at)
+        offsets, span = (28, 49), (141655179, 141655202)  # the target on the window, as B10 had it
+        found = ns["_other_indels"](span[0], span[1], *window)
+        self.assertEqual([k for k, _g, _o in found], [second])
+        out = ns["_breaking_slots"](found, offsets, span, window[0], window[1], window[2],
+                                    window[0] - 1 - 30, isc.IndelCarriers({sample: gt}))
+        self.assertEqual({k: g for k, g, _o in out}, {second: {}})
+
+    def test_overlapping_records(self):
+        self.assertEqual(isc.overlapping_records(self.PAIR), set(self.PAIR))
+        self.assertEqual(isc.overlapping_records([self.PAIR[0], self.SECOND]), set())
+        two = [(110, "A", "AC"), (110, "A", "ACC")]  # two insertions at one point
+        self.assertEqual(isc.overlapping_records(two + [(130, "TG", "T")]), set(two))
+        # a record left unnormalized (TCA>TCAG) and an insertion on its last base
+        self.assertEqual(isc.overlapping_records([(110, "TCA", "TCAG"), (112, "A", "AT")]),
+                         {(110, "TCA", "TCAG"), (112, "A", "AT")})
+
+
 class TheAnalyzerUsesIt(unittest.TestCase):
     def _src(self, name):
         with open(os.path.join(HERE, name)) as fh:
@@ -946,7 +1340,13 @@ class TheAnalyzerUsesIt(unittest.TestCase):
                       self._src("analisi_indels_NNN.py"))
         self.assertIn('max_total_edits=${13:--1}', self._src("analisi_indels_NNN.sh"))
         self.assertIn('max_total_edits=${14:--1}', self._src("post_analisi_indel.sh"))
-        self.assertIn("{chrom} {max_total_edits}", self._src("pool_post_analisi_indel.py"))
+        # (since 2.10.0 an argument list, the cap after the chromosome, then the stage)
+        self.assertIn("annotation_file, pam_file, dict_folder, final_res, final_res_alt, chrom,\n"
+                      "            str(max_total_edits), stage]",
+                      self._src("pool_post_analisi_indel.py"))
+        self.assertIn('max_total_edits=${14:--1}\n# 2.10.0, option P: all (default), cluster or '
+                      'finish (analisi_indels_NNN.sh)\nstage=${15:-all}',
+                      self._src("post_analisi_indel.sh"))
         sub = self._src("submit_job_automated_new_multiple_vcfs.sh")
         self.assertIn('$final_res $final_res_alt $ncpus "$max_total_edits"', sub)
 

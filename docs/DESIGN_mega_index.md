@@ -7,7 +7,19 @@ hybrid was superseded by the re-phased HGDP1kGP default and retired in v2.7.8. T
 one **sites-only** index so a user can scan once against the union of common
 variation across cohorts, with **per-dataset allele frequencies** + a **global
 `AF_max`**. Individual-level (genotype) data is intentionally discarded (user
-decision, 2026-09-01). NRG (NRG_3) only for now.
+decision, 2026-09-01). It was built for NRG (`NRG_3`) alone at first; the archives of 2.8.1
+hold an NRG and an NRR mega index, and 2.10.0 publishes `20-NRR_3_hg38+hg38_mega` alone, which
+serves NRG searches, pruned (`docs/PRECOMPUTED_INDEXES.md`).
+
+> **CRISPRme 2.10.0.** The mega is rebuilt from the same merged VCFs by
+> `seq_script/merge_panels/mega_rebuild.sh`: every store reads the records CRISPRitz 2.10.0's
+> enricher reads (FILTER `PASS`/`.`, every allele of a line), the build input carries `INFO/AF` =
+> `AF_max` and one record of each REF>ALT (the more frequent: the enricher windows each indel
+> record apart), and `PostProcess/verify_mega_chrom.py`
+> checks every store against the source VCF (METHODS section 2). Searched, a sites-only dataset's
+> candidates in windows of 2^20 sequences or more are withheld (the sites-only density guard) and
+> its combinations below the frequency bound ranked after the others (METHODS section 5). The build
+> notes below are the original 2.5.x design and status.
 
 Sources (`/data/pinello/SHARED_DATA/CRISPRme_data/variants_datasets_20260827/`):
 1000G-2021, HGDP, gnomAD v4.1, TOPMed, All-of-Us. MAF > 0.001 for **all** (uniform
@@ -133,7 +145,9 @@ from a **separate sites-only sidecar**:
   the indel's site has as many sources as the VCF's first record: CRISPRitz
   `add-variants` reads each record's `AF` at the place in `INFO` where the first record
   has it (a known limit, METHODS section 8), and this `AF`'s place moves with the number
-  of sources at the site, so every other indel would get none. The as-run genome-wide
+  of sources at the site, so every other indel would get none. That is CRISPRitz 2.9.1
+  and earlier: 2.10.0 finds each record's `AF` by its key, so on an index it builds
+  every indel would get it. The as-run genome-wide
   merge that made the shipped mega's VCFs, `mega_gw_merge.sh` (read by
   `mega_build_indels.sh`), writes only `AF_<src>` and `AF_max`, with no plain `INFO/AF`,
   so the shipped mega's indel logs hold no AF (for none of its 13,853,761 indels,

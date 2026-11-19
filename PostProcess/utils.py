@@ -611,27 +611,34 @@ def download_reference_genome(
                 )
         else:
             raise ValueError(f"Unknown genome source {source!r} (use ucsc|url)")
-        # collect every FASTA anywhere under staging into the assembly folder
-        fastas = [
+        # collect every FASTA anywhere under staging into the assembly folder, as an
+        # upload's (pages/settings_page._install_uploaded_genome): not a hidden file
+        # (macOS tar puts each file's extended attributes in a ._<name> member beside it,
+        # ._chr1.fa, which every search read as a chromosome and failed on), and each as
+        # a .fa file (chr1.fasta as chr1.fa: index-genome indexes the .fa files only, and
+        # a search lists a genome's chromosomes as its *.fa). Both went in as they were.
+        fastas = sorted(
             os.path.join(root, f)
             for root, _dirs, files in os.walk(staging)
             for f in files
-            if f.endswith((".fa", ".fasta"))
-        ]
+            if f.endswith((".fa", ".fasta")) and not f.startswith(".")
+        )
         if not fastas:
             raise RuntimeError(
                 f"No FASTA files found after downloading assembly '{assembly}'"
             )
         # each goes in under its file name alone: of two of one name (an assembly's
-        # hap1/chr1.fa and hap2/chr1.fa), the second replaced the first with no message.
-        # Refused before an installed genome of that name is touched, as an upload is.
-        seen = {}
+        # hap1/chr1.fa and hap2/chr1.fa, or chr1.fa and chr1.fasta), the second replaced
+        # the first with no message. Refused before an installed genome of that name is
+        # touched, as an upload is.
+        seen = {}  # the name each goes in under -> the file
         for fa in fastas:
-            other = seen.setdefault(os.path.basename(fa), fa)
+            fname = os.path.splitext(os.path.basename(fa))[0] + ".fa"
+            other = seen.setdefault(fname, fa)
             if other != fa:
                 raise RuntimeError(
                     f"The download holds two FASTA files that would both go in as "
-                    f"{os.path.basename(fa)} ({os.path.relpath(other, staging)}, "
+                    f"{fname} ({os.path.relpath(other, staging)}, "
                     f"{os.path.relpath(fa, staging)}), one replacing the other, so nothing "
                     f"was installed. If they belong to two genomes (the two haplotypes of "
                     f"an assembly, say), install each under a name of its own."
@@ -643,8 +650,8 @@ def download_reference_genome(
         work = tempfile.mkdtemp(prefix=".install_", dir=staging)
         built, old = os.path.join(work, "new"), os.path.join(work, "old")
         os.makedirs(built)
-        for fa in fastas:
-            shutil.move(fa, os.path.join(built, os.path.basename(fa)))
+        for fname, fa in seen.items():
+            shutil.move(fa, os.path.join(built, fname))
         # CRISPRme identifies chromosomes by FASTA file name, one sequence per file
         # (see genome_layout.py). UCSC assemblies without a per-chromosome archive
         # (e.g. the pig susScr11) arrive as ONE multi-sequence .fa, which indexes and

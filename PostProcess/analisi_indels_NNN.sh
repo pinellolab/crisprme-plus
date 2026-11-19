@@ -36,6 +36,22 @@ output_folder=${12}
 # the search's cap on total edits (mismatches + bulges), -1 for none: a target
 # resolved per carrier haplotype is dropped past it as past --mm
 max_total_edits=${13:--1}
+# 2.10.0, option P (pool_post_analisi_indel.py): "all" (the default) runs every step;
+# "cluster" stops after the clustering and writes the analysis' arguments to
+# $CRISPRME_POSTPROC_MANIFEST (the pool then runs analisi_indels_NNN.py in pieces and merges
+# them, merge_pieces.py); "finish" runs the steps after the analysis
+stage=${14:-all}
+
+if [ "$stage" = "finish" ]; then
+    echo 'Sorting and adjusting results'
+    ./adjust_cols.py "$jobid.bestCFD_INDEL.txt"
+    ./adjust_cols.py "$jobid.bestCRISPR_BULGE_INDEL.txt"
+    ./adjust_cols.py "$jobid.bestmmblg_INDEL.txt"
+    ./remove_bad_indel_targets.py "$jobid.bestCFD_INDEL.txt"
+    ./remove_bad_indel_targets.py "$jobid.bestCRISPR_BULGE_INDEL.txt"
+    ./remove_bad_indel_targets.py "$jobid.bestmmblg_INDEL.txt"
+    exit 0
+fi
 
 touch $REFtargets.corrected  # initialize reference targets out fname
 
@@ -64,6 +80,13 @@ rm "$jobid.semi_common_targets.minmaxdisr.txt"
 # adjust header (final version)
 sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster Position\tDirection\tMismatches\tBulge_Size\tTotal\tChromosome_fake\tPAM_gen\tVar_uniq\tSamples\tAnnotation Type\tReal Guide\tID\tAF\tSNP/' "$jobid.total.cluster.txt"
 rm "$jobid.total.txt"
+if [ "$stage" = "cluster" ]; then
+    # analisi_indels_NNN.py's arguments, one a line, for the pool
+    printf '%s\n' "$annotationfile" "$jobid.total.cluster.txt" "$jobid" "$dictionaries" \
+        "$pam_file" "$mm" "$referencegenome" "$guide_file" "$bDNA" "$bRNA" \
+        "$max_total_edits" > "${CRISPRME_POSTPROC_MANIFEST:?}"
+    exit 0
+fi
 
 # extract samples
 # For this step, instead of using $jobid.total.cluster.txt and $jobid as a single input,

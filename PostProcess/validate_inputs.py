@@ -12,9 +12,10 @@ from check to failure mode.
 A slower, opt-in full-file scan (`run_full`, `--full_input_validate`) covers
 issues that can only be caught by reading an entire VCF: structural variants
 anywhere in the file, full chromosome coverage, INFO/AF field-position
-consistency, FILTER PASS ratio, POS bounds, high-allele-count multiallelic
-sites, breakend notation, duplicate records, mixed GT phasing, and indels near
-a chromosome start.
+consistency, FILTER PASS ratio, POS bounds, records listing several ALTs,
+breakend notation, positions holding several records, mixed GT phasing, and
+indels near a chromosome start. The lightweight pass looks at the first
+records of each VCF for lines listing several ALTs too.
 """
 
 from typing import Dict, List, NamedTuple, Optional, Tuple
@@ -27,6 +28,7 @@ try:  # PostProcess/ on sys.path (crisprme.py, the pipeline) ...
     from genome_layout import (
         describe_header_problems,
         describe_index_problems,
+        describe_name_problems,
         describe_problem,
         find_multi_record_fastas,
         find_name_mismatched_fastas,
@@ -35,6 +37,7 @@ except ImportError:  # ... or imported as PostProcess.validate_inputs (tests)
     from PostProcess.genome_layout import (
         describe_header_problems,
         describe_index_problems,
+        describe_name_problems,
         describe_problem,
         find_multi_record_fastas,
         find_name_mismatched_fastas,
@@ -71,18 +74,28 @@ MIN_VCF_DATA_FIELDS = 8
 # hit it -- worst case is under-warned data loss, never a wrongly-blessed run.)
 ENRICHER_PASS_VALUES = ("PASS", ".")
 STRUCTURAL_VARIANT_LEN = 50
-# enricher.py:302 builds indel context as genomeStr[pos-26 : pos+26+len(ref)];
-# a negative start silently wraps via Python slicing instead of erroring
-INDEL_START_PROXIMITY = 26
-# enricher.py's allele-index matching does `str(value) in gt_string`, a
-# substring test that misfires once two-digit allele indices appear
-MULTIALLELIC_WARN_THRESHOLD = 10
+# the records of each VCF the lightweight pass reads for lines listing several ALTs
+MULTI_ALT_SCAN_RECORDS = 1000
 # warn (not error) below this PASS ratio; a dataset legitimately restricted to
 # one difficult chromosome can have a low ratio without being misconfigured
 FILTER_PASS_WARN_RATIO = 0.10
 # mock file CRISPRme substitutes for optional file arguments; skip content
 # checks against it
 MOCK_FILENAME = "vuoto.txt"
+
+
+def indel_start_proximity() -> int:
+    """The first POS at which the installed CRISPRitz's enricher writes an indel's
+    fake-indel window: one more than the reference bases the window holds before the
+    record (indel_window.engine_window: 31 for CRISPRitz 2.10.0, whose windows hold 30;
+    26 up to 2.9.1, 25). The enricher skips an indel at a POS below it, with a warning on
+    stdout, so no indel off-target is searched there."""
+    try:
+        import indel_window
+    except ImportError:  # (imported as PostProcess.validate_inputs)
+        from PostProcess import indel_window
+
+    return indel_window.engine_window()[0] + 1
 
 
 class Issue(NamedTuple):
@@ -320,8 +333,13 @@ def check_genome_fasta(genomedir: str) -> Tuple[List[Issue], List[str]]:
         multi, mismatched, header_problems = {}, {}, []
     for fname, ids in multi.items():
         issues.append(Issue(ERROR, describe_problem(genomedir, fname, ids)))
+    # a .fa file of one sequence named otherwise: the search drops all that sequence's
+    # off-targets, and its own check (genome_layout.py) refuses it, as here (M1); a .fasta
+    # one, which no search reads, is only named
+    for problem in describe_name_problems(genomedir, reported=multi):
+        issues.append(Issue(ERROR, problem))
     for fname, rid in mismatched.items():
-        if fname in multi:
+        if fname in multi or fname.split(".")[-1] == "fa":
             continue  # already reported, with the fix
         issues.append(
             Issue(
@@ -545,6 +563,108 @@ def check_vcf_content(vcf_path: str) -> List[Issue]:
     except OSError as e:
         issues.append(Issue(ERROR, f"{fname}: error reading VCF content ({e})"))
     return issues
+
+
+def _multi_alt_issue(fname: str, count: int, example: str, scanned: Optional[int]) -> Issue:
+    """The WARN for VCF lines that list several ALTs (C>A,T): what CRISPRme does with
+    them. ``scanned`` is the number of records read (the lightweight pass), or None for
+    a whole file."""
+    where = (
+        f"{count} of its first {scanned} records list"
+        if scanned is not None
+        else f"{count} record(s) list"
+    )
+    return Issue(
+        WARN,
+        f"{fname}: {where} several ALTs on one line (e.g. {example}) — CRISPRme "
+        "reads each ALT with its own carriers: CRISPRitz 2.10.0 writes each ALT's "
+        "dictionary entry in split form (a genotype such as 1|2 is 1|0 under the first "
+        "ALT, 0|1 under the second), which ties each ALT to its own slot; a dictionary "
+        "of an earlier CRISPRitz keeps 1|2 under both, read against each ALT's own "
+        "allele index, and where the genotypes cannot tell which index an ALT is (every "
+        "carrier of two ALTs is 1|2; a record of one ALT at the same position tells "
+        "nothing of the line's numbers), its carriers are resolved without phase (PUTATIVE). "
+        "Each ALT of such a line is given the line's first ID, as CRISPRitz "
+        "add-variants writes it: where the ID column lists one per ALT (rs1;rs2), "
+        "the rows of the second ALT name the first's (rs1). A VCF split with "
+        "`bcftools norm -m -any`, as the published panels are built, gives each "
+        "ALT a record of its own holding the line's whole ID column: a SNP's rows "
+        "give it whole (rs1;rs2), an indel's its first ID (rs1), as for every "
+        "indel record",
+    )
+
+
+def _multi_lines_issue(fname: str, count: int, examples: List[str],
+                       scanned: Optional[int]) -> Issue:
+    """The WARN for positions that hold two or more lines each listing several ALTs (a REF
+    of one base, an ALT of one character at least, FILTER read by the enricher): what
+    CRISPRme's readers then do. ``scanned`` as for `_multi_alt_issue`."""
+    where = (
+        f"{count} position(s) among its first {scanned} records hold"
+        if scanned is not None
+        else f"{count} position(s) hold"
+    )
+    return Issue(
+        WARN,
+        f"{fname}: {where} two or more lines that each list several ALTs (e.g. "
+        f"{', '.join(examples)}) — CRISPRitz lists the one-base ALTs of every such line in "
+        "the position's one dictionary value: CRISPRitz 2.10.0 writes each in split form "
+        "(1 its own ALT), which CRISPRme's readers tie to its own slot, but an index built "
+        "with an earlier CRISPRitz keeps each line's own allele numbers (1|2), which they "
+        "cannot tell apart: an ALT of one line can be tied to a number of the other's and "
+        "read on the other haplotype slot. Build such an index again with CRISPRitz 2.10.0, "
+        "or split such lines (`bcftools norm -m -any`, as the published panels are built) or "
+        "join them into one",
+    )
+
+
+def check_vcf_multi_alt(vcf_path: str, max_records: int = MULTI_ALT_SCAN_RECORDS) -> List[Issue]:
+    """Warns when the first ``max_records`` records of a VCF hold a line that lists
+    several ALTs, and, apart, a position there holding two or more such lines whose REF is
+    one base, with an ALT of one character, and whose FILTER the enricher reads (C-R1-4:
+    only the opt-in full scan looked for those). Bounded, so it runs on every invocation;
+    the full scan (`--full_input_validate`) counts every such line and position. An
+    unreadable file is left to `check_vcf_content`, which says so."""
+    fname = os.path.basename(vcf_path)
+    count = scanned = 0
+    example = ""
+    at: Tuple[str, str] = ("", "")
+    at_multi = 0
+    positions = 0
+    position_examples: List[str] = []
+    try:
+        with gzip.open(vcf_path, "rt") as fin:
+            for line in fin:
+                if line.startswith("#"):
+                    continue
+                fields = line.split("\t", 7)
+                if len(fields) < 5:
+                    continue
+                scanned += 1
+                if (fields[0], fields[1]) != at:
+                    at, at_multi = (fields[0], fields[1]), 0
+                if "," in fields[4]:
+                    count += 1
+                    if not example:
+                        example = f"{fields[0]}:{fields[1]} {fields[3]}>{fields[4]}"
+                    filt = fields[6] if len(fields) > 6 else ""
+                    if (len(fields[3]) == 1 and filt in ENRICHER_PASS_VALUES
+                            and any(len(a) == 1 for a in fields[4].split(","))):
+                        at_multi += 1
+                        if at_multi == 2:
+                            positions += 1
+                            if len(position_examples) < 5:
+                                position_examples.append(f"{fields[0]}:{fields[1]}")
+                if scanned >= max_records:
+                    break
+    except (OSError, EOFError, UnicodeDecodeError):
+        return []
+    if not count:
+        return []
+    out = [_multi_alt_issue(fname, count, example, scanned)]
+    if positions:
+        out.append(_multi_lines_issue(fname, positions, position_examples, scanned))
+    return out
 
 
 def check_tbi_files(vcf_dir: str) -> List[Issue]:
@@ -1276,6 +1396,7 @@ def run_lightweight(
                 ok_message=f"{os.path.basename(vf)}: gzip-compressed, valid #CHROM "
                 "header with samples, first record has an AF field",
             )
+            report.add(check_vcf_multi_alt(vf))
             if has_samplesfile and sample_ids:
                 report.add(
                     check_samples_in_vcf_header(vf, sample_ids),
@@ -1372,13 +1493,15 @@ def check_vcf_full_scan(
       chromosome implied by the filename (`chrN` token) — a stray record for
       a different chromosome, e.g. from a bad VCF subset/split, wouldn't be
       caught by the filename-only lightweight check.
-    - AF field-position consistency: `enricher.py` caches the AF field's
-      position from the *first* record only and reuses it for every later
-      record (`enricher.py:387-400`). If INFO field ordering isn't constant
+    - AF field-position consistency: up to CRISPRitz 2.9.1 `enricher.py`
+      caches the AF field's position from the *first* record only and reuses
+      it for every later record. If INFO field ordering isn't constant
       record-to-record, older crispritz versions could silently read the
       wrong field at that position; as of CRISPRitz PR #36 the extraction
-      re-verifies the key on every record, so this now degrades to a blank
-      AF for the affected records rather than a wrong value.
+      re-verifies the key on every record, so this degrades to a blank AF
+      for the affected records rather than a wrong value. CRISPRitz 2.10.0,
+      which this CRISPRme installs, finds each record's AF by its key, so the
+      warning says whose limit it is.
     - FILTER PASS ratio: warns if effectively no variants will survive
       enrichment, against the values the installed crispritz actually
       hardcodes (`ENRICHER_PASS_VALUES`), not `--vcf-filter-pass-values`
@@ -1386,9 +1509,11 @@ def check_vcf_full_scan(
     - POS bounds vs. chromosome length: a build/genome mismatch causes an
       IndexError in `enricher.py`, only reachable by scanning far enough into
       the file.
-    - Multiallelic sites with >=10 ALT alleles: `enricher.py`'s allele-index
-      matching is a substring test (`str(value) in gt_string`) that misfires
-      once two-digit allele indices appear.
+    - Records listing several ALTs on one line (C>A,T): CRISPRitz 2.10.0 writes
+      each ALT's dictionary entry in split form, which ties it to its own slot;
+      a dictionary of an earlier CRISPRitz is read against each ALT's own
+      allele index (`site_alleles`), and a carrier whose genotypes cannot tell
+      it is resolved without phase.
     - Breakend/SV notation in ALT (`]`/`[` without a leading `<`): only
       `<DEL>`-style symbolic ALT is filtered out; breakend text is spliced as
       literal sequence into the enriched genome.
@@ -1397,18 +1522,22 @@ def check_vcf_full_scan(
       out of the indel/SV path, but does so silently, so these records are
       never searched at all with zero signal to the user (not corrupted,
       just invisibly omitted).
-    - Duplicate CHR+POS records: the per-variant dict is keyed by
-      `(chrom, pos)` only, so a duplicate record silently overwrites the
-      first with no warning.
+    - Positions holding several records: split records of one site (each ALT
+      its own record; CRISPRitz 2.10.0 codes and lists every ALT, earlier
+      releases only the last record's), and records of one REF>ALT, which
+      CRISPRme reads as one allele with their carriers merged.
     - Mixed GT phasing separators (`|` vs `/`): `new_simple_analysis.py`
       decides phasing for the *entire chromosome* from whichever dict entry
       its iteration happens to hit first — a mixed phased/unphased VCF
       (common with merged cohorts) causes silently wrong haplotype/sample
       attribution. The validator can only warn here; the real fix belongs in
       `new_simple_analysis.py`.
-    - Indels within 26bp of a chromosome start: `enricher.py:322`'s
-      `pos-26` context window goes negative, and Python silently wraps a
-      negative slice index to the end of the string instead of erroring.
+    - Indels nearer a chromosome's start than the installed CRISPRitz's
+      fake-indel window reaches (a POS below `indel_start_proximity()`: 31
+      with 2.10.0's windows of 30 bases, 26 with 2.9.1's of 25): the enricher
+      skips such a record, with a warning on stdout (up to 2.9.0 its window's
+      negative slice wrapped to the chromosome's end instead), so no indel
+      off-target is searched there.
     - AF/ALT allele-count consistency, SNP path: `enricher.py`'s
       `add_to_dict_snps` indexes the comma-separated AF list by each
       single-character ALT allele's 1-indexed position in the full ALT list.
@@ -1441,13 +1570,25 @@ def check_vcf_full_scan(
     pass_count = 0
     total_count = 0
     multiallelic_count = 0
+    multiallelic_example = ""
     breakend_count = 0
     symbolic_alt_count = 0
     seen_positions: Dict[Tuple[str, str], int] = {}
-    duplicate_examples: List[str] = []
+    # the alleles of the position being read (a sorted VCF holds a position's records
+    # together)
+    block_key: Tuple[str, str] = ("", "")
+    seen_alleles: set = set()
+    same_allele_count = 0
+    same_allele_examples: List[str] = []
+    # the lines of the position being read that list several ALTs, one of one character
+    # (the dictionary keeps each such line's raw calls), and the positions with two
+    block_multi = 0
+    multi_lines_positions = 0
+    multi_lines_examples: List[str] = []
     phased_seen = False
     unphased_seen = False
     indel_near_start_count = 0
+    indel_start = indel_start_proximity()
     out_of_bounds_count = 0
     af_index_overflow_count = 0
     indel_af_index_overflow_count = 0
@@ -1468,19 +1609,43 @@ def check_vcf_full_scan(
                 if expected_chrom_norm and _normalize_chrom(chrom) != expected_chrom_norm:
                     rogue_chroms[chrom] = rogue_chroms.get(chrom, 0) + 1
 
-                # duplicate CHR+POS
+                # several records at one CHR+POS, and records of one REF>ALT
                 key = (chrom, pos_str)
                 if key in seen_positions:
                     seen_positions[key] += 1
-                    if len(duplicate_examples) < 5:
-                        duplicate_examples.append(f"{chrom}:{pos_str}")
                 else:
                     seen_positions[key] = 1
+                if key != block_key:
+                    block_key = key
+                    seen_alleles = set()
+                    block_multi = 0
+                alt_alleles = alt.split(",")
+                if (len(alt_alleles) > 1 and len(ref) == 1 and filt in ENRICHER_PASS_VALUES
+                        and any(len(a) == 1 for a in alt_alleles)):
+                    block_multi += 1
+                    if block_multi == 2:
+                        multi_lines_positions += 1
+                        if len(multi_lines_examples) < 5:
+                            multi_lines_examples.append(f"{chrom}:{pos_str}")
+                # a REF>ALT whatever the case of its REF and ALT: VCF 4.x reads them
+                # alike, and so do CRISPRitz 2.10.0, whose enricher upper-cases REF and
+                # every ALT as it reads a line (C>G beside c>g is one allele, one
+                # dictionary entry, the SNV coded), and CRISPRme, which names an indel or
+                # MNV record in upper case (tg>t beside TG>T is one allele); an ALT
+                # holding '<' (a symbolic allele) as written
+                record_alleles = {(ref.upper(), a if "<" in a else a.upper())
+                                  for a in alt_alleles}
+                for allele in sorted(record_alleles & seen_alleles):
+                    same_allele_count += 1
+                    if len(same_allele_examples) < 5:
+                        same_allele_examples.append(f"{chrom}:{pos_str} {allele[0]}>{allele[1]}")
+                seen_alleles |= record_alleles
 
                 # REF/ALT length survey + breakend + multiallelic + indel proximity
-                alt_alleles = alt.split(",")
-                if len(alt_alleles) >= MULTIALLELIC_WARN_THRESHOLD:
+                if len(alt_alleles) > 1:
                     multiallelic_count += 1
+                    if not multiallelic_example:
+                        multiallelic_example = f"{chrom}:{pos_str} {ref}>{alt}"
                 is_breakend = any(
                     ("[" in a or "]" in a) and not a.startswith("<") for a in alt_alleles
                 )
@@ -1495,7 +1660,7 @@ def check_vcf_full_scan(
                 is_indel = any(len(a) != len(ref) for a in alt_alleles)
                 if is_indel:
                     try:
-                        if int(pos_str) < INDEL_START_PROXIMITY:
+                        if int(pos_str) < indel_start:
                             indel_near_start_count += 1
                     except ValueError:
                         pass
@@ -1581,13 +1746,11 @@ def check_vcf_full_scan(
             Issue(
                 WARN,
                 f"{fname}: AF field position varies across records "
-                f"({sorted(af_positions_seen)}) — crispritz caches the "
-                "position from the first record only. Once CRISPRitz PR #36 "
-                "has shipped, a later record whose INFO layout puts a "
-                "different field at that cached position now safely reads as "
-                "a blank AF (the fixed extraction re-verifies the key on "
-                "every record rather than trusting the cached position "
-                "blindly) rather than silently using the wrong value",
+                f"({sorted(af_positions_seen)}) — CRISPRitz 2.9.1 and earlier "
+                "read every record's AF at the first record's position, so an "
+                "index they build has no AF for a record that has it elsewhere "
+                "(its MAF is blank); CRISPRitz 2.10.0, which this CRISPRme "
+                "installs, finds each record's AF by its key",
             )
         )
     if pass_count == 0:
@@ -1624,13 +1787,7 @@ def check_vcf_full_scan(
         )
     if multiallelic_count:
         issues.append(
-            Issue(
-                WARN,
-                f"{fname}: {multiallelic_count} site(s) have >="
-                f"{MULTIALLELIC_WARN_THRESHOLD} ALT alleles — crispritz matches "
-                "allele indices by substring, which misattributes samples once "
-                "two-digit allele indices appear",
-            )
+            _multi_alt_issue(fname, multiallelic_count, multiallelic_example, None)
         )
     if af_index_overflow_count:
         # Once CRISPRitz PR #36 has shipped, both the SNP and indel paths
@@ -1682,17 +1839,30 @@ def check_vcf_full_scan(
                 "dropped",
             )
         )
-    if duplicate_examples:
+    if same_allele_count:
         dup_count = sum(1 for n in seen_positions.values() if n > 1)
         issues.append(
             Issue(
                 WARN,
-                f"{fname}: {dup_count} duplicate CHR+POS record(s) found "
-                f"(e.g. {', '.join(duplicate_examples)}) — the per-variant "
-                "dict is keyed by CHR+POS only, so all but the last duplicate "
-                "are silently dropped",
+                f"{fname}: {same_allele_count} record(s) repeat the REF>ALT of an "
+                f"earlier record at their position (e.g. "
+                f"{', '.join(same_allele_examples)}; {dup_count} position(s) hold "
+                "more than one record) — CRISPRme reads the records of one REF>ALT "
+                "as one allele, their carriers merged, an indel's too, REF and ALT "
+                "whatever their case (VCF 4.x reads them alike, and so does CRISPRitz "
+                "2.10.0: tg>t beside TG>T is one allele, named in upper case, and so is "
+                "c>g beside C>G): a haplotype slot "
+                "carries the ALT if either record puts it there (a sample whose two calls "
+                "are not phased alike keeps the one with more copies, the earlier on a "
+                "tie, as CRISPRitz merges them). A sample left with two ALTs of "
+                "one position on one slot is resolved without phase (PUTATIVE). "
+                "Split records of one site, one ALT each, are read each as its own "
+                "allele",
             )
         )
+    if multi_lines_positions:
+        issues.append(_multi_lines_issue(fname, multi_lines_positions, multi_lines_examples,
+                                         None))
     if phased_seen and unphased_seen:
         issues.append(
             Issue(
@@ -1710,11 +1880,13 @@ def check_vcf_full_scan(
         issues.append(
             Issue(
                 WARN,
-                f"{fname}: {indel_near_start_count} indel(s) within "
-                f"{INDEL_START_PROXIMITY}bp of the chromosome start — "
-                "enricher.py's context window goes negative here, and Python "
-                "silently wraps the slice to the end of the sequence instead "
-                "of erroring, corrupting that variant's FASTA record",
+                f"{fname}: {indel_near_start_count} indel(s) at a POS below "
+                f"{indel_start}, with fewer than {indel_start - 1} reference bases between the "
+                f"chromosome start and the record — the enricher (CRISPRitz add-variants) "
+                f"skips such an indel, "
+                f"with a warning on stdout: its fake-indel window holds "
+                f"{indel_start - 1} reference bases before the record, so no indel "
+                f"off-target is searched at it",
             )
         )
     return issues

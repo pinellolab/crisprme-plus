@@ -18,21 +18,31 @@ irm https://pinellolab.github.io/crisprme-plus/install.ps1 | iex
 
 Then open **CRISPRme** from Applications (macOS) or the Desktop / Start Menu
 (Windows) — a small window with **three buttons: Start / Update / Stop**. Click
-**Start**: the first time it **asks where to store the data** (a ~45 GB download that
-takes ~98 GB once installed, so pick a disk with ~150 GB free) — accept the
+**Start**: the first time it **asks where to store the data** (a ~70 GB download that
+takes ~150 GB once installed, so pick a disk with ~200 GB free) — accept the
 default in your home folder, or pick another disk/folder if your home disk is low
 on space; the choice is **remembered** for every future launch. It then downloads
 the reference + variant data automatically (once) and opens the web interface at
 http://localhost:8080; every Start after that is instant. (Manage additional data
 from the web app's own Settings.)
 
-**Memory:** most searches are light, but the **whole-genome variant-aware search**
-(across 1000G + HGDP) needs **~64 GB of RAM** — give Docker Desktop that much under
-Settings → Resources → Memory. On **Windows with the WSL 2 backend there is no memory
-slider**: set `memory=` in `C:\Users\<you>\.wslconfig`, then run `wsl --shutdown` (see
+**Installed with 2.8.1?** **Update** pulls the new engine only. Your data folder keeps 2.8.1's
+indexes, which 2.10.0 still searches with their limits, and an app installed by 2.8.1's
+installer downloads 2.8.1's index on a first Start. To move to 2.10.0's indexes: run the
+one-line install command above again (it replaces the app); then **Stop** CRISPRme, rename or
+delete the old data folder, and delete `~/CRISPRme/.data_location` (Windows:
+`%USERPROFILE%\CRISPRme\.data_location`). The next **Start** asks where to put the data and
+downloads 2.10.0's (~70 GB). The README's
+[Upgrading from 2.8.1](../README.md#upgrading-from-281) says what changes.
+
+**Memory:** the **whole-genome variant-aware search** (across 1000G + HGDP) needs
+**~64 GB of RAM** — give Docker Desktop that much under Settings → Resources → Memory.
+On **Windows with the WSL 2 backend there is no memory slider**: set `memory=` in
+`C:\Users\<you>\.wslconfig`, then run `wsl --shutdown` (see
 the [Docker Quickstart](../docs/DOCKER_QUICKSTART.md#1-install-docker-one-time)). Many current laptops ship with 36–128 GB and can run
-it; otherwise use a workstation or HPC. **Reference-only or single-chromosome /
-target-region variant searches fit ~16 GB**, so any laptop can do those. Requires
+it; otherwise use a workstation or HPC. Smaller searches need less: the README's
+[System Requirements](../README.md#0-system-requirements) give what a reference-only search and
+a variant-aware search of one chromosome or region took. Requires
 [Docker Desktop](https://www.docker.com/products/docker-desktop/) (the installer
 guides you if it is missing).
 
@@ -49,9 +59,13 @@ guides you if it is missing).
 - The apps are thin managers that shell out to `docker run` and open the browser; the engine is
   the published `pinellolab/crisprme` image, which the scripts pull as **`:latest`** (the release
   CI pushes `:latest`), so the installer tracks the current release automatically and the
-  **Update** button always re-pulls it — no per-release tag bump needed.
+  **Update** button always re-pulls it — no per-release tag bump needed. The first Start's index
+  name is written into the app, though, and Update changes neither the app nor the data folder:
+  where a release changes the default index (2.10.0 did, to `20-NRR_3_hg38+hg38_HGDP1kGP`), an
+  existing app keeps downloading the old one, and its users re-run the installer
+  (**Installed with 2.8.1?**, above).
 - The first-run download (reference data + the default **HGDP + 1000 Genomes** variant index) is
-  **~45 GB**, **~98 GB** on disk once installed (keep **~150 GB** free), and the engine image a
+  **~70 GB**, **~150 GB** on disk once installed (keep **~200 GB** free), and the engine image a
   **~5 GB** download (**~1.8 GB** on Apple Silicon) — keep these figures in sync with `README.md`,
   `docs/index.html`, `docs/DOCKER_QUICKSTART.md`, `docs/TROUBLESHOOTING.md` and
   `docs/DATA_LAYOUT.md`; `PostProcess/test_documented_sizes.py` checks that they agree.

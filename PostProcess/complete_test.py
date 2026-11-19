@@ -136,9 +136,9 @@ def require_prebuilt_index() -> str:
             f"\nNo prebuilt index found for the complete-test (looked in {lib}).\n"
             "CRISPRme does not build one automatically.\n\n"
             "Download an index first, e.g.:\n"
-            "  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP\n"
-            "  (the recommended default: phased HGDP + 1000 Genomes, 4,091 samples;\n"
-            "   or --index-name NRG_3_hg38 for a reference-only scan)\n\n"
+            "  crisprme.py download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP\n"
+            "  (the recommended default: SpCas9 NRR, phased HGDP + 1000 Genomes, 4,091\n"
+            "   samples; or --index-name 20-NRR_3_hg38 for a reference-only scan)\n\n"
             "then re-run:  crisprme.py complete-test --chrom chr22 --thread 4\n"
             "  (chromosome 22 only; without --chrom it searches every chromosome)\n"
         )
@@ -152,8 +152,16 @@ def require_prebuilt_index() -> str:
 
 
 def _recorded_five_prime(index_dir: str) -> Optional[bool]:
-    """Whether an index's .pam_build records a 5' PAM ("<name> <seq_len> <pam_pos>", a
-    negative pam_pos): None without a usable record."""
+    """Whether an index records a 5' PAM: its name, which says the side since 2.10.0
+    (index_fit.parse_index_name: NNNN-20_2_hg38 for a 5' PAM), else the header of its .bin
+    files (index format 2), else its .pam_build ("<name> <seq_len> <pam_pos>", a negative
+    pam_pos), as the search script's _index_side reads them. None without any."""
+    parsed = index_fit.parse_index_name(os.path.basename(os.path.normpath(index_dir)))
+    if parsed and parsed[4]:
+        return parsed[4] == 5
+    five_prime = index_fit.built_five_prime(index_dir)
+    if five_prime is not None:
+        return five_prime
     try:
         with open(os.path.join(index_dir, ".pam_build")) as fh:
             return int(fh.readline().split()[-1]) < 0
@@ -169,7 +177,7 @@ def _smoke_rank(index_name: str) -> tuple:
     parsed = _parse_index_name(index_name)
     if parsed is None:
         return (2, 0, index_name)
-    token, bmax = parsed[0], int(index_name.split("_", 2)[1])
+    token, bmax = parsed[0], index_fit.parse_index_name(index_name)[1]
     all_n = set(token) == {"N"}
     if all_n and len(token) > 3:
         rank = 3
@@ -191,7 +199,7 @@ def check_output(benchmarks: bool) -> None:
     and validate-test would read an earlier run's results as this run's: every folder of
     this mode there (crisprme-test-out_<name> of any benchmark, a heavy one or one an
     earlier release ran too) is named, all in one message, before anything is downloaded
-    or searched. A folder of the other mode is in neither's way.
+    or searched. A folder of the other mode is in neither's way, nor is an empty one.
 
     Args:
         benchmarks (bool): Whether this run is the benchmark mode's.
@@ -202,10 +210,14 @@ def check_output(benchmarks: bool) -> None:
     """
     results_dir = os.path.abspath(os.path.join(os.getcwd(), CRISPRME_DIRS[1]))
     assert os.path.isdir(results_dir)
+    # (an empty one is no earlier run's results: complete-search makes its output folder,
+    # then a refusal of its pre-flight leaves it empty, and that stopped every run after
+    # it, until the user removed it, R2-F2; complete-search takes an empty folder)
     found = [os.path.join(results_dir, d) for d in sorted(os.listdir(results_dir))
              if (d.startswith(f"{COMPLETETESTRESDIR}_") if benchmarks
                  else d == COMPLETETESTRESDIR)
-             and os.path.isdir(os.path.join(results_dir, d))]
+             and os.path.isdir(os.path.join(results_dir, d))
+             and os.listdir(os.path.join(results_dir, d))]
     if found:
         # all in one message (named one at a time, the benchmark mode's six stopped a user
         # five more times), and exit 2, not 0, which a script or a CI step read as a pass
@@ -282,9 +294,18 @@ def download_genome_data(chrom: str, dest: str) -> str:
         # (repo/file missing, no network, huggingface_hub absent) fall back to
         # the original UCSC source transparently. A file the repo does not hold
         # is no failure: one line on stdout says where it comes from instead
+        # The repo holds every chromosome gzipped (genomes/hg38/<chrom>.fa.gz) and chr22
+        # unpacked too: a chromosome but chr22 came from UCSC (FR :725)
         try:
-            hf_fetch(f"genomes/hg38/{chrom}.fa", chromfa)
-            sys.stderr.write(f"Fetched {chrom}.fa from HuggingFace ({HF_DATA_REPO})\n")
+            try:
+                hf_fetch(f"genomes/hg38/{chrom}.fa", chromfa)
+                sys.stderr.write(f"Fetched {chrom}.fa from HuggingFace ({HF_DATA_REPO})\n")
+            except Exception as unpacked:  # noqa: BLE001
+                if not hf_missing(unpacked):
+                    raise
+                hf_fetch(f"genomes/hg38/{chrom}.fa.gz", f"{chromfa}.gz")
+                gunzip(f"{chromfa}.gz", chromfa)  # (which removes the .gz)
+                sys.stderr.write(f"Fetched {chrom}.fa.gz from HuggingFace ({HF_DATA_REPO})\n")
             assert os.path.isfile(chromfa)
             return os.path.abspath(genome_dir)
         except Exception as e:
@@ -725,16 +746,19 @@ def write_samplesids_config(dataset: str) -> str:
 
 
 def _parse_index_name(index_name: str):
-    """Parse a CRISPRme index directory name ``<PAM>_<bMax>_<ref>[+<variant>]``.
+    """Parse a CRISPRme index directory name ``<PAM>_<bMax>_<ref>[+<variant>]``, or the
+    form that carries the guide length and the side since 2.10.0
+    (index_fit.parse_index_name).
 
     Returns (pam_token, ref_genome, is_variant) or None if it does not parse.
     e.g. ``NRG_3_hg38`` -> ('NRG', 'hg38', False);
-         ``NRG_3_hg38+hg38_1000G2021`` -> ('NRG', 'hg38', True).
+         ``NRG_3_hg38+hg38_1000G2021`` -> ('NRG', 'hg38', True);
+         ``20-NRR_3_hg38`` -> ('NRR', 'hg38', False).
     """
-    parts = index_name.split("_", 2)
-    if len(parts) < 3 or not parts[1].isdigit():
+    parsed = index_fit.parse_index_name(index_name)
+    if not parsed:
         return None
-    pam_token, _bmax, rest = parts[0], parts[1], parts[2]
+    pam_token, _bmax, rest = parsed[:3]
     ref = rest.split("+")[0]
     return pam_token, ref, ("+" in rest)
 
@@ -1004,7 +1028,8 @@ def _chrom_view(chrom: str, ref: str, vcf_list: Optional[str]):
             ):
                 continue
             os.mkdir(os.path.join(view, "genome_library", name))
-            five_prime_all_n = set(name.split("_")[0]) == {"N"} and _recorded_five_prime(idx)
+            five_prime_all_n = (set(index_fit.index_pam(name)) == {"N"}
+                                and _recorded_five_prime(idx))
             for f in os.listdir(idx):
                 if tree.fullmatch(f) or (f == ".pam_build" and five_prime_all_n):
                     link("genome_library", name, f)
@@ -1013,7 +1038,9 @@ def _chrom_view(chrom: str, ref: str, vcf_list: Optional[str]):
                 os.path.join(lib, f"{indels}.lock")
             ):
                 os.mkdir(os.path.join(view, "genome_library", indels))
-                fake = "_".join(name.split("_", 2)[:2]) + f"_fake{chrom}"  # <PAM>_<N>_
+                # <PAM>_<N>_fake<chrom>: the engine's name, whichever form the index's takes
+                _parts = index_fit.parse_index_name(name)
+                fake = f"{_parts[0]}_{_parts[1]}_fake{chrom}"
                 if os.path.isdir(os.path.join(lib, indels, fake)):
                     link("genome_library", indels, fake)
         # A variant index with no _INDELS companion (an indel-free dataset, for which
@@ -1076,12 +1103,13 @@ def _pam_files(pams: str) -> list:
 
 
 def _smoke_five_prime(index_name: str, token: str) -> Optional[bool]:
-    """Whether the index was built for a PAM on the 5' side of the guide: what its
-    .pam_build records. Without one, an all-N index is a 3' build, as the search takes it
+    """Whether the index was built for a PAM on the 5' side of the guide: what its name, the
+    header of its .bin files (index format 2) or its .pam_build records
+    (_recorded_five_prime). Without any, an all-N index is a 3' build, as the search takes it
     (_index_side in submit_job_automated_new_multiple_vcfs.sh) and every published one is;
-    and a dedicated one, which a search builds with no record, is what the PAM files of
-    its motif in PAMs/ say, or else 3' for a PAM of up to 3 nt, as every shipped one that
-    short is. None for one wider that no PAM file tells of: its side is not known."""
+    and a dedicated one, which a search builds with no record, is what the PAM files of its
+    motif in PAMs/ say, or else 3' for a PAM of up to 3 nt, as every shipped one that short
+    is. None for one wider that no PAM file tells of: its side is not known."""
     recorded = _recorded_five_prime(os.path.join(os.getcwd(), "genome_library", index_name))
     if recorded is not None:
         return recorded
@@ -1133,7 +1161,8 @@ def _smoke_inputs(index_name: str, token: str):
     file, the PAM it searches, the search's extra flag, whether that PAM is on the 5' side).
 
     An all-N index wider than 3 nt on the 3' side (the published NNNNNNNN_3) is searched
-    for NRG with --prune-pam, its documented use, which scores the example. Any other is
+    for NRR, the default PAM, with --prune-pam, its documented use, which scores the
+    example. Any other is
     searched for its own PAM, on its own side: a 20-nt spacer (fewer on an index built for
     a shorter guide), which any longer build serves, with the example guide padded for
     that PAM. Exits 2, in one line, for an index whose side cannot be told (a search of
@@ -1147,8 +1176,8 @@ def _smoke_inputs(index_name: str, token: str):
         )
         sys.exit(2)
     if not five_prime and set(token) == {"N"} and len(token) > 3:
-        pam = _smoke_pam_file("N" * 20 + "NRG 3", "20bp-NRG-SpCas9.txt")
-        return pam, write_sg1617_guidefile(), "NRG", " --prune-pam", False
+        pam = _smoke_pam_file("N" * 20 + "NRR 3", "20bp-NRR-SpCas9.txt")
+        return pam, write_sg1617_guidefile(), "NRR", " --prune-pam", False
     built = index_fit.built_guide_len(os.path.join(os.getcwd(), "genome_library", index_name))
     spacer = min(20, built or 20)
     width = len(token)
@@ -1211,7 +1240,7 @@ def _search_in_smoke(index_name, pam_token, ref, is_variant, genome_dir, pam, gu
                      prune_arg, five_prime, threads, debug, chrom) -> None:
     """The smoke's complete-search, and what it left, for _run_prebuilt_index_smoke."""
     # A variant index searches its variants, in complete-search's context-aware default
-    # mode: per-sample on a phased genotyped index such as NRG_3_hg38+hg38_HGDP1kGP,
+    # mode: per-sample on a phased genotyped index such as 20-NRR_3_hg38+hg38_HGDP1kGP,
     # population-level otherwise.
     # `download --what index` writes list_vcf.txt / list_samplesID.txt; a build/DATA dir
     # may instead use vcf_list.txt / samples_list.txt -- accept either.
@@ -1330,8 +1359,8 @@ def _run_benchmarks_ondemand(chrom: str, dataset: str, threads: int, debug: bool
     registry = load_benchmarks()
     global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
     # "heavy" benchmarks build a bulge-2 variant index. They run by default: the whole set
-    # fits a 16 GiB, 4-CPU hosted runner. CRISPRME_SKIP_HEAVY=1 leaves them out on a very
-    # small machine.
+    # fits a 16 GiB, 4-CPU hosted runner. CRISPRME_SKIP_HEAVY=1 leaves them out, to save time
+    # on a slow machine (not memory: the peak is the variant enrichment, which each needs).
     skip_heavy = os.environ.get("CRISPRME_SKIP_HEAVY") == "1"
     for bench in registry["benchmarks"]:
         if skip_heavy and bench.get("heavy"):

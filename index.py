@@ -28,7 +28,8 @@ _warnings.filterwarnings(
     "ignore", message=r".*importing Biopython from inside the source tree.*"
 )
 
-from app import URL, IPADDRESS, WEBADDRESS, ONLINE, current_working_directory, app, cache, pool_executor
+from app import (URL, IPADDRESS, WEBADDRESS, ONLINE, PORTLOCAL, current_working_directory, app,
+                 cache, pool_executor)
 from pages import (
     main_page,
     navbar_creation,
@@ -40,6 +41,7 @@ from pages import (
     settings_page,
 )
 from pages.pages_utils import results_job_dir
+import safe_files  # (PostProcess/, on sys.path from app and pages_utils)
 
 from dash import Dash
 from dash import Input, Output, State
@@ -56,7 +58,7 @@ import os
 MODEFILE = ".mode_type.txt"  # running mode report file
 HOST = "0.0.0.0"  # server host
 PORTWEB = "80"  # website port
-PORTLOCAL = "8080"  # local server port
+# (the local server's port, PORTLOCAL: 8080, or crisprme.py web-interface --port's, from app)
 
 
 def _is_assembly_job(job_id: str) -> bool:
@@ -253,7 +255,7 @@ def run_server(app: Dash, host: str, port: str, debug: bool) -> None:
             dev_tools_props_check=debug,
         )
     finally:
-        cache.clear()  # clear cache, once server is closed
+        cache.clear()  # clear cache, once server is closed (its folder goes at exit: app)
         pool_executor.shutdown(wait=False)
 
 
@@ -281,9 +283,10 @@ def index():
     website = "--website" in sys.argv[1:]  # check if local server or website
     try:  # keep track of running mode (debugging purposes)
         modefname = os.path.join(current_working_directory, MODEFILE)
-        with open(modefname, mode="w") as outfile:
-            mode = "server" if website else "local"
-            outfile.write(mode)
+        # a link another user put at its name is replaced, never written through
+        # (safe_files): the data folder's group may write the folder
+        safe_files.write_text(modefname, current_working_directory,
+                              "server" if website else "local")
     except OSError as e:
         raise IOError("Cannot write mode file") from e
     # assign webserver or local port

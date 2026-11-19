@@ -204,5 +204,26 @@ class WhatTheDataRepoDoesNotHostIsNoFailure(unittest.TestCase):
                           "dhs+encode+gencode.hg38.bed.tar.gz"])
 
 
+class ThePamFilesSetupWritesAreTheShippedOnes(unittest.TestCase):
+    """`crisprme.py setup` writes PAM files into the working directory's PAMs/, over any of the
+    same name. Its 22bp-NNGRRN-SaCas9.txt held a 23-nt guide (25 N, then GRRN), while the file
+    of that name CRISPRme ships, from which the index set of 2.10.0 builds 22-NNGRRN_3_hg38
+    (seq_script/rebuild/index_set_2.10.0.tsv), holds a 22-nt one: in a working directory set up
+    so, a search of a 22-nt guide with that PAM file, on the published index, read a 23-nt
+    PAM file (found in the sweep of the stage-2b review of lane D). Every PAM file setup writes
+    under the name of one CRISPRme ships holds what that one holds."""
+
+    def test_same_name_same_content(self):
+        shipped_dir = Path(__file__).resolve().parent.parent / "PAMs"
+        with tempfile.TemporaryDirectory() as tmp, \
+                contextlib.redirect_stdout(io.StringIO()):
+            written = sld._write_all_pam_files(Path(tmp))
+            shared = sorted(n for n in written if (shipped_dir / n).is_file())
+            self.assertIn("22bp-NNGRRN-SaCas9.txt", shared)
+            for name in shared:
+                self.assertEqual(Path(written[name]).read_text().split(),
+                                 (shipped_dir / name).read_text().split(), name)
+
+
 if __name__ == "__main__":
     unittest.main()

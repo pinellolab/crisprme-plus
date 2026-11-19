@@ -11,10 +11,10 @@ Answers the gate questions for REPLACE / ALONGSIDE / NO-GO:
     the same set, split out on the bulge-containing subset (where CRISPR-Bulge/CFD are
     known-weak and CRISPR-Bulge is claimed to win).
 
-Run from the CRISPR-Bulge repo root inside the cbulge env:
-    mamba run -n cbulge_cpu python bench_cbulge.py --mode speed  --sizes 1000,10000,100000
-    mamba run -n cbulge_gpu python bench_cbulge.py --mode speed  --sizes 1000,10000,100000,1000000 --gpu
-    mamba run -n cbulge_cpu python bench_cbulge.py --mode accuracy
+Run inside the cbulge env, with the CRISPR-Bulge repository given (--repo, or CBULGE_REPO):
+    mamba run -n cbulge_cpu python bench_cbulge.py --repo <CRISPR-Bulge> --mode speed  --sizes 1000,10000,100000
+    mamba run -n cbulge_gpu python bench_cbulge.py --repo <CRISPR-Bulge> --mode speed  --sizes 1000,10000,100000,1000000 --gpu
+    mamba run -n cbulge_cpu python bench_cbulge.py --repo <CRISPR-Bulge> --mode accuracy
 
 Emits a human table to stdout and a JSON blob to --out (default bench_out.json).
 """
@@ -25,14 +25,24 @@ import resource
 import sys
 import time
 
-REPO = os.environ.get("CBULGE_REPO", "/srv/local/lp698/cbulge_bench/CRISPR-Bulge")
-sys.path.insert(0, REPO)
-os.chdir(REPO)
+# The CRISPR-Bulge repository the benchmark runs in, its models, datasets and code: --repo,
+# or CBULGE_REPO. main() enters it (_enter_repo); importing this module changed the working
+# folder and the module path of whatever imported it, to a developer's path (RV4-3).
+REPO = os.environ.get("CBULGE_REPO", "")
 
 # The DataFrame column names the encoder reads are these upstream constants
-# (SG_RNA_SEQ == "Align.sgRNA", OFF_TARGET == "Align.off-target", LABEL == "label").
-# Import them so we always match, whatever the CSV header is called.
-from OT_deep_score_src.general_utilities import SG_RNA_SEQ, OFF_TARGET, LABEL  # noqa: E402
+# (SG_RNA_SEQ == "Align.sgRNA", OFF_TARGET == "Align.off-target", LABEL == "label"),
+# imported from the repository so we always match, whatever the CSV header is called.
+SG_RNA_SEQ = OFF_TARGET = LABEL = None
+
+
+def _enter_repo(repo):
+    """Run from the CRISPR-Bulge repository ``repo``: its modules importable, the relative
+    paths below (ENSEMBLE_PATHS, TRUEOT_CSV) found there, and its column names read."""
+    global SG_RNA_SEQ, OFF_TARGET, LABEL
+    sys.path.insert(0, repo)
+    os.chdir(repo)
+    from OT_deep_score_src.general_utilities import SG_RNA_SEQ, OFF_TARGET, LABEL
 
 # 5-model classification ensemble (c_2, aligned, GUIDE-seq fine-tuned) — the
 # configuration main_predict.py demonstrates for Refined_TrueOT.
@@ -254,7 +264,13 @@ def main():
     ap.add_argument("--threads", type=int, default=0, help="0 = TF default")
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--out", default="bench_out.json")
+    ap.add_argument("--repo", default=REPO,
+                    help="the CRISPR-Bulge repository to run in (default: $CBULGE_REPO)")
     args = ap.parse_args()
+    if not args.repo:
+        ap.error("give the CRISPR-Bulge repository: --repo <folder>, or CBULGE_REPO")
+    args.out = os.path.abspath(args.out)  # (named from where it was run, before _enter_repo)
+    _enter_repo(args.repo)
 
     if args.mode == "speed":
         sizes = [int(x) for x in args.sizes.split(",") if x]

@@ -24,6 +24,18 @@ ref_name = sys.argv[4]
 vcf_name = sys.argv[5]
 bMax = sys.argv[6]
 ncpus = sys.argv[7]
+# optional: the variant index this INDELS index goes with, whose .pam_build _own_pam reads:
+# its folder, or its name in genome_library/ (<true_pam>_<bMax>_<ref>+<vcf> or, since 2.10.0,
+# the form that carries the guide length and the side: index_fit.parse_index_name). A search
+# passes its folder: it runs this in a folder of the INDELS index's build lock, and puts what
+# it writes there in place (submit_job_automated_new_multiple_vcfs.sh _build_in_lock).
+variant_index = (sys.argv[8] if len(sys.argv) > 8
+                 else f"{true_pam}_{bMax}_{ref_name}+{vcf_name}")
+# the dataset's indel logs, which record each fake-indel window (Dictionaries/log_indels_<vcf>
+# of the working directory that holds Genomes/, where both the search and build-index-only
+# keep them)
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(indels_folder))),
+                       "Dictionaries", f"log_indels_{vcf_name}")
 
 # The record of a chromosome's sub-index that buildTST built with no target, which
 # pool_search_indels.py reads. Its fake-indel genome holds indels, but no window of
@@ -31,7 +43,8 @@ ncpus = sys.argv[7]
 # Cas12a's TTTV): buildTST writes no .bin, rightly, and CRISPRitz 2.9.1 refuses to
 # search an index directory without one, as it does a broken or partial build. This
 # file tells the two apart. index-genome removes the directory it rebuilds, record
-# and all, and crispritz.py search passes over a dot file.
+# and all, and crispritz.py search passes over a dot file. (Each sub-index also records
+# what it holds, its index format among it: index_fit.write_index_meta, _record_index.)
 NO_TARGETS = ".no_targets"
 
 
@@ -82,7 +95,8 @@ def _own_pam():
     not record it). Else None.
 
     That variant index is then a PAM-less one standing in for the search's PAM (NNN_3
-    serving NRG, or NNNNNNNN_3 under --prune-pam, as complete-search resolves one), and
+    serving NRG, or NNNNNNNN_3 under --prune-pam, as complete-search resolves one), or
+    under --prune-pam a dedicated one of a PAM that holds it (NRR_3 serving NGG), and
     the search builds its INDELS index, when it is missing, with the PAM file of the
     search. index-genome names an index by the PAM of its PAM file, so that build went
     into <search PAM>_<N>_<ref>+<vcf>_INDELS, where the search does not look: finding no
@@ -100,8 +114,7 @@ def _own_pam():
     k = len(true_pam)
     guide, n, name = len(seq) - abs(size), (k if size > 0 else -k), None
     try:
-        with open(os.path.join("genome_library", f"{true_pam}_{bMax}_{ref_name}+{vcf_name}",
-                               ".pam_build")) as fh:
+        with open(os.path.join("genome_library", variant_index, ".pam_build")) as fh:
             built = fh.read().rsplit(None, 2)
         if len(built) == 3 and abs(int(built[2])) == k and int(built[1]) > k:
             name, guide, n = built[0], int(built[1]) - k, int(built[2])
@@ -110,31 +123,38 @@ def _own_pam():
     return ("N" * guide + true_pam if n > 0 else true_pam + "N" * guide) + f" {n}", name
 
 
+def _sub_index(chrom):
+    """Where index-genome writes ``chrom``'s sub-index: its outer directory takes the PAM
+    of the PAM file, the sub-index the name given."""
+    return os.path.join(
+        "genome_library",
+        f"{_index_pam(build_pam)}_{bMax}_{ref_name}+{vcf_name}_INDELS",
+        f"{true_pam}_{bMax}_fake{chrom}",
+    )
+
+
 def _record_no_targets(chrom, fake_dir):
     """After index-genome has built ``chrom``'s sub-index: when it holds no .bin and
     no contig of the fake-indel genome holds a target, by buildTST's own rule (the
-    crispritz_bins check build-index-only makes), write NO_TARGETS into it. Nothing is
-    written for a sub-index with a .bin, nor for one whose genome holds a target (the
-    engine left out its .bin, as with the disk's inode table full: build-index-only
-    fails on it) or is read otherwise than buildTST reads it: a search refuses such a
-    sub-index. Returns the status of this step: 1 when the record could not be
-    written."""
+    crispritz_bins check build-index-only makes, by the rule of the index format the
+    installed CRISPRitz writes, the one that has just built it), write NO_TARGETS into
+    it. Nothing is written for a sub-index with a .bin, nor for one whose genome holds a
+    target (the engine left out its .bin, as with the disk's inode table full:
+    build-index-only fails on it) or is read otherwise than buildTST reads it: a search
+    refuses such a sub-index. Returns the status of this step: 1 when the record could
+    not be written."""
     try:
         import crispritz_bins
+        import index_fit
 
-        # where index-genome writes it: its outer directory takes the PAM of the PAM
-        # file, the sub-index the name given
-        sub = os.path.join(
-            "genome_library",
-            f"{_index_pam(build_pam)}_{bMax}_{ref_name}+{vcf_name}_INDELS",
-            f"{true_pam}_{bMax}_fake{chrom}",
-        )
+        sub = _sub_index(chrom)
         if any(f.endswith(".bin") for f in os.listdir(sub)):
             return 0
         # (index-genome indexes each .fa there, and none is not "no target")
         if not any(f.strip().split(".")[-1] == "fa" for f in os.listdir(fake_dir)):
             return 0
-        missing, unread = crispritz_bins.missing_bins(sub, fake_dir, build_pam, int(bMax))
+        missing, unread = crispritz_bins.missing_bins(sub, fake_dir, build_pam, int(bMax),
+                                                      index_fit.engine_index_format())
     except (ImportError, OSError, ValueError, IndexError):
         return 0
     if missing or unread:
@@ -175,11 +195,37 @@ def _contigs_left_out():
     return contigs
 
 
+def _window_disagreement(chrom, fake_dir):
+    """The ERROR for ``chrom`` when its fake-indel genome holds other windows than its indel
+    log records (indel_window.fake_window_disagreement): the two come from two enrichments
+    (a download installs an index's logs, not the enrichment they come from, beside one made
+    here by another CRISPRitz), and the sub-index, which records the log's windows
+    (_record_index), would be read with that log, every indel row of it misplaced. None
+    where they agree, or nothing tells."""
+    import indel_window
+
+    how = indel_window.fake_window_disagreement(os.path.join(fake_dir, f"fake{chrom}.fa"),
+                                                indel_window.log_path(LOG_DIR, chrom))
+    if not how:
+        return None
+    return (f"ERROR: the fake-indel genome of {chrom} ({os.path.normpath(fake_dir)}) and its "
+            f"indel log, in "
+            f"{LOG_DIR}, come from two enrichments: {how}. An INDELS index built from it would "
+            f"be read with that log, every indel off-target of {chrom} misplaced. Install the "
+            f"dataset's enrichment and its dictionaries from one build or one download "
+            f"(build-index-only, run on the dataset, says what to remove)")
+
+
 def index_indels(chrom):
     fake_dir = f"{indels_folder}/fake_{vcf_name}_{chrom}"
     if _fake_genome_is_empty(fake_dir):
         print(f"No indels on {chrom}: nothing to index", flush=True)
         return
+    said = _window_disagreement(chrom, fake_dir)
+    if said:  # (stderr: the search fails this step on it, as on an engine error)
+        sys.stderr.write(said + "\n")
+        sys.stderr.flush()
+        return 1
     # (flushed, as every line of a worker: the pool's exit terminates the workers, and
     # what one still holds in its buffer is lost)
     print("Indexing INDELs in", chrom, flush=True)
@@ -188,8 +234,45 @@ def index_indels(chrom):
     )  # {indels_folder}/fake_{vcf_name}_{chrom}
     if not status:
         status = _record_no_targets(chrom, fake_dir)
+    if not status:
+        _record_index(chrom)
     print("Indexing ended for INDELs in", chrom, flush=True)
     return status
+
+
+def _log_window(chrom):
+    """The fake-indel windows (left, right) of ``chrom``'s indel log, which records each
+    window's start and end (indel_window): the windows its fake-indel genome holds, which
+    the sub-index records. None where the log is not there, holds no row, or holds two
+    widths (it is then no log of this genome)."""
+    import indel_window
+
+    path = indel_window.log_path(LOG_DIR, chrom)
+    try:
+        found = indel_window.log_windows(path) if path else set()
+    except (OSError, ValueError, EOFError):
+        return None
+    return next(iter(found)) if len(found) == 1 else None
+
+
+def _record_index(chrom):
+    """Record in ``chrom``'s sub-index, which index-genome has just built, what it holds
+    (index_fit.write_index_meta): its index format among it, which a sub-index with no .bin
+    records nowhere else, and the fake-indel windows it was built from, which its indel log
+    tells (_log_window): a search refuses the sub-index beside a log of other windows. A
+    record that cannot be written is said on stdout."""
+    sub = _sub_index(chrom)
+    if not os.path.isdir(sub):
+        return
+    try:
+        import index_fit
+
+        why = index_fit.write_index_meta(sub, build_pam, built=True,
+                                         indel_window=_log_window(chrom))
+    except (ImportError, OSError) as exc:
+        why = str(exc)
+    if why:
+        print(f"Indexing INDELs in {chrom}: {why}", flush=True)
 
 
 chrs = []
@@ -224,7 +307,9 @@ if own:
             shutil.rmtree(own_dir, ignore_errors=True)
         sys.exit(1)
     build_pam_arg = shlex.quote(build_pam)
-    print(f"The variant index {true_pam}_{bMax}_{ref_name}+{vcf_name} is PAM-less and stands in "
+    # (a PAM-less one, or a dedicated one of a PAM that holds the search's: NRR for NGG)
+    _what = "PAM-less" if set(true_pam) == {"N"} else f"of the PAM {true_pam}"
+    print(f"The variant index {os.path.basename(variant_index)} is {_what} and stands in "
           f"for {_index_pam(pam_file)}: indexing the INDELs with its own PAM ({own[0]}"
           + (f", as {own[1]}" if own[1] else "") + ")", flush=True)
 

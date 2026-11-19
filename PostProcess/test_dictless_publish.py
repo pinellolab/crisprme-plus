@@ -77,12 +77,24 @@ class _FakeApi:
         self.uploads.append((dst, path_in_repo))
 
 
+class EntryNotFoundError(Exception):
+    """As huggingface_hub's: the file is not in the repo."""
+
+
 class _FakeHF:
     def __init__(self, api):
         self._api = api
 
     def HfApi(self):
         return self._api
+
+    def hf_hub_download(self, repo_id, filename, repo_type=None, token=None, **kwargs):
+        """A file uploaded before, as the Hub serves it (publish_index reads a panel
+        companion's record so); one never uploaded, the Hub's EntryNotFoundError."""
+        path = os.path.join(self._api.sink_dir, os.path.basename(filename))
+        if not os.path.isfile(path):
+            raise EntryNotFoundError(f"{filename} is not in {repo_id}")
+        return path
 
 
 def _publish(index_dir, sink_dir, dictless=False):

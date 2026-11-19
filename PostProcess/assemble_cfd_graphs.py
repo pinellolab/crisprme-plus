@@ -28,7 +28,7 @@ if files_fake:
     for f in files_fake:
         df = pd.read_csv(f, sep="\t")
         cumulative_graph_fake = cumulative_graph_fake.add(df)
-        os.system(f"rm {f}")
+        os.remove(f)  # (a name of the folder: through a shell, a name's ";" ran what followed)
 
     cumulative_graph_fake = cumulative_graph_fake.astype("int64")
     cumulative_graph_fake.to_csv("indels.CFDGraph.txt", sep="\t", index=False)
@@ -39,7 +39,7 @@ if files_true:
     for f in files_true:
         df = pd.read_csv(f, sep="\t")
         cumulative_graph_true = cumulative_graph_true.add(df)
-        os.system(f"rm {f}")
+        os.remove(f)
 
     cumulative_graph_true = cumulative_graph_true.astype("int64")
     cumulative_graph_true.to_csv("snps.CFDGraph.txt", sep="\t", index=False)

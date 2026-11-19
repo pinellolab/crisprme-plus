@@ -25,7 +25,10 @@ echo "Sorting done in $(($ENDTIME - $STARTTIME)) seconds"
 # echo -e $header | cat - $fileIn.sorted.tmp > $fileIn.sorted
 # rm $fileIn.sorted.tmp
 echo "Merging contiguous targets"
-if [[ "${sort_pivot}" == "score" ]]; then
+# the CFD and CRISPR-Bulge merges (pivot 'score') take --sorting-criteria-scoring, the
+# mismatches + bulges one --sorting-criteria: it tested ${sort_pivot}, which nothing sets,
+# so every merge took --sorting-criteria (wset N1)
+if [[ "${sort_criteria}" == "score" ]]; then
     criteria=$sorting_criteria_scoring
 else
     criteria=$sorting_criteria

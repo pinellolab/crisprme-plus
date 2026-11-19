@@ -105,7 +105,8 @@ def greedy_worst_case(columns, ref_seq, real_target, guide_no_pam, revert,
         DROPPED (verified on real chr22 data: 141 PAM-creation off-targets missed). Never
         raises mismatch to gain a PAM (mismatch is the primary key), so it is lossless.
 
-    Returns ``{"seq": <list of bases>, "carriers": <set>, "info": <list of [rsID,AF,snp]>}``.
+    Returns ``{"seq": <list of bases>, "carriers": <set>, "info": <list of [rsID,AF,snp]>,
+    "chosen": {pos_c: the candidate taken there, or None for the reference base}}``.
     At each column pick the alt minimizing the selection key ``(mismatch, pam_invalid,
     alt)``: fewest mismatches first (additive per column under the fixed alignment, so the
     greedy equals the argmin edit over all 2^k combinations), then -- among mismatch ties
@@ -180,7 +181,7 @@ def greedy_worst_case(columns, ref_seq, real_target, guide_no_pam, revert,
         if ch is not None:
             carriers |= set(ch["carriers"])
             info.append(ch["info"])
-    return {"seq": greedy_seq, "carriers": carriers, "info": info}
+    return {"seq": greedy_seq, "carriers": carriers, "info": info, "chosen": chosen}
 
 
 def _max_score_brute(columns, ref_seq, real_target, guide_no_pam, revert,
@@ -231,7 +232,7 @@ def greedy_max_score(columns, ref_seq, real_target, guide_no_pam, revert,
     real chr22 double-bulge windows). Over a large (dense, separately-flagged) window it
     falls back to a greedy per-column argmax + bounded multi-pass. ``score_fn(seq_prerevert
     _list) -> float`` MUST already fold in the alignment + PAM. Returns ``{"seq": list,
-    "carriers": set, "info": [[rsID,AF,snp], ...]}``."""
+    "carriers": set, "info": [[rsID,AF,snp], ...], "chosen": {pos_c: candidate or None}}``."""
     exact = _max_score_brute(columns, ref_seq, real_target, guide_no_pam, revert,
                              pos_beg, pos_end, revcom_fn, score_fn, cap, valid_fn=valid_fn)
     if exact is not None:
@@ -241,7 +242,8 @@ def greedy_max_score(columns, ref_seq, real_target, guide_no_pam, revert,
             if ch is not None:
                 carriers |= set(ch["carriers"])
                 info.append(ch["info"])
-        return {"seq": exact["seq"], "carriers": carriers, "info": info}
+        return {"seq": exact["seq"], "carriers": carriers, "info": info,
+                "chosen": {col["pos_c"]: exact["chosen"].get(col["pos_c"]) for col in columns}}
 
     # dense window (> cap combos): greedy per-column argmax + bounded multi-pass (best-effort).
     greedy_seq = list(ref_seq)
@@ -281,7 +283,49 @@ def greedy_max_score(columns, ref_seq, real_target, guide_no_pam, revert,
         if ch is not None:
             carriers |= set(ch["carriers"])
             info.append(ch["info"])
-    return {"seq": greedy_seq, "carriers": carriers, "info": info}
+    return {"seq": greedy_seq, "carriers": carriers, "info": info, "chosen": chosen}
+
+
+def cut_to_degeneracy(rep, columns, ref_seq, max_degeneracy, degeneracy_fn, rank_fn):
+    """``rep`` (greedy_worst_case's or greedy_max_score's) cut back to rest on at most
+    ``max_degeneracy`` ambiguous columns (complete-search's --max-degeneracy), or None when
+    it cannot be. ``degeneracy_fn(seq_prerevert_list)`` counts the columns an alignment rests
+    on (window_density.degeneracy). Each step puts the reference base back at one column of
+    those, the one whose sequence ``rank_fn(seq_prerevert_list)`` ranks first (lowest; the
+    lowest column on a tie), so the cut keeps the strongest alignment it can: the caller
+    ranks a valid PAM first, then fewer mismatches or a higher score. A column whose alt
+    the alignment does not rest on (one taken on a tie) keeps it. Returns a rep of the same
+    shape; ``rep`` itself when it is within the budget."""
+    seq = list(rep["seq"])
+    chosen = dict(rep["chosen"])
+    d = degeneracy_fn(seq)
+    if d <= max_degeneracy:
+        return rep
+    while d > max_degeneracy:
+        best = None
+        for col in columns:
+            pc = col["pos_c"]
+            if chosen.get(pc) is None:
+                continue
+            trial = list(seq)
+            trial[pc] = ref_seq[pc]
+            td = degeneracy_fn(trial)
+            if td >= d:
+                continue
+            key = (rank_fn(trial), pc)
+            if best is None or key < best[0]:
+                best = (key, pc, trial, td)
+        if best is None:
+            return None
+        _key, pc, seq, d = best
+        chosen[pc] = None
+    carriers, info = set(), []
+    for col in columns:
+        ch = chosen.get(col["pos_c"])
+        if ch is not None:
+            carriers |= set(ch["carriers"])
+            info.append(ch["info"])
+    return {"seq": seq, "carriers": carriers, "info": info, "chosen": chosen}
 
 
 def brute_force_min_mismatch(columns, ref_seq, real_target, guide_no_pam, revert,

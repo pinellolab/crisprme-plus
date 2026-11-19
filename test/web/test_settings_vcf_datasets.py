@@ -196,6 +196,12 @@ check(not ok and len(msgs) == 1 and msgs[0].startswith(
           "has no sample list (samplesIDs/toyg_agg.samplesID.txt)")
       and "per-dataset allele-frequency registry" in msgs[0] and "Build its" not in msgs[0],
       f"Submit says why a sites-only dataset has no list (got {msgs})")
+# and names the index with a registry as a web user gets it, not a file of the repository
+# (it cited docs/DESIGN_mega_index.md: FV :342)
+check(not ok and len(msgs) == 1
+      and "(Settings downloads it, under Download a prebuilt index)" in msgs[0]
+      and ".md" not in msgs[0],
+      f"Submit's refusal of a sites-only dataset says what a web user can do (got {msgs})")
 
 # ---- a list of only its header, put there for a sites-only dataset ----------------------
 SITES = HEADER.replace("\tFORMAT\t" + "\t".join(SAMPLES), "")

@@ -55,20 +55,25 @@ try:  # page modules need the web stack (Dash); the light unit-test CI does not 
     import dash  # noqa: F401
     from dash import no_update
 except ImportError:  # pragma: no cover
-    raise unittest.SkipTest("dash not installed: web page tests skipped")
+    dash = None
+# Without Dash each class skips, not the module: a SkipTest raised at import is a traceback
+# under `python -m unittest <module>` (skips D7).
+_NEEDS_DASH = unittest.skipUnless(dash, "dash not installed: web page tests skipped")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.argv = ["crisprme.py", "--version"]  # importing the pages starts the app object
 
-import pages.main_page as mp  # noqa: E402
-import pages.pages_utils as pu  # noqa: E402
-import pages.settings_page as sp  # noqa: E402
-import index  # noqa: E402  (check_directories: the data folder the web app starts with)
+if dash:  # (the pages import Dash)
+    import pages.main_page as mp  # noqa: E402
+    import pages.pages_utils as pu  # noqa: E402
+    import pages.settings_page as sp  # noqa: E402
+    import index  # noqa: E402  (check_directories: the data folder the web app starts with)
 
 PAM = "20bp-NRG-SpCas9"
 
 
+@_NEEDS_DASH
 class _Install(unittest.TestCase):
     """A data folder: genome hg38 (raw FASTA), panels "walk" (VCFs + a 1-bulge
     index), "fresh" (VCFs, no index), "zero" (VCFs + a 0-bulge index) and "shipped"
@@ -106,6 +111,7 @@ class _Install(unittest.TestCase):
                      + "".join(f"{s}\thg38_{panel}\tunknown\tunknown\n" for s in samples))
 
 
+@_NEEDS_DASH
 class TestBulgeNote(_Install):
     def note(self, variant, dna, rna):
         return mp.update_bulge_note("hg38", PAM, variant, dna, rna)
@@ -148,10 +154,10 @@ class TestBulgeNote(_Install):
         self.assertIn("download a variant index for it in Settings", note)
 
     def test_panel_with_no_index_for_this_pam_and_nothing_to_build_one(self):
-        # a wider PAM-less index and no VCF files: the search script refuses it, so the note
-        # does not promise that a first search prepares anything
+        # an index of a PAM that does not hold NRG (NGG), and no VCF files: the search script
+        # refuses it, so the note does not promise that a first search prepares anything
         self.index("NRG_2_hg38")
-        self.index("NNNNNNNN_3_hg38+hg38_k8")
+        self.index("NGG_3_hg38+hg38_k8")
         self.sample_list("k8")
         note = self.note("k8", 0, 0)
         self.assertNotIn("prepares", note)
@@ -160,11 +166,32 @@ class TestBulgeNote(_Install):
 
     def test_panel_with_its_enriched_genome_can_still_build_one(self):
         self.index("NRG_2_hg38")
-        self.index("NNNNNNNN_3_hg38+hg38_k8")
+        self.index("NGG_3_hg38+hg38_k8")
         self.sample_list("k8")
         os.makedirs(os.path.join(self.tmp, "Genomes", "hg38+hg38_k8"))
         open(os.path.join(self.tmp, "Genomes", "hg38+hg38_k8", "chr1.enriched.fa"), "w").close()
         self.assertIn("the first one prepares", self.note("k8", 0, 0))
+
+    def test_a_panel_the_search_prunes_an_index_of_offers_its_bulges(self):
+        # a wider PAM-less index, or a dedicated one of a PAM that holds NRG (NRR): the
+        # search prunes it to NRG by itself since 2.10.0, from the web too, so the panel
+        # offers the bulges of that index (it offered none, and said none was installed)
+        self.index("NRG_2_hg38")
+        for name in ("NNNNNNNN_3_hg38+hg38_k8", "NRR_3_hg38+hg38_nrr"):
+            panel = name.rpartition("_")[2]
+            with self.subTest(index=name):
+                self.index(name)
+                self.sample_list(panel)
+                note = self.note(panel, 2, 2)
+                self.assertIn("Up to 2 DNA/RNA bulge(s) available.", note)
+                self.assertNotIn("No ", note)
+        # one built for the 5' side does not serve a 3' PAM
+        self.index("NNNN_3_hg38+hg38_five")
+        with open(os.path.join(self.tmp, "genome_library", "NNNN_3_hg38+hg38_five",
+                               ".pam_build"), "w") as fh:
+            fh.write("NNNN-20bp-X 24 -4\n")
+        self.sample_list("five")
+        self.assertIn("variant index for this PAM", self.note("five", 0, 0))
 
     def test_no_index_and_no_genome_files(self):
         os.remove(os.path.join(self.tmp, "Genomes", "hg38", "chr1.fa"))
@@ -181,6 +208,7 @@ def _vcf(path, samples=("S1", "S2")):
         fh.write("##fileformat=VCFv4.2\n" + cols + "\n")
 
 
+@_NEEDS_DASH
 class TestRefusedDatasets(_Install):
     """A dataset whose search Submit refuses whatever the bulges is not offered as
     searchable: the note says what Submit says."""
@@ -257,6 +285,29 @@ class TestRefusedDatasets(_Install):
                       self.note("dl"))
         self.assertEqual(self.submit("dl"), (True, []))
 
+    def test_a_vcf_named_for_no_chromosome_beside_others_is_named(self):
+        # beside VCFs named per chromosome, or beside another such file, the refusal said
+        # that the dataset's VCF was a single multi-chromosome file (RV1-WEB2-5): it names
+        # the file the search cannot read
+        rest = ("which a search cannot prepare the variant genome from: {} split per "
+                "chromosome only when its index is built. Build its index in Settings (Build "
+                "an index locally) first, or remove the dataset in Settings and add it again "
+                "as one VCF file per chromosome (<name>.chrN.vcf.gz).")
+        self.dataset("mix", ["walk.chr1.vcf.gz", "walk.chr2.vcf.gz", "merged.vcf.gz"])
+        note = self.note("mix")
+        self.assertEqual(note, "No mix variant index for this PAM is installed yet, and the "
+                               "dataset's VCF folder holds merged.vcf.gz, whose name says no "
+                               "chromosome (no '.chrN.' part), "
+                               + rest.format("such a file is"))
+        self.assertEqual(self.submit("mix"), (False, [note]))
+        self.dataset("two", ["b.vcf.gz", "a.vcf.gz"])
+        note = self.note("two")
+        self.assertEqual(note, "No two variant index for this PAM is installed yet, and the "
+                               "dataset's VCF folder holds a.vcf.gz, b.vcf.gz, whose names say "
+                               "no chromosome (no '.chrN.' part), "
+                               + rest.format("such files are"))
+        self.assertEqual(self.submit("two"), (False, [note]))
+
     def test_sites_only_dataset_with_or_without_its_index(self):
         # Submit refuses a search of a sites-only dataset, which has no sample list, and
         # building its index does not change that; the note offered a 0-bulge search and a
@@ -270,6 +321,13 @@ class TestRefusedDatasets(_Install):
                 self.assertEqual(note, pu.samplesid_problem("hg38_sites", "sites"))
                 self.assertTrue(note.startswith("The variant dataset 'sites' is sites-only"))
                 self.assertNotIn("Build an index locally", note)
+                # the index that has a registry is one a web user can get, from Settings:
+                # the note cited a file of the repository, which a web user cannot open
+                # (FV :342)
+                self.assertIn("as the hg38_mega index published on HuggingFace has "
+                              "(Settings downloads it, under Download a prebuilt index); "
+                              "building its index does not make one.", note)
+                self.assertNotIn(".md", note)
                 self.assertEqual(self.submit("sites"), (False, [note]))
         # a single multi-chromosome sites-only file: the sites-only message alone, as a
         # build does not make it searchable
@@ -414,6 +472,39 @@ class TestRefusedDatasets(_Install):
         launch.assert_called_once_with(
             ["download", "--what", "index", "--index-name", name], "Download index")
 
+    def test_a_dataset_with_a_vcf_that_cannot_be_read(self):
+        # one unreadable .vcf.gz: a Settings build writes no list, yet the note and Submit
+        # said to build its index in Settings, "which writes the list" (M6)
+        self.dataset("broken", ["broken.chr1.vcf.gz"], sample_list=False)
+        with open(os.path.join(self.tmp, "VCFs", "hg38_broken", "broken.chr2.vcf.gz"), "wb") as fh:
+            fh.write(b"not gzip")
+        note = self.note("broken")
+        self.assertIn("Its VCF file broken.chr2.vcf.gz has no readable header (a file cut "
+                      "short, or no VCF), so no build can write the list from it", note)
+        self.assertNotIn("Build its variant index in Settings", note)
+        self.assertEqual(self.submit("broken"), (False, [note]))
+
+    def test_a_merged_panel_missing_the_list_of_one_of_its_datasets(self):
+        # Submit makes a merged panel's list from its datasets' lists; with one of them
+        # missing, the advice said to add the VCF dataset hg38_1000G_HGDP again in
+        # Settings, a dataset never added (FR :98): it names the list that is missing
+        self.index("NRG_2_hg38+hg38_1000G_HGDP")
+        self.sample_list("1000G")
+        note = self.note("1000G_HGDP", 1, 1)
+        self.assertEqual(note, (
+            "No sample list for the variant dataset '1000G_HGDP': a search with it reads "
+            "samplesIDs/hg38_1000G_HGDP.samplesID.txt (one row per sample its VCFs genotype), "
+            "which Submit makes from the lists of the datasets it merges "
+            "(samplesIDs/hg38_1000G.samplesID.txt, samplesIDs/hg38_HGDP.samplesID.txt), and "
+            "samplesIDs/hg38_HGDP.samplesID.txt is missing. If its index came from "
+            "HuggingFace, remove the index in Settings and download it again there, which "
+            "installs the lists; or add the missing file yourself, then submit again."))
+        self.assertEqual(self.submit("1000G_HGDP", 1, 1), (False, [note]))
+        self.assertNotIn("add the VCF dataset hg38_1000G_HGDP", note)
+        # with that list, Submit makes the panel's
+        self.sample_list("HGDP")
+        self.assertTrue(self.submit("1000G_HGDP", 1, 1)[0])
+
     def test_the_note_writes_no_sample_list(self):
         # Submit (check_input, then change_url) makes a merged panel's list from those of its
         # datasets. The note made it too, drawn as the page loads with the panel selected,
@@ -514,6 +605,7 @@ class _Form:
 ORDERS = ("before", "unlowered", "after", "synced")
 
 
+@_NEEDS_DASH
 class TestBulgeCap(_Install):
     def limit(self, variant, dna, rna, edits, held, mms=4):
         return mp.limit_bulges_to_index("hg38", PAM, variant, dna, rna, mms, edits, held)
@@ -641,6 +733,163 @@ class TestBulgeCap(_Install):
                 self.assertEqual(form.change("ref", order), (2, 1, 3))
 
 
+@_NEEDS_DASH
+class TestThePamPickerOfAPamLessIndex(_Install):
+    """The PAM picker of a PAM-less index, its callbacks as Dash calls them: shown when one is
+    installed for the genome or dataset selected, it offers the PAMs that index serves, checks
+    a typed one, and Use this PAM writes its PAM file and selects it in the PAM list. There
+    was none (2.8.1): a PAM-less index served from the web only the PAM files installed."""
+
+    def test_hidden_without_one_and_shown_with_one(self):
+        style, note, options = mp.update_pamless_picker("hg38", "ref")
+        self.assertEqual((style["display"], note, options), ("none", "", []))
+        self.index("NNNNNNNN_3_hg38")
+        style, note, options = mp.update_pamless_picker("hg38", "ref")
+        self.assertEqual(style["display"], "block")
+        self.assertIn("NNNNNNNN_3_hg38 is a PAM-less index: it serves any 3' PAM of a 20-nt "
+                      "guide up to 8 nt", note)
+        self.assertEqual(options[0]["value"], "SpCas9:NRR")
+        # a dataset's own: none for walk
+        self.assertEqual(mp.update_pamless_picker("hg38", "walk")[0]["display"], "none")
+
+    def test_a_typed_pam_is_checked_and_used(self):
+        self.index("NNN_3_hg38")
+        said = mp.validate_pamless_custom_pam("NGCG", "hg38", "ref")
+        self.assertIn("longer than this index's 3-nt flank", said.children)
+        said = mp.validate_pamless_custom_pam("ngn", "hg38", "ref")
+        self.assertIn("NGN: served by NNN_3_hg38", said.children)
+        options, value, said = mp.use_pamless_pam(1, None, "ngn", "hg38", "ref")
+        self.assertEqual(value, "20bp-NGN-Custom")
+        self.assertIn("20bp-NGN-Custom", [o["value"] for o in options])
+        with open(os.path.join(self.tmp, "PAMs", "20bp-NGN-Custom.txt")) as fh:
+            self.assertEqual(fh.read(), "N" * 20 + "NGN 3\n")
+        # one it does not serve writes nothing
+        out = mp.use_pamless_pam(2, None, "NGCG", "hg38", "ref")
+        self.assertIs(out[1], no_update)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "PAMs", "20bp-NGCG-Custom.txt")))
+
+    def test_a_preset_is_used_and_a_forged_one_is_not(self):
+        self.index("NNNNNNNN_3_hg38")
+        _options, value, _said = mp.use_pamless_pam(1, "SpG:NGN", None, "hg38", "ref")
+        self.assertEqual(value, "20bp-NGN-SpG")
+        from dash.exceptions import PreventUpdate
+        for forged in ("SpG:NGN;rm", "Cas12a:TTTV", "../x:NGG"):
+            with self.subTest(preset=forged), self.assertRaises(PreventUpdate):
+                mp.use_pamless_pam(1, forged, None, "hg38", "ref")
+
+    def test_online_it_writes_no_pam_file_and_selects_an_installed_one(self):
+        # Settings changes nothing of the data folder on a server online (add_pam); Use this
+        # PAM wrote a PAM file into PAMs/ all the same, one a request, which every visitor's
+        # PAM list then showed
+        self.index("NNNNNNNN_3_hg38")
+        pams = os.path.join(self.tmp, "PAMs")
+        with open(os.path.join(pams, "20bp-NGG-SpCas9.txt"), "w") as fh:
+            fh.write("N" * 20 + "NGG 3\n")
+        with open(os.path.join(pams, "21bp-NGN-Other.txt"), "w") as fh:  # another guide length
+            fh.write("N" * 21 + "NGN 3\n")
+        before = sorted(os.listdir(pams))
+        with patch.object(mp, "ONLINE", True), patch.object(sp, "ONLINE", True):
+            for preset, typed in ((None, "NGNN"), (None, "NGNA"), (None, "NAAAAAAA"),
+                                  (None, "RYRYRYRY"), (None, "NGN"), ("SpG:NGN", None)):
+                with self.subTest(preset=preset, typed=typed):
+                    out = mp.use_pamless_pam(1, preset, typed, "hg38", "ref")
+                    self.assertIs(out[1], no_update)
+                    self.assertIn("this server adds none (it runs online)", out[2].children)
+            self.assertEqual(sorted(os.listdir(pams)), before)
+            # a PAM whose file is installed, typed or by enzyme, under whatever name
+            for preset, typed in ((None, "ngg"), ("SpCas9:NGG", None), (None, "NRG")):
+                with self.subTest(preset=preset, typed=typed):
+                    options, value, said = mp.use_pamless_pam(1, preset, typed, "hg38", "ref")
+                    want = "20bp-NGG-SpCas9" if (typed or preset).upper().endswith("NGG") \
+                        else PAM
+                    self.assertEqual(value, want)
+                    self.assertIn(want, [o["value"] for o in options])
+            self.assertEqual(sorted(os.listdir(pams)), before)
+            # the presets offer what is installed, and the typed field says the same
+            _style, note, options = mp.update_pamless_picker("hg38", "ref")
+            self.assertIn("This server runs online and adds no PAM file", note)
+            offered = {o["value"] for o in options if not o["disabled"]}
+            self.assertEqual(offered, {"SpCas9:NRG", "SpCas9:NGG"})
+            self.assertIn("this server adds none",
+                          mp.validate_pamless_custom_pam("NGNA", "hg38", "ref").children)
+            self.assertIn("NGG: served by NNNNNNNN_3_hg38",
+                          mp.validate_pamless_custom_pam("NGG", "hg38", "ref").children)
+        # locally, as before
+        _options, value, _said = mp.use_pamless_pam(1, None, "NGNA", "hg38", "ref")
+        self.assertEqual(value, "20bp-NGNA-Custom")
+
+
+@_NEEDS_DASH
+class TestAnIndexOnlyDatasetIsOfferedAsItIs(_Install):
+    """A variant dataset installed as an index alone (a download, or one whose VCF dataset was
+    removed in Settings) is offered from its index's name: an index of another genome, of a
+    dataset named after this one, was offered too (FR :278), each underscore of the
+    dataset's name showed as " + ", as for a merged panel of two datasets (FR :286), and the
+    PAM of an index named in the 2.10.0 form as its name's first field ("20-NRR")."""
+
+    def test_under_its_own_genome_and_by_its_name(self):
+        for name in ("NRG_2_hg19+hg38_other", "NRG_2_hg38+hg38_my_vcf",
+                     "20-NRR_3_hg38+hg38_named"):  # (and the 2.10.0 form of the name)
+            self.index(name)
+        offered = {o["value"]: o["label"] for o in pu.get_variant_dataset_options("hg38")}
+        self.assertNotIn("other", offered)
+        self.assertEqual(offered["my_vcf"].split(" ")[0], "my_vcf")
+        self.assertEqual(offered["named"].split(" ")[0], "named")
+        self.assertIn(" — PAM(s): NRR ", offered["named"])
+        self.assertEqual(offered["shipped"].split(" ")[0], "shipped")
+
+
+@_NEEDS_DASH
+class TestTheSettingsBuildFormPairsADatasetWithItsGenome(_Install):
+    """Settings' Build an index locally offered every genome for a VCF dataset whose genome
+    Settings recorded when it was added (VCFs/.<dataset>.refgenome), as the search form
+    does not: a build of the dataset on another genome ended in the enricher's crash
+    (std::out_of_range, SIGABRT; FV :328). It offers that genome alone, and refuses the
+    pair, saying so."""
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.tmp, "Genomes", "walkdesc"))
+        open(os.path.join(self.tmp, "Genomes", "walkdesc", "chr3.fa"), "w").close()
+        with open(os.path.join(self.tmp, "VCFs", ".hg38_walk.refgenome"), "w") as fh:
+            fh.write("hg38")
+        self.launch = patch.object(sp, "launch_settings_job").start()
+        self.addCleanup(patch.stopall)
+
+    def test_the_genome_offered(self):
+        options, value = sp.build_genomes_of_dataset("hg38_walk", "walkdesc")
+        self.assertEqual(([o["value"] for o in options], value), (["hg38"], "hg38"))
+        # reference only, or a dataset with no record: every genome, the selection kept
+        for vcf in ("", "hg38_fresh"):
+            with self.subTest(vcf=vcf):
+                options, value = sp.build_genomes_of_dataset(vcf, "walkdesc")
+                self.assertEqual((sorted(o["value"] for o in options), value),
+                                 (["hg38", "walkdesc"], "walkdesc"))
+        # a record of a genome not installed: every genome, and the build says why not
+        with open(os.path.join(self.tmp, "VCFs", ".hg38_zero.refgenome"), "w") as fh:
+            fh.write("mm39")
+        options, _value = sp.build_genomes_of_dataset("hg38_zero", None)
+        self.assertEqual(sorted(o["value"] for o in options), ["hg38", "walkdesc"])
+
+    def test_the_build_of_another_genome_is_refused(self):
+        said = sp.build_index(1, "walkdesc", PAM, 1, 1, "hg38_walk", None)[2]
+        self.assertEqual(said, "hg38_walk is a VCF dataset of hg38, as recorded when it was "
+                               "added: build its index on hg38.")
+        with open(os.path.join(self.tmp, "VCFs", ".hg38_zero.refgenome"), "w") as fh:
+            fh.write("mm39")
+        said = sp.build_index(1, "hg38", PAM, 1, 1, "hg38_zero", None)[2]
+        self.assertIn("build its index on mm39, which is not installed", said)
+        self.assertEqual(self.launch.call_count, 0)
+        # its own genome, and a dataset with no record, as before
+        for genome, vcf in (("hg38", "hg38_walk"), ("walkdesc", "hg38_fresh")):
+            with self.subTest(genome=genome, vcf=vcf):
+                sp.build_index(1, genome, PAM, 1, 1, vcf, None)
+                argv = self.launch.call_args[0][0]
+                self.assertEqual(argv[argv.index("--genome") + 1],
+                                 os.path.join(self.tmp, "Genomes", genome))
+
+
+@_NEEDS_DASH
 class TestSubmitWithoutAGenomeOrPAM(unittest.TestCase):
     """Submit with a genome or PAM selected that is not installed, or none installed: on the
     data folder the web app starts with (index.check_directories: its folders, all empty),
@@ -679,7 +928,9 @@ class TestSubmitWithoutAGenomeOrPAM(unittest.TestCase):
 
     def test_load_example_then_submit_on_a_fresh_data_folder(self):
         guide, pam, genome, variant, mms, dna, rna = mp.load_example_data(1)[:7]
-        self.assertEqual((genome, pam), ("hg38", PAM))
+        # nothing installed: the default names (NRR since 2.10.0)
+        self.assertEqual((genome, pam), ("hg38", mp.DEFAULT_PAM))
+        self.assertEqual(mp.DEFAULT_PAM, "20bp-NRR-SpCas9")
         # the PAM dropdown, which offers nothing, can lose the value Load Example set
         for chosen in (pam, None):
             with self.subTest(pam=chosen):
@@ -703,7 +954,9 @@ class TestSubmitWithoutAGenomeOrPAM(unittest.TestCase):
         # BED coordinates in a genome not installed are not read
         out, msgs = self.submit("hg38", "20bp-NGG-SpCas9", ">s\nchr1 0 43", "GS")
         self.assertEqual((out[0], msgs), (None, [no_hg38]))
-        # none selected, with some installed: as before
+        # none selected, with some installed: each named, and no bulge line (one computed for
+        # the fallback genome, hg38_ref, came after them until 2.8.1: the bulge check waits
+        # for a genome and a PAM)
         self.assertEqual(self.submit(None, None)[1], ["Genome", "PAM"])
         # both installed: Submit runs the search
         self.assertEqual(self.submit("susScr11", "20bp-NGG-SpCas9")[0][0], 1)

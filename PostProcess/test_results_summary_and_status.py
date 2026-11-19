@@ -23,16 +23,20 @@ import pandas as pd
 try:  # page modules need the web stack (Dash); the light unit-test CI does not have it
     import dash  # noqa: F401
 except ImportError:  # pragma: no cover
-    raise unittest.SkipTest("dash not installed: web page tests skipped")
+    dash = None
+# Without Dash each class skips, not the module: a SkipTest raised at import is a traceback
+# under `python -m unittest <module>` (skips D7).
+_NEEDS_DASH = unittest.skipUnless(dash, "dash not installed: web page tests skipped")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.argv = ["crisprme.py", "--version"]  # importing the pages starts the app object
 
-import pages.load_page as lp  # noqa: E402
-import pages.results_page as rp  # noqa: E402
-import index_fit  # noqa: E402
-from test_index_fit import _newer_index_error  # noqa: E402
+if dash:  # (the pages import Dash)
+    import pages.load_page as lp  # noqa: E402
+    import pages.results_page as rp  # noqa: E402
+    import index_fit  # noqa: E402
+    from test_index_fit import _newer_index_refusal  # noqa: E402
 
 
 def _counts(rows):
@@ -43,6 +47,7 @@ REF_BLOCK = [[1, 0, 1, 2, 32], [0, 1, 4, 74, 2099], [0, 0, 20, 400, 16067]]
 ZERO_BLOCK = [[0] * 5] * 3
 
 
+@_NEEDS_DASH
 class TestDropEmptyVariantBlock(unittest.TestCase):
     def test_reference_only_keeps_just_the_reference_block(self):
         out = rp._drop_empty_variant_block(_counts(REF_BLOCK + ZERO_BLOCK), "ref")
@@ -72,6 +77,7 @@ class TestDropEmptyVariantBlock(unittest.TestCase):
         self.assertEqual(len(rp._drop_empty_variant_block(df, "ref")), 5)
 
 
+@_NEEDS_DASH
 class TestNoHitsStatus(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -141,12 +147,14 @@ class TestNoHitsStatus(unittest.TestCase):
                     "nothing can be created in '/data/genome_library' (a read-only mount, no "
                     "write permission, or a full disk). Make that folder writable, or install "
                     "the index there, then run this search again")
-        # (an index in the way, built for a shorter guide)
-        short = ("NGG_2_hg38 was built for a 20-nt guide, and this search has a 23-nt guide "
+        # (an index in the way, its trees built for a shorter guide than its name says)
+        short = ("23-NGG_2_hg38 was built for a 20-nt guide, and this search has a 23-nt guide "
                  "with 1 DNA and 1 RNA bulge(s): it stores too few bases per site, so a search "
                  "of it would report wrong alignments and lose off-targets. This search builds "
-                 "its index under that name: move it out of /data/genome_library, or run this "
-                 "search from another working directory")
+                 "its index under that name: name it for the guide it was built for (mv "
+                 "'/data/genome_library/23-NGG_2_hg38' '/data/genome_library/20-NGG_2_hg38'), "
+                 "move it out of /data/genome_library, or run this search from another working "
+                 "directory")
         # (no variant index serves it, nor VCFs or an enriched genome to build one)
         no_variant = ("no variant index here serves this search (genome hg38, dataset ds, PAM "
                       "NGG, 1 DNA and 1 RNA bulge(s), a 20-nt guide), and none can be built: "
@@ -164,8 +172,37 @@ class TestNoHitsStatus(unittest.TestCase):
         # (an index a newer CRISPRitz built, in index format 2: the line the search script
         # prints for it, and the text index_fit.py gives of it)
         index = os.path.join(self.tmp, "genome_library", "NRG_2_hg38")
-        newer_err, newer = _newer_index_error(index), index_fit.newer_format_error(index)
+        newer_err, newer = _newer_index_refusal(index)
+        # (the INDELS sub-index of a chromosome with indels, empty or not there: the empty-
+        # index guard of pool_search_indels.py, which got the general text, emptyidx F7)
+        empty = ("the indel index of chr2 (genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2) "
+                 "holds no .bin and no record that its build found no target there (an index "
+                 "built before CRISPRme 2.8.1 has none), and Genomes/hg38+ds_INDELS/"
+                 "fake_ds_chr2/fakechr2.fa holds a target of NRG: the index is incomplete. "
+                 "Rebuild it: rm -rf genome_library/NRG_2_hg38+ds_INDELS, and run this search "
+                 "again")
+        absent = ("the indel index of chr2 (genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2) "
+                  "is not there, though chr2 has indels (its indel log lists them): the INDELS "
+                  "index is incomplete, and a search with bulges cannot do without it. Rebuild "
+                  "it: rm -rf genome_library/NRG_2_hg38+ds_INDELS, and run this search again")
+        # (a genome folder the search cannot take as it is: what genome_layout.py says, its
+        # fix command on a line of its own, then the script's ERROR)
+        layout = ("ERROR: all.fa: holds 2 sequences (chr1, chr2). CRISPRme needs ONE FASTA file "
+                  "per sequence, named after it (e.g. chr1.fa); with a multi-sequence file the "
+                  "search runs but every result is silently dropped. Split it with:\n"
+                  "    python PostProcess/genome_layout.py --split /data/Genomes/hg38\n"
+                  "ERROR: reference genome folder /data/Genomes/hg38 is not as a search needs "
+                  "it (see above)\n")
         for name, err, says in (
+                ("empty indel index", f"ERROR: {empty}\nERROR: indels search failed\n",
+                 f"The search was not run: {empty}."),
+                ("absent indel index", f"ERROR: {absent}\n",
+                 f"The search was not run: {absent}."),
+                ("genome layout", layout,
+                 "The search was not run: all.fa: holds 2 sequences (chr1, chr2). CRISPRme needs "
+                 "ONE FASTA file per sequence, named after it (e.g. chr1.fa); with a "
+                 "multi-sequence file the search runs but every result is silently dropped. "
+                 "Split it with: python PostProcess/genome_layout.py --split /data/Genomes/hg38"),
                 ("newer index", newer_err, f"The search was not run: {newer}."),
                 ("partial", f"ERROR: {partial}\n", f"The search was not run: {partial}."),
                 ("no variant", f"ERROR: {no_variant}\n", f"The search was not run: {no_variant}."),

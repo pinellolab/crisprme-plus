@@ -1,9 +1,12 @@
 """Unit tests for scorer_env (env-manager lifecycle + state, no conda needed)."""
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+import venv
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -273,13 +276,26 @@ class TestHealthCheck(unittest.TestCase):
         self.assertIn("numpy=1.23.5", text)
 
 
+def _env_python(root):
+    """A Python environment of its own under ``root`` (a venv, without pip), standing in for
+    a scorer env: its packages are in its own prefix, as a conda env's are. Returns (its
+    python, its site-packages)."""
+    venv.create(root, with_pip=False, symlinks=(os.name != "nt"))
+    py = os.path.join(root, "Scripts" if os.name == "nt" else "bin",
+                      "python.exe" if os.name == "nt" else "python")
+    site = subprocess.run([py, "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    return py, site
+
+
 class TestProbeVersions(unittest.TestCase):
-    """The import probe runs for real, in this interpreter standing in for the env's.
+    """The import probe runs for real, in an environment of its own standing in for the env.
     pkg_resources has no __version__, so a healthy env listed it as 'pkg_resources=?',
     which read like a missing package: it now reports the setuptools version."""
 
     def test_a_module_without_a_version_is_not_shown_as_unknown(self):
-        with tempfile.TemporaryDirectory() as d:
+        with tempfile.TemporaryDirectory() as root:
+            py, d = _env_python(os.path.join(root, "env"))
             for mod, body in (("pkg_resources", ""), ("noversion", ""),
                               ("withversion", "__version__ = '1.2.3'\n")):
                 os.mkdir(os.path.join(d, mod))
@@ -291,9 +307,8 @@ class TestProbeVersions(unittest.TestCase):
                 fh.write("Metadata-Version: 2.1\nName: setuptools\nVersion: 80.9.0\n")
             with mock.patch.dict(se.SCORER_ENVS["cbulge"],
                                  {"probe_imports": ["pkg_resources", "noversion", "withversion"]}), \
-                 mock.patch.dict(os.environ, {"PYTHONPATH": d}), \
                  mock.patch.object(se, "detect_env_manager", return_value=("/m/mamba", "mamba")), \
-                 mock.patch.object(se, "env_python", return_value=sys.executable), \
+                 mock.patch.object(se, "env_python", return_value=py), \
                  mock.patch.object(se, "source_present", return_value=True):
                 rec = se.health_check("cbulge")
         self.assertEqual(rec["status"], se.OK, rec["issues"])
@@ -301,6 +316,80 @@ class TestProbeVersions(unittest.TestCase):
                                            "noversion": "ok", "withversion": "1.2.3"})
         self.assertIn("packages: pkg_resources=80.9.0 (setuptools), noversion=ok, "
                       "withversion=1.2.3", se.render_health(rec))
+
+
+class TheProbesRunNoCodeOfTheWorkingDirectory(unittest.TestCase):
+    """Every complete-search (complete-test's too) runs the health check before it searches,
+    from the folder the user runs crisprme.py in: the data folder, which the members of its
+    group can write under a umask of 002. The probe ran as "python -c", which puts the
+    working directory first on sys.path, so a json.py one of them put there ran as the user,
+    on the probe's first "import json"; the self-test, which scorer-env check runs, did the
+    same (2.10.0, the review of lane S, round 4, S-R4-1). Both run isolated (-I) now, and so
+    does the look-up of the env's python: a module planted in the working directory runs
+    nothing, and the probes still work."""
+
+    PLANTED = ("json", "sitecustomize", "usercustomize", "importlib", "crispr_bulge_score",
+               "tensorflow", "numpy", "pandas", "pkg_resources")
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.data = os.path.join(self.root, "data")  # the data folder a search runs from
+        self.ran = os.path.join(self.root, "ran")  # what a planted module leaves
+        os.makedirs(self.data)
+        os.makedirs(self.ran)
+        for mod in self.PLANTED:
+            with open(os.path.join(self.data, mod + ".py"), "w") as fh:
+                fh.write("import os\nopen(os.path.join(%r, %r), 'w').close()\n"
+                         "raise ImportError('planted')\n" % (self.ran, mod))
+        here = os.getcwd()
+        os.chdir(self.data)
+        self.addCleanup(os.chdir, here)
+
+    def assert_nothing_ran(self):
+        self.assertEqual(sorted(os.listdir(self.ran)), [])
+
+    def test_the_health_check(self):
+        with mock.patch.dict(se.SCORER_ENVS["cbulge"], {"probe_imports": ["json", "csv"]}), \
+             mock.patch.object(se, "detect_env_manager", return_value=("/m/mamba", "mamba")), \
+             mock.patch.object(se, "env_python", return_value=sys.executable), \
+             mock.patch.object(se, "source_present", return_value=True):
+            rec = se.health_check("cbulge")
+        self.assert_nothing_ran()
+        # the probe ran, in the env's python, and found its modules where they are
+        self.assertEqual(rec["status"], se.OK, rec["issues"])
+        self.assertEqual(rec["python_version"],
+                         ".".join(str(x) for x in sys.version_info[:3]))
+        self.assertEqual(set(rec["versions"]), {"json", "csv"})
+
+    def test_the_self_test(self):
+        with mock.patch.object(se, "env_python", return_value=sys.executable):
+            ok, msg = se.selftest("cbulge")
+        self.assert_nothing_ran()
+
+    def test_the_env_s_python_is_looked_up_isolated(self):
+        # the manager's "run -n <env> <command>" runs <command> here, as micromamba does
+        manager = os.path.join(self.root, "micromamba")
+        with open(manager, "w") as fh:
+            fh.write("#!/bin/sh\nshift 3\nexec \"$@\"\n")
+        os.chmod(manager, 0o755)
+        bindir = os.path.join(self.root, "bin")
+        os.makedirs(bindir)
+        os.symlink(sys.executable, os.path.join(bindir, "python"))
+        with mock.patch.object(se, "detect_env_manager", return_value=(manager, "micromamba")), \
+             mock.patch.dict(os.environ, {"PATH": bindir + os.pathsep + os.environ["PATH"]}):
+            calls = []
+            real = se._run
+
+            def run(cmd, **kw):
+                calls.append(list(cmd))
+                return real(cmd, **kw)
+
+            with mock.patch.object(se, "_run", run):
+                py = se.env_python("cbulge")
+        self.assert_nothing_ran()
+        self.assertIsNotNone(py)
+        self.assertEqual(calls[0][:6], [manager, "run", "-n", "cbulge", "python", "-I"])
 
 
 if __name__ == "__main__":

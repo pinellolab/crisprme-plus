@@ -1,0 +1,7 @@
+# Findings of scripts/check_indel_rows.py on the SNP+indel oracle that are CRISPRme
+# defects already reported upstream: run_oracle.sh passes this list with --known, so a
+# match prints as known-defect (non-gating) and an entry no longer found as known-not-seen.
+# Empty: the two carrier-not-strongest blocks of site U (the unphased S19 on an alignment
+# weaker than its strongest) are gone since the merge keys an indel row by its aligned
+# spacer (rel/2.8.2, dc6e70e).
+class	chrom	start	strand	variants	samples	reason

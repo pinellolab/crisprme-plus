@@ -277,9 +277,10 @@ def compile_genotypes(records, sample_axis, out_bin, out_idx):
         prepared.append((int(pos), alt, ref, carriers))
     prepared.sort(key=lambda r: (r[0], r[1]))
     # (pos, alt) MUST be unique: the reader bisects to exactly one row per key, so a
-    # duplicate would make the second row's carriers silently unreachable. The
-    # bcftools norm -m- biallelic dict never repeats a (pos, alt); this guards a
-    # future non-dict caller from a silent carrier drop.
+    # duplicate would make the second row's carriers silently unreachable. A VCF can
+    # hold two records of one REF>ALT; the dict reader merges their carriers into one
+    # record before they get here (tier0_compile.iter_dict_records), so this refuses
+    # only a caller that hands two records of one (pos, alt) without merging them.
     for _i in range(1, len(prepared)):
         if (prepared[_i][0], prepared[_i][1]) == (prepared[_i - 1][0], prepared[_i - 1][1]):
             raise ValueError(
@@ -398,6 +399,10 @@ def compile_genotypes_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_
     Builds the global sample axis via ``tier0_compile.build_sample_meta`` (reading
     the per-database samplesID files), streams the dict with
     ``tier0_compile.iter_dict_records``, and compiles each (pos, alt) carrier list.
+    The genotypes stored are those that reader gives: each read against its own
+    record's allele index ("1" holds the record's ALT, also for a record that listed
+    several ALTs on one VCF line, whose raw 1|2 it turns into 1|0 and 0|1), and two
+    records of one REF>ALT merged into one.
 
     Non-SNP alts (multi-char alt, multi-char ref, or a non-ACGT placeholder such as
     the '*' spanning-deletion marker) are SKIPPED with a counter (never crash),

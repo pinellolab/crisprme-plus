@@ -128,7 +128,7 @@ chrom_length() {
 check_prereqs() {
     local missing=0
     command -v "$PYTHON" >/dev/null 2>&1 || { echo "ERROR: python ('$PYTHON') not found" >&2; missing=1; }
-    "$PYTHON" -c "import requests, pandas, pysam" 2>/dev/null || {
+    "$PYTHON" "$SCRIPT_DIR/check_prereqs.py" 2>/dev/null || {
         echo "ERROR: python packages requests/pandas/pysam are required" >&2; missing=1; }
     command -v "$BCFTOOLS" >/dev/null 2>&1 || { echo "ERROR: bcftools ('$BCFTOOLS') not found" >&2; missing=1; }
     command -v "$TABIX" >/dev/null 2>&1 || { echo "ERROR: tabix ('$TABIX') not found" >&2; missing=1; }

@@ -141,13 +141,27 @@ _READ = (
     "statistical range shown (it is not captured by that range).")
 
 
-def render_risk_card(meta: dict, cfd_scores: Sequence[float],
-                     cb_scores: Optional[Sequence[float]], n_perfect: int = 0):
+def render_risk_card(meta: dict, cfd_scores: Optional[Sequence[float]],
+                     cb_scores: Optional[Sequence[float]], n_perfect: int = 0,
+                     no_score_note: str = ""):
     """Return (card_html, modal_html). ``*_scores`` are the <=1-gap OFF-target raw
-    scores (on-targets excluded); ``cb_scores`` may be None if CRISPR-Bulge did not run."""
-    cal = _calib()
+    scores (on-targets excluded); ``cb_scores`` may be None if CRISPR-Bulge did not run,
+    and ``cfd_scores`` None if CFD was not computed. With neither (a nuclease of no
+    SpCas9 family, a 5' PAM), every band would read 0, as "no site at risk": the card
+    gives ``no_score_note`` (HTML) in their place, and no modal (cli5 D6)."""
     guide = meta.get("guide_display") or meta.get("guide") or ""
     header = f"{_esc(guide)} &middot; {_esc(meta.get('nuclease',''))} &middot; {_esc(meta.get('pam',''))}"
+    warn = ""
+    if n_perfect and n_perfect >= 2:
+        warn = (f'<div class="rc-warn">⚠ On-target is not unique: {int(n_perfect)} '
+                f'perfect (0-mismatch, 0-gap) matches.</div>')
+    if cfd_scores is None and cb_scores is None:
+        return (
+            f'<style>{CARD_CSS}</style>'
+            '<div class="risk-card">'
+            f'<div class="rc-head">OFF-TARGET RISK &middot; {header}</div>'
+            f'{warn}<div class="rc-note">{no_score_note}</div></div>', "")
+    cal = _calib()
 
     # NB: risk-card tables use plain header ROWS (no <thead>/<tbody>/<th>), so the card never
     # adds a table the report's top-1000 parser could mistake for the ottable. (That parser is
@@ -178,11 +192,6 @@ def render_risk_card(meta: dict, cfd_scores: Sequence[float],
                 'more or less prone at its own locus can shift this count substantially in '
                 'either direction &mdash; often the largest uncertainty, and not something '
                 'the range above captures.</div>')
-
-    warn = ""
-    if n_perfect and n_perfect >= 2:
-        warn = (f'<div class="rc-warn">⚠ On-target is not unique: {int(n_perfect)} '
-                f'perfect (0-mismatch, 0-gap) matches.</div>')
 
     note = ('<div class="rc-note">'
             '<b>Expected true</b> estimates how many of the listed sites are real off-targets '

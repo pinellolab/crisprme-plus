@@ -4,6 +4,360 @@ Which published index is valid, for which client, and why — with the measureme
 behind each claim. Written for the 2.8.1 release, when CRISPRitz 2.9.1 changed
 the index builder and a second, non-backward-compatible index family appeared.
 
+> **The indexes of 2.10.0** are rebuilt by CRISPRitz 2.10.0 in index format 2 and published in
+> their own repo, `lucapinello/crisprme_plus_indices`, from the index set
+> [`seq_script/rebuild/index_set_2.10.0.tsv`](../seq_script/rebuild/index_set_2.10.0.tsv), which
+> gives each archive's build and publish commands (`seq_script/rebuild/README.md`); their
+> provenance is the next section. The rest of this page covers the archives of 2.8.1, which stay
+> in `lucapinello/crisprme-data` and `lucapinello/crisprme-data-general-index` for 2.8.1.
+
+## The indexes of CRISPRme 2.10.0 (index format 2)
+
+The rebuild for 2.10.0 built the 26 archives of the index set: 16 indexes, the 7 companions of
+the variant panels (each panel's Dictionaries bundle, and the genotype store and phased indel
+genotypes of HGDP + 1000 Genomes and of HPRC) and the 3 enriched-genome kits. It ran on two
+nodes of the same kind (AMD EPYC 7H12, 2 × 64 cores, about 1 TB of RAM): ml008 built HPRC
+(2026-11-14, 03:49 to 06:39 UTC), then the mega and the 7 reference indexes (06:45 to 15:00
+UTC); ml007 built HGDP + 1000 Genomes (2026-11-14 06:45 UTC to 2026-11-15 03:48 UTC). Every row
+ran from one image and one commit, every exit status was 0, and an index's bytes depend on that
+image and on the thread count alone. Gate A, the integrity check of what was built, passed on
+both nodes (below). The archives were published on 2026-11-18, and the size and SHA-256 of each
+index and companion archive below are the Hub's, filled in from it after the publish (the release
+checklist, E, step 5; Each archive, below). The methods of the rebuild, and how it was checked, are
+in [METHODS §11](../METHODS.md#11-index-rebuild-of-2100).
+
+### The build image: the image route, not the release image
+
+The indexes were **not** built with the release image, which `seq_script/rebuild/README.md`'s
+rule 2 names: the release image is built from the Dockerfile at the release's tags, and the
+indexes are built before the tags exist (CRISPRitz's `v2.10.0` among them). They were built with
+an image made by the image route of the D7 readiness audit: the environment of `rc281f.sif`, a
+release candidate of 2.8.1 that was never published, with CRISPRme's tree replaced by the commit
+below and CRISPRitz compiled inside it, from the commit below, with the Dockerfile's `g++` lines.
+`rc281f.sif`'s Dockerfile equals v2.8.1's, and its own `crisprme.py` (md5 `4c527335…`, not v2.8.1's
+`1fbc9c9f…`) is replaced; its conda environment is v2.8.1's (at the build commit, `db50986`,
+2.10.0's `environment.yml` added `pigz` alone, which the image holds; after the build it added
+conda-forge's GNU `coreutils` too, for Ubuntu 26.04, whose part the image's Debian GNU coreutils
+play: 2.10.0's Dockerfile installs the same conda packages as 2.8.1's). That image, and its
+`.provenance.txt`, are the only artifacts that reproduce these indexes' bytes: keep them with the
+release's records.
+
+| | |
+|---|---|
+| Image | `crisprme-2.10.0-db50986.sif`, 4,513,169,408 bytes, sha256 `e95dd278ac76b17277528a89996815790186e86d9a67b21e3b03b3e180e06e16` |
+| Made | 2026-11-14 at 02:18 UTC on ml007, unprivileged (apptainer 1.4.4), by the plan's `mkimage.sh`; copied to ml008 and ml003, the sha256 checked on each |
+| Base | `rc281f.sif`, sha256 `c10c34f903b0fb28d8c40fabedf047b29c70028fe7073bd66a766006599fc116`, checked before the build |
+| CRISPRme | commit `db50986cc54e4e39533be8b7725d94aa1664b2bc` of `feat/2.10.0` (version 2.10.0), as a `git archive` (sha256 `6ec147db0a1a0267aed5285543a59f3d16c0edb898c2182673b134979cb512e1`); the image's `/opt/conda/opt/crisprme` equals the archive, 548 files by md5, and its `crisprme.py` (md5 `10148d8b8b2c61fb399bbda70c53265d`) the commit's |
+| CRISPRitz | commit `4ded5e62230fcea4a4031ae1bf431e64344b5309` of its `feat/2.10.0` (`v2.10.0` not yet tagged at the build), as a `git archive` (sha256 `f92e5801f9864d5e7141ffc448960b561797dfe917a08318f7b88aba6fecf360`): VERSION 2.10.0, INDEX_FORMAT 2, INDEL_LEFT and INDEL_RIGHT 30; the enricher compiled without `-fopenmp`, as the Dockerfile's line compiles it |
+| Binaries (md5) | `buildTST` `f6a1c29a246caff13d04efe5bc8eaf1a`, `searchTST` `b16b9e340556f1046bd359420bc0f535`, `searchBruteForce` `eefeb865acdacf5cdd32f84f646feee8`, `enricher` `b2a5d3a78c7713853d6ad259babe383e`, `crispritz.py` `070a462e50c24befde4791b791055912` |
+| Tools | bcftools 1.24, ijson 3.6.0 (yajl2_cffi), huggingface_hub 2.4.0 |
+| Environment | every row under `env -i`, with `PYTHONNOUSERSITE=1` (the image's Python packages, not those of `~/.local`, which the bind of `$HOME` puts first: ijson 3.5.1 there, which parses the dictionaries the same) |
+| Checked | `crisprme.py --version` v2.10.0 in the image, on ml007 and on ml003 (apptainer 1.3.4); the scorer's self-test computes; the smoke (the reference index and HPRC on chr22, mega on chr3, chr4 and chr12) records `built_by` 2.10.0/2.10.0; after the build, Gate A checked again on ml007 and ml008 the sha256, these md5s, the versions and the tree (below) |
+
+At the release, check that the tagged sources that build indexes are those used:
+`git diff --stat 4ded5e6 v2.10.0 -- sourceCode crispritz.py Makefile Makefile_conda conda` in
+CRISPRitz prints nothing, and in CRISPRme `git diff db50986 v2.10.0 -- PAMs
+seq_script/merge_panels seq_script/rebuild/index_set_2.10.0.tsv` prints nothing but comment
+lines and the name of the repo the set is published in, `lucapinello/crisprme_plus_indices`, made
+during the build under that name (in the index set's header, its `repo` column and every publish
+command: each kit's `hf upload` and each index's `publish-index --hf-repo`, which the image of
+`db50986` the publish runs in needs, as its code routes an index of format 2 to the name the plan
+had given the repo, which is no repo's; and in `seq_script/merge_panels/README.md`; no recipe and
+no build command names a repo). At `cb282e83` it prints that name and the index set's header
+comment on why a publish names it: the recipes, their comments included, are `db50986`'s, so the
+HPRC recipe's header still names v2.0's graph, the
+recipe's default `SRC`, where the rebuild gave it v2.1's split as `SRC` (`$HPRC_SRC`, above). The
+19 row lines of the build half keep their md5 (`7389f7e234d4e617860f8f9b34abdc49`: those of
+`check_index_set.py --commands build` after its `# build` line, the `if`, `else` and mark lines
+around each left out, as `check_index_set.half_lines` takes them; the printed script, which holds
+its checks and those lines too, has an md5 of its own); and `git diff db50986 v2.10.0 --
+crisprme.py PostProcess` changes nothing a build writes (the changes after `db50986` are search,
+download, publish and checker code and the text of some refusals, each named in the
+CHANGELOG).
+
+### Threads
+
+The `.bin` files of an index depend on the thread count it was built with (`buildTST` sorts in
+parallel, and the order it writes depends on the threads), its targets do not: in the D7 audit,
+an index of HGDP + 1000 Genomes built again from its kit at 64 threads, the count it was built
+with, was byte-identical (7 of 7 `.bin` files), and at 16 threads 6 of 7 differed; searches of
+indexes built at 16 and at 64 threads gave identical rows. Every row ran with its recipe's count,
+under `env -i`, so that no `THREADS` of a shell reached it, and none was changed on a re-run:
+
+| Archives | Threads | Where it is set |
+|---|---|---|
+| The 7 reference indexes (`20-NRR_3_hg38`, ...) | 16 | the manifest's `--thread 16` |
+| The 7 indexes of HGDP + 1000 Genomes | 64 | `seq_script/merge_panels/hgdp1kgp_build.sh`, `THREADS` |
+| `20-NRR_3_hg38+hg38_HPRC` | 32 | `seq_script/merge_panels/hprc_build.sh`, `THREADS` |
+| `20-NRR_3_hg38+hg38_mega` | 16 | `seq_script/merge_panels/mega_rebuild.sh`, `THREADS` |
+| Every `_INDELS` sub-index | 1 | `PostProcess/pool_index_indels.py` (`-th 1` a chromosome) |
+
+The tier emitter's workers (`CRISPRME_TIER_WORKERS`, 3 on ml007) and the enrichment's change no
+file: each chromosome's tiers are written alone. A user who rebuilds an index from its kit
+(`docs/PRECOMPUTED_INDEXES.md`, step 3) gets the published `.bin` files with these counts.
+
+So an archive's SHA-256 can be reproduced only at its row's thread count, which sets the order of
+the records in its `.bin` files: built at another count, the index holds the same targets, and
+its searches give the same rows. The architecture changes neither. From the rebuild's chr22 FASTA
+(md5 `319cba9f…`), the amd64 and arm64 release candidates of 2.10.0 wrote byte-identical `.bin`
+files of an NGG index at 8 threads, and again at 1; the rebuild's `20-NGG_3_hg38` (16 threads)
+has chr22 files of the same sizes and other md5s. Searching those files of the rebuild, built on
+x86, the arm64 engine wrote the amd64 engine's targets file byte for byte: the targets it found in
+the index it had built itself, in another order.
+
+### Inputs
+
+Each input was checked against a list of checksums before the build, on the node that read it;
+the lists are kept with the build's records (`checks/` of the rebuild's working folder), and each
+list's own sha256 is given here:
+
+| Input | Source and version | Files | List (sha256 of the list) |
+|---|---|---|---|
+| hg38 | the 455 FASTAs of hg38 that `download --what genome` installs from `lucapinello/crisprme-data` (chr1-22, X, Y and M, and the alt, random and unplaced contigs), md5 equal to HF's; the reference indexes and HGDP + 1000 Genomes are built on all 455, HPRC and the mega on chr1-22, X and Y (as 2.8.1's indexes of each panel were) | 455 | `hg38_455.md5` (`58f53f0e9b9dd85cfa597c4925202909094b51871b0074778f2e5d3ca75017ee`) |
+| HGDP + 1000 Genomes, re-phased | gnomAD v3.1.2's joint HGDP + 1000 Genomes callset, re-phased with SHAPEIT5 keeping singletons (`docs/HGDP_1KGP_PHASED_INDEX_METHODS.md`): `hgdp1kg.<chr>.rephased.bcf` and `.csi`, chr1-22 and X, the recipe's first input | 46 | `hgdp_rp.sha256` (`1891be055ad8a4d6d8c55cee1a31251b7f11ec98612b9a8c9fa166be63b5abf1`) |
+| HGDP + 1000 Genomes, normalised | the recipe's VCF-PREP output, `hgdp1kgp.<chr>.norm.vcf.gz` and `.tbi`: 2.8.1's as-run files, sha256 equal to HF's `vcfs/hg38_HGDP1kGP`, put in place of VCF-PREP, which reproduces them record for record; 144,858,810 records (Gate A's census) | 46 | `hgdp_vcfs_281.sha256` (`fb91de7fe0e1299290196d0373d9eab9429db2db120a28544e53307103a15b74`) |
+| META | gnomAD's metadata of the callset, `gnomad_meta_updated.tsv` (`release/3.1/secondary_analyses/hgdp_1kg_v2/metadata_and_qc/`), sha256 `e18e7a29d0567b8063edc1a714bd31e57dc422823ba51af2c63fecef0dbc3cf1`: the panel's samplesID is derived from it | 1 | `meta.sha256` (`377b549762758217719a0715748b91ca2ec64a4bd4e816399a1d853f61a18946`) |
+| HPRC | HPRC Release 2's Minigraph-Cactus graph **v2.1**, split per chromosome (below) | 48 | `hprc_src.sha256` (`83589242e6b7843bf51a657b43d223abb08221114b0e942e0276ec6e16e75350`) |
+| P1KG | the samplesID of 1000 Genomes 2021, `hg38_1000G2021.samplesID.txt` (3,501 rows), which names the HPRC samples' populations, sha256 `93fa520fb185a75814dccc502102fc54201fa5ba3e43d0e3233af04117fa9764` | 1 | `p1kg.sha256` (`fa27a591f71965d76372bf24f93a3a73589579db9993c0445a9e22a2a1a66352`) |
+| mega | the merged sites-only VCFs `mega.<chr>.afmax.vcf.gz` and `.tbi`, chr1-22, X and Y, of five sources (1000 Genomes 2021, HGDP, gnomAD v4.1, TOPMed and All of Us; `seq_script/merge_panels/merge_mega_sites.sh`, `AF_<source>` and `AF_max`), sha256 equal to HF's `vcfs/hg38_mega`; 66,913,681 records, 62,584,776 of them `PASS` or `.` (Gate A's census) | 48 | `mega_src.sha256` (`a7b9671631fbd0e17f39b2ed7e8afbf74cb14b75d02229007dc75c70e3b6e6da`) |
+
+**HPRC v2.1.** The source is `hprc-v2.1-mc-grch38.wave.vcf.gz`, the `vcfwave`-decomposed VCF of
+the GRCh38 graph, from S3
+`human-pangenomics/pangenomes/freeze/release2/minigraph-cactus/v2.1/hprc-v2.1-mc-grch38/`:
+2,291,014,302 bytes, md5 `63cc82deb0e010ab98719a9e31dfa352`, its S3 multipart ETag
+`3e33ef1c419591a0774722d0ca9e10c5-274` recomputed from the file (8 MiB parts) and equal; its `.tbi`
+2,212,134 bytes. It is split per chromosome as `docs/PRECOMPUTED_INDEXES.md` gives the commands
+(`bcftools view --regions <chr>`, then `tabix -p vcf`), into `ALL.<chr>.HPRC.vcfwave.vcf.gz` and
+its `.tbi` for chr1-22, X and Y, whose sha256 are these (`hprc_src.sha256`):
+
+```text
+1e26e98e6c4c0cbef0b05b1acc115eb0fb681e05bd3730b96eab9f049fb1e689  ALL.chr1.HPRC.vcfwave.vcf.gz
+34f2fc7636757989224a85229d357e831124d102d1936f3f6e66dfce86cec8a5  ALL.chr1.HPRC.vcfwave.vcf.gz.tbi
+6cd9311fbb25769c326c4b022e1a4a7be89cf838946d529509502f1ca16a2902  ALL.chr10.HPRC.vcfwave.vcf.gz
+49a50b8b07a37649ed2436d282c1805a51c4f1c03bcbe20637c064c6d7686b48  ALL.chr10.HPRC.vcfwave.vcf.gz.tbi
+a0f1592a8cc8bcde05d5022f73cc032b19c3c17936a571a84fba595dee803076  ALL.chr11.HPRC.vcfwave.vcf.gz
+c08dace5a5e7f42ee03b3bf8c2cb0d807da58f81496630116ee6f702d1acfccf  ALL.chr11.HPRC.vcfwave.vcf.gz.tbi
+373b9bdefe5f7f7dffa22cdd5f9522a8bd9a94410bbcb0fbae6525a62024e493  ALL.chr12.HPRC.vcfwave.vcf.gz
+5442b7953e590fdea5fda434fc2dadbcb50834ed4b47dd5b38849e3ab13a2e46  ALL.chr12.HPRC.vcfwave.vcf.gz.tbi
+37d18433341612a79ee3a3c2c5170124d283fb58d6bd255776886b605ae1310b  ALL.chr13.HPRC.vcfwave.vcf.gz
+86d6e1b41e90f34362e2f95808a249c9be41423ffdb03c2904165309aab82555  ALL.chr13.HPRC.vcfwave.vcf.gz.tbi
+88d5b0152f02787ac4ac5694a1ef2624765f72bcb5b1fa2a1b888511a09723cc  ALL.chr14.HPRC.vcfwave.vcf.gz
+55e683e3cadd7fd187632abb89fe12830820a94aec96a38e17173b93b935796f  ALL.chr14.HPRC.vcfwave.vcf.gz.tbi
+b927c2efa7f641e2626b0bd3661f20a1921da911e401a985a8a2b5d5d10cb731  ALL.chr15.HPRC.vcfwave.vcf.gz
+a95aacef2d200332804f2b254e20cdcda85ae699bf98224394be6d4be73c57d3  ALL.chr15.HPRC.vcfwave.vcf.gz.tbi
+27ef9b089d51904a59a3b89f556adf37803aede6c03670f918f4bdfe48b2d282  ALL.chr16.HPRC.vcfwave.vcf.gz
+6b602506ba43ef3cc3f39c4ac2b5dfbc6dc78549093155bcde532925a6402bfe  ALL.chr16.HPRC.vcfwave.vcf.gz.tbi
+1208b7b3515e77329d1f023ddfdfd9f5d1587f86a739efaf2591572e9f0a40cf  ALL.chr17.HPRC.vcfwave.vcf.gz
+a22eb700c22e7dd38ed01911ce1610f8a502e30074d04fc78c6df365ebbc92d4  ALL.chr17.HPRC.vcfwave.vcf.gz.tbi
+8cf98d1bb7375433fb2c35c89ee1556034282a9016312c7be5632d7733781bc1  ALL.chr18.HPRC.vcfwave.vcf.gz
+cf0b2ee832b2c5ff116cd8cf2b2a131a02c7062e5b9fbddd5840e9c6ec7322d4  ALL.chr18.HPRC.vcfwave.vcf.gz.tbi
+4a2c3b86a58e0041122286fa3b8cf0215af12cbfaabc7379b965fb6dfc52fe4e  ALL.chr19.HPRC.vcfwave.vcf.gz
+896640baccdb5555fbaa41760417232ceec5dc7653b3323c74d05e1a4fd2fe43  ALL.chr19.HPRC.vcfwave.vcf.gz.tbi
+c0ca5f26e29ed5fb20a0c57a748fa7783df82bdb4cf885a8ec0846ef3b17ecbc  ALL.chr2.HPRC.vcfwave.vcf.gz
+1e6f92f727ffc31a30c23751eade450c8c49394deef92c16b0dc200f151bd7f9  ALL.chr2.HPRC.vcfwave.vcf.gz.tbi
+de170e59f32a19ec79bf8b6617e531ec6121576e8bbe39566ff82385656a69ad  ALL.chr20.HPRC.vcfwave.vcf.gz
+811830c436f87380bf7d33cdb29c9f7afe44285641e06ff1b21b1948e1287150  ALL.chr20.HPRC.vcfwave.vcf.gz.tbi
+40ca4681103bd64bb28c7b8d17c9461b31928e3ec78fd0e8751c9b70f1d9830c  ALL.chr21.HPRC.vcfwave.vcf.gz
+7aaea0681329af709c40c7aa055d0e18b005b80e079f10ed6c224ad204b2685e  ALL.chr21.HPRC.vcfwave.vcf.gz.tbi
+69f8e290918bb58b16c867a03ff171b6e465049bcdd3890607b3a7700887a812  ALL.chr22.HPRC.vcfwave.vcf.gz
+0317f6a779ae87af9978737218c7a85a44570ed65480291fa1b7ba9c369d5424  ALL.chr22.HPRC.vcfwave.vcf.gz.tbi
+77487d780463c5e1f06f441077bd4ac268ef4cfbfc2c1a6392b43eb9c4d9cbd8  ALL.chr3.HPRC.vcfwave.vcf.gz
+19555a711b2d19bad25028b27588c85b9381592d88239e7e91f2d4ff2cd6c8b2  ALL.chr3.HPRC.vcfwave.vcf.gz.tbi
+ced2e7b891c02fc17eb4436e8c1862e84042a08e121ef0fc4aee7dda57038606  ALL.chr4.HPRC.vcfwave.vcf.gz
+e248942b0519bae03334a5e7fe835c0eedaab1a19198c74786ccb1a3312898ce  ALL.chr4.HPRC.vcfwave.vcf.gz.tbi
+2cb125575563871a3ad9d75b0ba5a5c50d82d77c60348fcd0017bc2acc3ecddb  ALL.chr5.HPRC.vcfwave.vcf.gz
+3029e9f5377f3d2b59690e1bd82ca9d2831a591479e8afb0207250d522f5f6e2  ALL.chr5.HPRC.vcfwave.vcf.gz.tbi
+ee41eea0afb9ebca552621a7c901f7078f2571fcd320ad0201d035f352a4b0e9  ALL.chr6.HPRC.vcfwave.vcf.gz
+bcccad92e449b8751b8fc79334c940868e03caae6be0fb3a896d93d76e3eb13f  ALL.chr6.HPRC.vcfwave.vcf.gz.tbi
+02fe8b9932f1ac024910bf7f82467566bad7f95b58ec7c30ecdfa1b29c8d4e86  ALL.chr7.HPRC.vcfwave.vcf.gz
+d78e083f59c78b53ebd8bf3c63be3c4c562a8da444815f773f7b9e09363f3fbd  ALL.chr7.HPRC.vcfwave.vcf.gz.tbi
+97c4848f8e6cce7aea4229473771598f55911d27e30e23c9f72d99e3c13c0a15  ALL.chr8.HPRC.vcfwave.vcf.gz
+c00b7bffab7431c05c12518dda7ea47642fb01680cadb9b20633751752e5325a  ALL.chr8.HPRC.vcfwave.vcf.gz.tbi
+110446d9fa5807ad61cee06ec109a5459596a2b796610760308056cc70544eb4  ALL.chr9.HPRC.vcfwave.vcf.gz
+5bbb2d84f2389705a11a46db4041f55d1c1a1759209358081bb33b66641e59b7  ALL.chr9.HPRC.vcfwave.vcf.gz.tbi
+87be3d502253a6a140e9d849033fa3b3f869845cfc88147c12317915d1643771  ALL.chrX.HPRC.vcfwave.vcf.gz
+5e9b1d32237dbefffb0ba90603228932f81aaaa36886eab356dbcd2115e3b4de  ALL.chrX.HPRC.vcfwave.vcf.gz.tbi
+1504e59263583dfe020265ebf2025ae45515543f3f04d3f976a70f53b2fe9895  ALL.chrY.HPRC.vcfwave.vcf.gz
+a5a7e44fb9c48129fd88b948ab2e099f8c42141e38fc95457cd2b7a91dfee5fd  ALL.chrY.HPRC.vcfwave.vcf.gz.tbi
+```
+
+Its 232 samples are v2.0's, in the same order, so the panel's samplesID equals 2.8.1's, byte for
+byte (sha256 `9fc1ce527d5390beb2e00fa9541a012c74279ab8925411a9449b00e7056180ff`). 2.8.1's HPRC
+archives were built from v2.0 (the CHANGELOG, 2.10.0, Changed, gives what differs). The index reads
+the recipe's normalised output of these files (`hprc.<chr>.norm.vcf.gz`), which the publish hosts
+with the panel's kit (`docs/RELEASE_CHECKLIST.md`, T-35).
+
+The samplesID lists the builds wrote, which each panel's Dictionaries bundle carries:
+
+| Panel | `samplesIDs/` | Rows | sha256 |
+|---|---|---|---|
+| HGDP + 1000 Genomes | `hg38_HGDP1kGP.samplesID.txt` (2,192 male, 1,899 female; the 7 regions of `gnomad_meta_updated.tsv`) | 4,091 | `f77fd82e837aa7dc6222c7c5dd83f2e5870508cf1309ba9dc7e8313c6ddcf1e1`, equal to 2.8.1's build's |
+| HPRC | `hg38_HPRC.samplesID.txt` (231 individuals and CHM13) | 232 | `9fc1ce527d5390beb2e00fa9541a012c74279ab8925411a9449b00e7056180ff`, equal to 2.8.1's |
+| mega | `hg38_mega.samplesID.txt` (one row per source, no individual) | 5 | `64d2f8077346e8fd31bd9acb950569f60382e876781a08a6d8c6482dc4119634` |
+
+### Each archive
+
+From the build's logs (`rows.status`, each row's `.time` and `.out`): each row's node, threads,
+wall time and peak memory (the maximum resident set size of its largest process, `/usr/bin/time
+-v`, in GiB = 2^30 bytes; a row runs several processes at once, so the node held more: the first
+row of HGDP + 1000 Genomes, whose tiers ran on 3 workers, up to 495 GiB summed over its
+processes). A panel's first row enriches hg38 with the panel, writes its Dictionaries (which its
+companions pack at the publish) and builds its first index; its next rows reuse them and build an
+index (each rewrites the registry's `variant_count.json` and the samplesID list, with the same
+counts: Gate A). Each kit's size is its tarball's (`stat -c %s`) and its SHA-256 the one its row
+wrote in `<dataset>.SHA256SUMS`.
+
+The size and SHA-256 of each index and companion archive are the Hub's. Its SHA-256 exists only
+once it is packed for the upload: `publish-index` packs each archive at the publish, its manifest
+dated then, uploads it and deletes it, so no build log holds it, and a tarball packed by hand would
+not be the Hub's. Both were filled in after the publish, from the Hub at its commit `a4d4bc00`
+(2026-11-18, the upload of `indexes/SHA256SUMS`): each SHA-256 from `indexes/SHA256SUMS`, which
+`scripts/hf_sha256sums.py` writes from the Hub's own checksums (the release checklist, E, step 5),
+and each size from the Hub's listing of `indexes/` (`list_repo_tree`). Before the publish, each
+size was measured on 2026-11-15 by running each publish row of the index set through
+`publish-index` (CRISPRme `72c2c8e`, which packs as `db50986`'s does) with a stand-in for the Hub,
+each `tar | pigz` stream counted in place of being written (the release checklist, D): the Hub's
+sizes are -3 to +9 bytes from those, the times `manifest.json` and a bundle's record give.
+
+| Archive | Node | Threads | Wall time | Peak memory | Size | SHA-256 |
+|---|---|---|---|---|---|---|
+| `20-NRR_3_hg38` | ml008 | 16 | 47:01 | 29.2 GiB | 20,169,184,695 | `5804fe694042be7e958dd51d5ab8781fc4b6e303191102dc2815e519764a8085` |
+| `20-NGG_3_hg38` | ml008 | 16 | 11:04 | 5.6 GiB | 3,813,713,292 | `3ee954d0f5dd5e338c39d221124c86f59255be9812f2befa116944b2be62736d` |
+| `20-NRG_3_hg38` | ml008 | 16 | 21:56 | 12.7 GiB | 8,885,680,169 | `b2880675d289dfa2abeae2bc8c526384eaaaf02ef66b2e0526dd49ac4e8b423e` |
+| `20-NNNNNNNN_3_hg38` | ml008 | 16 | 2:53:53 | 104.4 GiB | 82,212,406,884 | `96a5ae1f9f19a5369f413aaa986fa09a5ae299401848a0f1b3fb88d76fb9bda9` |
+| `22-NNGRRN_3_hg38` | ml008 | 16 | 14:55 | 7.8 GiB | 5,408,945,223 | `05e5fb75c50cb28b72e3acddff765fbe06f72b5ec6f2532008b114e7d17f9ffa` |
+| `TTTN-20_3_hg38` | ml008 | 16 | 9:13 | 4.3 GiB | 2,831,074,694 | `1fa14bf6545dc1b40714c4f2f453a36612ffb4d5bb31218b716c3f09e5554c66` |
+| `TTTN-23_3_hg38` | ml008 | 16 | 9:53 | 4.9 GiB | 3,085,485,783 | `d086308269adb3e35e4888ccb95932f96fb9b234f1064dce0d75f108d5073a35` |
+| `20-NRR_3_hg38+hg38_HGDP1kGP` (the panel's first row) | ml007 | 64 | 12:17:13 | 177.2 GiB | 27,842,100,969 | `b46355ee6b10ef5d1c1e07eee4e61fe08f2a1e3337e6f523be9d2d7e167322e4` |
+| `20-NGG_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 32:13 | 7.0 GiB | 5,336,725,023 | `1f39e06f9b8571db5c836f33606ecf7877a30ed95f39734e32f69cf39793b8af` |
+| `20-NRG_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 53:41 | 13.5 GiB | 12,243,828,684 | `3d6fe5b72675f3d3a682cd415730681a475c202144e91b40c73fd3a3c56db895` |
+| `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 5:38:16 | 104.7 GiB | 110,912,223,728 | `fe5905efd8b49808afca413c2d77030ed98b3eb3235a892f91ca381823b381d9` |
+| `22-NNGRRN_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 40:27 | 8.5 GiB | 7,517,827,068 | `8f1cb7c9803befee64273967b38707a5e3976e4c1cc91ffbd62d2c3e0d4a59bc` |
+| `TTTN-20_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 29:28 | 5.7 GiB | 4,542,619,339 | `9be2336fc721fb44c1990da06daea7eab7321264c5df92a738f56f7fcf73041f` |
+| `TTTN-23_3_hg38+hg38_HGDP1kGP` | ml007 | 64 | 30:44 | 6.6 GiB | 4,831,243,457 | `3bcf203f56ad208f2abe58064ae7a03911cbab18969b815698511b3c90a46ebe` |
+| `dictionaries-bundle_hg38_HGDP1kGP` | ml007 | (the panel's first row) | — | — | 16,420,012,995 | `6122341d80535a42db1c03bef6fff76088da333d56c32df9fe2b24c71fc809c6` |
+| `genotypes_hg38_HGDP1kGP` | ml007 | (the panel's first row) | — | — | 5,865,023,573 | `4eb23d82b7a1cdace71601c13eef932db0e7d45d2d45986cee69459e96393bd5` |
+| `indel_genotypes_hg38_HGDP1kGP` | ml007 | (the panel's first row) | — | — | 7,638,538,409 | `d3c30a4927998ec97f6346f97a48f8208f2c2ee9e6435bd8d1813f45f8696ad5` |
+| `build-inputs/hg38_HGDP1kGP` | ml007 | (pigz) | 0:17 | 0.1 GiB | 1,237,137,069 | `00d20b53ff60d2efca9eb779b7a23cc0aad8e7c6ffec5e33ee59e9640463e77d` |
+| `20-NRR_3_hg38+hg38_HPRC` (the panel's first row and its only index) | ml008 | 32 | 2:49:00 | 29.7 GiB | 29,548,088,135 | `e556e9464345343cd0daded2fe2d854908fe96b14eb502332660d4029a4e98ed` |
+| `dictionaries-bundle_hg38_HPRC` | ml008 | (the panel's first row) | — | — | 2,443,592,495 | `1c7b3af1cdca1822c9dfe739c69674d5f38ae83dc2c5e3c6a1fe349cc4b045fc` |
+| `genotypes_hg38_HPRC` | ml008 | (the panel's first row) | — | — | 559,741,385 | `30be4ab5878925ea88b0c82dbaf8a022d9f2f639bfa0ec52353f256af1f07c40` |
+| `indel_genotypes_hg38_HPRC` | ml008 | (the panel's first row) | — | — | 590,105,972 | `c9988b65e0b15564b69d6a732bf84d4416c1f12a806b9e4d778076abb4345cf8` |
+| `build-inputs/hg38_HPRC` | ml008 | (pigz) | 0:23 | 0.1 GiB | 1,182,402,681 | `09e9944b1a113fbd6653ef91c09b29f3859ce8723df9f029123fa200d24fdc07` |
+| `20-NRR_3_hg38+hg38_mega` (the panel's first row and its only index) | ml008 | 16 | 3:26:06 | 29.7 GiB | 24,108,874,757 | `466127c4cc8b2fab8df583127a228dac85adacaac348b6114c35c9d245504138` |
+| `dictionaries-bundle_hg38_mega` | ml008 | (the panel's first row) | — | — | 1,954,090,899 | `25d0c4cd822bdfa3707991784b6e36ea23eef475d968fb2a291f79cde29573a5` |
+| `build-inputs/hg38_mega` | ml008 | (pigz) | 0:17 | 0.1 GiB | 1,018,696,857 | `f374afa01c455bb750e178364c040b82443c7e7fc2d617600edff8d3a072ee45` |
+
+The 23 index and companion archives add up to 388,761,127,628 bytes (388.76 GB) on the Hub
+(388,761,127,579 as packing measured them before the publish) and the 3 kits to 3,438,236,607
+(3.44 GB). A panel's first index, with the companions a download of it fetches, its
+reference index aside: HGDP + 1000 Genomes 50.13 GB (27.84 + 16.42 + 5.87; the phased indel
+genotypes are in the bundle too, and their own archive, 7.64 GB, is fetched with the genotype store
+by `download --what genotype-oracle`), HPRC 32.55 GB, the mega 26.06 GB. The rows took 0.82 to 1.03
+times the upper end of the plan's estimate of each group of rows, and HGDP + 1000 Genomes' kit, a
+group of its own, 0.06 times (17 s).
+
+Each kit's member list, `<dataset>.members.md5`, gives the md5 of each file the kit holds, by its
+path in it (`scripts/kit_members.py`): the tarball is not byte-reproducible (tar records each
+file's time, owner and listing order), so its `SHA256SUMS` says that a download is the published
+file, and the list what the kit holds, the same for any packing of the same files. Gate A wrote
+each list from the tarball, with nothing extracted, and found it byte-identical to the one written
+from the working directory's folders; the publish puts it beside its kit
+(`build-inputs/<dataset>.members.md5`; the release checklist, E, step 4):
+
+| Kit | Files | Member list | Its SHA-256 | Its md5 |
+|---|---|---|---|---|
+| `hg38_HGDP1kGP` | 478 (455 enriched FASTAs, 23 fake-indel FASTAs) | `hg38_HGDP1kGP.members.md5` | `ccce7be177fa68c62efea59bb914c6de7a227b1bc9e3a765e894e87eabe79d1b` | `d6a5a65493cfb382b9de1a65155bc2d1` |
+| `hg38_HPRC` | 48 (24 and 24) | `hg38_HPRC.members.md5` | `af381e445a4591d931b449fc3802838311aa548ac398141b98eb1e4604f84c62` | `73c6e0bd98dd75bcd10966ba1e200790` |
+| `hg38_mega` | 48 (24 and 24) | `hg38_mega.members.md5` | `ef62b38bb499a1a9d6a5ce180c82339fef99c4308dcde4666740b25f19a18510` | `29cbaf3d5ac0425039ca0af7a7abbd78` |
+
+What each index holds (`crispritz.py index-info` on every index and sub-index, all of index
+format 2, N = 3, the PAM, side and guide length of its name, `built_by` CRISPRitz 2.10.0 and
+CRISPRme 2.10.0; "Q" counts the `.bin` files whose header flags the four-allele symbol):
+
+| Index | Contigs | `.bin` files (with Q) | `_INDELS` sub-indexes (`.bin` files) |
+|---|---|---|---|
+| `20-NRR_3_hg38` | 455 | 771 | — |
+| `20-NGG_3_hg38` | 455 | 501 | — |
+| `20-NRG_3_hg38` | 455 | 586 | — |
+| `20-NNNNNNNN_3_hg38` | 455 | 1,628 | — |
+| `22-NNGRRN_3_hg38` | 455 | 522 | — |
+| `TTTN-20_3_hg38` | 454 | 488 | — |
+| `TTTN-23_3_hg38` | 454 | 488 | — |
+| `20-NRR_3_hg38+hg38_HGDP1kGP` | 455 | 779 (345) | 23 (95) |
+| `20-NGG_3_hg38+hg38_HGDP1kGP` | 455 | 508 (76) | 23 (23) |
+| `20-NRG_3_hg38+hg38_HGDP1kGP` | 455 | 593 (160) | 23 (40) |
+| `20-NNNNNNNN_3_hg38+hg38_HGDP1kGP` | 455 | 1,628 (1,177) | 23 (319) |
+| `22-NNGRRN_3_hg38+hg38_HGDP1kGP` | 455 | 523 (91) | 23 (26) |
+| `TTTN-20_3_hg38+hg38_HGDP1kGP` | 454 | 491 (60) | 23 (34) |
+| `TTTN-23_3_hg38+hg38_HGDP1kGP` | 454 | 491 (60) | 23 (30) |
+| `20-NRR_3_hg38+hg38_HPRC` | 24 | 345 (345) | 24 (279) |
+| `20-NRR_3_hg38+hg38_mega` | 24 | 346 (346) | 24 (87) |
+
+**454 contigs for TTTN.** `chrUn_KI270539v1` (993 bp, GC 0.80) holds no `TTT` and no `AAA`, so it
+has no TTTN site at 20 or 23 nt on either strand, in hg38 or in the panel's enriched genome
+(identical there: no variant of the panel lies on it), and `buildTST` writes no tree for a contig
+with no site. The other PAMs hold sites on it (NRR 636, NGG 417, NRG 537, the general index 1,932,
+NNGRRN 326), and each of their indexes holds it. TTTN-20 and TTTN-23 therefore hold 454 contigs on
+the reference and on HGDP + 1000 Genomes, the other indexes there all 455 (accepted on
+2026-11-14).
+
+And what each panel holds:
+
+| Panel | SNP alleles | Indel-path alleles (indel log rows) | Samples |
+|---|---|---|---|
+| HGDP + 1000 Genomes | 127,666,429 | 17,192,381 | 4,091, phased |
+| HPRC (v2.1) | 36,719,470 | 12,361,907 | 232, phased |
+| mega | 48,731,015 | 13,853,753 | none: sites-only, 5 sources |
+
+The genotyped panels' counts are their `variant_count.json`; the mega's recipe writes none, and its
+counts are the sum of its registry's records and its indel log's rows. HGDP + 1000 Genomes' SNP
+alleles are 2,486,165 more than 2.8.1's 125,180,264, its CRISPRitz 2.9.1 coding only the last
+record of a split site; its indels are the same 17,192,381.
+
+### Gate A: the integrity of what was built
+
+Gate A (the release checklist, E, step 1) checked every index, the panels' Dictionaries and the
+kits before anything else read them, in the image, read-only, each node's results re-derived by a
+second, independent check: on ml008 on 2026-11-14 (from 15:21 UTC: REF, HPRC, the mega), on ml007
+on 2026-11-15 (from 04:21 UTC: HGDP + 1000 Genomes). It passed on both:
+
+- **The image and the commit.** The SIF's sha256 and the md5 of `crisprme.py`, `buildTST`,
+  `searchTST`, the enricher and `crispritz.py` are those above; the tree in the image is `db50986`;
+  the build half's lines keep md5 `7389f7e234d4e617860f8f9b34abdc49`.
+- **Every index** (59 on ml008 and 175 on ml007, sub-indexes included): `crispritz.py
+  index-info` exits 0 and reads format 2, the PAM, side and guide length of its name and N = 3 in
+  every `.bin` header; `.index_meta.json` and `.pam_build` agree; the contigs are as above. The
+  rebuild's `postcheck` gives each variant index's `_INDELS` 23 (HGDP + 1000 Genomes) or 24 (HPRC,
+  the mega) sub-indexes, none empty, `built_by` 2.10.0/2.10.0, and no lower-case base in a
+  fake-indel genome (none in the 1,111,296,669 bases of HGDP + 1000 Genomes').
+- **The counts.** HGDP + 1000 Genomes: a census of the 23 normalised VCFs gives the
+  `variant_count.json` above chromosome by chromosome (127,666,429 distinct single-base SNV alleles
+  with AC > 0 and FILTER `PASS` or `.`; 17,192,381 other records, each one row of the indel log),
+  and every row's log says `Dictless tier emission complete: 23/23`. HPRC: the plan's own count
+  (`hprc_expect.sh`) gives 36,719,470 and 12,361,907, equal to the pilot's; tier emission 24/24.
+  The mega: `verify_mega_chrom` passes on all 24 chromosomes, and an independent recount of its
+  build VCFs equals each chromosome's registry records, by count and record by record; chrY keeps
+  its 177,968 records with `AF_max`.
+- **Case.** The input's records with a lower-case REF or ALT (6 deletions of HGDP + 1000 Genomes,
+  13 records of the mega) are upper case in the indel log and the fake-indel genome, and read so
+  from the stores: the mega's indel frequencies hold them in upper case, and HGDP + 1000 Genomes'
+  indel genotype store keeps the VCF's case, which its readers upper-case on load.
+- **The kits.** `sha256sum -c` of each kit's `SHA256SUMS` passes; each tarball holds only
+  `Genomes/hg38+<dataset>/` and `Genomes/hg38+<dataset>_INDELS/`, and its member list is the one
+  above.
+- **Nothing changed after its row.** No index, Dictionaries folder or kit is newer than its row's
+  end, no build mark is left, and the gate wrote nothing under the working directories.
+
+The only checks that failed were the plan's literal expectation of 455 contigs on every reference
+and HGDP + 1000 Genomes index, on the TTTN indexes (454, above), and one whose pattern matched an
+idle process unrelated to the rebuild (a precise re-check found no process of the rebuild). The
+later gates read these indexes as built (the real-data checker, gate B, read every chromosome of
+every panel as coding every allele, index format 2 and fake-indel windows of 30/30; the timing
+gate; G5; the docs' figures): none of their findings came from the indexes (METHODS §11).
+
+## The archives of CRISPRme 2.8.1 (index format 1)
+
 Two separate questions per archive:
 
 1. **Readability** — can an older CRISPRme release read it? Decided by the
@@ -346,7 +700,10 @@ compiled into `buildTST`, so it cannot affect index content.
 - **Nothing stamps the builder version into an index.** The provenance above was
   reconstructed from upload dates, build mtimes and source hashes. A
   `.pam_build`-style sidecar recording the CRISPRitz version and git SHA would
-  make this a lookup. Not done in 2.8.1.
+  make this a lookup. Not done in 2.8.1. Done in 2.10.0: every index CRISPRme 2.10.0
+  builds records the CRISPRitz and CRISPRme that built it in its `.index_meta.json`
+  (`built_by`), and each `.bin` of index format 2 its build parameters in its header,
+  which Gate A read on every index of the rebuild (above).
 - **An indel genotype store built by an enricher at or below 2.9.0 from a
   multiallelic VCF** can hold a fabricated compound allele under a real variant's
   rsID (CRISPRitz `cfcb6a6`). Latent on every CRISPRme-supplied VCF, which are
@@ -354,14 +711,16 @@ compiled into `buildTST`, so it cannot affect index content.
   through `gnomAD-converter --multiallelic`. The fix does not retroactively touch
   an already-built store, and nothing invalidates one.
 - **At a position carrying more than one SNP record, only the last record's ALT
-  reaches the enriched genome** (CRISPRitz, both enricher ports, since 2.6.0 in 2021;
-  the SNP dict has always kept one entry a position; in CRISPRitz 2.9.1's Known issues). Normalising a VCF splits a multiallelic site into
+  reaches the enriched genome** (CRISPRitz up to 2.9.1, both enricher ports, since 2.6.0
+  in 2021; the SNP dict kept one record's entry a position up to then; in CRISPRitz 2.9.1's
+  Known issues). Normalising a VCF splits a multiallelic site into
   biallelic records, and each record rebuilds the position's IUPAC code from the
   reference base and overwrites the SNP dict entry, so an earlier record's ALT is in
   neither the enriched genome nor the dict, and an off-target that needs it is not
   found, or is reported at a lower score, without its carriers (a VCF line that lists
-  several ALTs itself is coded with all of them). It applies to any index enriched
-  from a VCF with such sites. Measured for HGDP + 1000 Genomes: 2,486,165 of the
+  several ALTs itself is coded with all of them). It applies to any index CRISPRitz 2.9.1
+  or earlier enriched from a VCF with such sites, every archive above among them.
+  Measured for HGDP + 1000 Genomes: 2,486,165 of the
   panel's 127,666,429 SNP records (1.95 %), at 2,441,139 positions, are not coded for
   this reason; per guide (NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per-sample,
   genome-wide) this leaves 3 to 7 sites whose true CFD puts them in the top-1000 out
@@ -380,21 +739,22 @@ compiled into `buildTST`, so it cannot affect index content.
   held. Two examples: chr22:19142014 has `rs807755` T>A at AC = 8,179 and T>G at
   AC = 1, and the enriched genome reads `K` (G/T), the stores hold G alone;
   chr20:12296886 has `rs6109350` G>A at AC = 1,451 and G>C at AC = 2, the code is
-  `S` (C/G), and the stores hold C alone. A fix changes the enriched genomes, and
-  with them every affected index: it will be fixed, with rebuilt indexes, in the next
-  release.
+  `S` (C/G), and the stores hold C alone. The fix changes the enriched genomes, and
+  with them every affected index: CRISPRitz 2.10.0 codes every ALT of such a site (`Q`
+  where the reference base and its ALTs cover A, C, G and T) and lists each in the dict,
+  and every index is rebuilt with it for CRISPRme 2.10.0.
 - **A record whose `INFO` has `AF` at another place than the VCF's first record gets
-  no `AF`** (CRISPRitz `add-variants`, both enricher ports: it looks for the `AF` key
-  in the first record only and reads every record's `AF` at that place). Of the
+  no `AF`** (CRISPRitz `add-variants` up to 2.9.1, both enricher ports: it looks for the
+  `AF` key in the first record only and reads every record's `AF` at that place). Of the
   published indexes it affects HPRC's chrY alone (the NRG and NRR archives install the
   same logs), whose VCF has `AF` at five places: its indel log has no `AF` for 91,950
   of its 102,665 indels, which the report then shows with no MAF; its SNPs, whose
   frequencies the registry counts from the genotypes, are not affected. HPRC's other
   chromosomes and HGDP1kGP have an `AF` for each of their 12,000,599 and 17,192,381
   indels. The mega's VCF has no `INFO/AF` at all, so none of its 13,853,761 indels has
-  one there, by design: their per-dataset frequencies are in `indel_af.tsv`. It will
-  be fixed in the next CRISPRitz release, and HPRC's chrY log needs rebuilding with it
-  (METHODS section 8).
+  one there, by design: their per-dataset frequencies are in `indel_af.tsv`. CRISPRitz
+  2.10.0 finds each record's `AF` by its key, and HPRC's chrY log is rebuilt with it for
+  CRISPRme 2.10.0 (METHODS section 8).
 
 ## How to re-run these measurements
 

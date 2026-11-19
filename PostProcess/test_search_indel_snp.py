@@ -147,6 +147,9 @@ class TheStore(_Tmp):
         self.vcf("x.chr2.vcf.gz", "chr2")
         self.store.mkdir()
         (self.store / "gt_indel_chr1.tsv.gz").write_bytes(gzip.compress(b"kept\n"))
+        # (a store of 2.10.0: its marker says it holds the records of PASS and '.' alone)
+        (self.store / "gt_indel_chr1.tsv.gz.done").write_text(
+            f"1\n{search_indel_snp.build_indel_genotypes.FILTER_MARK}\n")
         (self.store / "gt_indel_chr2.tsv.gz").write_bytes(gzip.compress(b"cut\n" * 99)[:12])
         out = self.write_store()
         self.assertEqual((out.returncode, out.stderr), (0, ""))
@@ -154,6 +157,24 @@ class TheStore(_Tmp):
             self.assertEqual(fh.read(), "kept\n")
         with gzip.open(self.store / "gt_indel_chr2.tsv.gz", "rt") as fh:
             self.assertIn("S2", fh.read())
+
+    def test_a_store_written_before_2_10_0_is_written_again(self):
+        """Its marker holds the record count alone: it may hold the indels of records whose
+        FILTER the search skips (neither PASS nor '.'), which no fake-indel window holds, so
+        a carrier would be taken off a row for one. Written again, it holds none of them."""
+        with gzip.open(self.vcfs / "x.chr1.vcf.gz", "wt") as fh:
+            fh.write(VCF_HEAD + "chr1\t26\trs1\tA\tAT\t.\tPASS\tAF=0.25\tGT\t0|0\t1|0\n"
+                     "chr1\t40\trs2\tCA\tC\t.\tLowQual\tAF=0.25\tGT\t1|0\t0|0\n")
+        self.store.mkdir()
+        old = gzip.compress(b"26_A_AT\tS2:1|0\n40_CA_C\tS1:1|0\n")
+        (self.store / "gt_indel_chr1.tsv.gz").write_bytes(old)
+        (self.store / "gt_indel_chr1.tsv.gz.done").write_text("2\n")
+        out = self.write_store()
+        self.assertEqual((out.returncode, out.stderr), (0, ""))
+        with gzip.open(self.store / "gt_indel_chr1.tsv.gz", "rt") as fh:
+            self.assertEqual(fh.read(), "26_A_AT\tS2:1|0\n")
+        self.assertEqual((self.store / "gt_indel_chr1.tsv.gz.done").read_text(),
+                         f"1\n{search_indel_snp.build_indel_genotypes.FILTER_MARK}\n")
 
     def test_a_vcf_with_no_record_writes_nothing(self):
         with gzip.open(self.vcfs / "x.chr1.vcf.gz", "wt") as fh:

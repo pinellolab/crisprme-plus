@@ -18,6 +18,7 @@ Run with:
 import gzip
 import json
 import os
+import random
 import shutil
 import sys
 import tempfile
@@ -28,19 +29,24 @@ from unittest.mock import MagicMock, patch
 try:  # page modules need the web stack (Dash); the light unit-test CI does not have it
     import dash  # noqa: F401
 except ImportError:  # pragma: no cover
-    raise unittest.SkipTest("dash not installed: web page tests skipped")
+    dash = None
+# Without Dash each class skips, not the module: a SkipTest raised at import is a traceback
+# under `python -m unittest <module>` (skips D7).
+_NEEDS_DASH = unittest.skipUnless(dash, "dash not installed: web page tests skipped")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.argv = ["crisprme.py", "--version"]  # importing the pages starts the app object
 
-import pages.load_page as lp  # noqa: E402
-import pages.main_page as mp  # noqa: E402
-import pages.pages_utils as pu  # noqa: E402
+if dash:  # (the pages import Dash)
+    import pages.load_page as lp  # noqa: E402
+    import pages.main_page as mp  # noqa: E402
+    import pages.pages_utils as pu  # noqa: E402
 
 GUIDE = "CTAACAGTTGCTTTTATCAC"
 
 
+@_NEEDS_DASH
 class TestSearchReuse(unittest.TestCase):
     def setUp(self):
         warnings.simplefilter("ignore", ResourceWarning)  # files the page code leaves open
@@ -64,12 +70,13 @@ class TestSearchReuse(unittest.TestCase):
         self.addCleanup(p.stop)
         pu.write_enabled_annotations("hg38", ["a.hg38.bed"])
 
-    def submit(self, *, mode="per-sample", full=False, name=None, variant="ref"):
+    def submit(self, *, mode="per-sample", full=False, name=None, variant="ref",
+               gate=False):
         """One click on Submit, as the form sends it (Advanced options open)."""
         return mp.change_url(
             1, "http://127.0.0.1:8080/index", "hg38", variant, "20bp-NRG-SpCas9", "IP",
             GUIDE, 4, 1, 1, "N", None, None, None, [], None, name, 6, True,
-            mode, ["full"] if full else [],
+            mode, ["full"] if full else [], ["on"] if gate else [],
         )
 
     def finish(self, url):
@@ -93,6 +100,25 @@ class TestSearchReuse(unittest.TestCase):
         self.assertIn("not run again", note.children)
         self.assertEqual(lp.show_reused_search_note(""), "")
 
+    def test_the_reused_job_s_log_keeps_its_lines_and_takes_today_s_date(self):
+        # a reuse wrote the log back without its last line, the report's (the search
+        # writes it after "Job Done"), and with a second "Job Done" with no line end
+        first = self.finish(self.submit())
+        log = os.path.join(self.tmp, "Results", first, "log.txt")
+        lines = ["Job\tStart\tFri", "Creating database\tEnd\tFri", "Job\tDone\tFri",
+                 "Building shareable report\tStart\tFri", "Building shareable report\tEnd\tFri"]
+        with open(log, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        self.assertEqual(self.submit()[1], f"?job={first}")
+        with open(log) as f:
+            again = f.read()
+        self.assertTrue(again.endswith("\n"))
+        again = again.split("\n")[:-1]
+        self.assertEqual(len(again), len(lines))
+        self.assertEqual([l for i, l in enumerate(again) if i != 2], lines[:2] + lines[3:])
+        self.assertTrue(again[2].startswith("Job\tDone\t"))
+        self.assertNotEqual(again[2], "Job\tDone\tFri")  # (today's date)
+
     def test_each_difference_runs_a_new_search(self):
         first = self.finish(self.submit())
         for label, kwargs in (
@@ -110,6 +136,25 @@ class TestSearchReuse(unittest.TestCase):
                 # ... and an identical one of THAT is reused
                 self.assertEqual(self.submit(**kwargs), ("/load", f"?job={job}", lp.REUSED_HASH))
         self.assertEqual(self.pool.submit.call_count, 4)
+
+    def test_the_carrier_gate_check_box_reaches_the_search_and_is_a_difference(self):
+        """The check box that asks the carrier gate to check a sites-only panel's rows
+        against the phased HGDP + 1000 Genomes genotypes (complete-search
+        --prioritize-observed) goes to the search as CRISPRME_PRIORITIZE_OBSERVED, and a job
+        run with it is not reused for one without it (nor the reverse)."""
+        first = self.finish(self.submit())
+        # (the search's environment: mp._run_search_job's argument after its argv)
+        self.assertEqual(self.pool.submit.call_args[0][2]["CRISPRME_PRIORITIZE_OBSERVED"],
+                         "auto")
+        url = self.submit(gate=True)
+        self.assertNotEqual(url[1], f"?job={first}")
+        self.assertEqual(self.pool.submit.call_args[0][2]["CRISPRME_PRIORITIZE_OBSERVED"],
+                         "on")
+        job = self.finish(url)
+        with open(os.path.join(self.tmp, "Results", job, mp.REUSE_KEY_FILE)) as f:
+            self.assertTrue(json.load(f)["prioritize_observed"])
+        self.assertEqual(self.submit(gate=True), ("/load", f"?job={job}", lp.REUSED_HASH))
+        self.assertEqual(self.submit(), ("/load", f"?job={first}", lp.REUSED_HASH))
 
     def test_annotation_change_runs_a_new_search(self):
         first = self.finish(self.submit())
@@ -148,6 +193,51 @@ class TestSearchReuse(unittest.TestCase):
         self.assertNotEqual(key["crisprme_version"], "unknown")
 
 
+@_NEEDS_DASH
+class TestReuseOnceTheSearchHasRun(unittest.TestCase):
+    """An identical request is sent to an earlier job that the search has run to its end,
+    as the job left its folder. 2.10.0's first cut had the search record the indexes it took
+    in the job's .Params.txt, which change_url compares byte for byte with a new request's,
+    so every identical resubmission started a new search: the record is a file of its own.
+    The search the image runs, its script and its engine, on a small genome."""
+
+    def setUp(self):
+        TestSearchReuse.setUp(self)
+        # the guide's site and two of one mismatch, on a chromosome of 30 kb
+        rng = random.Random(7)
+        seq = [rng.choice("ACGT") for _ in range(30000)]
+        for i, at in enumerate((1000, 9000, 20000)):
+            site = list(GUIDE + "AGG")
+            if i:
+                site[3 + i] = "A" if site[3 + i] != "A" else "C"
+            seq[at:at + len(site)] = site
+        with open(os.path.join(self.tmp, "Genomes", "hg38", "chr1.fa"), "w") as f:
+            f.write(">chr1\n" + "".join(seq) + "\n")
+        os.makedirs(os.path.join(self.tmp, "samplesIDs"))
+        os.makedirs(os.path.join(self.tmp, "VCFs"))
+        # the job runs here, to its end, as the web's pool runs it
+        self.pool.submit.side_effect = lambda fn, *args, **kwargs: fn(*args, **kwargs)
+
+    def test_an_identical_request_is_sent_to_it(self):
+        url = TestSearchReuse.submit(self)
+        job = url[1].split("job=")[-1]
+        folder = os.path.join(self.tmp, "Results", job)
+        with open(os.path.join(folder, "log.txt")) as f:
+            self.assertIn("Job\tDone", f.read())
+        # (a finished search moves its stderr log aside, as log_error_no_check.txt)
+        self.assertFalse(os.path.exists(os.path.join(folder, "log_error.txt")))
+        self.assertEqual(TestSearchReuse.submit(self), ("/load", f"?job={job}", lp.REUSED_HASH))
+        self.assertEqual(self.pool.submit.call_count, 1)
+        self.assertEqual(TestSearchReuse.jobs(self), [job])
+        # what the search recorded of the index it took (it built it, under the name that
+        # says its guide length and side), beside the request's parameters
+        with open(os.path.join(folder, ".indexes_searched.txt")) as f:
+            self.assertIn("Reference_index\t20-NRG_2_hg38 (in ", f.read())
+        with open(os.path.join(folder, mp.PARAMS_FILE)) as f:
+            self.assertNotIn("_index", f.read())
+
+
+@_NEEDS_DASH
 class TestDatasetsWithoutTheTiers(unittest.TestCase):
     """A search of a variant dataset with neither Dictionaries/registry_<vcf>/ nor
     genotypes_<vcf>/ (an index built without --samplesID, such as the one the benchmark

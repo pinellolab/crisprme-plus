@@ -438,6 +438,72 @@ class AnnotatedSearchRemovesItsTempFolders(unittest.TestCase):
             self.assertEqual(fh.read().strip(), "read")
 
 
+class TheCosmicFreeCopyOfAnAnnotationItsFolderCannotHold(unittest.TestCase):
+    """When the folder of the annotation cannot hold its COSMIC-free copy (a read-only or a
+    shared install), _apply_cosmic_license strips it elsewhere: into $CRISPRME_TMPDIR, the
+    working directory, or tempfile's folder (/tmp). It wrote there under a fixed name,
+    .nocosmic.<name>, the strip beside it under one made of its process id, and in a shared
+    /tmp any other user of the machine can make such names first: a link to a file of the
+    user's, which the strip overwrote with the annotation's lines (2.10.0's sweep after the
+    review of lane S, round 3). It strips into a folder of its own there now (mkdtemp: 0700, a
+    new name), removed with the annotation temp folders."""
+
+    def setUp(self):
+        self.work = os.path.realpath(tempfile.mkdtemp(prefix="nocosmic_"))
+        self.addCleanup(shutil.rmtree, self.work, True)
+        os.makedirs(os.path.join(self.work, "Annotations"))  # no licence attested there
+        self.ann_dir = os.path.join(self.work, "install")
+        os.makedirs(self.ann_dir)
+        self.ann = os.path.join(self.ann_dir, "func.bed")
+        with open(self.ann, "w") as fh:
+            fh.write("chrS\t0\t10\tTP53_COSMIC\nchrS\t20\t30\tpromoter_test\n")
+        self.shared = os.path.join(self.work, "shared")  # a /tmp other users write
+        os.makedirs(self.shared)
+        crisprme._ANNOTATION_TMPDIRS[:] = []
+        self.addCleanup(crisprme._ANNOTATION_TMPDIRS.clear)
+        import cosmic_license
+        real, ann_dir = cosmic_license.strip_cosmic, self.ann_dir
+
+        def strip(src, out):
+            # the annotation's folder cannot be written, whoever runs the test (root too)
+            if os.path.dirname(out) == ann_dir:
+                raise PermissionError(13, "Permission denied", out)
+            return real(src, out)
+        env = {k: v for k, v in os.environ.items() if k != "CRISPRME_TMPDIR"}
+        env["CRISPRME_TMPDIR"] = self.shared
+        for patcher in (mock.patch.dict(os.environ, env, clear=True),
+                        mock.patch.object(crisprme, "current_working_directory",
+                                          self.work + os.sep),
+                        mock.patch.object(cosmic_license, "strip_cosmic", strip)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_it_strips_into_a_folder_of_its_own(self):
+        victim = os.path.join(self.work, "victim.txt")
+        with open(victim, "w") as fh:
+            fh.write("mine\n")
+        fixed = os.path.join(self.shared, ".nocosmic.func.bed")
+        link = fixed + ".%d.tmp" % os.getpid()
+        os.symlink(victim, link)  # another user's, made first
+        with open(fixed, "w") as fh:
+            fh.write("chrS\t0\t99\tplanted_row\n")
+        with contextlib.redirect_stdout(io.StringIO()):
+            out = crisprme._apply_cosmic_license([], self.ann)
+        with open(victim) as fh:
+            self.assertEqual(fh.read(), "mine\n")
+        folder = os.path.dirname(out)
+        self.assertEqual(os.path.dirname(folder), self.shared)
+        self.assertTrue(os.path.basename(folder).startswith("crisprme_nocosmic_"), out)
+        self.assertEqual(os.stat(folder).st_mode & 0o777, 0o700)
+        self.assertEqual(crisprme._ANNOTATION_TMPDIRS, [folder])
+        with open(out) as fh:
+            self.assertEqual(fh.read(), "chrS\t20\t30\tpromoter_test\n")
+        # what the other user made is left as it was
+        self.assertTrue(os.path.islink(link))
+        with open(fixed) as fh:
+            self.assertEqual(fh.read(), "chrS\t0\t99\tplanted_row\n")
+
+
 class TheDispatchRemovesThemForEveryCallerThatSortsAnnotations(unittest.TestCase):
     """complete-search and assembly-search are the two subcommands that call
     _check_annotation / _check_gene_annotation (the web's assembly-search job runs

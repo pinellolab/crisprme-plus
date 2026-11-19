@@ -24,9 +24,11 @@ SRC=${SRC:-/srv/local/lp698/mega_gw}               # per-chr merged sites VCFs m
 SCR=${SCR:-/srv/local/lp698/mega_gw_indel_scratch} # per-chr scratch builds
 PAM=${PAM:-$(find /srv/local/lp698 -name "20bp-NRG-SpCas9.txt" 2>/dev/null | head -1)}
 PAMBASE=$(basename "$PAM")                          # PAM filename copied into each per-chr workdir
-# Index-name prefix crispritz assigns for $PAM: <MOTIF>_<N> (e.g. NRG_3 for 20bp-NRG + bMax giving N=3).
-# Override IDXNAME to match a non-NRG PAM (e.g. IDXNAME=NGG_3 PAM=/path/20bp-NGG-SpCas9.txt). A mismatch
-# is caught loudly after the first build (the expected dir is verified against what crispritz produced).
+# Index-name prefix the build assigns for $PAM: <MOTIF>_<N> (e.g. NRG_3 for 20bp-NRG + bMax giving N=3)
+# with a $CK before CRISPRme 2.10.0, <guide>-<MOTIF>_<N> (20-NRG_3) from 2.10.0 on, whose index names say
+# the guide length and the side of the PAM. Override IDXNAME to match a non-NRG PAM or a 2.10.0 $CK (e.g.
+# IDXNAME=NGG_3 PAM=/path/20bp-NGG-SpCas9.txt). A mismatch is caught loudly after the first build (the
+# expected dir is verified against what the build produced).
 IDXNAME=${IDXNAME:-NRG_3}
 IDXDIR="${IDXNAME}_hg38+hg38_mega_INDELS"
 mkdir -p "$SCR" "$MC/Genomes/hg38+hg38_mega_INDELS" "$MC/genome_library/$IDXDIR"
@@ -62,13 +64,14 @@ for c in $CHRS; do
   apptainer exec --writable-tmpfs -B "$CK/crisprme.py":/opt/conda/bin/crisprme.py -B "$CK/PostProcess":/opt/conda/opt/crisprme/PostProcess -B /srv/local/lp698 "$SIF" \
     bash -c "export PATH=/opt/conda/bin:\$PATH; cd $W; crisprme.py build-index-only --genome $W/Genomes/hg38 --pam $W/PAMs/$PAMBASE --bDNA 2 --bRNA 2 --thread 16 --vcf $W/VCFs/hg38_mega --path $W" > "$W/build.log" 2>&1
   echo "[$c] build exit=$? $(date +%H:%M:%S)"
-  # Guard: confirm crispritz produced exactly the index dir IDXNAME expects. A mismatch means
+  # Guard: confirm the build produced exactly the index dir IDXNAME expects. A mismatch means
   # IDXNAME is wrong for this PAM -- fail loudly with the actual name so it can be set, rather
   # than silently placing 0 bins.
   if [ ! -d "$W/genome_library/$IDXDIR" ]; then
-    echo "[$c] ERROR: expected index dir '$IDXDIR' not produced; crispritz built:" \
+    echo "[$c] ERROR: expected index dir '$IDXDIR' not produced; the build made:" \
          "$(ls -1 "$W"/genome_library/ 2>/dev/null | grep '_mega_INDELS$' | tr '\n' ' ')" \
-         "-- set IDXNAME to the <MOTIF>_<N> prefix matching $PAMBASE and rerun." >&2
+         "-- set IDXNAME to the prefix of that name for $PAMBASE (<MOTIF>_<N> before CRISPRme 2.10.0," \
+         "<guide>-<MOTIF>_<N> from 2.10.0 on, e.g. 20-NRG_3) and rerun." >&2
     continue
   fi
   strip_and_place "$c" "$W" && rm -rf "$W/Genomes/run_"* "$W"/genome_library/*_hg38 2>/dev/null

@@ -3,6 +3,7 @@ FAKE worker (stdlib only, no TensorFlow), plus graceful-degradation paths."""
 import contextlib
 import io
 import os
+import shutil
 import sys
 import tempfile
 import textwrap
@@ -90,6 +91,29 @@ _SENTINEL_WORKER = textwrap.dedent(
 )
 
 
+# Ready once it has done what TensorFlow's autograph does with the code it generates
+# (tensorflow/python/autograph/pyct/loader.py load_source): a module written to the
+# temporary folder, removed at exit, imported from there.
+_AUTOGRAPH_WORKER = textwrap.dedent(
+    """
+    import atexit, importlib.util, json, os, sys, tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".py", prefix="__autograph_generated_file",
+                                     delete=False) as f:
+        f.write("X = 1\\n")
+    atexit.register(os.remove, f.name)
+    spec = importlib.util.spec_from_file_location(os.path.basename(f.name)[:-3], f.name)
+    spec.loader.exec_module(importlib.util.module_from_spec(spec))
+    sys.stdout.write(json.dumps({"ready": True, "load_s": 0.0}) + "\\n"); sys.stdout.flush()
+    while True:
+        line = sys.stdin.readline()
+        if not line or json.loads(line).get("cmd") == "quit":
+            break
+        n = len(json.loads(line).get("pairs", []))
+        sys.stdout.write(json.dumps({"scores": [1.0] * n}) + "\\n"); sys.stdout.flush()
+    """
+)
+
+
 def _write(tmpdir, name, body):
     p = os.path.join(tmpdir, name)
     with open(p, "w") as fh:
@@ -127,6 +151,19 @@ class TestRunnerProtocol(unittest.TestCase):
     def test_empty_batch(self):
         r = self._runner(_GOOD_WORKER)
         self.assertEqual(r.predict([], []), [])
+
+    def test_the_worker_leaves_nothing_in_the_temporary_folder(self):
+        # CRISPR-Bulge's TensorFlow imports the code autograph generates from the temporary
+        # folder, which left __pycache__/__autograph_generated_file*.pyc there, one a run:
+        # in the data folder, under CRISPRME_TMPDIR=/DATA
+        tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmpdir, ignore_errors=True)
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONDONTWRITEBYTECODE"}
+        with mock.patch.dict(os.environ, dict(env, TMPDIR=tmpdir), clear=True):
+            r = self._runner(_AUTOGRAPH_WORKER)
+            self.assertEqual(r.predict(["AA"], ["AA"]), [1.0])
+            r.close()
+        self.assertEqual(os.listdir(tmpdir), [])
 
     def test_length_mismatch_raises(self):
         r = self._runner(_GOOD_WORKER)

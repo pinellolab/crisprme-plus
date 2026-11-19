@@ -4,6 +4,10 @@
 Created on Fri Jul  3 17:31:45 2020
 
 @author: francesco
+
+Unused: no script or test of CRISPRme runs it. Its window (POS - 26 to POS + len(REF) + 25)
+is neither CRISPRitz 2.9.1's fake-indel window nor 2.10.0's (indel_window.py reads each
+window from its indel log row); do not take it for one.
 """
 import pandas as pd
 import numpy as np

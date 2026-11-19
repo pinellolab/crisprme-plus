@@ -12,6 +12,13 @@
 (function () {
   var CHUNK = 8 * 1024 * 1024; // 8 MB per chunk
 
+  // A refusal or a failure is shown in the red of the Settings cards' feedback; progress
+  // and success in grey (refusals were grey too, as if all were well)
+  function say(prog, text, refused) {
+    prog.textContent = text;
+    prog.style.color = refused ? "#b00" : "#555";
+  }
+
   function uploadFile(file, target, dataset, genome, prog, btn) {
     var total = Math.max(1, Math.ceil(file.size / CHUNK));
     var idx = 0;
@@ -40,22 +47,22 @@
         })
         .then(function (res) {
           if (!res.ok) {
-            prog.textContent = "Error: " + res.text;
+            say(prog, "Error: " + res.text, true);
             btn.disabled = false;
             return;
           }
           idx += 1;
           var pct = Math.round((idx / total) * 100);
-          prog.textContent = "Uploading... " + pct + "%";
+          say(prog, "Uploading... " + pct + "%", false);
           if (res.text.indexOf("complete") === 0) {
-            prog.textContent = "Upload complete. It appears in the search form and in Settings when you revisit the page.";
+            say(prog, "Upload complete. It appears in the search form and in Settings when you revisit the page.", false);
             btn.disabled = false;
             return;
           }
           sendNext();
         })
         .catch(function (e) {
-          prog.textContent = "Upload failed: " + e;
+          say(prog, "Upload failed: " + e, true);
           btn.disabled = false;
         });
     }
@@ -87,7 +94,7 @@
     btn.addEventListener("click", function () {
       var file = input.files && input.files[0];
       if (!file) {
-        prog.textContent = "Choose a file first.";
+        say(prog, "Choose a file first.", true);
         return;
       }
       var dataset = "";

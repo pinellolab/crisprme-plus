@@ -123,16 +123,18 @@ qfmt='%CHROM\t%POS\t%REF\t%ALT'; for n in "${names[@]}"; do qfmt="$qfmt\t%INFO/A
 tabix -s1 -b2 -e2 "$WORK/afmax.tab.gz"
 # Annotate BOTH AF_max AND a plain INFO/AF (= AF_max). The plain AF is the single
 # global frequency CRISPRitz `add-variants` embeds into the fake-indel contig
-# metadata (the index's indel log) -- BUT add-variants looks for the AF key in the
-# VCF's FIRST record only, and reads every later record's AF at the same place in
-# INFO. Here AF comes after the site's AF_<src> keys and AF_max, and the number of
-# AF_<src> keys is the number of sources that hold the site, so only an indel whose
-# site has as many sources as the first record's gets the global AF_max through that
-# path; every other one gets NO AF in the log, and its MAF is blank (on an index
-# without the dict-less registry, a SNP's AF in the classic per-sample dictionaries
-# is read the same way). A known limit (METHODS section 8), to be fixed in the next
-# CRISPRitz release; the recipe below is unchanged, and the shipped mega's VCFs came
-# from mega_gw_merge.sh, which writes no plain AF at all. Per-dataset indel AF comes
+# metadata (the index's indel log) -- BUT up to CRISPRitz 2.9.1 add-variants looks
+# for the AF key in the VCF's FIRST record only, and reads every later record's AF at
+# the same place in INFO. Here AF comes after the site's AF_<src> keys and AF_max, and
+# the number of AF_<src> keys is the number of sources that hold the site, so only an
+# indel whose site has as many sources as the first record's gets the global AF_max
+# through that path; every other one gets NO AF in the log, and its MAF is blank (on
+# an index without the dict-less registry, a SNP's AF in the classic per-sample
+# dictionaries is read the same way). A known limit (METHODS section 8) of CRISPRitz
+# 2.9.1 and earlier: 2.10.0 finds each record's AF by its key, so on an index it
+# builds an indel gets the global AF_max whatever its site's sources. The recipe below
+# is unchanged, and the shipped mega's VCFs came from mega_gw_merge.sh, which writes no
+# plain AF at all. Per-dataset indel AF comes
 # from the separate build_mega_indel_af.py sidecar. For SNPs the dict-less registry
 # is authoritative (it reads each AF_<src> by its key), so this plain AF only
 # matters for indels / dict-based use.

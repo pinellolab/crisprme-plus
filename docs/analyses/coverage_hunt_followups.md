@@ -20,6 +20,11 @@ coverage gaps**. This file records what was fixed and what remains for review.
 ## Deferred — need careful review / real-data validation (NOT rushed into v2.7.1)
 
 ### A. Tier-1 genotype axis not filtered to VCF-genotyped samples (#46 AF-deflation on the co-occurrence path)
+> **Fixed in v2.7.2** (commit 8528032): `build_dictless_tiers.py` passes the same
+> `genotyped_samples` to the Tier-1 store's build, so its sample axis holds only the samples the
+> VCF genotypes; `test_tier1_genotypes.test_genotyped_samples_filter_drops_phantom_from_axis`
+> covers it. The text below is the finding as it was recorded.
+
 `build_dictless_tiers.py:237` / `tier1_genotypes.py:410` — the #46 phantom-sample filter
 (`genotyped_samples`) is wired on the **Tier-0** path but the **Tier-1** genotype axis
 (`build_sample_meta`) is built unfiltered, so an over-listing samplesID can still deflate the joint

@@ -45,7 +45,9 @@ import subprocess
 import os
 
 MAX_LIMIT = 50000000
-alphabet = "-RYSWKMBDHVryswkmbdhvACGTacgt"  # For forcing IUPAC before reference target
+# For forcing IUPAC before reference target (Q: a position whose reference base and SNP ALTs
+# hold all four bases)
+alphabet = "-RYSWKMBDHVQryswkmbdhvqACGTacgt"
 pam_at_end = True
 guides_to_check = set()  # Set of error guides, do not do computation on them
 if os.path.exists("./guides_error.txt"):
@@ -94,7 +96,7 @@ if "orderChr" in sys.argv[:]:
     out_directory = os.path.dirname(sys.argv[1])
     subprocess.run(
         [
-            f"sort -T {out_directory} -k4,4 -k6,6 -k15,15 -k7,7 "
+            f"LC_ALL=C sort -T {out_directory} -k4,4 -k6,6 -k15,15 -k7,7 "
             + sys.argv[1]
             + " > "
             + result_name
@@ -102,6 +104,9 @@ if "orderChr" in sys.argv[:]:
         ],
         shell=True,
     )  # sort input file by chr, clusterpos, real guide, direction
+    # (LC_ALL=C, as every sort of the search's rows: in another locale, en_US.UTF-8 say, sort
+    # compares the rows of a cluster with its rules for case and '-', so the cluster's
+    # alignments came in another order, the order the sort by total below keeps for ties)
     print("END Sorting", time.time() - start_time)
     start_time = time.time()
     # errors="replace" guards against a stray non-UTF-8 byte in the

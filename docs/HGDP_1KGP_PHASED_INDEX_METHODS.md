@@ -1,14 +1,15 @@
 # gnomAD HGDP + 1kGP re-phased variant index — methods & validation record
 
-> **Living document.** This records the rationale, source-data provenance, verification, and
-> (once finalized) the validated build recipe for a new **default** CRISPRme+ variant index built
-> from the gnomAD v3.1.x HGDP + 1000 Genomes joint callset. **Once the recipe is finalized and
-> validated, sections 5–7 are folded into `METHODS.md` and the CRISPRme+ manuscript Methods**
-> (this is a key methodological contribution: a fully-phased, singleton-inclusive, uniformly-processed
-> HGDP+1kGP haplotype panel enabling CONFIRMED-cis co-occurrence across BOTH cohorts).
->
-> Nothing is built genome-wide or pushed to HuggingFace until every section is verified spotless and
-> Luca signs off. Status log at the bottom.
+> **Record of the HGDP + 1000 Genomes panel's re-phasing and build.** This records the rationale,
+> source-data provenance, verification and validated build recipe of the **default** CRISPRme+
+> variant panel, built from the gnomAD v3.1.x HGDP + 1000 Genomes joint callset (a fully-phased,
+> singleton-inclusive, uniformly-processed HGDP+1kGP haplotype panel enabling CONFIRMED-cis
+> co-occurrence across BOTH cohorts). The recipe of §7 built the default index of CRISPRme 2.7.0 to
+> 2.8.1 (`NRG_3_hg38+hg38_HGDP1kGP`, published 2026-10-07 in `lucapinello/crisprme-data`). With
+> CRISPRitz 2.10.0 it built the seven HGDP + 1000 Genomes indexes of 2.10.0, the default among
+> them (`20-NRR_3_hg38+hg38_HGDP1kGP`), published 2026-11-18 in `lucapinello/crisprme_plus_indices`
+> (`docs/INDEX_PROVENANCE.md`). `METHODS.md` §2 and §11 give the method. The status log (§8)
+> records the first build; the decision of §4c was taken on 2026-09-29: singletons kept.
 
 ## 1. Rationale
 
@@ -392,9 +393,21 @@ crisprme.py build-index-only --genome <hg38/> --pam 20bp-NRG-SpCas9.txt \
 NRG (NAG+NGG) SpCas9 PAM; 2 DNA + 2 RNA bulges; RAW (uncompressed) registry and SNP+indel
 co-occurrence ON — consistent with the other production indexes (bulges are a build parameter;
 mismatches are a search-time parameter, run at `--mm 6`). Output
-`genome_library/NRG_3_hg38+hg38_HGDP1kGP` (+ `_INDELS`) + `Dictionaries/{registry,genotypes,
+`genome_library/NRG_3_hg38+hg38_HGDP1kGP` (+ `_INDELS`; CRISPRme 2.10.0 and later name it for
+its guide length and side, `20-NRG_3_hg38+hg38_HGDP1kGP`) + `Dictionaries/{registry,genotypes,
 indel_genotypes,log_indels}_hg38_HGDP1kGP` + `variant_count.json` (**125,180,264 SNPs +
-17,192,381 indels**; `phased:true`); every `reg_<chrom>.idx` carries `data_type=genotyped-phased`.
+17,192,381 indels** in 2.8.1's build, whose CRISPRitz 2.9.1 coded only the last record of a
+split site, METHODS §2; 2.10.0's build, whose CRISPRitz 2.10.0 codes every allele, wrote
+**127,666,429 SNP alleles + 17,192,381 indels**, `docs/INDEX_PROVENANCE.md`; `phased:true`);
+every `reg_<chrom>.idx` carries `data_type=genotyped-phased`.
+
+The command above is the NRG build of 2.7.0 to 2.8.1. For 2.10.0 the index set
+(`seq_script/rebuild/index_set_2.10.0.tsv`) runs `hgdp1kgp_build.sh` with
+`PAM=PAMs/20bp-NRR-SpCas9.txt` for the panel's first row, which writes its Dictionaries and the
+default `20-NRR_3_hg38+hg38_HGDP1kGP`. It then runs it with the NGG, NRG, general
+(`20bp-NNNNNNNN-NO-PAM.txt`), NNGRRN (22 nt) and TTTN (20 and 23 nt) PAM files on the same
+enriched genome, 64 threads, CRISPRitz 2.10.0 (`METHODS.md` §11). All use 2 DNA + 2 RNA bulges,
+a RAW registry and SNP+indel co-occurrence ON, as the other production indexes do.
 
 ### 7.4 chrX pseudoautosomal (PAR) ploidy — a correctness requirement
 chrX is hemizygous in males ONLY outside the pseudoautosomal regions. On GRCh38: PAR1
@@ -518,13 +531,14 @@ reads the same field), the indel and each SNP alt as a forward-strand `chrom_pos
 (same format the SNP path emits, so `resultIntegrator` parses and strand-corrects them
 identically), and its `Samples` column is the individuals whose own haplotype has that sequence.
 The indel post-analysis writes the indel first, with the `rsID` / `MAF` lists 1:1 with the tokens,
-but the merge of a cluster's rows (`remove_contiguous_samples.py`), as on SNP rows, sorts and
-deduplicates the token, `rsID` and `MAF` lists each on its own, so the results tables and the
-report keep neither the order nor that pairing: a SNP token can come before the indel's, and equal
-values show once, so a list can be shorter than the token list (two variants with one MAF give one
-MAF). A slot whose phase cannot be read (unphased, a missing allele, no phased indel genotype) gets
-the strongest target its own alleles allow, and a sites-only panel (mega) the strongest target the
-codes allow, listing the indel log's carriers; the `*.indel_snp_cooc.tsv` sidecar marks those
+and the merge of a cluster's rows (`remove_contiguous_samples.py`), as on SNP rows, writes each
+variant once, its tokens sorted as text, so a SNP token can come before the indel's. Since 2.10.0
+the `rsID` and `MAF` lists follow the tokens one to one, and two variants of one frequency give it
+each. Up to 2.8.1 the merge sorted and deduplicated the three lists each on its own and kept
+neither the pairing nor equal values (METHODS §8). A slot whose phase cannot be read (unphased, a
+missing allele, no phased indel genotype) gets the strongest target its own alleles allow, and a
+sites-only panel (mega) the strongest target the codes allow, listing the indel log's carriers;
+the `*.indel_snp_cooc.tsv` sidecar marks those
 PUTATIVE (the anti-chimera contract of §9c: no individual is listed for an allele it does not
 carry). Up to 2.8.0 the indel row's sequence was instead resolved column by column without
 genotypes, and a PUTATIVE call stayed in the sidecar while the row kept that guide-optimistic
@@ -532,7 +546,10 @@ sequence and every indel carrier.
 
 ### 9c. The dense-window APPROXIMATION (the greedy cap) + FLAGS + DEFAULT behaviour
 Enumerating the lattice is 2^k in the number of co-located variants, so extreme-density windows are
-**capped**: `capped = _FAST_MODE OR (CRISPRME_IUPAC_CAP ≥ 0 AND #variants > CRISPRME_IUPAC_CAP)`.
+**capped**: `capped = _FAST_MODE OR (CRISPRME_IUPAC_CAP ≥ 0 AND sequences > 2^CRISPRME_IUPAC_CAP)`,
+where a window's sequences are the product of the bases its letters stand for (2 for a two-allele
+column, 3 for a three-allele one, 4 for a four-allele `Q`; a count of variant columns up to 2.8.1,
+the same on a window of two-allele columns), and the default cap is 10 (METHODS.md §5).
 
 - **Population-level** (`CRISPRME_FAST_MODE=1`; `--population-level`, and the default on a
   sites-only / unphased / hybrid / reference-only index): **every** multi-variant window emits ONE
@@ -550,12 +567,20 @@ Enumerating the lattice is 2^k in the number of co-located variants, so extreme-
   chr14:106770868 that nobody actually carries; the real observed haplotypes there are ≤2 variants,
   CFD ≈ 0). Per the per-sample contract — report an off-target only when ≥1 real individual carries it —
   the chimera is suppressed; the window surfaces only its real observed haplotypes. This is the path
-  of an index with the dict-less tiers, such as this one: an index built without `--samplesID` has
-  none, and its per-sample search goes the classic dictionary path, which still reports a capped
-  window by its greedy worst-case alignment, whose listed carriers need not carry every variant in it
-  (METHODS.md §5).
+  of an index with the dict-less tiers, such as this one; since 2.10.0 an index built without
+  `--samplesID`, which has none, goes the same path, reading the same genotypes in its classic
+  per-sample dictionaries (up to 2.8.1 it still reported a capped window by its greedy worst-case
+  alignment, whose listed carriers need not carry every variant in it; METHODS.md §5).
 - Every capped window is still logged to **`<out>.high_variant_density_regions.bed`** so approximated
-  regions are visible, never silent; the reference off-target row keeps the locus in the table.
+  regions are visible, never silent; the reference off-target row keeps the locus in the table. So is
+  every window of 2^20 sequences or more, whatever the cap. Since 2.10.0 the file holds one line a
+  window, read from every raw target of the search before the haplotype pre-check skips any
+  (METHODS.md §5), its carriers the samples carrying an ALT of the window. Its `greedy` column
+  says whether a greedy worst-case alignment stands for the window (0 on the observed-haplotype
+  path per sample, and for a hyperdense window a per-sample search enumerated within the cap);
+  only then, or for a row that names no carrier (a sites-only dataset's), does
+  `High_variant_density_region` say so, and under `--per-sample` it says otherwise that the
+  haplotypes its carriers have are reported.
 - The **`observed_haplotypes.tsv`** report companion lists, for every multi-haplotype site, EACH real
   observed haplotype with its variant set, both scores (CFD + CRISPR-Bulge), carriers and AF — so the
   full per-sample set a dense site contributes is visible, not just the per-cluster representative.

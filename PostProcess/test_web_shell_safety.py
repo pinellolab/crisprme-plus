@@ -84,6 +84,13 @@ offer for the genome, PAM and dataset selected, and the Max edits slider's maxim
 follows them), before anything is written. The reference Submit made its job folder before
 int() refused the Max edits value: it checks that value first.
 
+And up to 2.10.0 the results' region page (cluster_page) ran through a shell what two files
+of the job's folder held, a folder others may write (its group, under a umask of 002): a
+"guide" put in the job's guide list passed the check that the link's guide is one of the job's,
+and an annotation put in its annotated targets went into the lookup's command (the review of
+lane S, round 4). A guide is looked up only if it is letters too, and the annotation reaches
+awk as a quoted value.
+
 Each case sends a value holding a command that would create a marker file, and a '../'
 path, and checks that no marker and no file outside the data folder appear, and that the
 normal value still works; a job id holding '../' reads, writes and removes nothing
@@ -291,10 +298,12 @@ class _WebFolder(_Folder):
             # the search, which records its arguments
             ("submit_job_automated_new_multiple_vcfs.sh",
              '#!/bin/bash\nprintf "%s\\n" "$@" > "$(dirname "$0")/args.txt"\n'),
-            # the Graphical Reports radar chart, which records its arguments
+            # the Graphical Reports radar chart, which records its arguments, and where the
+            # folder of its inputs really is
             ("generate_img_radar_chart.py",
              "import json, os, sys\nwith open(os.path.join(os.path.dirname(__file__), "
-             "'radar_args.json'), 'w') as fh:\n    json.dump(sys.argv[1:], fh)\n"),
+             "'radar_args.json'), 'w') as fh:\n    json.dump(sys.argv[1:] + "
+             "[os.path.realpath(os.path.dirname(sys.argv[2]))], fh)\n"),
             # the Personal Risk Card plots, which draws empty ones
             ("CRISPRme_plots_personal.py",
              "import os, sys\nfor kind in ('fewest', 'CFD', 'CRISPR_Bulge'):\n"
@@ -342,9 +351,33 @@ class TestSubmitCheckAndBaseEditing(_WebFolder):
             with self.subTest(text=text):
                 options, _ = mp.update_base_editing_dropdown(text, "GS", "hg38")
                 self.assertEqual([o["value"] for o in options], list(range(1, len(SEQ) + 1)))
+        # (a chromosome with no FASTA: the window offers nothing, as for any line Submit then
+        # refuses, where it was an HTTP 500 of the callback: FR :89, :189)
+        none = [{"label": "", "value": ""}]
         for text in (">s\nchr1$(touch${IFS}MARK_d) 0 43", ">../outside/x\nchrZ 0 43"):
-            with self.subTest(text=text), self.assertRaises(FileNotFoundError):
-                mp.update_base_editing_dropdown(text, "GS", "hg38")
+            with self.subTest(text=text):
+                self.assertEqual(mp.update_base_editing_dropdown(text, "GS", "hg38"),
+                                 (none, none))
+        self.assertNothingRun()
+
+
+@NEEDS_DASH
+class TestTheBaseEditingWindowOfBedLines(_WebFolder):
+    """The base-editing window's options, which the form recomputes at each change of the
+    guides: for BED lines it raised on no genome selected (a fresh data folder after Load
+    Example), on a chromosome with no FASTA and on coordinates past its end, each an HTTP 500
+    and a console error in the browser (FR :89, :189). It offers nothing for them, as for
+    any line Submit then refuses, saying why."""
+
+    def test_no_window_and_no_error(self):
+        none = [{"label": "", "value": ""}]
+        for text, genome in ((">s\nchr1 0 43", None), (">s\nchrZ 0 43", "hg38"),
+                             (">s\nchr1 100000 100060", "hg38"), (">s\nchr1 0", "hg38")):
+            with self.subTest(text=text, genome=genome):
+                self.assertEqual(mp.update_base_editing_dropdown(text, "GS", genome),
+                                 (none, none))
+        options, _ = mp.update_base_editing_dropdown(">s\nchr1 0 43", "GS", "hg38")
+        self.assertEqual([o["value"] for o in options], list(range(1, len(SEQ) + 1)))
         self.assertNothingRun()
 
 
@@ -477,6 +510,40 @@ class TestSearchLaunch(_WebFolder):
                 self.assertEqual(self.pool.submit.call_count, 0)
                 self.assertEqual(self.jobs(), [])
         self.assertNothingRun()
+
+    def test_base_editing_values_are_the_form_s_before_anything_is_written(self):
+        # with base editing on, int() refused a window bound that is no number, and an
+        # assert a nucleotide that is no base, only after the job folder and its files were
+        # made: each such request left a folder that never ran (secfu RV1-N1)
+
+        def submit(start, stop, nt, radio="Y", name=None):
+            return mp.change_url(1, "http://127.0.0.1:8080/index", "hg38", "ref", PAM, "IP",
+                                 "CTAACAGTTGCTTTTATCAC", 4, 1, 1, radio, start, stop, nt,
+                                 [], None, name, 6, True, "population-level", [])
+
+        for start, stop, nt in (("x", 5, "A"), (1, "5;touch${IFS}MARK_h;#", "A"), (1, 5, "Z"),
+                                ([1], 5, "A"), (1.5, 5, "A"), (1, 5, ["A"]), (-1, 5, "A"),
+                                ("1" * 5000, 5, "A")):
+            with self.subTest(start=str(start)[:30], stop=stop, nt=nt):
+                with self.assertRaises(PreventUpdate):
+                    submit(start, stop, nt)
+                self.assertEqual(self.pool.submit.call_count, 0)
+                self.assertEqual(self.jobs(), [])
+        self.assertNothingRun()
+        # the form's values, and base editing off whatever the dropdowns hold, as before
+        for i, (start, stop, nt, radio, want) in enumerate((
+                (4, 8, "A", "Y", ("A", "4", "8")), ("4", "8", "T", "Y", ("T", "4", "8")),
+                (None, None, None, "Y", ("none", "1", "0")),
+                ("x", "y", "Z", "N", ("none", "1", "0")))):
+            with self.subTest(start=start, stop=stop, nt=nt, radio=radio):
+                submit(start, stop, nt, radio, name=f"be{i}")
+                self.assertEqual(self.pool.submit.call_count, 1)
+                self.pool.reset_mock()
+                (job,) = [j for j in self.jobs() if j.startswith(f"be{i}_")]
+                with open(os.path.join(self.data, "Results", job, ".Params.txt")) as fh:
+                    params = dict(line.rstrip("\n").split("\t", 1) for line in fh)
+                self.assertEqual((params["BE_nucleotide"], params["BE_start"],
+                                  params["BE_stop"]), want)
 
     def test_max_edits_is_a_whole_number_of_the_slider_s_range_before_anything_is_written(self):
         # with Advanced options closed the Max edits slider governs, and int() refused a
@@ -634,6 +701,18 @@ class TestSearchFormReadsItsOwnValues(_WebFolder):
         self.assertNothingReadOutside(seen)
         options, _value = mp.update_search_mode_availability("walk", "hg38", "population-level")
         self.assertFalse(options[1]["disabled"])  # the genotype store of walk
+        # a genotyped dataset whose index is not built: per-sample needs that index, not
+        # another panel (FV :342); a sites-only one, a genotyped panel
+        _vcf(os.path.join(self.data, "VCFs", "hg38_unbuilt", "u.chr1.vcf.gz"), True)
+        _vcf(os.path.join(self.data, "VCFs", "hg38_sitesonly", "s.chr1.vcf.gz"), False)
+        for dataset, says in (("unbuilt", "(its samples are not indexed yet: build its index "
+                                          "in Settings)"),
+                              ("sitesonly", "(needs a genotyped panel)")):
+            with self.subTest(dataset=dataset):
+                options, _value = mp.update_search_mode_availability(
+                    dataset, "hg38", "population-level")
+                self.assertTrue(options[1]["disabled"])
+                self.assertTrue(options[1]["label"].endswith(says), options[1]["label"])
 
     def test_the_bulge_options(self):
         none = mp.limit_bulges_to_index(None, PAM, "ref", 1, 1, 4, 6, {})
@@ -735,6 +814,52 @@ class TestSearchFormReadsItsOwnValues(_WebFolder):
         self.assertTrue(lines[0].startswith(
             "No single variant index for this PAM is installed yet, and the dataset's VCF is "
             "a single multi-chromosome file"), lines)
+
+
+@NEEDS_DASH
+class TestTheSettingsBuildFormReadsItsOwnValues(_WebFolder):
+    """Settings' Build an index locally offers the genome Settings recorded for the VCF
+    dataset selected (build_genomes_of_dataset), a callback a request can call with any
+    dataset: it joined the value into the path of the record it reads
+    (VCFs/.<dataset>.refgenome), so './' and '../' reached a file <x>.refgenome beside a
+    folder <x> outside the data folder, and what that file held chose the genomes offered.
+    A value the form does not offer is answered as none is, and nothing outside is read;
+    a dataset it offers is answered as before."""
+
+    def setUp(self):
+        super().setUp()
+        p = patch.object(sp, "current_working_directory", self.data + os.sep)
+        p.start()
+        self.addCleanup(p.stop)
+        os.makedirs(os.path.join(self.data, "Genomes", "mm10"))
+        shutil.copy(os.path.join(self.data, "Genomes", "hg38", "chr1.fa"),
+                    os.path.join(self.data, "Genomes", "mm10"))
+        # a dataset Settings added for hg38, and outside the data folder a folder with a
+        # record of the other genome beside it
+        os.makedirs(os.path.join(self.data, "VCFs", "hg38_walk"))
+        os.makedirs(os.path.join(self.outside, "cohort"))
+        for record, genome in ((os.path.join(self.data, "VCFs", ".hg38_walk.refgenome"), "hg38"),
+                               (os.path.join(self.outside, "cohort.refgenome"), "mm10")):
+            with open(record, "w") as fh:
+                fh.write(genome + "\n")
+        self.before = self.outside_files()
+
+    def test_the_genome_offered(self):
+        none = sp.build_genomes_of_dataset(None, "hg38")
+        self.assertEqual((sorted(o["value"] for o in none[0]), none[1]), (["hg38", "mm10"], "hg38"))
+        # (up to / from VCFs/, for the record and the folder beside it)
+        up = "/.." * (os.path.realpath(self.data).count("/") + 2)
+        with _paths_read() as seen:
+            for vcf in ("." + up + os.path.realpath(self.outside) + "/cohort",
+                        "./../outside/cohort", "./../outside/nothing_here", "hg38_absent"):
+                with self.subTest(vcf=vcf):
+                    self.assertEqual(sp.build_genomes_of_dataset(vcf, "hg38"), none)
+        outside = os.path.realpath(self.outside) + os.sep
+        self.assertEqual([p for p in seen if p.startswith(outside)], [])
+        self.assertNothingRun()
+        # the dataset the form offers: the genome recorded for it alone, as before
+        options, value = sp.build_genomes_of_dataset("hg38_walk", "mm10")
+        self.assertEqual(([o["value"] for o in options], value), (["hg38"], "hg38"))
 
 
 @NEEDS_DASH
@@ -915,11 +1040,13 @@ class TestAssemblySearchLaunch(_WebFolder):
         self.assertNothingRun()
 
     def test_bulges_and_max_edits_are_taken_as_the_form_offers_them(self):
-        # the bulge dropdowns offer what the genome, PAM and variant dataset selected allow
-        # (limit_bulges_to_index): 3 with an installed reference index deeper than the app's
-        # ceiling (N = 4, built for a 20-nt guide), and the slider's maximum follows them
-        # (sync_max_edits_bound), to 6 + 3 + 3. Submit took 0 to 2 bulges and a Max edits of
-        # 1 to 10, whatever they offered
+        # the bulge dropdowns of this tab offer the app's ceiling, 0 to 2 (limit_bulges_to_index
+        # on the Personal assembly tab: its search indexes each haplotype itself), and the
+        # slider's maximum follows them (sync_max_edits_bound), to 6 + 2 + 2. Submit took 0
+        # to 2 bulges and a Max edits of 1 to 10, whatever they offered; then what the
+        # Reference tab's hidden genome and variant dataset allowed (OF-11): 3 with an
+        # installed reference index deeper than the ceiling, none with a dataset that has no
+        # variant index
         index = os.path.join(self.data, "genome_library", "NRG_4_hg38")
         os.makedirs(index)
         with open(os.path.join(index, "chr1.bin"), "wb") as fh:  # (the header of a tree)
@@ -928,15 +1055,14 @@ class TestAssemblySearchLaunch(_WebFolder):
         fields = mp.populate_assembly_fields_from_individual(self.IND)
         edits = "maximum edits (mismatches + bulges)"
 
-        def offered(genome, variant):
+        def offered(genome, variant, tab=mp.ASSEMBLY_TAB):
             return [o["value"] for o in
-                    mp.limit_bulges_to_index(genome, PAM, variant, 1, 1, 4, 6, {})[0]]
+                    mp.limit_bulges_to_index(genome, PAM, variant, 1, 1, 4, 6, {}, tab)[0]]
 
-        def submit(mms, dna, rna, cap, genome="hg38", variant="ref"):
+        def submit(mms, dna, rna, cap):
             """The lines of the warning, or the command and .Params.txt of the search run."""
             result = mp.submit_assembly_search_job(
-                1, *fields, PAM, GUIDE[:-3], mms, dna, rna, None, self.IND, cap, False,
-                genome, variant)
+                1, *fields, PAM, GUIDE[:-3], mms, dna, rna, None, self.IND, cap, False)
             if not self.pool.submit.call_count:
                 self.assertEqual(os.listdir(os.path.join(self.data, "Results")), [])
                 return [li.children for li in result[3].children]
@@ -948,28 +1074,52 @@ class TestAssemblySearchLaunch(_WebFolder):
             shutil.rmtree(job)
             return cmd[cmd.index("--bDNA"):cmd.index("--merge")], (params["DNA"], params["RNA"])
 
-        self.assertEqual(offered("hg38", "ref"), [0, 1, 2, 3])
-        self.assertEqual(mp.sync_max_edits_bound(6, 3, 3, 6)[0], 12)
-        self.assertEqual(submit(6, 3, 3, 12), (["--bDNA", "3", "--bRNA", "3"], ("3", "3")))
-        self.assertEqual(submit(6, 3, 3, 11), (
-            ["--bDNA", "3", "--bRNA", "3", "--max-total-edits", "11"], ("3", "3")))
-        for mms, dna, rna, cap, said in ((6, 4, 3, 9, ["DNA bulges"]),
-                                         (6, 3, 4, 9, ["RNA bulges"]),
-                                         (6, 3, 3, 13, [edits]), (4, 1, 1, 11, [edits])):
+        # the Reference tab's own offer, as before
+        self.assertEqual(offered("hg38", "ref", "tab-reference-genome"), [0, 1, 2, 3])
+        self.assertEqual(offered("hg38", "walk", "tab-reference-genome"), [0])
+        # this tab's, whatever the Reference tab's genome and dataset, none or one outside
+        for genome, variant in (("hg38", "ref"), ("hg38", "walk"), (None, "ref"),
+                                (os.path.join(self.outside, "hg38"), "ref")):
+            with self.subTest(genome=genome, variant=variant):
+                self.assertEqual(offered(genome, variant), [0, 1, 2])
+        self.assertEqual(mp.sync_max_edits_bound(6, 2, 2, 6)[0], 10)
+        self.assertEqual(submit(6, 2, 2, 10), (["--bDNA", "2", "--bRNA", "2"], ("2", "2")))
+        self.assertEqual(submit(6, 2, 2, 9), (
+            ["--bDNA", "2", "--bRNA", "2", "--max-total-edits", "9"], ("2", "2")))
+        self.assertEqual(submit(4, 1, 0, 5), (["--bDNA", "1", "--bRNA", "0"], ("1", "0")))
+        for mms, dna, rna, cap, said in ((6, 3, 3, 12, ["DNA bulges", "RNA bulges", edits]),
+                                         (6, 3, 2, 9, ["DNA bulges"]),
+                                         (6, 2, 3, 9, ["RNA bulges"]),
+                                         (6, 2, 2, 11, [edits]), (4, 1, 1, 11, [edits])):
             with self.subTest(mms=mms, dna=dna, rna=rna, cap=cap):
                 self.assertEqual(submit(mms, dna, rna, cap), said)
-        # a dataset whose index offers fewer: what they offer, as the search would
-        self.assertEqual(offered("hg38", "walk"), [0])
-        self.assertEqual(submit(4, 1, 0, 6, variant="walk"), ["DNA bulges"])
-        self.assertEqual(submit(4, 0, 0, 4, variant="walk"), (["--bDNA", "0", "--bRNA", "0"],
-                                                              ("0", "0")))
-        # a genome the form does not offer (none, or one outside): the app's ceiling, as
-        # the dropdowns offer then
-        for genome in (None, os.path.join(self.outside, "hg38")):
-            with self.subTest(genome=genome):
-                self.assertEqual(offered(genome, "ref"), [0, 1, 2])
-                self.assertEqual(submit(6, 3, 3, 12, genome=genome),
-                                 ["DNA bulges", "RNA bulges", edits])
+        self.assertNothingRun()
+
+    def test_the_tab_offers_every_pam_and_says_what_its_search_builds(self):
+        # the PAM list and the bulge note of the Personal assembly tab followed the
+        # Reference tab's variant dataset (OF-11): with an NRG variant index of walk
+        # selected there, only the PAMs it serves were offered (NRG; NGA, a VQR PAM, not),
+        # and the note spoke of walk's index
+        with open(os.path.join(self.data, "PAMs", "20bp-NGA-SpCas9VQR.txt"), "w") as fh:
+            fh.write("N" * 20 + "NGA 3\n")
+        _vcf(os.path.join(self.data, "VCFs", "hg38_walk", "walk.chr1.vcf.gz"), True)
+        os.makedirs(os.path.join(self.data, "genome_library", "NRG_2_hg38+hg38_walk"))
+        every = sorted(p["value"] for p in mp.get_available_PAM())
+        self.assertEqual(len(every), 2)
+        on_reference = mp.update_pam_options("hg38", "walk", PAM, "tab-reference-genome")
+        self.assertEqual([o["value"] for o in on_reference[0]], [PAM])
+        options, value = mp.update_pam_options("hg38", "walk", PAM, mp.ASSEMBLY_TAB)
+        self.assertEqual((sorted(o["value"] for o in options), value), (every, PAM))
+        self.assertEqual(mp.update_bulge_note("hg38", PAM, "walk", 1, 1, mp.ASSEMBLY_TAB),
+                         "Up to 2 DNA/RNA bulge(s) available. A personal-assembly search "
+                         "indexes each haplotype of the individual for the PAM and bulges "
+                         "selected the first time, then reuses those indexes.")
+        self.assertNotIn("walk", mp.update_bulge_note(None, PAM, "walk", 1, 1, mp.ASSEMBLY_TAB))
+        os.makedirs(os.path.join(self.data, "genome_library", "NNNNNNNN_3_hg38"))
+        self.assertEqual(mp.update_pamless_picker("hg38", "ref", mp.ASSEMBLY_TAB)[0]["display"],
+                         "none")
+        self.assertEqual(mp.update_pamless_picker("hg38", "ref", "tab-reference-genome")[0][
+            "display"], "block")
         self.assertNothingRun()
 
 
@@ -982,7 +1132,12 @@ class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
     genome folders with the names its archive gives (one holding such a name is no longer
     imported: test_personal_assembly; one imported before can be searched).
     post_analisi_snp.sh is a stand-in here, which records its arguments, in the folder the
-    post-analysis runs in (the search runs it in PostProcess/)."""
+    post-analysis runs in (the search runs it in PostProcess/). Since 2.10.0 (option P) the
+    pool runs it with a stage, last: "all" (the whole post-analysis of a chromosome, with
+    CRISPRME_POSTPROC_PIECES=0), or "cluster" and "finish" around the analysis it runs itself
+    in pieces with the arguments the "cluster" stage writes to CRISPRME_POSTPROC_MANIFEST
+    (the stand-ins write a clustered file of one line, so the analysis, a stand-in too, runs
+    once a chromosome, as one piece)."""
 
     def setUp(self):
         super().setUp()
@@ -990,8 +1145,16 @@ class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
         os.makedirs(self.post)
         stand_in = os.path.join(self.post, "post_analisi_snp.sh")
         with open(stand_in, "w") as fh:
-            fh.write('#!/bin/bash\nprintf "%s\\0" "$@" >> "$(dirname "$0")/args"\n')
+            fh.write('#!/bin/bash\nprintf "%s\\0" "$@" >> "$(dirname "$0")/args"\n'
+                     'if [ "${14}" = cluster ]; then\n'
+                     '  c="$(dirname "$0")/cluster.$$"; printf "#h\\nx\\n" > "$c"\n'
+                     '  printf "%s\\n" fa dict "$c" pam "${13}" 4 > "$CRISPRME_POSTPROC_MANIFEST"\n'
+                     'fi\n')
         os.chmod(stand_in, 0o755)
+        analysis = os.path.join(self.post, "new_simple_analysis.py")
+        with open(analysis, "w") as fh:
+            fh.write('#!/bin/bash\nprintf "%s\\0" "$@" >> "$(dirname "$0")/analyses"\n')
+        os.chmod(analysis, 0o755)
         self.genome = os.path.join(self.data, "Genomes", "hg38")
         self.job = os.path.join(self.data, "Results", "JOB1")
         os.makedirs(self.job)
@@ -1003,21 +1166,30 @@ class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
                      os.path.join(self.job, "final_results_JOB1.altMerge.txt")]
         self.before = self.outside_files()
 
-    def post_analysis(self):
+    def post_analysis(self, pieces="0"):
         """pool_post_analisi_snp.py, run as the search runs it, and the arguments of each
-        run of post_analisi_snp.sh it made."""
+        run of post_analisi_snp.sh it made (with its stage, last), and of the analysis."""
         record = os.path.join(self.post, "args")
-        if os.path.exists(record):
-            os.remove(record)
+        analyses = os.path.join(self.post, "analyses")
+        for old in (record, analyses):
+            if os.path.exists(old):
+                os.remove(old)
+        env = dict(os.environ, CRISPRME_POSTPROC_PIECES=pieces, TMPDIR=self.post)
         done = subprocess.run(
             [sys.executable, os.path.join(HERE, "pool_post_analisi_snp.py")] + self.head + ["1"],
-            cwd=self.post, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+            cwd=self.post, stdin=subprocess.DEVNULL, capture_output=True, text=True, env=env)
+        self.analyses = []
+        if os.path.exists(analyses):
+            with open(analyses, "rb") as fh:
+                words = [w.decode() for w in fh.read().split(b"\0")[:-1]]
+            os.remove(analyses)
+            self.analyses = [words[i:i + 6] for i in range(0, len(words), 6)]
         words = []
         if os.path.exists(record):
             with open(record, "rb") as fh:
                 words = [w.decode() for w in fh.read().split(b"\0")[:-1]]
             os.remove(record)
-        return done, [words[i:i + 13] for i in range(0, len(words), 13)]
+        return done, [words[i:i + 14] for i in range(0, len(words), 14)]
 
     def test_a_fasta_named_with_a_command_runs_nothing(self):
         # a FASTA of sequence chr1 named so: the search's own check of the folder reads the
@@ -1045,8 +1217,17 @@ class TestPostAnalysisOfTheGenomesFastaFiles(_Folder):
                 fh.write(f">{name}\n" + SEQ + "\n")
         done, runs = self.post_analysis()
         self.assertEqual((done.returncode, done.stderr), (0, ""))
-        self.assertEqual(sorted(runs), [self.head + [chrom]
+        self.assertEqual(sorted(runs), [self.head + [chrom, "all"]
                                         for chrom in ("HLA-A*01:01", "chr1", "chr2")])
+        self.assertEqual(self.markers(), [])
+        # in pieces (the default): "cluster" then "finish" a chromosome, the analysis between
+        # them run with the arguments the cluster stage wrote, each name one argument
+        done, runs = self.post_analysis(pieces="1")
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        names = ("HLA-A*01:01", "chr1", "chr2")
+        self.assertEqual(sorted(runs), sorted(self.head + [chrom, stage] for chrom in names
+                                              for stage in ("cluster", "finish")))
+        self.assertEqual(sorted(a[4] for a in self.analyses), sorted(names))
         self.assertEqual(self.markers(), [])
 
 
@@ -1476,6 +1657,36 @@ class TestResultsPages(_WebFolder):
         self.assertEqual(page.children.children, "The selected result does not exist")
         self.assertNothingRun()
 
+    # The guide list and the annotated targets are files of the job's folder, which others
+    # may write (its group, under a umask of 002): a "guide" put in the list passed the check
+    # that the link's guide is the job's, and an annotation put in the annotated targets went
+    # into the lookup's command, both through the shell, as the web app's user (2.10.0, the
+    # review of lane S, round 4)
+    def test_a_region_link_runs_no_guide_the_job_s_guide_list_holds(self):
+        planted = f"{GUIDE};touch${{IFS}}MARK_guide;#"
+        with open(os.path.join(self.job, ".guides.txt"), "a") as fh:
+            fh.write(planted + "\n")
+        page = rp.cluster_page(self.JOB, f"{planted}-Pos-chr1-1000")
+        self.assertEqual(self.markers(), [])
+        self.assertEqual(getattr(page.children, "children", None),
+                         "The selected position does not exist")
+        self.assertNothingRun()
+
+    def test_a_region_link_runs_no_annotation_the_job_s_targets_hold(self):
+        with open(os.path.join(self.job, f"{self.JOB}.Annotation.targets.txt"), "w") as fh:
+            fh.write(f"X\t{GUIDE}\tY\tchr1\t1\t1000\t'; touch MARK_annotation; echo '\n")
+        # (the lookup's first command reads .bestMerge.txt of the web app's working
+        # directory, its name as it is, and stops the page without one: one there, which
+        # anyone who can write the data folder can make, lets it reach the annotation's)
+        with open(os.path.join(self.data, ".bestMerge.txt"), "w") as fh:
+            fh.write("#Bulge_type\tcrRNA\n")
+        page = rp.cluster_page(self.JOB, f"{GUIDE}-Pos-chr1-1000")
+        self.assertEqual(self.markers(), [])
+        self.assertEqual(page.children[0].children, "Selected Position: chr1 - 1000")
+        with open(os.path.join(self.job, f"{self.JOB}.chr1_1000.{GUIDE}.txt")) as fh:
+            self.assertNotIn("MARK", fh.read())
+        self.assertNothingRun()
+
     def test_a_sample_link(self):
         data, _cols = rp.update_table_sample(0, 10, [], None, f"?job={self.JOB}",
                                              f"#{GUIDE}-Sample-S1")
@@ -1529,11 +1740,22 @@ class TestResultsPages(_WebFolder):
         rp.update_images_tabs("2", [{"row": 0}], "CFD", f"?job={self.JOB}",
                               [{"Guide": GUIDE}])
         with open(recorded) as fh:
-            # the words of the command 2.8.0 ran
-            self.assertEqual(json.load(fh), [
-                GUIDE, f"{self.job}/.guide_dict_{GUIDE}_CFD.json",
-                f"{self.job}/.motif_dict_{GUIDE}_CFD.json", "2", "0", "TOTAL_CFD",
-                f"{self.job}/imgs/"])
+            # the words of the command 2.8.0 ran, but for the paths: copies of the inputs and
+            # the folder of the chart, in a folder of the web app's own in the job's folder,
+            # renamed into imgs/ afterwards, which the script reaches through its descriptor
+            # (results_page._job_scratch: the script read and wrote the job's files by name,
+            # through a link another user put there)
+            words = json.load(fh)
+        words, real = words[:-1], words[-1]  # (the stand-in's: where that folder is)
+        scratch = os.path.dirname(words[1])
+        self.assertRegex(scratch, r"^/proc/self/fd/[0-9]+$")
+        self.assertEqual(os.path.dirname(real), self.job)
+        self.assertTrue(os.path.basename(real).startswith(".crisprme-"))
+        self.assertEqual(words, [
+            GUIDE, f"{scratch}/.guide_dict_{GUIDE}_CFD.json",
+            f"{scratch}/.motif_dict_{GUIDE}_CFD.json", "2", "0", "TOTAL_CFD",
+            f"{scratch}/imgs/"])
+        self.assertFalse(os.path.exists(real))  # (gone with what was renamed out of it)
         for mm, guide in (("2", "G;touch${IFS}MARK_f;#"), ("2;touch${IFS}MARK_g;#", GUIDE)):
             with self.subTest(mm=mm, guide=guide):
                 rp.update_images_tabs(mm, [{"row": 0}], "CFD", f"?job={self.JOB}",

@@ -1,6 +1,10 @@
 # CRISPRme+ 2.8.0 Design Plan — Sites-Only Chimera-Aware Prioritization
 
-> Status: **PLANNING ONLY** (no code). Approved concept by Luca 2026-10-22; targeted for 2.8.0.
+> Status: **implemented in CRISPRme 2.10.0 as the carrier gate** (`PostProcess/haplotype_prioritizer.py`;
+> [METHODS §5, "The carrier gate"](../METHODS.md#the-carrier-gate-a-population-level-rows-variants-against-phased-haplotypes);
+> on by default for genotyped panels, opt-in for mega, `complete-search --prioritize-observed`).
+> This page is the design plan as approved by Luca on 2026-10-22 (then targeted for 2.8.0); where
+> it and METHODS differ, METHODS describes what ships.
 > Produced by a 5-agent adversarial exploration (statistics / red-team / implementation / framing →
 > synthesis), grounded in the live codebase. This is the sites-only counterpart to the 2.8.0
 > context-aware default (per-sample on genotyped indexes).
@@ -164,7 +168,16 @@ Total ≈ 5 S + 4 M + 1 optional L.
 - **Q6 — ancestry disclaimer: DECIDED = static warning only.** Name the thin-coverage groups (OCE n=30,
   MID n=157); no automatic ancestry-aware flagging. "Caveat; little we can do about panel coverage."
 
-## 8. Open questions still for Luca
+## 8. Open questions (as the plan was written; all settled since)
+
+> These were open when the plan was written. §8b records Luca's decisions on 1, 2 and 6. The
+> carrier gate as shipped settles the others
+> ([METHODS §5](../METHODS.md#the-carrier-gate-a-population-level-rows-variants-against-phased-haplotypes)):
+> E's threshold is a parameter, `--gate-min-expected`, 3 by default (3); a C1 row is ranked
+> after the others, and the labels state what the gate found, with no "chimera" word (4); no
+> QC/artifact axis shipped (5); and an A row that one haplotype carries, or whose phase is not
+> known, has a state of its own (7).
+
 1. **Sort precedence:** tier **primary** ("put real on top": A>B>C1>C2 then detectability within tier),
    or tier as a **tertiary tiebreak** under the calibrated CFD/CRISPR-Bulge sort? (Materially different
    top-1000 orderings. Luca's verbatim "PUT ON TOP" reads tier-primary; the analyses lean badge +

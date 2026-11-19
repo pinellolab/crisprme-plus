@@ -24,8 +24,9 @@
 # *_integrated_results.tsv and .zip, *_report.zip,
 # *_all_results_with_alternative_alignments.zip, the per-chrom co-occurrence /
 # high-variant-density sidecars (snp_snp_cooc / indel_snp_cooc /
-# high_variant_density_regions / indel_af), the small *_observed_haplotypes_raw.zip
-# sidecar (fast re-renders), the per-guide/per-sample summaries, imgs/, and the sqlite
+# high_variant_density_regions / four_allele_positions / indel_af), the small
+# *_observed_haplotypes_raw.zip sidecar (fast re-renders), the per-guide/per-sample
+# summaries, imgs/, and the sqlite
 # .<job>.db web results-page index.
 output_folder="$1"
 cicd_test="$2"
