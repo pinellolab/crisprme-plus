@@ -41,7 +41,8 @@ say "${GRN}Docker found.${NC}"
 
 # ---- 1b. Pre-pull the engine image (best-effort, visible progress) --------
 # Front-load the engine image now (a ~5 GB download on Intel/AMD, ~1.8 GB on Apple
-# Silicon; ~7 GB+ once unpacked) — with progress here in the terminal — so the
+# Silicon; once unpacked ~16 GB on Intel/AMD (~11 GB on a classic overlay2 store),
+# ~7 GB on Apple Silicon) — with progress here in the terminal — so the
 # app's first Start (which probes a bind mount using this image) doesn't appear to
 # hang while it pulls. Skipped silently if the daemon isn't up yet; the app pulls
 # it on demand in that case.

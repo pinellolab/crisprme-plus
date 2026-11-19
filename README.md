@@ -873,12 +873,15 @@ docker images
 Look for an entry similar to the following:
 ```
 REPOSITORY            TAG       IMAGE ID       CREATED        SIZE
-pinellolab/crisprme   latest    <image_id>     <timestamp>    ~7 GB on Apple Silicon (more on amd64)
+pinellolab/crisprme   latest    <image_id>     <timestamp>    ~7 GB on Apple Silicon (~16 GB on amd64)
 ```
 
 The pull downloads about 5 GB on amd64 and 1.8 GB on Apple Silicon (arm64). `docker images`
-shows what the image takes on disk once unpacked: about 7 GB on Apple Silicon, and more on
-amd64, whose CRISPR-Bulge scorer env carries the CUDA build of TensorFlow.
+shows what the image takes on disk once unpacked: about 7 GB on Apple Silicon, and about 16 GB
+on amd64, whose CRISPR-Bulge scorer env carries the CUDA build of TensorFlow. Both figures
+include the download, which the containerd image store of Docker Desktop (and of Docker Engine
+from version 29, on a fresh install) keeps beside the unpacked image; on Docker Engine's classic
+overlay2 store, the amd64 image takes about 11 GB.
 
 You are now ready to run CRISPRme using Docker.
 
