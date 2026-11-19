@@ -66,8 +66,12 @@ had given the repo, which is no repo's; and in `seq_script/merge_panels/README.m
 no build command names a repo). At `cb282e83` it prints that name and the index set's header
 comment on why a publish names it: the recipes, their comments included, are `db50986`'s, so the
 HPRC recipe's header still names v2.0's graph, the
-recipe's default `SRC`, where the rebuild gave it v2.1's split as `SRC` (`$HPRC_SRC`, above). The
-19 row lines of the build half keep their md5 (`7389f7e234d4e617860f8f9b34abdc49`: those of
+recipe's default `SRC`, where the rebuild gave it v2.1's split as `SRC` (`$HPRC_SRC`, above).
+Against a tag after `v2.10.0` it prints, besides, a sentence of
+`seq_script/merge_panels/README.md`, text no build reads: it said that `mega_rebuild.sh` was not
+run genome-wide before the release, and since 2.10.1 says that it built 2.10.0's mega index
+genome-wide (Gate A, below). The 19 row lines of the build half keep their md5
+(`7389f7e234d4e617860f8f9b34abdc49`: those of
 `check_index_set.py --commands build` after its `# build` line, the `if`, `else` and mark lines
 around each left out, as `check_index_set.half_lines` takes them; the printed script, which holds
 its checks and those lines too, has an md5 of its own); and `git diff db50986 v2.10.0 --

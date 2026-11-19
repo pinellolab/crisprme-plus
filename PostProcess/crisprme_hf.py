@@ -190,9 +190,10 @@ _COMPONENT_LOCALDIR = {
 
 # The PAM file of the default PAM (SpCas9 NRR since CRISPRme 2.10.0), which the README's
 # commands and the web form's default use. It ships with CRISPRme, in PAMs/ beside
-# PostProcess/, and a download of the pams component installs it when the data repo's
-# pams/ does not hold it (_install_default_pam): at 2.10.0's release that held the NGG, NNN
-# and NRG files only.
+# PostProcess/, and a download of the pams component installs it when the repo's pams/ does
+# not hold it (_install_default_pam): the data repo's held the NGG, NNN and NRG files alone
+# until 2.10.0's release uploaded the index set's 9 PAM files, this one among them (12 in
+# all); a repo given by --hf-repo or CRISPRME_HF_REPO may still lack it.
 DEFAULT_PAM_FILE = "20bp-NRR-SpCas9.txt"
 _SHIPPED_PAMS = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "PAMs")
