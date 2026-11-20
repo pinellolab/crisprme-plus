@@ -58,7 +58,13 @@ RUN apt-get update \
 # both conda-forge and bioconda). The resulting environment is identical.
 ARG CONDA_CHANNEL_BASE=https://conda.anaconda.org
 
-# Python 3.11 environment: scoring stack + Dash 2.x web stack + pipeline tools.
+# Python 3.11 environment: scoring stack + Dash 2.x web stack + pipeline tools. The package
+# cache goes in the RUN that fills it, so that no layer keeps it: `clean --all` alone keeps the
+# folder of every package an env uses, and in it each file the env holds a copy of rather than a
+# link to (2.10.0's amd64 image carried 1.35 GB of those in /opt/conda/pkgs, linked into no env,
+# the scorer env's TensorFlow library most of it), so --force-pkgs-dirs removes the whole cache.
+# Nothing at run time reads it: `micromamba run` and `scorer-env check` work without it, and a
+# later create or install downloads what it needs.
 RUN micromamba install -y -n base \
         -c ${CONDA_CHANNEL_BASE}/conda-forge -c ${CONDA_CHANNEL_BASE}/bioconda \
         python=3.11 \
@@ -72,7 +78,7 @@ RUN micromamba install -y -n base \
         importlib-metadata \
         "dash>=2.14,<3" "dash-bootstrap-components<2" dash-daq \
         "flask=3.1.3" "flask-caching=2.4.1" "flask-compress=1.24" gunicorn "werkzeug=3.1.8" "cachelib=0.17.0" \
-    && micromamba clean --all --yes
+    && micromamba clean --all --force-pkgs-dirs --yes
 # ^ flask/flask-caching/werkzeug/cachelib PINNED to the versions the working v2.5.5 image
 #   shipped. They were unpinned and drifted: a newer flask-caching dropped the
 #   flask_caching.backends.filesystem submodule, so the web app crashed at import
@@ -164,16 +170,19 @@ ARG TARGETARCH
 # main env (networks that block conda.anaconda.org set e.g. --build-arg CONDA_CHANNEL_BASE=
 # https://prefix.dev); scorer_env._channel_args() reads it. Defaults to conda.anaconda.org.
 ARG CONDA_CHANNEL_BASE=https://conda.anaconda.org
+# The scorer env's package cache goes in this RUN, as the main env's does in its own (above), and
+# pip keeps none (PIP_NO_CACHE_DIR): on arm64 the env's TensorFlow is the PyPI wheel, whose cache
+# took 308 MB of 2.10.0's arm64 image (/root/.cache/pip).
 RUN if [ "$build_scorer_envs" = "1" ]; then \
       BACKEND="${scorer_backend}"; \
       if [ "$BACKEND" = "auto" ]; then \
         if [ "${TARGETARCH}" = "amd64" ]; then BACKEND=gpu; else BACKEND=cpu; fi; \
       fi; \
       echo "[scorer-env] building + COMPUTE-self-testing ALL registered scorer envs (backend=${BACKEND}, arch=${TARGETARCH})" \
-      && CONDA_CHANNEL_BASE="${CONDA_CHANNEL_BASE}" python -c "import sys; sys.path.insert(0, '${PREFIX}/opt/crisprme/PostProcess'); \
+      && CONDA_CHANNEL_BASE="${CONDA_CHANNEL_BASE}" PIP_NO_CACHE_DIR=1 python -c "import sys; sys.path.insert(0, '${PREFIX}/opt/crisprme/PostProcess'); \
 import scorer_env; ok, rep = scorer_env.build_all(gpu=('${BACKEND}'=='gpu')); \
 [print('[scorer-env]', line) for line in rep]; sys.exit(0 if ok else 1)" \
-      && micromamba clean --all --yes ; \
+      && micromamba clean --all --force-pkgs-dirs --yes ; \
     fi
 
 WORKDIR /root

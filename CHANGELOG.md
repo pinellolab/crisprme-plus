@@ -13,6 +13,25 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Changed
+- **The Docker image keeps no conda or pip package cache.** The Dockerfile's `micromamba clean
+  --all --yes`, at the end of each RUN that installs an environment, removes the cached packages
+  no environment uses, but keeps the folder of every package one uses, and in it each file the
+  environment holds a copy of rather than a link to. 2.10.0's amd64 image carried 1.35 GB of such
+  files in `/opt/conda/pkgs` (8,019 files, linked into no environment; 1.19 GB of them of the
+  scorer environment's own packages, the TensorFlow library alone 1.06 GB), and its arm64 image,
+  whose TensorFlow is the PyPI wheel, 308 MB of pip's cache in `/root/.cache/pip`. Each of the two
+  RUNs now removes the whole cache (`--force-pkgs-dirs`), and pip writes none
+  (`PIP_NO_CACHE_DIR`), so that no layer keeps them. Nothing reads the cache at run time: with it
+  pointed at a folder that does not exist, the published 2.10.0 image's `micromamba run`,
+  `scorer-env check` (its compute self-test included) and the searches of the SNP and indel
+  oracle, CFD and CRISPR-Bulge scored, ran as with it; a later `scorer-env create` or `update`
+  downloads what it needs, as it did. The docs' sizes of the image are 2.10.0's until the release
+  measures its own (`docs/RELEASE_CHECKLIST.md`, D).
+- **The report generator's version is 2.5** (`REPORT_GENERATOR_VERSION`, which the report's
+  footer prints). It had been 2.4 since CRISPRme+ 2.4.0, through the generator's changes of
+  2.10.0. The website's example report, 2.10.0's, keeps its "report generator v2.4".
+
 ### Fixed
 - **The docs give the measured size of 2.10.0's image once unpacked, and of its arm64
   `.sif`.** The one-line installers' comments said "~7 GB+ once unpacked", the README "about
@@ -27,6 +46,39 @@ and the `release-crisprme` skill.
   ~1.7 GB, and `docs/RELEASE_CHECKLIST.md` records the measurement ("The image's size", D). The
   download, 4.84 GB on amd64 and 1.82 GB on arm64, and the amd64 `.sif`, 4.51 GB, are the same
   as 2.8.1's, so the docs' figures for them stand.
+- **`download --help` and the download's refusal of a VCF dataset no longer call the default
+  repo's `hg38_HPRC` the source of a shipped index.** The help's `--dataset` called the datasets of
+  `--what vcf` and `--what build-inputs` "the SOURCE VCFs that built a shipped index", `hg38_HPRC`
+  among them, and the refusal of a dataset the repo lacks said that the default repo hosts "the
+  source VCFs of its prebuilt variant indexes". The default repo's
+  (`lucapinello/crisprme-data`) `hg38_HPRC` is HPRC graph v2.0, the input of 2.8.1's archives:
+  2.10.0's HPRC index was built from v2.1's normalised VCFs, which
+  `lucapinello/crisprme_plus_indices` holds under `build-inputs/hg38_HPRC/`. Both now say so, as
+  the docs have since 2.10.0, the help with the `hf download` that fetches them and where to put
+  them to build; HGDP + 1000 Genomes' and the mega's VCFs in the default repo are 2.10.0's inputs
+  as they are.
+- **`complete-search --help` no longer says that the population-level analysis can be the faster
+  beside mega.** It was, before the sites-only density guard; with the guard on, the default, the
+  release gate's search beside mega took 1,003 to 1,043 s per sample against 2,307 to 2,378 s
+  population-level (METHODS section 5). The help's `--population-level` now says what the README
+  and METHODS say: per sample is the faster on a dense panel such as HGDP + 1000 Genomes, and
+  beside mega too, and the population-level analysis can be on a small panel such as HPRC. The
+  ROADMAP's open item on it is gone.
+- **The web form's note says how long the first build of a reference index takes, and on how
+  many threads.** Where a search first builds the reference index of its PAM, the note under the
+  bulge caps said "about 20 to 35 minutes for a human genome". In 2.10.0's rebuild, on 16 threads,
+  hg38's NRR index (the default PAM's) took 47 minutes, NGG's 11 and NRG's 22
+  (`docs/INDEX_PROVENANCE.md`), and a web search builds on 4 threads: the note gives these
+  figures and that basis, as the web interface guide does.
+- **Two texts written before 2.10.0's release say what it did.**
+  `seq_script/merge_panels/README.md` said that the mega's recipe, `mega_rebuild.sh`, had not been
+  run genome-wide before the release: it built 2.10.0's `20-NRR_3_hg38+hg38_mega`, and
+  `verify_mega_chrom.py` passed on all 24 chromosomes (`docs/INDEX_PROVENANCE.md`, Gate A).
+  INDEX_PROVENANCE's check of the build's sources, `git diff db50986 v2.10.0 -- PAMs
+  seq_script/merge_panels ...`, now says that against a later tag it prints that sentence too,
+  text no build reads. And a comment of `PostProcess/crisprme_hf.py` said that the data repo's
+  `pams/` held the NGG, NNN and NRG files only, as it did until 2.10.0's release uploaded the
+  index set's 9 PAM files (12 in all).
 
 ## [2.10.0] - 2026-11-19
 

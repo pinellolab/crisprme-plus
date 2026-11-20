@@ -137,6 +137,19 @@ class TestBulgeNote(_Install):
                 self.assertIn("No reference index for this PAM is installed, so the search "
                               "first builds one", self.note("ref", dna, 0))
 
+    def test_the_time_of_a_build_says_its_basis(self):
+        # (it said "about 20 to 35 minutes for a human genome": 2.10.0's rebuild took 47 min
+        # for hg38's NRR index on 16 threads, docs/INDEX_PROVENANCE.md, and a web search
+        # builds on 4)
+        first = self.note("ref", 1, 0)
+        self.index("NRG_2_hg38")
+        deeper = self.note("ref", 2, 1)
+        for note in (first, deeper):
+            self.assertIn("for hg38 with NRR, the default PAM, 47 minutes on 16 threads in "
+                          "2.10.0's rebuild, and longer on the 4 threads a web search uses", note)
+            self.assertNotIn("20 to 35 minutes", note)
+        self.assertIn("first builds a deeper one", deeper)
+
     def test_panel_without_an_index_but_with_its_vcf_files(self):
         self.index("NRG_2_hg38")
         note = self.note("fresh", 0, 0)

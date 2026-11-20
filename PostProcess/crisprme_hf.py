@@ -190,9 +190,10 @@ _COMPONENT_LOCALDIR = {
 
 # The PAM file of the default PAM (SpCas9 NRR since CRISPRme 2.10.0), which the README's
 # commands and the web form's default use. It ships with CRISPRme, in PAMs/ beside
-# PostProcess/, and a download of the pams component installs it when the data repo's
-# pams/ does not hold it (_install_default_pam): at 2.10.0's release that held the NGG, NNN
-# and NRG files only.
+# PostProcess/, and a download of the pams component installs it when the repo's pams/ does
+# not hold it (_install_default_pam): the data repo's held the NGG, NNN and NRG files alone
+# until 2.10.0's release uploaded the index set's 9 PAM files, this one among them (12 in
+# all); a repo given by --hf-repo or CRISPRME_HF_REPO may still lack it.
 DEFAULT_PAM_FILE = "20bp-NRR-SpCas9.txt"
 _SHIPPED_PAMS = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "PAMs")
@@ -1940,9 +1941,12 @@ def download_component(
             raise ValueError(
                 f"No raw VCF dataset '{dataset}' found in HuggingFace repo '{repo}' "
                 f"(looked for '{remote_prefix}/{dataset}/'). The default repo hosts the "
-                f"source VCFs of its prebuilt variant indexes as the datasets "
-                f"hg38_HGDP1kGP, hg38_HPRC and hg38_mega (e.g. --what vcf --dataset "
-                f"hg38_HGDP1kGP). A variant-aware search does not need them:  crisprme.py "
+                f"VCFs of three panels as the datasets hg38_HGDP1kGP, hg38_HPRC and "
+                f"hg38_mega (e.g. --what vcf --dataset hg38_HGDP1kGP): HGDP + 1000 Genomes' "
+                f"and the mega's are the source VCFs of 2.10.0's indexes, but its hg38_HPRC "
+                f"is HPRC graph v2.0, the input of 2.8.1's archives; 2.10.0's HPRC index was "
+                f"built from v2.1's normalised VCFs, in {FORMAT2_HF_REPO} under "
+                f"build-inputs/hg38_HPRC/. A variant-aware search does not need them:  crisprme.py "
                 f"download --what index --index-name 20-NRR_3_hg38+hg38_HGDP1kGP  (the "
                 f"genotype store it ships covers carriers and per-sample output). To build "
                 f"an index from other VCFs, place them under VCFs/{dataset}/ yourself, or "
