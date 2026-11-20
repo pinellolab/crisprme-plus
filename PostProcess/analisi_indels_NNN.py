@@ -448,7 +448,29 @@ def preprocess_CFD_score(target):
         if target[-3] == 55:
             target[-3] = "{:.3f}".format(cfd_score)
         if target[-3] == 33:
-            cfd_ref_score = _cfd_from_alignment(target[1], target[-4])
+            # The reference alignment can come back SHORT -- empty, in practice.
+            # alignRefFromVar slices the plain reference chromosome at the row's
+            # coordinates, and an indel row can sit past the chromosome's end: a large
+            # insertion (e.g. a subtelomeric telomeric-repeat expansion) makes the fake
+            # indel genome longer than the real chromosome, so a target found inside the
+            # inserted sequence has no reference position at all. Python returns '' for
+            # an out-of-range slice rather than raising, so the empty alignment used to
+            # travel silently into cfd_score_bulge_aware, whose documented precondition
+            # is that the two alignments are the same length; with a DNA bulge in the
+            # guide it indexed the protospacer by the crRNA's positions and died with
+            # "IndexError: string index out of range", taking the whole indel
+            # post-analysis -- and so the entire run -- with it.
+            #
+            # There is genuinely no reference target to score here, so there is no
+            # reference CFD: report 0. The row itself is kept, with its own (ALT) CFD
+            # intact; only the reference comparison is unavailable.
+            ref_aligned_target = target[-4]
+            if not isinstance(ref_aligned_target, str) or len(
+                ref_aligned_target
+            ) < len(target[1]):
+                cfd_ref_score = 0.0
+            else:
+                cfd_ref_score = _cfd_from_alignment(target[1], ref_aligned_target)
             target[-3] = "{:.3f}".format(cfd_ref_score)
     else:
         cfd_score = -1

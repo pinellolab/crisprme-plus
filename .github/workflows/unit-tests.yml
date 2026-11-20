@@ -488,6 +488,21 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_reference_row_downstream -v
 
+      - name: "The reference-alignment CFD of a row that has no reference (both paths: an out-of-range slice returns '', and the bulge-aware scorer's precondition is two alignments of one length)"
+        # alignRefFromVar builds an indel row's reference alignment by slicing the plain
+        # reference chromosome at the row's coordinates. A row found inside a large insertion
+        # has no reference position at all -- the per-chromosome fake indel genome is longer
+        # than the real chromosome -- and Python returns '' for an out-of-range slice instead
+        # of raising. The empty alignment reached cfd_score_bulge_aware, which on a DNA-bulge
+        # row indexes the protospacer by the crRNA's positions, and died with "IndexError:
+        # string index out of range", taking the whole chromosome's indel post-analysis with
+        # it (post_analisi_indel.sh exits 0 regardless, so the loss is silent). The SNP path
+        # reaches the same call with a refSeq that comes back truncated near a chromosome
+        # boundary. Both call sites, and that a well-formed reference alignment still gets
+        # exactly the score it got before the guard.
+        working-directory: PostProcess
+        run: python -m unittest test_indel_ref_alignment_guard -v
+
       - name: "Tier-path SNP rows mark the REF mismatches as the dictionary path does (per-sample + population-level)"
         working-directory: PostProcess
         run: python -m unittest test_tier_ref_columns -v

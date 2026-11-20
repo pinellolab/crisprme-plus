@@ -2386,7 +2386,30 @@ def preprocess_CFD_score(target):
         if target[-3] == 55:  # if 55 sequence is ref so no score have to be calculated
             target[-3] = "{:.3f}".format(cfd_score)
         if target[-3] == 33:  # if 33 sequence is alt so ref score must be calculated
-            cfd_ref_score = _cfd_from_alignment(target[1], target[-4])
+            # The reference alignment can come back SHORT, as on the indel path.
+            # refSeq is genomeStr[pos : pos + len(replaceTarget)] and, near a chromosome
+            # boundary or from an out-of-range position on the variant-enriched combined
+            # index, it comes back truncated -- the hazard the boundary guards above
+            # (replaceTarget's IUPAC loop) document. Those guards skip the offending
+            # POSITION so per-position indexing cannot raise; they do not drop the row
+            # or restore the missing bases, and _ref_with_bulges carries the truncation
+            # into target[-4]. A short alignment then reaches cfd_score_bulge_aware,
+            # whose documented precondition is that the two alignments are the same
+            # length; with a DNA bulge in the guide it indexes the protospacer by the
+            # crRNA's positions and raises "IndexError: string index out of range",
+            # aborting the whole post-analysis.
+            #
+            # There is no reference target to score, so there is no reference CFD:
+            # report 0. The row keeps its own (ALT) CFD; only the reference comparison
+            # is unavailable. A well-formed alignment is the same length as the frame,
+            # so this cannot fire on one.
+            ref_aligned_target = target[-4]
+            if not isinstance(ref_aligned_target, str) or len(
+                ref_aligned_target
+            ) < len(target[1]):
+                cfd_ref_score = 0.0
+            else:
+                cfd_ref_score = _cfd_from_alignment(target[1], ref_aligned_target)
             target[-3] = "{:.3f}".format(cfd_ref_score)
     else:
         # no score calculated, append -1 in CFD score and in position -3 insert -1 value (-1 means no score calculated)
