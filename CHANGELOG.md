@@ -105,9 +105,14 @@ and the `release-crisprme` skill.
   alternative-alignment rows, 24 indel row blocks), read as the gate read the run, the check of
   2.10.0 gives those 5 gating findings and this one none, in soundness and in both modes; each
   gives the same one non-gating line besides (`limit-two-indels`, completeness, HG02728 at
-  chr6:169,126,042 (+)). Covered by `test_check_indel_rows`
+  chr6:169,126,042 (+)). Genome-wide on that run, in soundness as its validation ran 2.10.0's
+  check, this one exits 0: no gating finding, and its 128,670 other findings are 2.10.0's line
+  for line (119,217 `overlap-reading-agrees`, 9,309 `limit-overlapping-records`, 126
+  `limit-two-indels`, 18 `limit-putative-carrier`). Covered by `test_check_indel_rows`
   (`AJunctionNearTheEdge`: both shapes, every end near the window's, the stretch's end, the
-  mirrors, and a carrier left off; each test but its control fails on the code before) and
+  mirrors, and a carrier left off, for every number of the target's bases a second deletion can
+  take, up to 21 of a target of 23 and 22 of one of 24, so a margin of fewer bases than such a
+  reading needs fails; each test but its controls fails on the code before) and
   `test_indel_haplotype_resolution` (the search keeps both carriers on hg38's bases, and takes
   each off with another base past the junction).
 
