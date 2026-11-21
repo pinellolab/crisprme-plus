@@ -215,6 +215,253 @@ def test_complement():
     assert isc.complement("M") == "M"  # IUPAC/other unchanged
 
 
+# --- an MNV read as a second record (2.10.1, the plan of the MNVs' phase on HPRC) -------
+# Two helpers of 2.10.0 read an MNV (REF and ALT of one length above 1) as they read an
+# indel: local_haplotype wrote its ALT bases after the base before its edit and left out the
+# places of the bases it replaces, and changes_span counted its ALT as bases inserted. Each
+# test below fails at c64e62e1 (2.10.0 and 2.10.1's quick wins).
+
+def _toy_held(ref, window, first, n, others):
+    """Whether a slot holding ``window`` and ``others`` holds the window's n bases from the
+    place ``first`` on (target_pairs, holds_target_bases), its reference ``ref`` from 0."""
+    lo, hi = 0, len(ref) - 1
+    on_window = isc.local_haplotype(lo, hi, window)
+    keys = [k for k, _s in on_window]
+    last = keys[keys.index(first) + n - 1]
+    hap = isc.local_haplotype(lo, hi, window, others)
+    ways = isc.target_pairs(on_window, hap, first, last)
+    return isc.holds_target_bases(ways, lambda src: src if isinstance(src, str) else ref[src])
+
+
+def test_the_plans_toy_calls_an_mnv_at_a_targets_first_base_in_a_repeat():
+    """The plan's toy calls, each "not held": a slot holding the row's record and an MNV
+    that changes the target's first bases does not have the target. At c64e62e1 the first
+    two read "held": the reading from the target's first base on started past the MNV,
+    where the repeat holds the target's bases."""
+    a_run = "C" * 10 + "A" * 40 + "T" * 20
+    # an insertion row in an A run (A>AA at 0-based 30; the target from 20 on, 15 bases)
+    # with AA>GG on the target's first base
+    assert not _toy_held(a_run, (31, "A", "AA"), (20, 0), 15, [(21, "AA", "GG")])
+    # a unit-deletion row TAT>T (0-based 31) in an AT repeat with AT>TA on the first base
+    at_run = "C" * 10 + "AT" * 20 + "G" * 20
+    assert at_run[31:34] == "TAT"
+    assert not _toy_held(at_run, (32, "TAT", "T"), (20, 0), 16, [(21, "AT", "TA")])
+    # the same MNV inside the target (not held at c64e62e1 too)
+    assert not _toy_held(a_run, (31, "A", "AA"), (20, 0), 15, [(25, "AA", "GG")])
+    # and without the MNV, or with it past the target, the slot holds the target
+    assert _toy_held(a_run, (31, "A", "AA"), (20, 0), 15, [])
+    assert _toy_held(a_run, (31, "A", "AA"), (20, 0), 15, [(40, "AA", "GG")])
+
+
+def test_local_haplotype_writes_an_mnvs_bases_at_their_places():
+    """An MNV's bases stand at the places of the bases they replace, (p, 0), the ALT base
+    the source; the places stay sorted; an MNV left unnormalized keeps its shared bases as
+    reference ones; a SNP row's haplotype (no window) reads it alike."""
+    hap = isc.local_haplotype(18, 24, (31, "A", "AA"), [(21, "AA", "GG")])
+    assert hap[:5] == [((18, 0), 18), ((19, 0), 19), ((20, 0), "G"), ((21, 0), "G"),
+                       ((22, 0), 22)], hap
+    for window in ((31, "A", "AA"), None):
+        hap = isc.local_haplotype(10, 40, window, [(21, "AA", "GG"), (15, "TCA", "TGA")])
+        keys = [k for k, _s in hap]
+        assert keys == sorted(keys)
+        got = dict(hap)
+        assert (got[(14, 0)], got[(15, 0)], got[(16, 0)]) == (14, "G", 16)
+        assert (got[(20, 0)], got[(21, 0)]) == ("G", "G")
+    # only the places inside lo..hi are written
+    hap = isc.local_haplotype(21, 30, None, [(21, "AA", "GG")])
+    assert hap[:2] == [((21, 0), "G"), ((22, 0), 22)], hap
+
+
+def test_local_haplotype_with_mnvs_holds_every_records_bases():
+    """Any set of indels and MNVs, in every order, gives the bases of the haplotype that
+    holds them all (each REF replaced by its ALT), or None where two REFs share a base, as
+    test_indel_haplotype_resolution's property for indels; and every reference position no
+    deletion (nor the window's REF) takes out has its place (p, 0), an MNV's too, whose base
+    is then the MNV's (c64e62e1 wrote an MNV's bases after the base before it, as an
+    insertion's, and its places had none)."""
+    import itertools
+    import random
+    rng = random.Random(21011)
+    ref = "".join(rng.choice("ACGT") for _ in range(70))
+
+    def record(p1):
+        kind = rng.randrange(3)
+        if kind == 0:  # an MNV, every base changed
+            n = rng.randint(2, 4)
+            r = ref[p1 - 1:p1 - 1 + n]
+            return (p1, r, r.translate(str.maketrans("ACGT", "TGCA")))
+        if kind == 1:  # an insertion
+            return (p1, ref[p1 - 1], ref[p1 - 1] + rng.choice("ACGT"))
+        return (p1, ref[p1 - 1:p1 + rng.randint(1, 3)], ref[p1 - 1])  # a deletion
+
+    seen = 0
+    for _ in range(2000):
+        window, *others = [record(rng.randint(15, 45)) for _ in range(rng.randint(2, 4))]
+        refs = sorted((p - 1, p - 1 + len(r)) for p, r, _a in [window] + others)
+        overlap = any(b[0] < a[1] for a, b in zip(refs, refs[1:]))
+        for order in itertools.permutations(others):
+            hap = isc.local_haplotype(0, len(ref) - 1, window, list(order))
+            if overlap:
+                assert hap is None
+                continue
+            if hap is None:  # two insertions at one point
+                continue
+            out, at = [], 0
+            for p1, r, a in sorted([window] + others):
+                out += [ref[at:p1 - 1], a]
+                at = p1 - 1 + len(r)
+            want = "".join(out) + ref[at:]
+            assert "".join(s if isinstance(s, str) else ref[s] for _k, s in hap) == want
+            keys = [k for k, _s in hap]
+            assert keys == sorted(keys)
+            out = set(range(window[0] - 1, window[0] - 1 + len(window[1])))
+            for p1, r, a in others:
+                if len(r) != len(a):
+                    c = isc.kept_bases(r, a)
+                    out |= set(range(p1 - 1 + c, p1 - 1 + len(r)))
+            assert {k[0] for k in keys if len(k) == 2} == set(range(len(ref))) - out
+            for p1, r, a in others:
+                if len(r) == len(a):
+                    got = dict(hap)
+                    assert "".join(got[(p1 - 1 + k, 0)] for k in range(len(r))) == a
+            seen += 1
+    assert seen > 500, seen
+
+
+def test_changes_span_reads_an_mnv_as_replaced_bases():
+    """changes_span for an MNV beside an indel on one slot, on both records' rows, by the
+    shapes of the plan's table (question 2's confirmed readings). On the indel's rows
+    ``gone`` is the bases the indel deletes; on the MNV's rows nothing is gone (2b). A
+    second record changes a row's target where it changes a base the target reaches."""
+    cs = isc.changes_span
+    # 1. an insertion anchored on the MNV's last base (MNV 0-based 50-51, insertion at 51)
+    assert cs(51, "AC", "GT", 40, 62)                      # indel's rows: its anchor changed
+    assert cs(52, "C", "CTT", 45, 60)                      # MNV's rows, past the MNV: leaves
+    assert not cs(52, "C", "CTT", 35, 51)                  # ... ending at its last base: stays
+    # 1b. an insertion anchored on another base of the MNV: bases added inside it
+    assert cs(51, "A", "ATT", 50, 51)
+    # 2. the MNV on the deletion's anchor base only (deletion CGT>C at 0-based 51)
+    assert cs(51, "AC", "GT", 40, 62, (52, 53))            # deletion's rows: anchor changed
+    assert cs(52, "CGT", "C", 45, 60)                      # MNV's rows reaching past it
+    assert not cs(52, "CGT", "C", 35, 51)
+    # 3. a deletion over part of the MNV (MNV 50-52; CGA>C at 51 deletes 52, 53)
+    assert cs(51, "ACG", "TTT", 40, 62, (52, 53))
+    assert cs(52, "CGA", "C", 40, 62)
+    # 4. the deletion's deleted bases inside the MNV (MNV 50-53; anchor 49, deletes 50, 51)
+    assert cs(51, "ACGT", "TGCA", 40, 62, (50, 51))        # deletion's rows: 52, 53 changed
+    assert cs(50, "AAC", "A", 40, 62)                      # MNV's rows: read as the deletion's
+    # 5. the MNV only on bases the deletion deletes: (a)(i) on the deletion's rows, changes
+    # nothing (c64e62e1 counted its ALT as inserted bases: True); (b) on the MNV's rows
+    assert not cs(51, "AC", "GT", 40, 62, (48, 55))
+    assert not cs(51, "AC", "GT", 40, 62, (50, 51))        # exactly its bases
+    assert cs(48, "TAACGGTTA", "T", 40, 62)
+    # an SNV is read alike: on deleted bases it changes nothing, elsewhere its base
+    assert not cs(51, "A", "G", 40, 62, (48, 55))
+    assert cs(51, "A", "G", 40, 62)
+    assert not cs(51, "A", "G", 52, 62)
+    # an MNV left unnormalized (TCA>TGA at 0-based 50) changes its middle base alone
+    assert cs(51, "TCA", "TGA", 51, 51) and not cs(51, "TCA", "TGA", 52, 60)
+    assert not cs(51, "TCA", "TGA", 40, 50)
+    assert not cs(51, "TCA", "TGA", 40, 62, (51, 51))
+
+
+# 2.10.0's changes_span and local_haplotype (c64e62e1), kept here to pin that the fixes
+# change nothing where no record has REF and ALT of one length (the plan's section 5: no
+# store of 2.10.0 holds one, so HGDP's and the mega's readings cannot move).
+def _changes_span_2100(pos1, ref, alt, lo, hi, gone=None):
+    a = pos1 - 1
+    c = isc.kept_bases(ref, alt)
+    t = isc.shared_tail(ref, alt)
+    if len(ref) - t > c:
+        first, last = a + c, a + len(ref) - t - 1
+        parts = [(first, last)] if gone is None else [
+            (first, min(last, gone[0] - 1)), (max(first, gone[1] + 1), last)]
+        if any(f <= l and f <= hi and l >= lo for f, l in parts):
+            return True
+    if len(alt) - t > c:
+        return lo <= a + c - 1 and a + c <= hi
+    return False
+
+
+def _local_haplotype_2100(lo, hi, window, others=()):
+    records = ([window] if window is not None else []) + list(others)
+    refs = sorted((p1 - 1, p1 - 1 + len(ref)) for p1, ref, _alt in records)
+    if any(b[0] < a[1] for a, b in zip(refs, refs[1:])):
+        return None
+    edits = []
+    if window is not None:
+        p1, ref, alt = window
+        s = p1 - 1
+        edits.append((s, s + len(ref), alt, s - 1, 2))
+    for p1, ref, alt in others:
+        s = p1 - 1
+        c = isc.kept_bases(ref, alt)
+        t = isc.shared_tail(ref, alt)
+        edits.append((s + c, s + len(ref) - t, alt[c:len(alt) - t], s + c - 1, 1))
+    edits.sort(key=lambda e: (e[0], e[1], e[4]))
+    out = []
+    at = lo
+    last = None
+    for start, end, put, after, rank in edits:
+        if last is not None and start == last[0] == last[1] == end and rank == last[2]:
+            return None
+        out.extend(((p, 0), p) for p in range(at, min(start, hi + 1)))
+        out.extend(((after, rank, k), b.upper()) for k, b in enumerate(put))
+        at = max(at, end)
+        last = (start, end, rank)
+    out.extend(((p, 0), p) for p in range(at, hi + 1))
+    return out
+
+
+def test_the_fixes_touch_the_records_of_one_length_alone():
+    """Over random indels and complex records (REF and ALT of two lengths: insertions,
+    deletions, records left unnormalized, complex ones such as TCC>G), with and without
+    bases gone, changes_span and local_haplotype give 2.10.0's answers; over MNVs they do
+    not (2.10.0's read them as an indel's): the fixes touch the records whose REF and ALT
+    have one length alone, which no store of 2.10.0 holds."""
+    import random
+    rng = random.Random(21012)
+    ref = "".join(rng.choice("ACGT") for _ in range(80))
+
+    def record(mnv=False):
+        p1 = rng.randint(10, 60)
+        r = ref[p1 - 1:p1 - 1 + rng.randint(2 if mnv else 1, 5)]
+        if mnv:
+            return (p1, r, r.translate(str.maketrans("ACGT", "TGCA")))
+        while True:
+            a = "".join(rng.choice("ACGT") for _ in range(rng.randint(1, 5)))
+            if len(a) != len(r):
+                return (p1, r, a)
+
+    moved = {"changes_span": 0, "local_haplotype": 0}
+    for _ in range(4000):
+        mnv = record(mnv=True)
+        g0 = rng.randint(0, 60)
+        gone = (g0, g0 + rng.randint(0, 10))
+        if isc.changes_span(*mnv, 0, 79, gone) != _changes_span_2100(*mnv, 0, 79, gone):
+            moved["changes_span"] += 1
+        if (isc.local_haplotype(0, 79, None, [mnv])
+                != _local_haplotype_2100(0, 79, None, [mnv])):
+            moved["local_haplotype"] += 1
+        rec = record()
+        lo = rng.randint(0, 70)
+        hi = lo + rng.randint(0, 15)
+        gone = None
+        if rng.random() < 0.5:
+            g0 = rng.randint(0, 70)
+            gone = (g0, g0 + rng.randint(0, 10))
+        assert isc.changes_span(*rec, lo, hi, gone) == _changes_span_2100(*rec, lo, hi, gone)
+        window = record()
+        others = [record() for _ in range(rng.randint(0, 3))]
+        lo = rng.randint(0, 20)
+        hi = rng.randint(50, 79)
+        assert (isc.local_haplotype(lo, hi, window, others)
+                == _local_haplotype_2100(lo, hi, window, others))
+        assert (isc.local_haplotype(lo, hi, None, others)
+                == _local_haplotype_2100(lo, hi, None, others))
+    assert all(moved.values()), moved
+
+
 def load_tests(loader, tests, pattern):
     """Under ``python -m unittest`` too, each test_ function above, which it found none of,
     and said OK (suite P4)."""

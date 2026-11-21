@@ -352,6 +352,262 @@ def test_compile_leaves_no_partial_final_on_kill(monkeypatch=None):
 
 
 
+# --- the store's MNV file (2.10.1, the plan of the MNVs' phase on HPRC) --------------------
+# Up to 2.10.0 the store kept the records whose REF and ALT lengths differ, so nothing a
+# search read said which haplotype holds an MNV. From 2.10.1 each chromosome's store has an
+# MNV file beside its indel file, in the same format and with the same marker. Each test
+# below fails at c64e62e1 (2.10.0 and 2.10.1's quick wins).
+
+_VCF_MNV = """\
+##fileformat=VCFv4.2
+##contig=<ID=chr22>
+##FILTER=<ID=LowQual,Description="Low quality">
+#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG1\tHG2\tHG3
+chr22\t100\trs1\tAT\tA\t.\tPASS\t.\tGT\t1|0\t0|1\t0|0
+chr22\t120\trsM1\tAA\tGG\t.\tPASS\t.\tGT\t1|.\t1/.\t1
+chr22\t130\trsM2\tTCA\tGAT\t.\t.\t.\tGT\t0|1\t0|0\t.|1
+chr22\t140\trsM3\tCG\tTA\t.\tLowQual\t.\tGT\t1|1\t0|0\t0|0
+chr22\t150\trsMX\tAC\tGT,A,AG\t.\tPASS\t.\tGT\t1|2\t3|0\t0|0
+chr22\t160\trsS\tC\tT\t.\tPASS\t.\tGT\t1|0\t0|1\t1|1
+chr22\t170\trsSV\tA\t<DEL>\t.\tPASS\t.\tGT\t1|0\t0|0\t0|0
+chr22\t180\trsSY\tACGTA\t<INV>\t.\tPASS\t.\tGT\t1|0\t0|0\t0|0
+"""
+
+
+def _vcf_file(text):
+    fd, vcf = tempfile.mkstemp(suffix=".vcf.gz")
+    os.close(fd)
+    with gzip.open(vcf, "wt") as fh:
+        fh.write(text)
+    return vcf
+
+
+def _lines(path):
+    with gzip.open(path, "rt") as fh:
+        return fh.read().splitlines()
+
+
+def test_an_mnv_is_ref_and_alt_of_one_length_above_one():
+    assert big._is_mnv("AA", "GG") and big._is_mnv("TCA", "TGA")
+    assert not big._is_mnv("A", "G")            # an SNV: the SNP genome codes it
+    assert not big._is_mnv("AT", "A") and not big._is_mnv("A", "AT")   # indels
+    assert not big._is_mnv("ACGTA", "<INV>")    # a symbolic allele of five characters
+    assert not big._is_mnv("AC", "*C")
+    assert not big._is_indel("AA", "GG")        # the indel file keeps none
+
+
+def test_the_mnv_file_its_marker_and_filter():
+    """compile_store writes the indel file and the MNV file of one chromosome in one pass:
+    each MNV ALT of a record whose FILTER is PASS or '.', read as "this ALT or not" with its
+    separator (1|. is 1|0, 1/. is 1/0, a haploid 1 is 1), carriers only; a line of several
+    ALTs gives each MNV ALT its own line (its genotype read against its own index; AC>AG,
+    one base changed but REF and ALT of one length, is an MNV by the rule, as CRISPRitz's
+    enricher windows it) and its indel ALT to the indel file; SNVs and symbolic alleles go
+    to neither. Each file atomic,
+    with the marker of 2.10.0's (its count, then FILTER_MARK), current; the reader reads
+    both (has_mnv), indels() giving both kinds."""
+    vcf = _vcf_file(_VCF_MNV)
+    d = tempfile.mkdtemp()
+    indel_out, mnv_out = big.store_files(d, "chr22")
+    try:
+        assert big.compile_store(vcf, indel_out, mnv_out) == (2, 4)
+        assert _lines(mnv_out) == ["120_AA_GG\tHG1:1|0,HG2:1/0,HG3:1",
+                                   "130_TCA_GAT\tHG1:0|1,HG3:0|1",
+                                   "150_AC_GT\tHG1:1|0", "150_AC_AG\tHG2:1|0"]
+        assert _lines(indel_out) == ["100_AT_A\tHG1:1|0,HG2:0|1", "150_AC_A\tHG1:0|1"]
+        for out, n in ((indel_out, 2), (mnv_out, 4)):
+            with open(big._done_marker(out)) as m:
+                assert m.read().splitlines() == [str(n), big.FILTER_MARK]
+            assert big.store_is_current(out)
+            assert not os.path.exists(out + ".tmp")
+        r = big.IndelGenotypeReader(indel_out)
+        assert r.has_mnv is True and r.reads_filter is True
+        assert r.carriers_dict(120, "AA", "GG") == {"HG1": "1|0", "HG2": "1/0", "HG3": "1"}
+        assert r.carriers_dict(130, "tca", "gat") == {"HG1": "0|1", "HG3": "0|1"}
+        assert r.carriers(140, "CG", "TA") == ""    # LowQual
+        assert r.indels() == [(100, "AT", "A"), (120, "AA", "GG"), (130, "TCA", "GAT"),
+                              (150, "AC", "A"), (150, "AC", "AG"), (150, "AC", "GT")]
+        # the indel file alone, as a reader of 2.10.0 opens it: no MNV
+        r0 = big.IndelGenotypeReader(indel_out, mnv_path="")
+        assert r0.has_mnv is False and r0.carriers(120, "AA", "GG") == ""
+        assert big.mnv_store_path(indel_out) == mnv_out
+        assert big.mnv_store_path(os.path.join(d, "store.tsv.gz")) is None
+        assert ([(k, p, r, a) for k, p, r, a, _c in big.iter_store_genotypes(vcf)]
+                == [("indel", 100, "AT", "A"), ("mnv", 120, "AA", "GG"),
+                    ("mnv", 130, "TCA", "GAT"), ("mnv", 150, "AC", "GT"),
+                    ("indel", 150, "AC", "A"), ("mnv", 150, "AC", "AG")])
+        assert [p for p, _r, _a, _c in big.iter_mnv_genotypes(vcf)] == [120, 130, 150, 150]
+        assert [p for p, _r, _a, _c in big.iter_indel_genotypes(vcf)] == [100, 150]
+    finally:
+        os.remove(vcf)
+        _cleanup(indel_out, mnv_out)
+        os.rmdir(d)
+
+
+def test_one_mnv_on_two_lines_or_in_two_cases_is_one_allele():
+    """An MNV the VCF writes on two lines, in one case or in two, is one allele, as an
+    indel is (decision B2): the MNV file keeps a line per record, and the reader merges
+    them (merge_store_carriers)."""
+    vcf = _vcf_file(
+        "##fileformat=VCFv4.2\n##contig=<ID=chr22>\n"
+        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tHG1\tHG2\tHG3\n"
+        "chr22\t120\t.\tAA\tGG\t.\tPASS\t.\tGT\t1|0\t0|1\t0|0\n"
+        "chr22\t120\t.\tAA\tGG\t.\tPASS\t.\tGT\t0|1\t0|0\t0|0\n"
+        "chr22\t120\t.\taa\tgg\t.\tPASS\t.\tGT\t0|0\t0|0\t1|0\n")
+    d = tempfile.mkdtemp()
+    indel_out, mnv_out = big.store_files(d, "chr22")
+    try:
+        assert big.compile_store(vcf, indel_out, mnv_out) == (0, 3)
+        r = big.IndelGenotypeReader(indel_out)
+        assert r.carriers_dict(120, "AA", "GG") == {"HG1": "1|1", "HG2": "0|1", "HG3": "1|0"}
+        assert r.indels() == [(120, "AA", "GG")]
+    finally:
+        os.remove(vcf)
+        _cleanup(indel_out, mnv_out)
+        os.rmdir(d)
+
+
+def test_a_store_of_2100_gains_its_mnv_file_and_keeps_its_indel_file():
+    """A store of 2.10.0 (an indel file, current) gains its MNV file: compile_store asked
+    for the files that are not current (files_to_write: the MNV file alone, as
+    search_indel_snp.store asks) leaves the indel file and its marker byte for byte, mtimes
+    included, and then asks for none. Read before, the store had no MNV (has_mnv False)."""
+    vcf = _vcf_file(_VCF_MNV)
+    d = tempfile.mkdtemp()
+    indel_out, mnv_out = big.store_files(d, "chr22")
+    try:
+        assert big.compile_indel_genotypes(vcf, indel_out) == 2
+        os.utime(indel_out, (1000000, 1000000))
+        os.utime(big._done_marker(indel_out), (1000001, 1000001))
+        before = {p: (open(p, "rb").read(), os.path.getmtime(p))
+                  for p in (indel_out, big._done_marker(indel_out))}
+        assert big.IndelGenotypeReader(indel_out).has_mnv is False
+        todo = big.files_to_write(d, "chr22")
+        assert todo == (None, mnv_out)
+        assert big.files_to_write(d, "chr22", "/scratch") == (None, "/scratch/gt_mnv_chr22.tsv.gz")
+        assert big.compile_store(vcf, *todo) == (None, 4)
+        assert big.files_to_write(d, "chr22") == (None, None)
+        assert {p: (open(p, "rb").read(), os.path.getmtime(p)) for p in before} == before
+        assert big.store_is_current(mnv_out)
+        r = big.IndelGenotypeReader(indel_out)
+        assert r.has_mnv and r.carriers_dict(130, "TCA", "GAT") == {"HG1": "0|1",
+                                                                     "HG3": "0|1"}
+        assert big.compile_store(vcf) == (None, None)  # nothing asked, nothing read
+    finally:
+        os.remove(vcf)
+        _cleanup(indel_out, mnv_out)
+        os.rmdir(d)
+
+
+def test_a_vcf_with_no_mnv_gets_an_mnv_file_of_no_record():
+    """Its MNV file says the MNVs were stored (none): current, read (has_mnv), and the
+    store's records its indels alone, as from its indel file."""
+    vcf = _write_vcf(gz=True)
+    d = tempfile.mkdtemp()
+    indel_out, mnv_out = big.store_files(d, "chr22")
+    try:
+        assert big.compile_store(vcf, indel_out, mnv_out) == (3, 0)
+        assert _lines(mnv_out) == []
+        assert big.store_is_current(mnv_out)
+        r = big.IndelGenotypeReader(indel_out)
+        assert r.has_mnv is True
+        assert r.indels() == big.IndelGenotypeReader(indel_out, mnv_path="").indels()
+        # the indel file is the one compile_indel_genotypes writes, byte for byte
+        alone = os.path.join(d, "alone.tsv.gz")
+        big.compile_indel_genotypes(vcf, alone)
+        assert _lines(alone) == _lines(indel_out)
+        _cleanup(alone)
+    finally:
+        os.remove(vcf)
+        _cleanup(indel_out, mnv_out)
+        os.rmdir(d)
+
+
+def test_compile_store_leaves_no_part_of_a_file_on_a_kill():
+    """A pass that dies (an OOM kill, an interrupt) leaves neither file nor a temporary
+    one, and no marker; compile_store_safe returns -1 on any other failure, the temporary
+    files and markers gone, and raises a failure that ends the build (a full disk)."""
+    import errno
+    vcf = _vcf_file(_VCF_MNV)
+    d = tempfile.mkdtemp()
+    indel_out, mnv_out = big.store_files(d, "chr22")
+    orig = big.iter_store_genotypes
+
+    def boom(_vcf, _keep=None, _kinds=("indel", "mnv")):
+        yield "mnv", 120, "AA", "GG", {"HG1": "1|0"}
+        raise RuntimeError("simulated OOM kill mid-write")
+
+    def full(_vcf, _keep=None, _kinds=("indel", "mnv")):
+        yield "mnv", 120, "AA", "GG", {"HG1": "1|0"}
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    try:
+        for out in (indel_out, mnv_out):
+            with open(big._done_marker(out), "w") as m:
+                m.write("1\n%s\n" % big.FILTER_MARK)    # a stale marker
+        big.iter_store_genotypes = boom
+        try:
+            big.compile_store(vcf, indel_out, mnv_out)
+            raise AssertionError("no failure")
+        except RuntimeError:
+            pass
+        assert sorted(os.listdir(d)) == []
+        assert big.compile_store_safe(vcf, indel_out, mnv_out) == -1
+        assert sorted(os.listdir(d)) == []
+        big.iter_store_genotypes = full
+        try:
+            big.compile_store_safe(vcf, indel_out, mnv_out)
+            raise AssertionError("a full disk did not end the build")
+        except OSError as err:
+            assert big.ends_the_build(err)
+        assert sorted(os.listdir(d)) == []
+    finally:
+        big.iter_store_genotypes = orig
+        os.remove(vcf)
+        _cleanup(indel_out, mnv_out)
+        os.rmdir(d)
+
+
+def test_the_mnv_only_command_line():
+    """build_indel_genotypes.py --mnv-only <vcf> <store folder> [<samplesID>] (HPRC's
+    rebuild): the MNV file of the VCF's chromosome (named as build-index-only names it, a
+    chr prefix added) in the folder, with the build's samples; every other file of the
+    folder as it was. A folder or a samplesID file named but not found is an error."""
+    import contextlib
+    import io
+    vcf = _vcf_file(_VCF_MNV.replace("chr22\t", "22\t"))
+    d = tempfile.mkdtemp()
+    indel_out, mnv_out = big.store_files(d, "chr22")
+    panel = os.path.join(d, "samples.txt")
+    with open(panel, "w") as fh:
+        fh.write("SAMPLE_ID\tPOP\nHG1\tX\nHG2\tX\n")
+    try:
+        with open(indel_out, "wb") as fh:
+            fh.write(b"a 2.10.0 store's indel file")
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            assert big.main(["build_indel_genotypes.py", "--mnv-only", vcf, d, panel]) == 0
+        assert "4 phased MNV records -> %s" % mnv_out in out.getvalue()
+        assert _lines(mnv_out) == ["120_AA_GG\tHG1:1|0,HG2:1/0", "130_TCA_GAT\tHG1:0|1",
+                                   "150_AC_GT\tHG1:1|0", "150_AC_AG\tHG2:1|0"]
+        assert big.store_is_current(mnv_out)
+        with open(indel_out, "rb") as fh:
+            assert fh.read() == b"a 2.10.0 store's indel file"
+        assert sorted(os.listdir(d)) == sorted([os.path.basename(indel_out), "samples.txt",
+                                                os.path.basename(mnv_out),
+                                                os.path.basename(mnv_out) + ".done"])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            assert big.main(["x", "--mnv-only", vcf, d, panel + ".missing"]) == 2
+            assert big.main(["x", "--mnv-only", vcf, os.path.join(d, "nofolder")]) == 2
+            assert big.main(["x", "--mnv-only", vcf]) == 2
+        assert "no samplesID file" in err.getvalue() and "no store folder" in err.getvalue()
+        assert big.vcf_chrom(vcf) == "chr22"
+    finally:
+        os.remove(vcf)
+        _cleanup(indel_out, mnv_out, panel)
+        os.rmdir(d)
+
+
 def load_tests(loader, tests, pattern):
     """Under ``python -m unittest`` too, each test_ function above, which it found none of,
     and said OK (suite P4)."""

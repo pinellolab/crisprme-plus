@@ -36,17 +36,19 @@ SAMPLES = [f"S{i:02d}" for i in range(20)]
 SAMPLE_META = {s: ("TEST", "AFR" if i < 12 else "EUR", "female") for i, s in enumerate(SAMPLES)}
 
 
-def build_panel(dicts, snps, indels=(), name=PANEL):
+def build_panel(dicts, snps, indels=(), name=PANEL, mnvs=()):
     """A phased store of ``name`` under ``dicts``: ``snps`` [(pos, REF, ALT, {sample: gt})]
     through tier1_genotypes, ``indels`` [(pos, REF, ALT, {sample: gt})] through a VCF and
-    build_indel_genotypes, as build-index-only writes them."""
+    build_indel_genotypes, as build-index-only writes them; with ``mnvs`` (the same, REF
+    and ALT of one length) the store's MNV file too, from the same VCF in one pass
+    (build_indel_genotypes.compile_store, as from 2.10.1)."""
     gdir = os.path.join(dicts, f"genotypes_{name}")
     os.makedirs(gdir, exist_ok=True)
     t1.compile_genotypes([(p, a, dict(g), r) for p, r, a, g in snps],
                          t1.build_sample_axis(SAMPLE_META),
                          os.path.join(gdir, f"gt_{CHROM}.bin"),
                          os.path.join(gdir, f"gt_{CHROM}.idx"))
-    if indels:
+    if indels or mnvs:
         idir = os.path.join(dicts, f"indel_genotypes_{name}")
         os.makedirs(idir, exist_ok=True)
         vcf = os.path.join(dicts, f"{name}.indels.vcf")
@@ -54,10 +56,14 @@ def build_panel(dicts, snps, indels=(), name=PANEL):
             fh.write("##fileformat=VCFv4.2\n")
             fh.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t"
                      + "\t".join(SAMPLES) + "\n")
-            for p, r, a, gts in indels:
+            for p, r, a, gts in sorted(list(indels) + list(mnvs)):
                 fh.write(f"{CHROM}\t{p}\t.\t{r}\t{a}\t.\tPASS\t.\tGT\t"
                          + "\t".join(gts.get(s, "0|0") for s in SAMPLES) + "\n")
-        big.compile_indel_genotypes(vcf, os.path.join(idir, f"gt_indel_{CHROM}.tsv.gz"))
+        indel_out = os.path.join(idir, f"gt_indel_{CHROM}.tsv.gz")
+        if mnvs:
+            big.compile_store(vcf, indel_out, os.path.join(idir, f"gt_mnv_{CHROM}.tsv.gz"))
+        else:
+            big.compile_indel_genotypes(vcf, indel_out)
     return gdir
 
 
@@ -156,8 +162,8 @@ class TestClassify(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def panel(self, snps, indels=()):
-        build_panel(self.dicts, snps, indels)
+    def panel(self, snps, indels=(), mnvs=()):
+        build_panel(self.dicts, snps, indels, mnvs=mnvs)
         p = hp.PanelChrom(PANEL, self.dicts, CHROM)
         self.addCleanup(p.close)
         return p
@@ -319,6 +325,59 @@ class TestClassify(unittest.TestCase):
         ver = hp.classify([v(108, "C", "G")], [both], span=(100, 122))
         self.assertEqual(ver.tier, "B")
 
+    def test_an_mnv_is_in_the_panel(self):
+        """2.10.1: the store's MNV file, beside its indel file. A row that names an MNV is
+        tiered on the panel's phased haplotypes, as one naming an indel: alone, B (in the
+        panel); with a SNP on one haplotype, A; with one it is never on a haplotype with
+        (S01: trans), not A. At c64e62e1 no MNV was in a panel: alone B "not in the panel",
+        and a combination holding one C2 ("not checked")."""
+        snps = [(100, "A", "G", {"S00": "1|0", "S01": "1|0", "S02": "0|1"}),
+                (130, "C", "T", {"S01": "1|0", "S04": "1|0"})]
+        mnvs = [(110, "AC", "GT", {"S00": "1|0", "S01": "0|1", "S03": "1|0"})]
+        p = self.panel(snps, mnvs=mnvs)
+        single = hp.classify([v(110, "AC", "GT")], [p])
+        self.assertEqual((single.tier, single.state, single.panel), ("B", "", PANEL))
+        pair = hp.classify([v(100, "A", "G"), v(110, "AC", "GT")], [p])
+        self.assertEqual((pair.tier, pair.state, pair.haplotypes, pair.samples),
+                         ("A", hp.ONE_HAPLOTYPE, 1, ("S00",)))
+        apart = hp.classify([v(110, "AC", "GT"), v(130, "C", "T")], [p])
+        self.assertEqual(apart.tier, "C1")
+        self.assertEqual(p.indels.indels, [(110, "AC", "GT")])
+
+    def test_an_mnv_in_the_target_takes_the_slot(self):
+        """An MNV inside a SNP-only row's target on the haplotype that holds the row's SNP
+        takes that haplotype out, as an indel does (the state keeps its label, "indel in the
+        target"): the SNP at 100 and the MNV at 104..105 on the same slots of S00 and S01.
+        A target that ends before the MNV keeps them; S05's MNV is on its other slot. In a
+        CA repeat an MNV on the target's first two bases takes the slot too, read on the
+        reference (holds_target): no reading puts the target's bases back. At c64e62e1 no
+        MNV was read: tier B."""
+        snps = [(100, "A", "G", {"S00": "1|0", "S01": "1|0"})]
+        mnvs = [(105, "AC", "GT", {"S00": "1|0", "S01": "1|0", "S05": "0|1"})]
+        p = self.panel(snps, mnvs=mnvs)
+        ver = hp.classify([v(100, "A", "G")], [p], span=(90, 112))
+        self.assertEqual((ver.tier, ver.state, ver.haplotypes), ("C1", hp.INDEL_IN_TARGET, 2))
+        self.assertEqual(ver.label(), f"all 2 {PANEL} haplotypes carrying it have an indel "
+                                      "in the target")
+        self.assertEqual(hp.classify([v(100, "A", "G")], [p], span=(90, 103)).tier, "B")
+        # S05 holds the SNP on the slot without the MNV: that haplotype has the target
+        p = self.panel([(100, "A", "G", {"S00": "1|0", "S01": "1|0", "S05": "1|0"})],
+                       mnvs=mnvs)
+        ver = hp.classify([v(100, "A", "G")], [p], span=(90, 112))
+        self.assertEqual((ver.tier, ver.haplotypes), ("B", 1))
+        ref = "G" * 100 + "CA" * 10 + "T" * 20
+        self.assertEqual(ref[102:104], "CA")
+        repeat = self.panel([(105, "C", "G", {"S00": "1|0", "S01": "1|0"})],
+                            mnvs=[(103, "CA", "GT", {"S00": "1|0", "S01": "0|1"})])
+        repeat.seq_at = lambda a, b: ref[max(a, 0):max(b, 0)]
+        ver = hp.classify([v(105, "C", "G")], [repeat], span=(102, 113))
+        self.assertEqual((ver.tier, ver.haplotypes), ("B", 1))
+        repeat_only_s00 = self.panel([(105, "C", "G", {"S00": "1|0"})],
+                                     mnvs=[(103, "CA", "GT", {"S00": "1|0"})])
+        repeat_only_s00.seq_at = repeat.seq_at
+        ver = hp.classify([v(105, "C", "G")], [repeat_only_s00], span=(102, 113))
+        self.assertEqual((ver.tier, ver.state, ver.haplotypes), ("C1", hp.INDEL_IN_TARGET, 1))
+
     def test_multi_alt_genotypes_are_read_per_alt(self):
         # one VCF line with two ALTs: S00 is G on slot 0 and T on slot 1 (1|2), listed under
         # both; with 105 C>T on slot 1, T and 105 are together, G and 105 are not
@@ -368,8 +427,8 @@ class TestAVariantTheScoreDoesNotNeed(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.dicts = os.path.join(self.tmp, "Dictionaries")
 
-    def panel(self, snps, indels=()):
-        build_panel(self.dicts, snps, indels)
+    def panel(self, snps, indels=(), mnvs=()):
+        build_panel(self.dicts, snps, indels, mnvs=mnvs)
         p = hp.PanelChrom(PANEL, self.dicts, CHROM)
         self.addCleanup(p.close)
         return p

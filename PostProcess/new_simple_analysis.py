@@ -1156,17 +1156,26 @@ class _SnpRowIndels(object):
     """The indels of a phased indel genotype store (build_indel_genotypes: one line per
     indel alt, '<POS>_<REF>_<ALT>' then 'sample:gt,...') whose REF meets a SNP target
     span widened by ``margin``: only those a SNP row's carrier can hold inside, or
-    around, its target. Their carriers are parsed when first asked for."""
+    around, its target. Their carriers are parsed when first asked for.
 
-    def __init__(self, store_path, spans, margin):
+    ``store_path`` is the store's indel file; its MNV file (``mnv_path``; None: the one
+    beside it, build_indel_genotypes.mnv_store_path) is read too where it is there (from
+    2.10.1), its MNVs read as its indels are: an MNV inside a SNP row's target takes off the
+    row a carrier whose haplotype holds it, its bases found nowhere on that haplotype
+    (indel_snp_cis.snp_target_held). A store of 2.10.0 has no MNV file: no SNP row loses a
+    carrier for an MNV, as in 2.10.0."""
+
+    def __init__(self, store_path, spans, margin, mnv_path=None):
         self.intervals = _merge_spans(spans, margin)
         starts = [a for a, _b in self.intervals]
         self.indels = []
         self._tokens = {}
         self._gts = {}
-        if self.intervals:
-            with (gzip.open(store_path, "rt") if store_path.endswith(".gz")
-                  else open(store_path)) as fh:
+        if mnv_path is None:
+            mnv_path = _big.mnv_store_path(store_path)
+        paths = [store_path] + ([mnv_path] if mnv_path and os.path.isfile(mnv_path) else [])
+        for path in (paths if self.intervals else ()):
+            with (gzip.open(path, "rt") if path.endswith(".gz") else open(path)) as fh:
                 for line in fh:
                     key, _tab, toks = line.partition("\t")
                     pos, _u, rest = key.partition("_")
@@ -2516,8 +2525,8 @@ def _collect_needed_dict_keys(cluster_path, chrom, spans=None):
 def _resolve_indel_genotype_path(dict_path, chrom):
     """The phased indel genotype store of ``chrom`` (build_indel_genotypes) from the SNP
     dict path: ``<...>/Dictionaries/indel_genotypes_<vcf>/gt_indel_<chrom>.tsv.gz``, the
-    one analisi_indels_NNN.py reads, or None when absent. MIRRORS
-    ``_resolve_genotype_paths``."""
+    one analisi_indels_NNN.py reads, or None when absent (its MNV file, beside it, is read
+    with it: _SnpRowIndels). MIRRORS ``_resolve_genotype_paths``."""
     dict_dir = os.path.dirname(dict_path)
     name = os.path.basename(dict_dir)
     suffix = name[len("dictionaries_"):] if name.startswith("dictionaries_") else name
