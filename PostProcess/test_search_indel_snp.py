@@ -176,6 +176,38 @@ class TheStore(_Tmp):
         self.assertEqual((self.store / "gt_indel_chr1.tsv.gz.done").read_text(),
                          f"1\n{search_indel_snp.build_indel_genotypes.FILTER_MARK}\n")
 
+    def test_each_chromosome_gets_its_mnv_file_and_a_store_of_2_10_0_keeps_its_indel_file(self):
+        """From 2.10.1 a chromosome's store has an MNV file beside its indel file
+        (build_indel_genotypes.store_files), written in the same pass. A store of 2.10.0
+        (its indel file current, no MNV file) gains its MNV file, and its indel file and
+        marker stay byte for byte; a store whose two files are current is not read again.
+        At c64e62e1 the search wrote the indel file alone."""
+        with gzip.open(self.vcfs / "x.chr1.vcf.gz", "wt") as fh:
+            fh.write(VCF_HEAD + "chr1\t26\trs1\tA\tAT\t.\tPASS\tAF=0.25\tGT\t0|0\t1|0\n"
+                     "chr1\t40\trs2\tCA\tTG\t.\tPASS\tAF=0.25\tGT\t1|0\t0|1\n")
+        with gzip.open(self.vcfs / "x.chr2.vcf.gz", "wt") as fh:
+            fh.write(VCF_HEAD + "chr2\t40\trs2\tCA\tTG\t.\tPASS\tAF=0.25\tGT\t1|1\t0|0\n")
+        self.store.mkdir()
+        kept = gzip.compress(b"26_A_AT\tS2:1|0\n")
+        marker = f"1\n{search_indel_snp.build_indel_genotypes.FILTER_MARK}\n"
+        (self.store / "gt_indel_chr1.tsv.gz").write_bytes(kept)
+        (self.store / "gt_indel_chr1.tsv.gz.done").write_text(marker)
+        out = self.write_store()
+        self.assertEqual((out.returncode, out.stderr), (0, ""))
+        self.assertEqual((self.store / "gt_indel_chr1.tsv.gz").read_bytes(), kept)
+        self.assertEqual((self.store / "gt_indel_chr1.tsv.gz.done").read_text(), marker)
+        for chrom, line in (("chr1", "40_CA_TG\tS1:1|0,S2:0|1\n"), ("chr2", "40_CA_TG\tS1:1|1\n")):
+            with gzip.open(self.store / f"gt_mnv_{chrom}.tsv.gz", "rt") as fh:
+                self.assertEqual(fh.read(), line)
+            self.assertTrue(search_indel_snp.build_indel_genotypes.store_is_current(
+                str(self.store / f"gt_mnv_{chrom}.tsv.gz")))
+        with gzip.open(self.store / "gt_indel_chr2.tsv.gz", "rt") as fh:
+            self.assertEqual(fh.read(), "")   # chr2's VCF holds an MNV alone
+        self.assertEqual(sorted(p.name for p in self.scratch.iterdir()), [])
+        self.assertIn("2 chromosome(s)", out.stdout)
+        out = self.write_store()  # every file current: no pass over a VCF
+        self.assertEqual((out.returncode, out.stderr, out.stdout), (0, "", ""))
+
     def test_a_vcf_with_no_record_writes_nothing(self):
         with gzip.open(self.vcfs / "x.chr1.vcf.gz", "wt") as fh:
             fh.write(VCF_HEAD)

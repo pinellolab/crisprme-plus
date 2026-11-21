@@ -51,8 +51,11 @@ def _chrom_of(vcf):
 
 def store(vcf_dir, store_dir, scratch_dir, threads):
     """Write into ``store_dir`` the phased indel genotype store of each VCF of ``vcf_dir``
-    that lacks a complete one written under the FILTER rule of 2.10.0
-    (build_indel_genotypes.store_is_current), as build-index-only does. Written in
+    whose files are not each complete and written under the FILTER rule of 2.10.0
+    (build_indel_genotypes.store_is_current), as build-index-only does: its indel file and,
+    from 2.10.1, its MNV file (build_indel_genotypes.store_files), the missing or stale
+    ones written in one pass over the VCF (build_indel_genotypes.compile_store), so that a
+    store of 2.10.0 gains its MNV files and keeps its indel files byte for byte. Written in
     ``scratch_dir`` and moved in once whole, so a run stopped meanwhile leaves no part of
     it. Every sample of
     the VCF is kept, as the indel log lists them. Guarded as build-index-only's is: a
@@ -65,9 +68,11 @@ def store(vcf_dir, store_dir, scratch_dir, threads):
         chrom = _chrom_of(vcf)
         if chrom is None:
             continue
-        name = f"gt_indel_{chrom}.tsv.gz"
-        if not build_indel_genotypes.store_is_current(os.path.join(store_dir, name)):
-            jobs.append((vcf, os.path.join(scratch_dir, name), None))
+        outs = [None if build_indel_genotypes.store_is_current(path)
+                else os.path.join(scratch_dir, os.path.basename(path))
+                for path in build_indel_genotypes.store_files(store_dir, chrom)]
+        if any(outs):
+            jobs.append((vcf, outs[0], outs[1], None))
     if not jobs:
         return
     os.makedirs(scratch_dir, exist_ok=True)
@@ -78,10 +83,10 @@ def store(vcf_dir, store_dir, scratch_dir, threads):
     workers = max(1, min(threads, workers, len(jobs)))
     if workers > 1:
         with multiprocessing.get_context("fork").Pool(workers) as pool:
-            pool.starmap(build_indel_genotypes.compile_indel_genotypes_safe, jobs)
+            pool.starmap(build_indel_genotypes.compile_store_safe, jobs)
     else:
         for job in jobs:
-            build_indel_genotypes.compile_indel_genotypes_safe(*job)
+            build_indel_genotypes.compile_store_safe(*job)
     os.makedirs(store_dir, exist_ok=True)
     for name in sorted(os.listdir(scratch_dir)):  # (the marker of each after its store)
         shutil.move(os.path.join(scratch_dir, name), os.path.join(store_dir, name))
