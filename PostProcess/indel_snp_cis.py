@@ -369,7 +369,15 @@ def changes_span(pos1, ref, alt, lo, hi, gone=None):
     inside, or bases inserted between two bases of it. The bases REF and ALT share
     at the start (the VCF anchor base) or at the end are kept, so they change nothing.
     ``gone`` (first, last; 0-based, inclusive): bases the haplotype has lost already,
-    to the indel of the window being read: losing them again changes nothing."""
+    to the indel of the window being read: losing them again changes nothing.
+
+    A record whose REF and ALT have one length (an MNV, an SNV) inserts no base: its ALT
+    bases stand in the places of the REF bases they replace (2.10.1). So one only on bases
+    of ``gone`` changes nothing (question 2a of the MNV plan, reading (i): METHODS section
+    4's rule for a variant on bases the indel deletes), and one elsewhere changes the bases
+    it replaces. Up to 2.10.0 its ALT was counted as bases inserted before its first
+    changed base, as a complex record's (TCC>G) still is, and such an MNV took the slot off
+    the deletion's row."""
     a = pos1 - 1
     c = kept_bases(ref, alt)
     t = shared_tail(ref, alt)
@@ -379,7 +387,7 @@ def changes_span(pos1, ref, alt, lo, hi, gone=None):
             (first, min(last, gone[0] - 1)), (max(first, gone[1] + 1), last)]
         if any(f <= l and f <= hi and l >= lo for f, l in parts):
             return True
-    if len(alt) - t > c:  # bases inserted between a+c-1 and a+c
+    if len(alt) - t > c and len(alt) != len(ref):  # bases inserted between a+c-1 and a+c
         return lo <= a + c - 1 and a + c <= hi
     return False
 
@@ -846,13 +854,20 @@ def local_haplotype(lo, hi, window, others=()):
     ``window`` (VCF POS, REF, ALT) is the indel of the fake-indel window, written as the
     window writes it: its REF out, its ALT in, the anchor base included; None for a
     haplotype read around a SNP row's target, which holds no window indel. ``others`` are
-    the haplotype's other indels; the bases one shares with its REF at either end
+    the haplotype's other indels and MNVs; the bases one shares with its REF at either end
     (kept_bases, shared_tail) stay reference bases. A source is a reference position
     (int), whose base is the haplotype's own allele there, or a base an ALT puts in
     (str). A place sorts as the haplotype runs: (p, 0) for reference position p, and
     (p, rank, k) for the k-th base an ALT puts in after reference position p, another
     indel's (rank 1) before the window's (rank 2), which follows the bases an indel
-    inserted before its anchor. None where two of the variants overlap, or insert at
+    inserted before its anchor. A record of ``others`` whose REF and ALT have one length
+    (an MNV) moves no base: its ALT bases are written at the places of the REF bases they
+    replace, (p, 0) with the ALT base as the source (2.10.1). Up to 2.10.0 they were
+    written after the base before its edit, as an insertion's are, and the places of the
+    bases it replaces were left out: on an MNV at a target's first base, the reading "from
+    the first base on" (target_pairs) then started past the MNV, where in a repeat it found
+    the target's bases, and a slot that does not hold them kept the row. None where two
+    of the variants overlap, or insert at
     one point: no one haplotype holds both (a VCF writes such a haplotype as one
     record). Two variants overlap when their REFs share a base, whatever bases each
     keeps: two records at one POS always do (an insertion and a deletion there are two
@@ -882,7 +897,12 @@ def local_haplotype(lo, hi, window, others=()):
         if last is not None and start == last[0] == last[1] == end and rank == last[2]:
             return None  # two insertions at one point: their bases have no one order
         out.extend(((p, 0), p) for p in range(at, min(start, hi + 1)))
-        out.extend(((after, rank, k), b.upper()) for k, b in enumerate(put))
+        if rank == 1 and end - start == len(put):
+            # an MNV's bases stand in the places of the bases they replace
+            out.extend(((start + k, 0), b.upper()) for k, b in enumerate(put)
+                       if lo <= start + k <= hi)
+        else:
+            out.extend(((after, rank, k), b.upper()) for k, b in enumerate(put))
         at = max(at, end)
         last = (start, end, rank)
     out.extend(((p, 0), p) for p in range(at, hi + 1))
