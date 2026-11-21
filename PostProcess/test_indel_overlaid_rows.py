@@ -500,7 +500,7 @@ class _Fixture(object):
     """Write the world as a data folder and run the shipped analyzer on it."""
 
     def __init__(self, tmp, world, tiers=("registry", "tier1", "indelgt"), env=None,
-                 max_total=None, indel_af=None, store_marker=True):
+                 max_total=None, indel_af=None, store_marker=True, mnv_store=False):
         self.tmp = tmp
         self.world = world
         d = os.path.join(tmp, "Dictionaries")
@@ -559,6 +559,17 @@ class _Fixture(object):
             if store_marker:  # (as build_indel_genotypes marks a store of 2.10.0)
                 with open(os.path.join(igd, "gt_indel_%s.tsv.gz.done" % CHROM), "w") as fh:
                     fh.write("%d\n%s\n" % (len(world.indels), big.FILTER_MARK))
+            if mnv_store:
+                # the store's MNV file, as build_indel_genotypes.compile_store writes it from
+                # 2.10.1: a store of 2.10.0 (the default here) has none
+                mnvs = [(p, r, a, g) for p, r, a, _rs, g in world.indels
+                        if len(r) == len(a) > 1]
+                with gzip.open(os.path.join(igd, "gt_mnv_%s.tsv.gz" % CHROM), "wt") as fh:
+                    for p, r, a, g in mnvs:
+                        fh.write("%d_%s_%s\t%s\n" % (p, r, a, ",".join(
+                            "%s:%s" % kv for kv in sorted(g.items()))))
+                with open(os.path.join(igd, "gt_mnv_%s.tsv.gz.done" % CHROM), "w") as fh:
+                    fh.write("%d\n%s\n" % (len(mnvs), big.FILTER_MARK))
         if indel_af is not None:
             iad = os.path.join(d, "indel_af_" + VCF)
             os.makedirs(iad)
@@ -1133,6 +1144,172 @@ class OtherInstalls(_Base):
                         "the engine must report the flank target")
         self.assertNotIn("U", site, site.get("U"))
 
+
+
+class MnvWorld(World):
+    """The world, its reference 2,000 bases longer, with MNV sites past its end (2.10.1, the
+    plan of the MNVs' phase on HPRC): each an MNV beside an indel, or an MNV row. The phased
+    store holds the MNVs where its MNV file is written (``mnv_store``), as from 2.10.1; a
+    store of 2.10.0 has none, and its readings are 2.10.0's.
+
+      * K5, chr5:177,802,035's shape (HPRC v2.1): a deletion restores a perfect target (there
+        TTATTTAA>T) and an MNV right past its REF, inside the target (AA>GG), is on S01's
+        slot of the deletion: that slot leaves the row; S02's MNV is on its other slot, S03
+        holds the deletion alone: both stay.
+      * MP, an MNV row read by phase: an MNV makes a perfect target with an SNV that the
+        guide needs (a code in its window), in cis on S01, in trans on S02. Its carriers from
+        the store, S01 has the perfect target and S02 one with a mismatch, both CONFIRMED;
+        from the indel log (a store of 2.10.0), both PUTATIVE, each with the strongest
+        target its own alleles allow, the perfect one.
+      * SP, an MNV at an indel row's POS: a deletion restores a perfect target; on S01's slot
+        an MNV at the deletion's own POS (another allele of that position: question 2c, read
+        without it), on S02's an MNV inside the target (leaves), S03 the deletion alone.
+      * SQ, an indel at an MNV row's POS: an MNV and an SNV in cis make a perfect target; on
+        S04's slot also an insertion at the MNV's own POS (read without it), S05 without."""
+
+    def __init__(self):
+        super().__init__()
+        rng = random.Random(21010)
+        self.seq += [rng.choice("ACGT") for _ in range(2000)]
+        g = GUIDE
+        k5 = 6100
+        gone = "TTATTTA"
+        self._put(k5, g[:10] + gone + g[10:] + "TGG")
+        self._indel("K5", k5 + 10, g[9] + gone, g[9], {"S01": "1|0", "S02": "1|0", "S03": "0|1"})
+        self._indel("K5M", k5 + 18, g[10:12], "CA", {"S01": "1|0", "S02": "0|1"})
+        mp = 6250
+        self._put(mp, g[:3] + "TT" + g[5:12] + "C" + g[13:] + "TGG")
+        self._indel("MP", mp + 4, "TT", g[3:5], {"S01": "1|0", "S02": "1|0"})
+        self._snp("MP", mp + 13, "C", g[12], {"S01": "1|0", "S02": "0|1"})
+        sp = 6400
+        self._put(sp, g[:10] + "C" + g[10:] + "TGG")
+        self._indel("SP", sp + 10, g[9] + "C", g[9], {"S01": "1|0", "S02": "1|0", "S03": "1|0"})
+        self._indel("SPM", sp + 10, g[9] + "C", "GA", {"S01": "1|0"})
+        self._indel("SPI", sp + 4, g[3:5], "CC", {"S02": "1|0"})
+        sq = 6550
+        self._put(sq, g[:3] + "TT" + g[5:12] + "C" + g[13:] + "TGG")
+        self._indel("SQ", sq + 4, "TT", g[3:5], {"S04": "1|0", "S05": "1|0"})
+        self._snp("SQ", sq + 13, "C", g[12], {"S04": "1|0", "S05": "1|0"})
+        self._indel("SQI", sq + 4, "T", "TG", {"S04": "1|0"})
+        self.ref = "".join(self.seq)
+
+
+@unittest.skipUnless(_gnu_wc(), _SKIP_WC)
+class TheMnvStore(_Base):
+    """The phased store's MNV file (2.10.1), read by the indel post-analysis as a second
+    record and for an MNV row's carriers; without it (a store of 2.10.0) the MNVs are read
+    as 2.10.0 read them. Each assertion on the store's run fails at c64e62e1 (2.10.0 and
+    2.10.1's quick wins), which reads no MNV file."""
+
+    world_class = MnvWorld
+    NOTE_READ = ("NOTE [indel-snp]: the MNVs of %s on %s were read from the phased indel "
+                 "genotype store's MNV file" % (VCF, CHROM))
+    NOTE_NONE = ("NOTE [indel-snp]: the phased indel genotype store of %s on %s holds no MNV "
+                 "(a store written before CRISPRme 2.10.1), and the indel log lists MNVs"
+                 % (VCF, CHROM))
+
+    def setUp(self):
+        super().setUp()
+        self.with_store = self.run_analyzer(mnv_store=True)
+        tmp = tempfile.mkdtemp(prefix="indel_overlaid_rows_store2100_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.store_2100 = _Fixture(tmp, self.world)
+        self.assertEqual(self.store_2100.proc.returncode, 0,
+                         self.store_2100.proc.stdout[-2000:] + self.store_2100.proc.stderr[-2000:])
+
+    def by_site(self, rows):
+        """{site: [rows]} by the record each row's variants start with (two records of one
+        POS are two sites here)."""
+        names = {(p, r.upper(), a.upper()): rs.split("_")[1]
+                 for p, r, a, rs, _g in self.world.indels}
+        sites = {}
+        for row in rows:
+            _c, pos1, ref, alt = row["var"].split(",")[0].rsplit("_", 3)
+            sites.setdefault(names[(int(pos1), ref, alt)], []).append(row)
+        return sites
+
+    def perfect(self, fx, site):
+        """The samples of the site's perfect rows (CFD 1)."""
+        rows = self.by_site(fx.rows()).get(site, [])
+        return sorted(r["samples"] for r in rows if r["cfd"] == 1.0)
+
+    def test_chr5_177802035_one_slot_leaves_the_other_keeps(self):
+        """S01's slot holds the deletion and the MNV right past it, inside the target: its
+        bases there are the MNV's, so it leaves the deletion's perfect row (the target that
+        slot holds is generated by no window: it needs both records). S02's MNV is on its
+        other slot. With a store of 2.10.0 every carrier of the deletion stays, as in
+        2.10.0 (the documented limit, checker class limit-indel-row-mnv)."""
+        self.assertEqual(self.perfect(self.with_store, "K5"), ["S02,S03"])
+        self.assertEqual(self.perfect(self.store_2100, "K5"), ["S01,S02,S03"])
+
+    def test_an_mnv_row_is_read_by_phase(self):
+        g = GUIDE
+        rows = self.by_site(self.with_store.rows())["MP"]
+        self.assertEqual(sorted((r["dna"], r["samples"]) for r in rows if r["mm"] <= 1),
+                         [(g + "TGG", "S01"), (g[:12] + "c" + g[13:] + "TGG", "S02")])
+        cooc = [c for c in self.with_store.cooc() if c[1:4] == ("6254", "TT", g[3:5])]
+        self.assertEqual(sorted(set((c[8], c[10], c[11]) for c in cooc)),
+                         [("CONFIRMED", "1", "S01")])
+        # from the indel log, phase unknown: each the strongest target its alleles allow
+        self.assertEqual(self.perfect(self.store_2100, "MP"), ["S01,S02"])
+        cooc = [c for c in self.store_2100.cooc() if c[1:4] == ("6254", "TT", g[3:5])]
+        self.assertEqual(sorted(set(c[8] for c in cooc)), ["PUTATIVE"])
+
+    def test_an_mnv_at_an_indel_rows_pos_is_another_allele_there(self):
+        """Question 2c, an indel row: S01's slot holds the deletion and an MNV at its own
+        POS, two alleles of one position (a phasing artefact): read without the MNV, S01
+        stays; S02's MNV inside the target takes its slot off. Read as an overlapping
+        record, as an indel at the same POS that keeps no anchor is, the MNV would take
+        S01 off too."""
+        self.assertEqual(self.perfect(self.with_store, "SP"), ["S01,S03"])
+        self.assertEqual(self.perfect(self.store_2100, "SP"), ["S01,S02,S03"])
+
+    def test_an_indel_at_an_mnv_rows_pos_is_another_allele_there(self):
+        """Question 2c, an MNV row: S04's slot holds the MNV, the SNV the target needs and an
+        insertion at the MNV's own POS: read without the insertion, S04 is listed, CONFIRMED,
+        as S05. Read as an overlapping record the insertion would take S04 off. With a store
+        of 2.10.0 the MNV's carriers are the log's, PUTATIVE (the rule waits for the MNV
+        file: test_indel_haplotype_resolution's TheMnvRules pins it there)."""
+        g = GUIDE
+        rows = self.by_site(self.with_store.rows())["SQ"]
+        self.assertEqual([r["samples"] for r in rows if r["dna"] == g + "TGG"], ["S04,S05"])
+        cooc = [c for c in self.with_store.cooc() if c[1:4] == ("6554", "TT", g[3:5])]
+        self.assertEqual(sorted(set((c[8], c[10], c[11]) for c in cooc)),
+                         [("CONFIRMED", "2", "S04,S05")])
+        cooc = [c for c in self.store_2100.cooc() if c[1:4] == ("6554", "TT", g[3:5])]
+        self.assertEqual(sorted(set(c[8] for c in cooc)), ["PUTATIVE"])
+
+    def test_the_notes_say_how_the_mnvs_were_read(self):
+        """Once per chromosome whose indel log lists an MNV, on stdout (the search's
+        log_verbose.txt), never stderr; the base world, whose log lists none, has neither
+        (test_a_store_of_an_earlier_release_is_noted)."""
+        for fx, note, other in ((self.with_store, self.NOTE_READ, self.NOTE_NONE),
+                                (self.store_2100, self.NOTE_NONE, self.NOTE_READ)):
+            self.assertEqual(fx.proc.stdout.count(note), 1, fx.proc.stdout[-3000:])
+            self.assertNotIn(other, fx.proc.stdout)
+            self.assertEqual(fx.proc.stderr, "")
+
+    def test_the_mnv_file_changes_the_mnvs_readings_alone(self):
+        """The MNV file changes the rows of the sites with an MNV (K5's perfect row loses
+        S01), and no other row: every site without an MNV beside it has the same rows with
+        either store, and those of a store of 2.10.0 are the base world's (the byte-identity
+        guard of the plan's section 5: no equal-length record, no row moves)."""
+        mnv_sites = {"K5", "K5M", "MP", "SP", "SPM", "SPI", "SQ", "SQI"}
+        key = lambda r: (r["dna"], r["start"], r["strand"], r["samples"], r["var"], r["cfd"])  # noqa: E731
+        got, mnv = {}, {}
+        for name, fx in (("store", self.with_store), ("2100", self.store_2100)):
+            sites = self.by_site(fx.rows())
+            got[name] = sorted(key(r) for site, rows in sites.items()
+                               if site not in mnv_sites for r in rows)
+            mnv[name] = sorted(key(r) for site, rows in sites.items()
+                               if site in mnv_sites for r in rows)
+        self.assertEqual(got["store"], got["2100"])
+        self.assertNotEqual(mnv["store"], mnv["2100"])
+        tmp = tempfile.mkdtemp(prefix="indel_overlaid_rows_base_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        base = _Fixture(tmp, World())
+        self.assertEqual(base.proc.returncode, 0, base.proc.stderr[-2000:])
+        self.assertEqual(sorted(map(key, base.rows())), got["store"])
 
 
 class World30(World):

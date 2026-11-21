@@ -653,6 +653,18 @@ _log_carriers = {}
 # whether a line of the indel log lists a carrier: the note on a genotyped dataset's indels
 # read without their phased store (below) goes by the whole log, in a piece too
 _log_lists_carriers = False
+# whether a line of the indel log is an MNV's (_names_an_mnv): the notes on how the MNVs were
+# read (below: from the phased store's MNV file, or, with a store of 2.10.0, from the log)
+# go by the whole log too
+_log_holds_mnv = False
+
+
+def _names_an_mnv(name):
+    """Whether a record's name ('<contig>_<POS>_<REF>_<ALT>', record_name) is an MNV's: REF
+    and ALT of one length above 1 (build_indel_genotypes._is_mnv)."""
+    head, _sep, alt = name.rpartition("_")
+    ref = head.rpartition("_")[2]
+    return len(ref) == len(alt) > 1
 
 
 def _log_union(first, more):
@@ -743,7 +755,7 @@ def _build_indels_tree(positions):
     a run's lines are kept until the run ends, and the carriers of those of a record the
     piece keeps a window of are then read in. Where a POS comes after a greater one (a log
     no build writes), the carriers of the records kept are read in a second pass."""
-    global _log_lists_carriers
+    global _log_lists_carriers, _log_holds_mnv
     tree = IntervalTree()
     run_pos, run, run_kept, in_runs = None, [], set(), True
     with _open_indel_log() as log:
@@ -762,6 +774,8 @@ def _build_indels_tree(positions):
             _name = _isc.record_name(splitted[4])
             if splitted[1]:
                 _log_lists_carriers = True
+            if not _log_holds_mnv and _names_an_mnv(_name):
+                _log_holds_mnv = True
             if positions is None:
                 _add_carriers(_name, splitted[1])
             else:
@@ -866,6 +880,22 @@ if _indel_snp:
               "an indel target with a SNP code gets the strongest target its own SNP alleles "
               "allow (PUTATIVE), and a second indel on its haplotype is not read. "
               "build-index-only with the dataset's VCFs writes it.", flush=True)
+    if _indelgt is not None and _log_holds_mnv:
+        # how the MNVs of the indel log were read (2.10.1; stdout, the run's own record of it,
+        # from which the real-data check takes its reading): from the store's MNV file, or,
+        # with a store of 2.10.0, which has none, from the indel log as 2.10.0 read them
+        if _indelgt.has_mnv:
+            print(f"NOTE [indel-snp]: the MNVs of {_vcf} on {current_chr} were read from the "
+                  "phased indel genotype store's MNV file: each MNV's carriers by their phase, "
+                  "and an MNV on a carrier's haplotype as a second record on another record's "
+                  "rows.", flush=True)
+        else:
+            print(f"NOTE [indel-snp]: the phased indel genotype store of {_vcf} on "
+                  f"{current_chr} holds no MNV (a store written before CRISPRme 2.10.1), and "
+                  "the indel log lists MNVs: each MNV's carriers are its indel log's, their "
+                  "phase unknown, and an MNV on a carrier's haplotype is not read on another "
+                  "record's rows. build-index-only of CRISPRme 2.10.1 or later with the "
+                  "dataset's VCFs adds the MNVs to the store.", flush=True)
     if _reg is not None:
         try:
             _cooc_out = open(outputFile + ".indel_snp_cooc.tsv", "w")
@@ -1048,7 +1078,15 @@ def _store_indels(lo, hi, ipos, iref, ialt, keep=None):
     (0-based, inclusive) and that ``keep`` (pos, REF, ALT, overlapping) takes, but another
     allele of this one's anchor: an indel at this one's own POS that keeps the same
     anchor. One haplotype cannot hold both, so a slot phased with both is a phasing
-    artefact, not a complex allele. Carriers are read only for the indels taken."""
+    artefact, not a complex allele. Carriers are read only for the indels taken.
+
+    The store's MNVs are records of it too where it has an MNV file (2.10.1:
+    IndelGenotypeReader.has_mnv), read as a second indel is. An MNV and an indel at one POS
+    are other alleles of that position too (question 2c of the MNV plan, both ways: an MNV
+    at an indel row's POS, an indel at an MNV row's POS), a phasing artefact, so neither is
+    read on the other's rows; an MNV keeps no anchor, so the rule above never took one.
+    Only where the MNV file was read: with a store of 2.10.0 an MNV row's carriers are the
+    indel log's, as 2.10.0 read them, and so is the record at its POS."""
     global _indel_index, _indel_starts, _indel_maxref
     if _indelgt is None:
         return
@@ -1058,6 +1096,7 @@ def _store_indels(lo, hi, ipos, iref, ialt, keep=None):
         _indel_maxref = max((len(r) for _p, r, _a in _indel_index), default=1)
     i0, i1 = ipos - 1, ipos - 1 + len(iref)  # this indel's REF, 0-based half-open
     kept = _isc.kept_bases(iref, ialt)
+    mnv = len(iref) == len(ialt)
     k = bisect.bisect_left(_indel_starts, lo - _indel_maxref)
     while k < len(_indel_index) and _indel_index[k][0] - 1 <= hi:
         p, r, a = _indel_index[k]
@@ -1066,6 +1105,8 @@ def _store_indels(lo, hi, ipos, iref, ialt, keep=None):
             continue
         if p == ipos and kept and _isc.kept_bases(r, a):
             continue  # another allele of the same anchor
+        if p == ipos and (len(r) == len(a)) != mnv and _indelgt.has_mnv:
+            continue  # an MNV and an indel at one POS: other alleles of that position
         overlapping = p - 1 < i1 and i0 < p - 1 + len(r)
         if keep is not None and not keep(p, r, a, overlapping):
             continue
@@ -1086,11 +1127,18 @@ def _other_indels(lo, hi, ipos, iref, ialt):
     an unphased carrier of both is a multi-allelic heterozygote (one allele per
     haplotype), so only its phased and haploid carriers count. Another allele of this
     one's anchor is none (_store_indels). An indel that only deletes bases this one
-    deletes too changes nothing."""
+    deletes too changes nothing, nor does an MNV only on them (2.10.1, question 2a of the
+    MNV plan: indel_snp_cis.changes_span).
+
+    An MNV window loses no base (question 2b): its ALT bases stand in the places of the
+    bases it replaces, so on an MNV's rows a deletion of any of them changes the target's
+    bases, the slot read as the deletion's haplotype. Up to 2.10.0 an MNV window's
+    replaced bases counted as lost, so a deletion only on them changed nothing there."""
     i0, i1 = ipos - 1, ipos - 1 + len(iref)  # this indel's REF, 0-based half-open
     kept = _isc.kept_bases(iref, ialt)
     tail = _isc.shared_tail(iref, ialt)
-    gone = (i0 + kept, i1 - 1 - tail) if len(iref) - tail > kept else None
+    gone = (i0 + kept, i1 - 1 - tail) if (len(iref) - tail > kept
+                                          and len(iref) != len(ialt)) else None
     out = []
     for (p, r, a), gts, overlapping in _store_indels(
             lo, hi, ipos, iref, ialt,
