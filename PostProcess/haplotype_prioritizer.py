@@ -449,10 +449,27 @@ class IndelIndex(object):
     indel, "<pos>_<REF>_<ALT>\t<sample>:<genotype>,..."), by position, with their carriers
     read on demand. ``wanted``: the 0-based reference positions a search's rows touch; only
     an indel whose REF (or the base past it, where an insertion goes) meets one of them is
-    kept, so a chromosome's whole store is not held for a few targets. None keeps all."""
+    kept, so a chromosome's whole store is not held for a few targets. None keeps all.
 
-    def __init__(self, path, wanted=None):
+    ``path`` is the store's indel file; its MNV file (``mnv_path``; None: the one beside it,
+    build_indel_genotypes.mnv_store_path) is read too where it is there (from 2.10.1), its
+    MNVs held as its indels are: an MNV a row names is in the panel, its haplotypes read by
+    phase, and one inside a SNP-only row's target takes a haplotype holding it off the row's
+    combination (the state "indel in the target"). With a store of 2.10.0 an MNV is in no
+    panel, as in 2.10.0."""
+
+    def __init__(self, path, wanted=None, mnv_path=None):
         self._toks = {}
+        if mnv_path is None:
+            mnv_path = big.mnv_store_path(path)
+        for one in [path] + ([mnv_path] if mnv_path and os.path.isfile(mnv_path) else []):
+            self._read(one, wanted)
+        self.indels = sorted(self._toks)
+        self.starts = [p for p, _r, _a in self.indels]
+        self.maxref = max((len(r) for _p, r, _a in self.indels), default=1)
+        self._gts = {}
+
+    def _read(self, path, wanted):
         opener = gzip.open if path.endswith(".gz") else open
         with opener(path, "rt") as fh:
             for line in fh:
@@ -475,10 +492,6 @@ class IndelIndex(object):
                 # allele, its carriers merged
                 self._toks[key] = (toks if prev is None else
                                    big.merge_store_carriers(prev, toks))
-        self.indels = sorted(self._toks)
-        self.starts = [p for p, _r, _a in self.indels]
-        self.maxref = max((len(r) for _p, r, _a in self.indels), default=1)
-        self._gts = {}
 
     def carriers(self, pos, ref, alt):
         key = (pos, ref.upper(), alt.upper())
@@ -595,10 +608,11 @@ def breaking_indels(index, lo, hi, snps, own=(), seq_at=None):
 
 class PanelChrom(object):
     """One panel's phased genotypes on one chromosome: the SNP store (Tier-1) and the indel
-    store, either absent. ``carriers`` gives a variant's carriers with each genotype read
-    against that variant ("1|0"), or None for a variant the panel does not hold.
-    ``wanted``: the positions the rows touch, for the indel store (IndelIndex); ``seq_at``:
-    the chromosome's reference bases (holds_target), or None."""
+    store (its MNVs too, from 2.10.1: IndelIndex), either absent. ``carriers`` gives a
+    variant's carriers with each genotype read against that variant ("1|0"), or None for a
+    variant the panel does not hold. ``wanted``: the positions the rows touch, for the indel
+    store (IndelIndex); ``seq_at``: the chromosome's reference bases (holds_target), or
+    None."""
 
     def __init__(self, name, dictionaries, chrom, role="own", wanted=None, seq_at=None):
         self.name = name
