@@ -469,9 +469,9 @@ def test_one_mnv_on_two_lines_or_in_two_cases_is_one_allele():
 
 def test_a_store_of_2100_gains_its_mnv_file_and_keeps_its_indel_file():
     """A store of 2.10.0 (an indel file, current) gains its MNV file: compile_store asked
-    for the MNV file alone (the file that is not current, as search_indel_snp.store asks)
-    leaves the indel file and its marker byte for byte, mtimes included. Read before, the
-    store had no MNV (has_mnv False)."""
+    for the files that are not current (files_to_write: the MNV file alone, as
+    search_indel_snp.store asks) leaves the indel file and its marker byte for byte, mtimes
+    included, and then asks for none. Read before, the store had no MNV (has_mnv False)."""
     vcf = _vcf_file(_VCF_MNV)
     d = tempfile.mkdtemp()
     indel_out, mnv_out = big.store_files(d, "chr22")
@@ -482,9 +482,11 @@ def test_a_store_of_2100_gains_its_mnv_file_and_keeps_its_indel_file():
         before = {p: (open(p, "rb").read(), os.path.getmtime(p))
                   for p in (indel_out, big._done_marker(indel_out))}
         assert big.IndelGenotypeReader(indel_out).has_mnv is False
-        todo = [None if big.store_is_current(p) else p for p in (indel_out, mnv_out)]
-        assert todo == [None, mnv_out]
+        todo = big.files_to_write(d, "chr22")
+        assert todo == (None, mnv_out)
+        assert big.files_to_write(d, "chr22", "/scratch") == (None, "/scratch/gt_mnv_chr22.tsv.gz")
         assert big.compile_store(vcf, *todo) == (None, 4)
+        assert big.files_to_write(d, "chr22") == (None, None)
         assert {p: (open(p, "rb").read(), os.path.getmtime(p)) for p in before} == before
         assert big.store_is_current(mnv_out)
         r = big.IndelGenotypeReader(indel_out)

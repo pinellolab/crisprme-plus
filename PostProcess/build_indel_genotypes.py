@@ -287,12 +287,28 @@ def _mark_done(out_path, n):
             raise
 
 
+def files_to_write(store_dir, chrom, write_dir=None):
+    """(indel file, MNV file) for compile_store to write of ``chrom``'s store in
+    ``store_dir`` (store_files): each one missing or not current there (store_is_current),
+    at its name in ``write_dir`` (None: ``store_dir`` itself, written in place); None for
+    one that is current. A store of 2.10.0 asks for its MNV file alone, so its indel file
+    stays byte for byte; a store of 2.10.1 whose files are current asks for none."""
+    out = []
+    for path in store_files(store_dir, chrom):
+        if store_is_current(path):
+            out.append(None)
+        else:
+            out.append(path if write_dir is None
+                       else os.path.join(write_dir, os.path.basename(path)))
+    return tuple(out)
+
+
 def compile_store(vcf_path, indel_out=None, mnv_out=None, keep_samples=None):
     """Write the files of one chromosome's phased store that are asked for, in ONE pass
     over its VCF: the indel file ``indel_out`` (as compile_indel_genotypes writes it) and
     the MNV file ``mnv_out`` (the same format and marker, for its MNV alts: _is_mnv); None
     asks for no such file. A caller asks only for the files that are missing or not current
-    (store_is_current), so that a store of 2.10.0 gains its MNV file and keeps its indel
+    (files_to_write), so that a store of 2.10.0 gains its MNV file and keeps its indel
     file byte for byte. A VCF without an MNV gets an MNV file of no record, which says that
     the MNVs were stored (none). Returns (indel records, MNV records), None for a file not
     asked for.

@@ -53,9 +53,10 @@ def store(vcf_dir, store_dir, scratch_dir, threads):
     """Write into ``store_dir`` the phased indel genotype store of each VCF of ``vcf_dir``
     whose files are not each complete and written under the FILTER rule of 2.10.0
     (build_indel_genotypes.store_is_current), as build-index-only does: its indel file and,
-    from 2.10.1, its MNV file (build_indel_genotypes.store_files), the missing or stale
-    ones written in one pass over the VCF (build_indel_genotypes.compile_store), so that a
-    store of 2.10.0 gains its MNV files and keeps its indel files byte for byte. Written in
+    from 2.10.1, its MNV file, the missing or stale ones (build_indel_genotypes.
+    files_to_write) written in one pass over the VCF (build_indel_genotypes.compile_store),
+    so that a store of 2.10.0 gains its MNV files and keeps its indel files byte for byte.
+    Written in
     ``scratch_dir`` and moved in once whole, so a run stopped meanwhile leaves no part of
     it. Every sample of
     the VCF is kept, as the indel log lists them. Guarded as build-index-only's is: a
@@ -68,9 +69,7 @@ def store(vcf_dir, store_dir, scratch_dir, threads):
         chrom = _chrom_of(vcf)
         if chrom is None:
             continue
-        outs = [None if build_indel_genotypes.store_is_current(path)
-                else os.path.join(scratch_dir, os.path.basename(path))
-                for path in build_indel_genotypes.store_files(store_dir, chrom)]
+        outs = build_indel_genotypes.files_to_write(store_dir, chrom, scratch_dir)
         if any(outs):
             jobs.append((vcf, outs[0], outs[1], None))
     if not jobs:
