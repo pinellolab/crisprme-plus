@@ -1404,7 +1404,7 @@ class TheMnvRules(unittest.TestCase):
         """A deletion of 1010..1017 (POS 1010) with an MNV on 1012..1013 (shape 5 of the
         plan's table, the deletion's rows): the slot holds the deletion's sequence, read
         without the MNV, as METHODS section 4 reads any variant on deleted bases. One that
-        also replaces a base past the deleted ones (shape 4, the deletion's rows) changes
+        also replaces a base past the deleted ones (shape 3, the deletion's rows) changes
         the target. At c64e62e1 changes_span counted the MNV's ALT as bases inserted, and
         the slot left the row."""
         seq = self.SEQ
