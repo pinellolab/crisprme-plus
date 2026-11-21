@@ -89,14 +89,29 @@ def _write_store(path, indels):
             fh.write("%d_%s_%s\t%s\n" % (p, r, a, ",".join("%s:%s" % kv for kv in gts.items())))
 
 
+def _mnv_inside():
+    """An MNV on the target's 10th and 11th bases (every base changed: TG>CA)."""
+    p0 = T0 + 9
+    ref = GENOME[p0:p0 + 2]
+    return (p0 + 1, ref, ref.translate(str.maketrans("ACGT", "TGCA")))
+
+
+def _mnv_first():
+    """An MNV on the target's first two bases."""
+    ref = GENOME[T0:T0 + 2]
+    return (T0 + 1, ref, ref.translate(str.maketrans("ACGT", "TGCA")))
+
+
 class _Fixture(object):
     """A SNP target at T0 (+ strand) whose SNP C>A makes it perfect, a phased indel
     store, and the harness globals of one per-sample (or population-level) run."""
 
-    def __init__(self, snp_gts, indels, observed=True, phased=True, fast=False):
+    def __init__(self, snp_gts, indels, observed=True, phased=True, fast=False, mnvs=None):
         self.tmp = tempfile.TemporaryDirectory()
         store = os.path.join(self.tmp.name, "gt_indel_chrT.tsv.gz")
         _write_store(store, indels)
+        if mnvs is not None:  # the store's MNV file, beside its indel file (2.10.1)
+            _write_store(os.path.join(self.tmp.name, "gt_mnv_chrT.tsv.gz"), mnvs)
         dna = G[:5] + "M" + G[6:] + "TGG"
         self.split = ["X", G + "NGG", dna, "chrT", str(T0), str(T0), "+", "1", "0", "1",
                       "NGG", "y", "NA", "NA", "NA", "NA", "NA", "NA"]
@@ -359,6 +374,22 @@ class StoreReader(unittest.TestCase):
             self.assertEqual(st.indels, [near])
             self.assertEqual(st.carriers(near), {"S1": "1|0", "S2": "1|1"})
 
+    def test_reads_the_mnv_file_beside_the_indel_file(self):
+        """From 2.10.1 the store's MNVs are in a file beside its indel file
+        (gt_mnv_<chrom>.tsv.gz), read with it: an MNV inside a target touches it. A store
+        of 2.10.0 has none. At c64e62e1 the reader read the indel file alone."""
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "gt_indel_chrT.tsv.gz")
+            _write_store(path, [(_edge_del(), {"S1": "1|0"})])
+            ns = _load_pure_functions({})
+            self.assertEqual(ns["_SnpRowIndels"](path, [(LO, HI)], 50).indels, [_edge_del()])
+            _write_store(os.path.join(d, "gt_mnv_chrT.tsv.gz"),
+                         [(_mnv_inside(), {"S2": "0|1"}), ((2000, "AC", "GT"), {"S3": "1|0"})])
+            st = ns["_SnpRowIndels"](path, [(LO, HI)], 50)
+            self.assertEqual(st.indels, sorted([_edge_del(), _mnv_inside()]))
+            self.assertEqual(st.carriers(_mnv_inside()), {"S2": "0|1"})
+            self.assertEqual(st.touching(LO, HI), [_mnv_inside()])
+
     def test_touching_junction_rule(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "s.tsv.gz")
@@ -449,6 +480,36 @@ class ObservedPath(unittest.TestCase):
         got, _fx = self._carriers({"S1": "1|0", "S2": "1|0"},
                                   [(_ins_inside(), {"S1": "1|0", "S2": "1|1"})], fast=True)
         self.assertEqual(got, {"S1", "S2"})
+
+    def test_an_mnv_in_the_target_takes_the_carrier_off(self):
+        """2.10.1, the store's MNV file: a carrier whose haplotype holding the row's SNP
+        also holds an MNV inside the target (the 10th and 11th bases; and on the first two,
+        where an indel row's slot read "from the first base on" started past the MNV up to
+        2.10.0) does not have the row's sequence: S1 (cis) and S3 (homozygous) leave the
+        row, S2 (the MNV on its other slot) and S6 (no MNV) stay. A population-level
+        search reads no store: every carrier stays. At c64e62e1 no MNV was read: all
+        stayed (the plan's 3,334 SNP-row listings on HPRC)."""
+        snps = {"S1": "1|0", "S2": "1|0", "S3": "1|0", "S6": "1|0"}
+        for mnv in (_mnv_inside(), _mnv_first()):
+            with self.subTest(mnv=mnv):
+                mnvs = [(mnv, {"S1": "1|0", "S2": "0|1", "S3": "1|1"})]
+                got, fx = self._carriers(snps, [], mnvs=mnvs)
+                self.assertEqual(got, {"S2", "S6"})
+                st = fx.ns["_snp_indel_stats"]
+                self.assertEqual((st["targets"], st["listings"], st["gone"]), (1, 2, 0))
+                got, _fx = self._carriers(snps, [], mnvs=mnvs, fast=True)
+                self.assertEqual(got, {"S1", "S2", "S3", "S6"})
+
+    def test_an_mnv_past_the_target_or_unphased(self):
+        """An MNV past the target changes none of its bases: its carrier (S1) stays; an
+        unphased heterozygous MNV call (S4) stays, PUTATIVE, as an unphased indel's; S5's
+        phased one in the target takes it off."""
+        past = (HI + 3, GENOME[HI + 2:HI + 4],
+                GENOME[HI + 2:HI + 4].translate(str.maketrans("ACGT", "TGCA")))
+        got, _fx = self._carriers({"S1": "1|0", "S4": "1|0", "S5": "1|0"}, [],
+                                  mnvs=[(past, {"S1": "1|0"}),
+                                        (_mnv_inside(), {"S4": "0/1", "S5": "1|0"})])
+        self.assertEqual(got, {"S1", "S4"})
 
     def test_no_store_unchanged(self):
         fx = _Fixture({"S1": "1|0"}, [(_ins_inside(), {"S1": "1|0"})],
