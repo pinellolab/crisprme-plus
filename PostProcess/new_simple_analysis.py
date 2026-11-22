@@ -1163,45 +1163,56 @@ class _SnpRowIndels(object):
     2.10.1), its MNVs read as its indels are: an MNV inside a SNP row's target takes off the
     row a carrier whose haplotype holds it, its bases found nowhere on that haplotype
     (indel_snp_cis.snp_target_held). A store of 2.10.0 has no MNV file: no SNP row loses a
-    carrier for an MNV, as in 2.10.0."""
+    carrier for an MNV, as in 2.10.0. An MNV file that cannot be read to its end (corrupt,
+    cut short: build_indel_genotypes.read_mnv_lines) is read so too, the indel file as it is:
+    ``mnv_error`` says why (None where it was read, or is not there), for the NOTE
+    _read_snp_row_indels writes. An indel file that cannot be read raises, as before."""
 
     def __init__(self, store_path, spans, margin, mnv_path=None):
         self.intervals = _merge_spans(spans, margin)
-        starts = [a for a, _b in self.intervals]
+        self._ivstarts = [a for a, _b in self.intervals]
         self.indels = []
         self._tokens = {}
         self._gts = {}
         if mnv_path is None:
             mnv_path = _big.mnv_store_path(store_path)
-        paths = [store_path] + ([mnv_path] if mnv_path and os.path.isfile(mnv_path) else [])
-        for path in (paths if self.intervals else ()):
-            with (gzip.open(path, "rt") if path.endswith(".gz") else open(path)) as fh:
-                for line in fh:
-                    key, _tab, toks = line.partition("\t")
-                    pos, _u, rest = key.partition("_")
-                    ref, _u, alt = rest.partition("_")
-                    try:
-                        p0 = int(pos) - 1
-                    except ValueError:
-                        continue
-                    k = bisect.bisect_right(starts, p0 + len(ref) - 1) - 1
-                    if k < 0 or self.intervals[k][1] < p0:
-                        continue  # meets no target's surroundings
-                    # REF and ALT in upper case (build_indel_genotypes.store_key)
-                    rec = (p0 + 1, ref.upper(), alt.upper())
-                    toks = toks.rstrip("\n")
-                    if rec in self._tokens:
-                        # an indel the VCF writes on two lines, in one case or in two:
-                        # one allele, its carriers merged
-                        # (build_indel_genotypes.merge_store_carriers)
-                        self._tokens[rec] = _big.merge_store_carriers(self._tokens[rec], toks)
-                        continue
-                    self.indels.append(rec)
-                    self._tokens[rec] = toks
+        self.mnv_path = mnv_path or None
+        self.mnv_error = None
+        if self.intervals:
+            with (gzip.open(store_path, "rt") if store_path.endswith(".gz")
+                  else open(store_path)) as fh:
+                self._take(fh)
+            if mnv_path and os.path.isfile(mnv_path):
+                lines, self.mnv_error = _big.read_mnv_lines(mnv_path)
+                self._take(lines or ())
         self.indels.sort()
         self._starts = [p for p, _r, _a in self.indels]
-        self._ivstarts = starts
         self._maxref = max((len(r) for _p, r, _a in self.indels), default=1)
+
+    def _take(self, lines):
+        starts = self._ivstarts
+        for line in lines:
+            key, _tab, toks = line.partition("\t")
+            pos, _u, rest = key.partition("_")
+            ref, _u, alt = rest.partition("_")
+            try:
+                p0 = int(pos) - 1
+            except ValueError:
+                continue
+            k = bisect.bisect_right(starts, p0 + len(ref) - 1) - 1
+            if k < 0 or self.intervals[k][1] < p0:
+                continue  # meets no target's surroundings
+            # REF and ALT in upper case (build_indel_genotypes.store_key)
+            rec = (p0 + 1, ref.upper(), alt.upper())
+            toks = toks.rstrip("\n")
+            if rec in self._tokens:
+                # an indel the VCF writes on two lines, in one case or in two:
+                # one allele, its carriers merged
+                # (build_indel_genotypes.merge_store_carriers)
+                self._tokens[rec] = _big.merge_store_carriers(self._tokens[rec], toks)
+                continue
+            self.indels.append(rec)
+            self._tokens[rec] = toks
 
     def __len__(self):
         return len(self.indels)
@@ -2885,6 +2896,16 @@ def _read_snp_row_indels(spans, needed_keys):
             return None
         t0 = time.time()
         store = _SnpRowIndels(path, spans, _SNP_INDEL_MARGIN)
+        if store.mnv_error is not None:
+            # (2.10.1) its MNV file cannot be read to its end: the chromosome is read as with
+            # a store of 2.10.0, which has none, the indel file as it is (stdout, never
+            # stderr: the run's own record of it)
+            _name = os.path.basename(os.path.dirname(path))
+            print(_big.mnv_unreadable_note(
+                _name[len("indel_genotypes_"):] if _name.startswith("indel_genotypes_")
+                else _name, current_chr, store.mnv_path, store.mnv_error,
+                "no per-sample SNP row loses a carrier for an MNV inside its target"),
+                flush=True)
         needed_keys |= _snp_indel_frame_keys(store, spans, current_chr)
         print(f"Read {len(store)} indel(s) of the phased indel genotype store near "
               f"{current_chr}'s SNP targets in {time.time() - t0:.1f}s")

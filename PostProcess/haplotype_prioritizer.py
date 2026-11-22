@@ -456,42 +456,50 @@ class IndelIndex(object):
     MNVs held as its indels are: an MNV a row names is in the panel, its haplotypes read by
     phase, and one inside a SNP-only row's target takes a haplotype holding it off the row's
     combination (the state "indel in the target"). With a store of 2.10.0 an MNV is in no
-    panel, as in 2.10.0."""
+    panel, as in 2.10.0. An MNV file that cannot be read to its end (corrupt, cut short:
+    build_indel_genotypes.read_mnv_lines) is read so too, the indel file as it is:
+    ``mnv_error`` says why (None where it was read, or is not there), for PanelChrom's NOTE;
+    before, it raised out of the gate's pool of chromosomes and failed the gate. An indel
+    file that cannot be read raises, as before."""
 
     def __init__(self, path, wanted=None, mnv_path=None):
         self._toks = {}
         if mnv_path is None:
             mnv_path = big.mnv_store_path(path)
-        for one in [path] + ([mnv_path] if mnv_path and os.path.isfile(mnv_path) else []):
-            self._read(one, wanted)
+        self.mnv_path = mnv_path or None
+        self.mnv_error = None
+        opener = gzip.open if path.endswith(".gz") else open
+        with opener(path, "rt") as fh:
+            self._take(fh, wanted)
+        if mnv_path and os.path.isfile(mnv_path):
+            lines, self.mnv_error = big.read_mnv_lines(mnv_path)
+            self._take(lines or (), wanted)
         self.indels = sorted(self._toks)
         self.starts = [p for p, _r, _a in self.indels]
         self.maxref = max((len(r) for _p, r, _a in self.indels), default=1)
         self._gts = {}
 
-    def _read(self, path, wanted):
-        opener = gzip.open if path.endswith(".gz") else open
-        with opener(path, "rt") as fh:
-            for line in fh:
-                key, _, toks = line.rstrip("\n").partition("\t")
-                pos, _, rest = key.partition("_")
-                ref, _, alt = rest.partition("_")
-                try:
-                    pos = int(pos)
-                except ValueError:
-                    continue
-                if wanted is not None and not any(
-                        p in wanted for p in range(pos - 1, pos + len(ref))):
-                    continue
-                # REF and ALT in upper case, as parse_variants reads a row's
-                # (build_indel_genotypes.store_key): keyed as the VCF writes them, an
-                # indel written in lower case (1,546 of HPRC chr22) was in no panel
-                key = (pos, ref.upper(), alt.upper())
-                prev = self._toks.get(key)
-                # an indel the VCF writes on two lines, in one case or in two: one
-                # allele, its carriers merged
-                self._toks[key] = (toks if prev is None else
-                                   big.merge_store_carriers(prev, toks))
+    def _take(self, lines, wanted):
+        for line in lines:
+            key, _, toks = line.rstrip("\n").partition("\t")
+            pos, _, rest = key.partition("_")
+            ref, _, alt = rest.partition("_")
+            try:
+                pos = int(pos)
+            except ValueError:
+                continue
+            if wanted is not None and not any(
+                    p in wanted for p in range(pos - 1, pos + len(ref))):
+                continue
+            # REF and ALT in upper case, as parse_variants reads a row's
+            # (build_indel_genotypes.store_key): keyed as the VCF writes them, an
+            # indel written in lower case (1,546 of HPRC chr22) was in no panel
+            key = (pos, ref.upper(), alt.upper())
+            prev = self._toks.get(key)
+            # an indel the VCF writes on two lines, in one case or in two: one
+            # allele, its carriers merged
+            self._toks[key] = (toks if prev is None else
+                               big.merge_store_carriers(prev, toks))
 
     def carriers(self, pos, ref, alt):
         key = (pos, ref.upper(), alt.upper())
@@ -630,6 +638,14 @@ class PanelChrom(object):
         ipath = os.path.join(dictionaries, f"indel_genotypes_{name}", f"gt_indel_{chrom}.tsv.gz")
         if os.path.isfile(ipath):
             self.indels = IndelIndex(ipath, wanted)
+            if self.indels.mnv_error is not None:
+                # (2.10.1) the store's MNV file of this chromosome cannot be read to its end:
+                # read as a store of 2.10.0, which has none (IndelIndex), said on stdout
+                # (never stderr) from the gate's worker, which no longer raises on it
+                print(big.mnv_unreadable_note(
+                    name, chrom, self.indels.mnv_path, self.indels.mnv_error,
+                    f"the carrier gate finds no MNV in the panel {name} there, and none "
+                    f"inside a SNP-only row's target takes a haplotype off"), flush=True)
         self._sites = {}
         self._ploidy = {}
         self._an = None

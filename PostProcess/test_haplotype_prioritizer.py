@@ -809,6 +809,107 @@ class TestGateCommand(unittest.TestCase):
             self.assertFalse(os.path.exists(hp.companion_path(self.results)))
 
 
+class TestTheGateReadsTheMnvsAsTheSearchRunsIt(unittest.TestCase):
+    """The command the pipeline runs (2.10.1), on rows of two chromosomes and two threads,
+    so each chromosome is gated in a worker of a pool (run_gate's pool.map), its store read
+    only at the positions its rows touch (_gate_chromosome's ``wanted``), not whole as the
+    unit tests above read it (the review's mutant Y read the MNV file only for a store read
+    whole, and every MNV left the gate as the search runs it):
+
+      * a SNP-only row whose target holds the MNV at 105 on the SNP's slot of S00 and S01:
+        C1, "indel in the target" (B where the MNV is not read);
+      * a row naming the MNV at 150 and the SNV at 155, one haplotype of S00 holding both:
+        A (C2, "not checked", where the MNV is in no panel);
+      * a row naming that MNV alone: B, in the panel (B "not in the panel" without it).
+
+    And an MNV file that cannot be read (the review's item 4): the chromosome is gated as
+    with a store of 2.10.0 (no MNV in the panel), its indel file read, a NOTE on stdout,
+    and the gate ends as it should, where its worker raised out of the pool and the gate
+    failed. A corrupt indel file still fails the gate, as it did."""
+
+    ALN = "ACGTACGTACGTACGTACGTAGG"
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gate_mnv_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.dicts = os.path.join(self.tmp, "Dictionaries")
+        build_panel(self.dicts, [(100, "A", "G", {"S00": "1|0", "S01": "1|0"}),
+                                 (155, "C", "T", {"S00": "1|0", "S04": "1|0"})],
+                    indels=[(300, "AT", "A", {"S02": "1|0"})],
+                    mnvs=[(105, "AC", "GT", {"S00": "1|0", "S01": "1|0", "S05": "0|1"}),
+                          (150, "AC", "GT", {"S00": "1|0", "S03": "1|0"})])
+        self.store = os.path.join(self.dicts, f"indel_genotypes_{PANEL}")
+        out = os.path.join(self.tmp, "Results", "job")
+        os.makedirs(out)
+        self.vcfs = os.path.join(self.tmp, "list_vcf.txt")
+        with open(self.vcfs, "w") as fh:
+            fh.write(f"VCFs/{PANEL}\n")
+        self.results = os.path.join(out, "GUIDE+NRG_hg38+" + PANEL + "_4+2_integrated_results.tsv")
+        aln = self.ALN
+
+        def row(chrom, start, variants):
+            return {"Spacer+PAM": "G", "Chromosome": chrom,
+                    **block("highest_CFD", start, "+", aln, "alt", variants),
+                    **block("fewest_mm+b", start, "+", aln, "ref", "NA"),
+                    **block("highest_CRISPR_BULGE", start, "+", aln, "ref", "NA")}
+        write_results(self.results, [
+            row(CHROM, 90, f"{CHROM}_100_A_G"),
+            row(CHROM, 140, f"{CHROM}_150_AC_GT,{CHROM}_155_C_T"),
+            row(CHROM, 145, f"{CHROM}_150_AC_GT"),
+            row(CHROM, 290, f"{CHROM}_300_AT_A"),
+            row("chr21", 90, "chr21_100_A_G")])
+
+    def gate(self):
+        done = subprocess.run(
+            [sys.executable, os.path.join(HERE, "haplotype_prioritizer.py"), "--results",
+             self.results, "--dictionaries", self.dicts, "--vcf-list", self.vcfs, "--mode",
+             "population-level", "--threads", "2"], capture_output=True, text=True)
+        tiers = None
+        if done.returncode == 0:
+            with open(hp.companion_path(self.results)) as fh:
+                tiers = [(r[0], r[7], r[8], r[9]) for r in
+                         (ln.rstrip("\n").split("\t") for ln in fh if not ln.startswith("#"))
+                         if r[1] == "highest_CFD"]
+        return done, tiers
+
+    def cut_short(self, kind):
+        path = os.path.join(self.store, f"gt_{kind}_{CHROM}.tsv.gz")
+        with open(path, "rb") as fh:
+            data = fh.read()
+        with open(path, "wb") as fh:
+            fh.write(data[:len(data) // 2])
+
+    def test_the_mnvs_are_read_where_the_rows_touch_them(self):
+        done, tiers = self.gate()
+        self.assertEqual((done.returncode, done.stderr), (0, ""), done.stderr)
+        self.assertEqual(tiers, [("1", "C1", hp.INDEL_IN_TARGET, PANEL),
+                                 ("2", "A", hp.ONE_HAPLOTYPE, PANEL),
+                                 ("3", "B", "-", PANEL),
+                                 ("4", "B", "-", PANEL),
+                                 ("5", "B", hp.NOT_IN_PANEL, "-")])
+        self.assertNotIn("holds no MNV", done.stdout)
+
+    def test_an_mnv_file_cut_short_is_read_as_none_in_the_pool(self):
+        self.cut_short("mnv")
+        done, tiers = self.gate()
+        self.assertEqual((done.returncode, done.stderr), (0, ""), done.stderr)
+        self.assertEqual(tiers, [("1", "B", "-", PANEL),
+                                 ("2", "C2", "-", PANEL),
+                                 ("3", "B", hp.NOT_IN_PANEL, "-"),
+                                 ("4", "B", "-", PANEL),
+                                 ("5", "B", hp.NOT_IN_PANEL, "-")])
+        self.assertEqual(done.stdout.count(
+            f"NOTE [indel-snp]: the phased indel genotype store of {PANEL} on {CHROM} holds no "
+            f"MNV that can be read: its MNV file gt_mnv_{CHROM}.tsv.gz is corrupt or cut short "
+            "("), 1, done.stdout)
+        self.assertIn(f"the carrier gate finds no MNV in the panel {PANEL} there", done.stdout)
+
+    def test_an_indel_file_cut_short_still_fails_the_gate(self):
+        self.cut_short("indel")
+        done, _tiers = self.gate()
+        self.assertNotEqual(done.returncode, 0)
+
+
 class TestTheSearchGivesTheGateItsPam(unittest.TestCase):
     """The pipeline's carrier-gate step passes the search's PAM file: without it the gate
     reads no PAM region of an alignment, and takes every allele in one for an allele the
