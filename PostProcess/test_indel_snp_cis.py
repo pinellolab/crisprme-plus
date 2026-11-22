@@ -272,6 +272,29 @@ def test_local_haplotype_writes_an_mnvs_bases_at_their_places():
     assert hap[:2] == [((21, 0), "G"), ((22, 0), 22)], hap
 
 
+def test_an_mnvs_base_at_the_frames_last_place_is_written():
+    """The review's mutant V: an MNV whose last base is the frame's last place (hi) has its
+    ALT base at that place, (hi, 0); one that runs past hi has its bases up to hi alone. Its
+    base at hi dropped, the haplotype had no place hi at all, one base short of the frame:
+    a target read up to its last base found its last base past the frame. Alike with a
+    window (an indel row's frame) and without one (a SNP row's)."""
+    for window in (None, (13, "A", "AT")):
+        out = {12} if window else set()  # (the window's REF, written as its ALT)
+        hap = isc.local_haplotype(10, 21, window, [(21, "AC", "GT")])
+        ref_places = [k for k, _s in hap if len(k) == 2]
+        assert ref_places == [(p, 0) for p in range(10, 22) if p not in out], (window, hap)
+        got = dict(hap)
+        assert (got[(19, 0)], got[(20, 0)], got[(21, 0)]) == (19, "G", "T"), hap
+        assert hap[-1] == ((21, 0), "T"), hap
+        # running past hi: its first base alone is in the frame
+        hap = isc.local_haplotype(10, 20, window, [(21, "AC", "GT")])
+        assert [k for k, _s in hap if len(k) == 2] == [(p, 0) for p in range(10, 21)
+                                                       if p not in out], hap
+        assert hap[-1] == ((20, 0), "G"), hap
+    # a frame of one place, the MNV's last base
+    assert isc.local_haplotype(21, 21, None, [(21, "AC", "GT")]) == [((21, 0), "T")]
+
+
 def test_local_haplotype_with_mnvs_holds_every_records_bases():
     """Any set of indels and MNVs, in every order, gives the bases of the haplotype that
     holds them all (each REF replaced by its ALT), or None where two REFs share a base, as

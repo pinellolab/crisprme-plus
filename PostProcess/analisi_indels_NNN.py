@@ -880,22 +880,35 @@ if _indel_snp:
               "an indel target with a SNP code gets the strongest target its own SNP alleles "
               "allow (PUTATIVE), and a second indel on its haplotype is not read. "
               "build-index-only with the dataset's VCFs writes it.", flush=True)
+    if _indelgt is not None and _indelgt.mnv_error is not None:
+        # an MNV file that cannot be read to its end (corrupt, cut short): the chromosome is
+        # read as with a store of 2.10.0, which has none, its indel file as it is (2.10.1;
+        # before, the whole store was dropped); said whether or not the log lists an MNV
+        print(_big.mnv_unreadable_note(
+            _vcf, current_chr, _indelgt.mnv_path, _indelgt.mnv_error,
+            "each MNV's carriers are its indel log's, their phase unknown, and an MNV on a "
+            "carrier's haplotype is not read on another record's rows"), flush=True)
     if _indelgt is not None and _log_holds_mnv:
         # how the MNVs of the indel log were read (2.10.1; stdout, the run's own record of it,
         # from which the real-data check takes its reading): from the store's MNV file, or,
         # with a store of 2.10.0, which has none, from the indel log as 2.10.0 read them
+        # (build-index-only's STEP 1c adds the MNV files to such a store, and the download
+        # step installs a downloaded panel's store with them: crisprme_hf.
+        # download_indel_genotypes)
         if _indelgt.has_mnv:
             print(f"NOTE [indel-snp]: the MNVs of {_vcf} on {current_chr} were read from the "
                   "phased indel genotype store's MNV file: each MNV's carriers by their phase, "
                   "and an MNV on a carrier's haplotype as a second record on another record's "
                   "rows.", flush=True)
-        else:
+        elif _indelgt.mnv_error is None:
             print(f"NOTE [indel-snp]: the phased indel genotype store of {_vcf} on "
                   f"{current_chr} holds no MNV (a store written before CRISPRme 2.10.1), and "
                   "the indel log lists MNVs: each MNV's carriers are its indel log's, their "
                   "phase unknown, and an MNV on a carrier's haplotype is not read on another "
                   "record's rows. build-index-only of CRISPRme 2.10.1 or later with the "
-                  "dataset's VCFs adds the MNVs to the store.", flush=True)
+                  "dataset's VCFs adds the MNVs to the store; for an index downloaded from "
+                  "Hugging Face, crisprme.py download --what indel-genotypes --dataset "
+                  f"{_vcf} installs the store with them.", flush=True)
     if _reg is not None:
         try:
             _cooc_out = open(outputFile + ".indel_snp_cooc.tsv", "w")

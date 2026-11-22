@@ -390,6 +390,36 @@ class StoreReader(unittest.TestCase):
             self.assertEqual(st.carriers(_mnv_inside()), {"S2": "0|1"})
             self.assertEqual(st.touching(LO, HI), [_mnv_inside()])
 
+    def test_an_mnv_file_that_cannot_be_read_is_none(self):
+        """The review's item 4: an MNV file cut short, or not gzip at all, is read as no
+        MNV file (a store of 2.10.0: no SNP row loses a carrier for an MNV), the indel file
+        as it is, mnv_error saying why; at 516d42a0 the reader raised and the run read the
+        chromosome with no store at all. A corrupt indel file still raises."""
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "gt_indel_chrT.tsv.gz")
+            mnv = os.path.join(d, "gt_mnv_chrT.tsv.gz")
+            _write_store(path, [(_edge_del(), {"S1": "1|0"})])
+            _write_store(mnv, [(_mnv_inside(), {"S2": "0|1"})])
+            with open(mnv, "rb") as fh:
+                whole = fh.read()
+            ns = _load_pure_functions({})
+            st = ns["_SnpRowIndels"](path, [(LO, HI)], 50)
+            self.assertEqual((st.indels, st.mnv_error), (sorted([_edge_del(), _mnv_inside()]),
+                                                         None))
+            for data in (whole[:len(whole) // 2], b"plain text\n"):
+                with open(mnv, "wb") as fh:
+                    fh.write(data)
+                st = ns["_SnpRowIndels"](path, [(LO, HI)], 50)
+                self.assertEqual(st.indels, [_edge_del()])
+                self.assertEqual(st.carriers(_edge_del()), {"S1": "1|0"})
+                self.assertEqual(st.touching(LO, HI), [])
+                self.assertTrue(st.mnv_error)
+                self.assertEqual(st.mnv_path, mnv)
+            with open(path, "wb") as fh:
+                fh.write(b"plain text\n")
+            with self.assertRaises(OSError):
+                ns["_SnpRowIndels"](path, [(LO, HI)], 50)
+
     def test_touching_junction_rule(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "s.tsv.gz")
@@ -669,6 +699,35 @@ class OptOutGate(unittest.TestCase):
         got, keys = self._read({}, fast=True)
         self.assertIsNone(got)
         self.assertEqual(keys, set())
+
+    def test_an_mnv_file_that_cannot_be_read_is_said_on_stdout(self):
+        """The review's item 4: a per-sample run whose store's MNV file is cut short reads
+        the store's indels (the frame around the target the insertion changes is read) and
+        writes one NOTE on stdout, never stderr, that opens as a store of 2.10.0's does."""
+        with tempfile.TemporaryDirectory() as d:
+            dicts = os.path.join(d, "Dictionaries", "dictionaries_hg38_X")
+            store = os.path.join(d, "Dictionaries", "indel_genotypes_hg38_X")
+            os.makedirs(dicts)
+            os.makedirs(store)
+            _write_store(os.path.join(store, "gt_indel_chrT.tsv.gz"),
+                         [(_ins_inside(), {"S1": "1|0"})])
+            with open(os.path.join(store, "gt_mnv_chrT.tsv.gz"), "wb") as fh:
+                fh.write(gzip.compress(b"41_AC_GT\tS2:1|0\n" * 50)[:30])
+            argv = ["new_simple_analysis.py", "chrT.fa", os.path.join(dicts, "my_dict_chrT.json")]
+            keys, out, err = set(), io.StringIO(), io.StringIO()
+            with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(err):
+                os.environ.pop("CRISPRME_INDEL_SNP", None)
+                got = self._reader(False)([(LO, HI)], keys)
+        self.assertEqual(len(got), 1)
+        self.assertTrue(keys)
+        self.assertEqual(err.getvalue(), "")
+        self.assertEqual(out.getvalue().count(
+            "NOTE [indel-snp]: the phased indel genotype store of hg38_X on chrT holds no MNV "
+            "that can be read: its MNV file gt_mnv_chrT.tsv.gz is corrupt or cut short ("), 1,
+            out.getvalue())
+        self.assertIn("no per-sample SNP row loses a carrier for an MNV inside its target",
+                      out.getvalue())
 
 
 class Constants(unittest.TestCase):

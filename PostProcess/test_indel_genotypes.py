@@ -525,8 +525,11 @@ def test_a_vcf_with_no_mnv_gets_an_mnv_file_of_no_record():
 
 def test_compile_store_leaves_no_part_of_a_file_on_a_kill():
     """A pass that dies (an OOM kill, an interrupt) leaves neither file nor a temporary
-    one, and no marker; compile_store_safe returns -1 on any other failure, the temporary
-    files and markers gone, and raises a failure that ends the build (a full disk)."""
+    one, and no marker; compile_store_safe returns None on any other failure (a tuple for a
+    chromosome written, so build-index-only's STEP 1c counts the written ones by `is not
+    None`; it returned -1, which STEP 1c's `>= 0` could not compare with a tuple), the
+    temporary files and markers gone, and raises a failure that ends the build (a full
+    disk). compile_indel_genotypes_safe keeps its contract: a count, or -1."""
     import errno
     vcf = _vcf_file(_VCF_MNV)
     d = tempfile.mkdtemp()
@@ -552,7 +555,9 @@ def test_compile_store_leaves_no_part_of_a_file_on_a_kill():
         except RuntimeError:
             pass
         assert sorted(os.listdir(d)) == []
-        assert big.compile_store_safe(vcf, indel_out, mnv_out) == -1
+        assert big.compile_store_safe(vcf, indel_out, mnv_out) is None
+        assert sorted(os.listdir(d)) == []
+        assert big.compile_indel_genotypes_safe(vcf, indel_out) == -1
         assert sorted(os.listdir(d)) == []
         big.iter_store_genotypes = full
         try:
@@ -566,6 +571,84 @@ def test_compile_store_leaves_no_part_of_a_file_on_a_kill():
         os.remove(vcf)
         _cleanup(indel_out, mnv_out)
         os.rmdir(d)
+
+
+def _corrupt_copies(mnv_out):
+    """{what: bytes} of an MNV file that cannot be read to its end: cut short (a copy
+    stopped partway), not gzip at all, its stream damaged past its header, and text that is
+    not UTF-8. The reader takes none of their lines."""
+    with open(mnv_out, "rb") as fh:
+        whole = fh.read()
+    assert len(whole) > 40
+    damaged = bytearray(whole)
+    for k in range(20, len(damaged) - 8):
+        damaged[k] ^= 0x5A
+    return {"cut short": whole[:len(whole) // 2], "not gzip": b"not a gzip file\n",
+            "damaged": bytes(damaged), "not UTF-8": gzip.compress(b"120_AA_GG\tHG1:1|0\n\xff\xfe\n")}
+
+
+def test_a_corrupt_mnv_file_leaves_the_indel_file_read():
+    """2.10.1, the review's item 4: an MNV file that cannot be read to its end (cut short,
+    not gzip, its stream damaged, not UTF-8) is read as no MNV file (a store of 2.10.0's
+    reading: has_mnv False), with why in mnv_error; the indel file is read as it is, every
+    indel and its carriers. At 516d42a0 the reader raised, and the indel post-analysis and
+    the SNP rows then read the chromosome with no store at all. A corrupt indel file still
+    raises, as it did (a store that cannot be read is no store)."""
+    vcf = _vcf_file(_VCF_MNV)
+    d = tempfile.mkdtemp()
+    indel_out, mnv_out = big.store_files(d, "chr22")
+    try:
+        big.compile_store(vcf, indel_out, mnv_out)
+        whole = big.IndelGenotypeReader(indel_out)
+        assert whole.has_mnv and whole.mnv_error is None and whole.mnv_path == mnv_out
+        indels_only = big.IndelGenotypeReader(indel_out, mnv_path="").indels()
+        for what, data in _corrupt_copies(mnv_out).items():
+            with open(mnv_out, "wb") as fh:
+                fh.write(data)
+            lines, why = big.read_mnv_lines(mnv_out)
+            assert lines is None and why, (what, why)
+            r = big.IndelGenotypeReader(indel_out)
+            assert r.has_mnv is False and r.mnv_error == why, (what, r.mnv_error)
+            assert r.indels() == indels_only, what
+            assert r.carriers_dict(100, "AT", "A") == {"HG1": "1|0", "HG2": "0|1"}, what
+            assert r.carriers(120, "AA", "GG") == "", what
+        # no MNV file: no error (a store of 2.10.0)
+        os.remove(mnv_out)
+        r = big.IndelGenotypeReader(indel_out)
+        assert r.has_mnv is False and r.mnv_error is None
+        # a corrupt indel file fails the store, as before
+        with open(indel_out, "rb") as fh:
+            data = fh.read()
+        with open(indel_out, "wb") as fh:
+            fh.write(data[:len(data) // 2])
+        try:
+            big.IndelGenotypeReader(indel_out)
+            raise AssertionError("a corrupt indel file was read")
+        except (EOFError, OSError):
+            pass
+    finally:
+        os.remove(vcf)
+        _cleanup(indel_out, mnv_out)
+        os.rmdir(d)
+
+
+def test_the_note_of_an_unreadable_mnv_file():
+    """What a reader says on stdout of an MNV file it read as absent: it opens as the NOTE
+    of a store with no MNV file does (the reading is the same), says why, and gives the two
+    ways to get the file whole, the commands pasted as they are (a quoted path)."""
+    note = big.mnv_unreadable_note("hg38_HPRC", "chr5", "/d/indel_genotypes_hg38_HPRC/"
+                                   "gt_mnv_chr5.tsv.gz", "Compressed file ended", "the reading")
+    assert note.startswith("NOTE [indel-snp]: the phased indel genotype store of hg38_HPRC "
+                           "on chr5 holds no MNV that can be read: its MNV file "
+                           "gt_mnv_chr5.tsv.gz is corrupt or cut short (Compressed file "
+                           "ended), so chr5 is read as with a store written before CRISPRme "
+                           "2.10.1, which has no MNV file: the reading."), note
+    assert ("rm -f /d/indel_genotypes_hg38_HPRC/gt_mnv_chr5.tsv.gz "
+            "/d/indel_genotypes_hg38_HPRC/gt_mnv_chr5.tsv.gz.done") in note
+    assert "crisprme.py download --what indel-genotypes --dataset hg38_HPRC" in note
+    assert "'/a b/gt_mnv_chr5.tsv.gz'" in big.mnv_unreadable_note(
+        "v", "chr5", "/a b/gt_mnv_chr5.tsv.gz", "x", "y")
+    assert "\n" not in note
 
 
 def test_the_mnv_only_command_line():

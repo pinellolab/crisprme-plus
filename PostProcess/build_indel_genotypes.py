@@ -25,8 +25,10 @@ haplotype holds one. A reader of 2.10.0 opens the indel file by name, so the MNV
 leaves its readings as they were, and its presence tells a reader of 2.10.1 that the
 MNVs were stored (IndelGenotypeReader.has_mnv). compile_store writes both files in one
 pass over the VCF, each only where it is asked for: a store of 2.10.0 gains its MNV file
-and keeps its indel file byte for byte (search_indel_snp.store asks for the files that
-are not current).
+and keeps its indel file byte for byte (build-index-only's STEP 1c and
+search_indel_snp.store ask for the files that are not current: files_to_write). A
+reader takes an MNV file it cannot read to its end for none, the indel file as it is
+(read_mnv_lines).
 
 STDLIB ONLY (gzip). Runs at build time; the reader loads one chromosome's indels
 into a dict (indels are ~10x fewer than SNPs, so this is cheap). Gated behind
@@ -36,6 +38,7 @@ CRISPRME_INDEL_SNP; classic build untouched.
 import contextlib
 import errno
 import os
+import shlex
 import sys
 import gzip
 
@@ -387,9 +390,12 @@ def compile_indel_genotypes_safe(vcf_path, out_path, keep_samples=None):
 
 def compile_store_safe(vcf_path, indel_out=None, mnv_out=None, keep_samples=None):
     """Guarded ``compile_store``, as compile_indel_genotypes_safe guards its writer: its
-    (indel records, MNV records), or -1 on any other failure, the temporary files and the
-    markers of the files asked for removed; it raises only a failure that ends the build
-    (``ends_the_build``)."""
+    (indel records, MNV records) tuple, each None for a file not asked for, or None on any
+    other failure, the temporary files and the markers of the files asked for removed; it
+    raises only a failure that ends the build (``ends_the_build``). So a caller tells a
+    chromosome written (a tuple) from one skipped with a WARNING (None) by ``is not None``
+    (build-index-only's STEP 1c). compile_indel_genotypes_safe keeps its own contract (a
+    count, or -1)."""
     try:
         return compile_store(vcf_path, indel_out, mnv_out, keep_samples=keep_samples)
     except Exception as err:  # noqa: BLE001 - store is optional (-> PUTATIVE)
@@ -409,7 +415,7 @@ def compile_store_safe(vcf_path, indel_out=None, mnv_out=None, keep_samples=None
             f"{os.path.basename(vcf_path)} ({err})",
             flush=True,
         )
-        return -1
+        return None
 
 
 def merge_store_carriers(earlier, later):
@@ -449,6 +455,53 @@ def store_key(pos, ref, alt):
     return f"{pos}_{ref}_{alt}".upper()
 
 
+def store_lines(path):
+    """Every line of a file of the store, read to its end before any is taken: a file cut
+    short (a copy stopped partway, a disk that lost a block) or corrupt raises here
+    (EOFError, OSError, zlib.error, UnicodeDecodeError...), so that a reader takes none of
+    its lines rather than a part of them."""
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt") as fh:
+        return fh.readlines()
+
+
+def read_mnv_lines(mnv_path):
+    """(the lines of a chromosome's MNV file, None), read whole (store_lines), or (None, why)
+    where it cannot be read to its end: corrupt or cut short. Each reader of the store (the
+    indel post-analysis' IndelGenotypeReader, the SNP rows' new_simple_analysis._SnpRowIndels,
+    the carrier gate's haplotype_prioritizer.IndelIndex) then reads that chromosome as a
+    store of 2.10.0 is read, with no MNV file, its indel file as it is, and says so on
+    stdout (mnv_unreadable_note); a corrupt indel file fails the store as before 2.10.1.
+    Before, a corrupt MNV file failed the whole store: the indel post-analysis and the SNP
+    rows read the chromosome with no store at all, and the gate's worker raised out of its
+    pool."""
+    try:
+        return store_lines(mnv_path), None
+    except MemoryError:
+        raise
+    except Exception as err:  # noqa: BLE001 - not read to its end: no MNV file
+        return None, (str(err) or type(err).__name__)
+
+
+def mnv_unreadable_note(vcf, chrom, mnv_path, why, reading):
+    """The NOTE (stdout: the run's own record of it, never stderr) of a reader that read
+    the MNV file ``mnv_path`` of ``vcf``'s store on ``chrom`` as absent (read_mnv_lines:
+    ``why``); ``reading``: how that reader then reads the chromosome's MNVs. It opens as
+    the NOTE of a store with no MNV file does ("the phased indel genotype store of <vcf> on
+    <chrom> holds no MNV"), the reading being the same, and says how to get the file
+    whole: a corrupt file can keep a .done marker, so build-index-only takes it for
+    current until it is removed."""
+    q = shlex.quote
+    return (f"NOTE [indel-snp]: the phased indel genotype store of {vcf} on {chrom} holds no "
+            f"MNV that can be read: its MNV file {os.path.basename(mnv_path)} is corrupt or "
+            f"cut short ({why}), so {chrom} is read as with a store written before CRISPRme "
+            f"2.10.1, which has no MNV file: {reading}. To read them by their phase, remove "
+            f"it (rm -f {q(mnv_path)} {q(_done_marker(mnv_path))}) and run build-index-only "
+            f"with the dataset's VCFs, which writes it again, or, for an index downloaded "
+            f"from Hugging Face, run crisprme.py download --what indel-genotypes --dataset "
+            f"{vcf}, which installs the store whole again.")
+
+
 class IndelGenotypeReader(object):
     """Read a phased indel genotype store (one chromosome) into a dict keyed by
     ``<pos>_<REF>_<ALT>``, REF and ALT in upper case (store_key). Small enough to hold
@@ -462,30 +515,40 @@ class IndelGenotypeReader(object):
     records of the store as its indels are (carriers, carriers_dict, and indels(), which
     gives both kinds). ``has_mnv``: whether an MNV file was read, so whether the store's
     MNVs can be told from no MNV at all (a store of 2.10.0 has no MNV file: its readers
-    read the MNVs, from the indel log, as 2.10.0 did)."""
+    read the MNVs, from the indel log, as 2.10.0 did).
 
-    __slots__ = ("_by_key", "reads_filter", "has_mnv")
+    An MNV file that cannot be read to its end (corrupt, cut short: read_mnv_lines) is read
+    as no MNV file, the indel file as it is: ``has_mnv`` False, and ``mnv_error`` says why
+    (None where the file was read, or is not there), for the reader's NOTE
+    (mnv_unreadable_note). An indel file that cannot be read raises, as before 2.10.1."""
+
+    __slots__ = ("_by_key", "reads_filter", "has_mnv", "mnv_error", "mnv_path")
 
     def __init__(self, store_path, mnv_path=None):
         self._by_key = {}
         self.reads_filter = store_reads_filter(store_path)
         if mnv_path is None:
             mnv_path = mnv_store_path(store_path)
-        self.has_mnv = bool(mnv_path) and os.path.isfile(mnv_path)
-        self._read(store_path)
-        if self.has_mnv:
-            self._read(mnv_path)
+        self.mnv_path = mnv_path or None
+        self.has_mnv = False
+        self.mnv_error = None
+        opener = gzip.open if store_path.endswith(".gz") else open
+        with opener(store_path, "rt") as fh:
+            self._take(fh)
+        if mnv_path and os.path.isfile(mnv_path):
+            lines, self.mnv_error = read_mnv_lines(mnv_path)
+            if lines is not None:
+                self._take(lines)
+                self.has_mnv = True
 
-    def _read(self, path):
-        opener = gzip.open if path.endswith(".gz") else open
-        with opener(path, "rt") as fh:
-            for line in fh:
-                key, _, toks = line.rstrip("\n").partition("\t")
-                if not key:
-                    continue
-                key = key.upper()  # store_key: the position is digits
-                prev = self._by_key.get(key)
-                self._by_key[key] = toks if prev is None else merge_store_carriers(prev, toks)
+    def _take(self, lines):
+        for line in lines:
+            key, _, toks = line.rstrip("\n").partition("\t")
+            if not key:
+                continue
+            key = key.upper()  # store_key: the position is digits
+            prev = self._by_key.get(key)
+            self._by_key[key] = toks if prev is None else merge_store_carriers(prev, toks)
 
     def carriers(self, pos, ref, alt):
         """Return "sample:gt" tokens (comma-joined) for the indel, or "" if absent."""

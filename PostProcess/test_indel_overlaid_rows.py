@@ -500,7 +500,8 @@ class _Fixture(object):
     """Write the world as a data folder and run the shipped analyzer on it."""
 
     def __init__(self, tmp, world, tiers=("registry", "tier1", "indelgt"), env=None,
-                 max_total=None, indel_af=None, store_marker=True, mnv_store=False):
+                 max_total=None, indel_af=None, store_marker=True, mnv_store=False,
+                 cut_short=()):
         self.tmp = tmp
         self.world = world
         d = os.path.join(tmp, "Dictionaries")
@@ -570,6 +571,14 @@ class _Fixture(object):
                             "%s:%s" % kv for kv in sorted(g.items()))))
                 with open(os.path.join(igd, "gt_mnv_%s.tsv.gz.done" % CHROM), "w") as fh:
                     fh.write("%d\n%s\n" % (len(mnvs), big.FILTER_MARK))
+            for kind in cut_short:
+                # a file of the store cut short (a copy stopped partway), its .done marker
+                # left as it was: "indel" or "mnv"
+                path = os.path.join(igd, "gt_%s_%s.tsv.gz" % (kind, CHROM))
+                with open(path, "rb") as fh:
+                    data = fh.read()
+                with open(path, "wb") as fh:
+                    fh.write(data[:len(data) // 2])
         if indel_af is not None:
             iad = os.path.join(d, "indel_af_" + VCF)
             os.makedirs(iad)
@@ -1282,12 +1291,81 @@ class TheMnvStore(_Base):
     def test_the_notes_say_how_the_mnvs_were_read(self):
         """Once per chromosome whose indel log lists an MNV, on stdout (the search's
         log_verbose.txt), never stderr; the base world, whose log lists none, has neither
-        (test_a_store_of_an_earlier_release_is_noted)."""
+        (test_a_store_of_an_earlier_release_is_noted). The NOTE of a store of 2.10.0 names
+        the two ways to get its MNVs: build-index-only (whose STEP 1c adds them since
+        2.10.1: the review's item 2) and, for a downloaded index, the download step."""
         for fx, note, other in ((self.with_store, self.NOTE_READ, self.NOTE_NONE),
                                 (self.store_2100, self.NOTE_NONE, self.NOTE_READ)):
             self.assertEqual(fx.proc.stdout.count(note), 1, fx.proc.stdout[-3000:])
             self.assertNotIn(other, fx.proc.stdout)
             self.assertEqual(fx.proc.stderr, "")
+        line = next(ln for ln in self.store_2100.proc.stdout.splitlines()
+                    if ln.startswith(self.NOTE_NONE))
+        self.assertIn("build-index-only of CRISPRme 2.10.1 or later with the dataset's VCFs "
+                      "adds the MNVs to the store", line)
+        self.assertIn("crisprme.py download --what indel-genotypes --dataset %s" % VCF, line)
+
+    def test_an_mnv_file_cut_short_is_read_as_none_and_said(self):
+        """The review's item 4: an MNV file that cannot be read to its end leaves the
+        chromosome read as with a store of 2.10.0 (every row as store_2100's), the indel
+        file read as it is (not as with no store at all, where K5's deletion row lists its
+        carriers unphased), with one NOTE on stdout, opening as a store of 2.10.0's does,
+        and nothing on stderr. At 516d42a0 the whole store was dropped: the rows were those
+        of a search with no phased store."""
+        tmp = tempfile.mkdtemp(prefix="indel_overlaid_rows_cut_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        cut = _Fixture(tmp, self.world, mnv_store=True, cut_short=("mnv",))
+        self.assertEqual(cut.proc.returncode, 0, cut.proc.stderr[-2000:])
+        self.assertEqual(cut.proc.stderr, "")
+        key = lambda r: (r["dna"], r["start"], r["strand"], r["samples"], r["var"], r["cfd"])  # noqa: E731
+        self.assertEqual(sorted(map(key, cut.rows())), sorted(map(key, self.store_2100.rows())))
+        self.assertEqual(cut.cooc(), self.store_2100.cooc())
+        head = ("NOTE [indel-snp]: the phased indel genotype store of %s on %s holds no MNV "
+                "that can be read: its MNV file gt_mnv_%s.tsv.gz is corrupt or cut short ("
+                % (VCF, CHROM, CHROM))
+        self.assertEqual(cut.proc.stdout.count(head), 1, cut.proc.stdout[-3000:])
+        self.assertNotIn(self.NOTE_READ, cut.proc.stdout)
+        self.assertNotIn(self.NOTE_NONE, cut.proc.stdout)
+        self.assertNotIn("no phased indel genotype store of", cut.proc.stdout)
+
+    def test_an_indel_file_cut_short_still_fails_the_store(self):
+        """A corrupt indel file keeps 2.10.0's reading: no store at all (the NOTE of a
+        dataset read without one), whatever its MNV file, as a run with no store."""
+        runs = {}
+        for name, kw in (("cut", dict(mnv_store=True, cut_short=("indel",))),
+                         ("none", dict(tiers=("registry", "tier1")))):
+            tmp = tempfile.mkdtemp(prefix="indel_overlaid_rows_%s_" % name)
+            self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+            runs[name] = _Fixture(tmp, self.world, **kw)
+            self.assertEqual(runs[name].proc.returncode, 0, runs[name].proc.stderr[-2000:])
+            self.assertEqual(runs[name].proc.stderr, "")
+        key = lambda r: (r["dna"], r["start"], r["strand"], r["samples"], r["var"], r["cfd"])  # noqa: E731
+        self.assertEqual(sorted(map(key, runs["cut"].rows())),
+                         sorted(map(key, runs["none"].rows())))
+        for fx in runs.values():
+            self.assertEqual(fx.proc.stdout.count(
+                "NOTE [indel-snp]: no phased indel genotype store of %s on %s:" % (VCF, CHROM)),
+                1, fx.proc.stdout[-3000:])
+            self.assertNotIn(self.NOTE_READ, fx.proc.stdout)
+            self.assertNotIn(self.NOTE_NONE, fx.proc.stdout)
+
+    def test_no_store_and_a_log_of_mnvs_says_no_mnv_note(self):
+        """The review's mutant E: the NOTEs on the MNVs are of a store that was read. With
+        none (a dataset built with CRISPRME_INDEL_SNP=0, or a store that failed) and a log
+        that lists MNVs, the run writes the NOTE of a dataset read without its store, once,
+        and neither MNV NOTE; read without that guard, the store's has_mnv on None ended the
+        run (its rows not written)."""
+        tmp = tempfile.mkdtemp(prefix="indel_overlaid_rows_nostore_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        fx = _Fixture(tmp, self.world, tiers=("registry", "tier1"))
+        self.assertEqual(fx.proc.returncode, 0, fx.proc.stderr[-2000:])
+        self.assertEqual(fx.proc.stderr, "")
+        self.assertTrue(fx.rows())
+        self.assertEqual(fx.proc.stdout.count(
+            "NOTE [indel-snp]: no phased indel genotype store of %s on %s:" % (VCF, CHROM)), 1)
+        self.assertNotIn(self.NOTE_READ, fx.proc.stdout)
+        self.assertNotIn(self.NOTE_NONE, fx.proc.stdout)
+        self.assertNotIn("holds no MNV", fx.proc.stdout)
 
     def test_the_mnv_file_changes_the_mnvs_readings_alone(self):
         """The MNV file changes the rows of the sites with an MNV (K5's perfect row loses
@@ -1310,6 +1388,35 @@ class TheMnvStore(_Base):
         base = _Fixture(tmp, World())
         self.assertEqual(base.proc.returncode, 0, base.proc.stderr[-2000:])
         self.assertEqual(sorted(map(key, base.rows())), got["store"])
+
+
+@unittest.skipUnless(_gnu_wc(), _SKIP_WC)
+class TheMnvFileOfNoRecord(_Base):
+    """The byte-identity guard of 2.10.1 (the plan's section 5): a dataset with no MNV, as
+    HGDP + 1000 Genomes and the mega, gets an MNV file of no record from build-index-only's
+    STEP 1c, and its store is read with it as without it: the same rows, the same
+    co-occurrence companion, the same stdout (no NOTE on the MNVs, its log listing none)."""
+
+    def test_the_same_run_with_and_without_it(self):
+        runs = {}
+        for name, kw in (("without", {}), ("with", dict(mnv_store=True))):
+            tmp = tempfile.mkdtemp(prefix="indel_overlaid_rows_%s_" % name)
+            self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+            runs[name] = _Fixture(tmp, self.world, **kw)
+            self.assertEqual(runs[name].proc.returncode, 0, runs[name].proc.stderr[-2000:])
+        mnv = os.path.join(runs["with"].tmp, "Dictionaries", "indel_genotypes_" + VCF,
+                           "gt_mnv_%s.tsv.gz" % CHROM)
+        with gzip.open(mnv, "rt") as fh:
+            self.assertEqual(fh.read(), "")
+        with open(runs["without"].out + ".bestCFD_INDEL.txt") as a, \
+                open(runs["with"].out + ".bestCFD_INDEL.txt") as b:
+            self.assertEqual(a.read(), b.read())
+        self.assertEqual(runs["without"].cooc(), runs["with"].cooc())
+        import re
+        strip = lambda fx: re.sub(r"\d+\.\d+", "<s>", fx.proc.stdout.replace(fx.tmp, "<T>"))  # noqa: E731
+        self.assertEqual(strip(runs["without"]), strip(runs["with"]))  # (timings aside)
+        self.assertNotIn("MNV", runs["with"].proc.stdout)
+        self.assertEqual(runs["with"].proc.stderr, "")
 
 
 class World30(World):

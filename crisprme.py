@@ -211,6 +211,7 @@ from validate_inputs import run_lightweight, run_full, resolve_vcf_dataset_dirs,
 from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside)
     download_component,
     download_genotype_oracle,
+    download_indel_genotypes,
     publish_index,
     resolve_repo,
     synthesize_combined_samplesid,
@@ -6559,8 +6560,13 @@ def build_index_only() -> None:
     # [indel-snp] STEP 1c (ADDITIVE, gated): emit the PHASED indel genotype store so
     # the indel post-analysis can do CONFIRMED-cis SNP+indel co-occurrence. One
     # gt_indel_<chrom>.tsv.gz per chromosome under indel_genotypes_<vcf>/ (sibling of
-    # the SNP tiers). GUARDED (stdout warning; only a full disk or quota, an I/O error
-    # or no memory left aborts); absent -> the post-
+    # the SNP tiers), and from 2.10.1 its MNV file beside it, gt_mnv_<chrom>.tsv.gz
+    # (build_indel_genotypes.store_files): a job per chromosome writes, in one pass over
+    # its VCF, whichever of the two is missing or not current
+    # (build_indel_genotypes.files_to_write, compile_store_safe), so a store of 2.10.0
+    # gains its MNV files and keeps its indel files byte for byte, and a VCF with no MNV
+    # gets an MNV file of no record. GUARDED (stdout warning; only a full disk or quota,
+    # an I/O error or no memory left aborts); absent -> the post-
     # analysis degrades to PUTATIVE via the log's unphased carriers. Enabled by
     # default (opt-out): set CRISPRME_INDEL_SNP=0 to disable.
     # A sites-only dataset has no phase to store: the presence genotype that makes its
@@ -6581,15 +6587,23 @@ def build_index_only() -> None:
                 _keep = _keep or None
             _n_ig = 0
 
-            def _ig_written(_igt_out):
-                return os.path.isfile(_igt_out) and _big.store_is_current(_igt_out)
+            def _ig_left_of(_job):
+                # the job's files still not written whole (a worker killed meanwhile): each
+                # one asked for that is not current yet
+                _vf, _ind, _mnv, _kp = _job
+                return (_vf, *[_p if _p and not _big.store_is_current(_p) else None
+                               for _p in (_ind, _mnv)], _kp)
 
-            # Build (vcf, out, keep) jobs; detect chrom from the first data line (the
-            # filename may not carry it). Skip chromosomes already built so a restart
-            # resumes instead of re-streaming 20GB VCFs -- but not a store written before
-            # 2.10.0, which holds the indels whose FILTER the search skips too
-            # (build_indel_genotypes.store_is_current): it is written again.
+            # Build (vcf, indel file, MNV file, keep) jobs; detect chrom from the first data
+            # line (the filename may not carry it). Skip chromosomes already built so a
+            # restart resumes instead of re-streaming 20GB VCFs -- but not a store written
+            # before 2.10.0, which holds the indels whose FILTER the search skips too
+            # (build_indel_genotypes.store_is_current): it is written again. Each job asks
+            # for the files of its chromosome that are missing or not current
+            # (build_indel_genotypes.files_to_write), the other None: a chromosome of a
+            # store of 2.10.0 for its MNV file alone.
             _ig_jobs = []
+            _mnv_alone = 0  # (chromosomes whose indel file is current: their MNV file alone)
             for _vf in sorted(_glob(os.path.join(vcfdir, "*.vcf.gz"))
                               + _glob(os.path.join(vcfdir, "*.vcf"))):
                 _chrom = None
@@ -6603,18 +6617,19 @@ def build_index_only() -> None:
                         break
                 if _chrom is None:
                     continue
-                _igt_out = os.path.join(_igt_dir, f"gt_indel_{_chrom}.tsv.gz")
-                # Resume only if the store is a COMPLETE, non-truncated gzip -- a
+                # Resume only where each file is a COMPLETE, non-truncated gzip -- a
                 # size>0 check would skip a file left partial by an OOM/SIGKILL
                 # mid-write and silently ship a short store (the gt_indel_chr1 bug).
-                if _ig_written(_igt_out):
+                _todo = _big.files_to_write(_igt_dir, _chrom)
+                if not any(_todo):
                     _n_ig += 1  # already built (resume)
                     continue
-                _ig_jobs.append((_vf, _igt_out, _keep))
+                _mnv_alone += _todo[0] is None
+                _ig_jobs.append((_vf, _todo[0], _todo[1], _keep))
             _ig_total = _n_ig + len(_ig_jobs)
-            # compile_indel_genotypes streams the VCF (low RAM, I/O + gzip bound), so
-            # fan out wide -- CRISPRME_INDELGT_WORKERS (default 8). Guarded worker so a
-            # single bad chromosome cannot sink the store.
+            # compile_store streams the VCF (low RAM, I/O + gzip bound), so fan out
+            # wide -- CRISPRME_INDELGT_WORKERS (default 8). Guarded worker so a single
+            # bad chromosome cannot sink the store.
             if _ig_jobs:
                 try:
                     _igw = int(os.environ.get("CRISPRME_INDELGT_WORKERS", "8"))
@@ -6623,16 +6638,23 @@ def build_index_only() -> None:
                 _igw = max(1, min(_igw, len(_ig_jobs)))
                 print(f"[indel-snp] building phased indel GT for {len(_ig_jobs)} "
                       f"chromosome(s) with {_igw} parallel worker(s)", flush=True)
+                if _mnv_alone:
+                    print(f"[indel-snp] {_mnv_alone} of them with a current indel file, "
+                          f"kept as it is (a store of CRISPRme 2.10.0): their MNV file "
+                          f"alone (gt_mnv_<chrom>.tsv.gz) is added", flush=True)
                 # written in place too, a chromosome at a time: marked unfinished
-                # until this step has built every chromosome's, as the tiers above are
+                # until this step has built every chromosome's, both its files, as the
+                # tiers above are
                 _mark_unfinished(_igt_dir)
                 _ig_done = _n_ig
                 while True:
                     try:
+                        # (compile_store_safe: a tuple for a chromosome written, None for
+                        # one skipped with a WARNING)
                         _n_ig += sum(
                             1 for _r in _in_forked_workers(
-                                _big.compile_indel_genotypes_safe, _ig_jobs, _igw)
-                            if _r is not None and _r >= 0
+                                _big.compile_store_safe, _ig_jobs, _igw)
+                            if _r is not None
                         )
                         break
                     except _BrokenProcessPool:
@@ -6643,7 +6665,7 @@ def build_index_only() -> None:
                               f"below {_igw} to start with fewer; building the "
                               f"chromosomes left one at a time.", flush=True)
                         _igw = 1
-                        _left = [_job for _job in _ig_jobs if not _ig_written(_job[1])]
+                        _left = [_j for _j in map(_ig_left_of, _ig_jobs) if any(_j[1:3])]
                         _n_ig = _ig_done + len(_ig_jobs) - len(_left)
                         _ig_jobs = _left
             print(f"[indel-snp] phased indel genotype store: {_n_ig} chromosome(s) "
@@ -6674,7 +6696,8 @@ def build_index_only() -> None:
                 )
             print(f"WARNING [indel-snp]: phased indel genotype store not built "
                   f"({_ig_err}); indel post-analysis falls back to PUTATIVE.", flush=True)
-            if _glob(os.path.join(_igt_dir, "gt_indel_*")):  # (a part of it is there)
+            if (_glob(os.path.join(_igt_dir, "gt_indel_*"))  # (a part of it is there)
+                    or _glob(os.path.join(_igt_dir, "gt_mnv_*"))):
                 _ig_left = "some chromosome(s)"
         # A part of the store, which a search would use as if it were the whole: the
         # mark stays
@@ -6914,14 +6937,24 @@ def print_help_download() -> None:
     sys.stderr.write(
         "Options:\n"
         "\t--what, component to fetch: genome | annotations | pams | samples | "
-        "vcf | build-inputs | index | assembly | genotype-oracle | all (all = "
+        "vcf | build-inputs | index | assembly | genotype-oracle | indel-genotypes | all "
+        "(all = "
         "genome+annotations+pams+samples, plus the default hg38 reference index so a "
         "reference scan works out of the box; genotype-oracle = the phased genotypes and "
         "indel genotypes of a panel, by default HGDP + 1000 Genomes, into Dictionaries/, "
         "which complete-search --prioritize-observed checks a sites-only dataset's rows "
-        "against; an installed index of the panel already brings them) [REQUIRED]\n"
+        "against; an installed index of the panel already brings them; indel-genotypes "
+        "(2.10.1) = the MNVs of an installed panel's phased indel genotype store, for an "
+        "index downloaded with CRISPRme 2.10.0, whose store has none: `crisprme.py download "
+        "--what indel-genotypes --dataset hg38_HPRC` fetches the panel's indel_genotypes_<vcf> "
+        "companion (0.61 GB for HPRC) and installs it whole in place of the store where it is "
+        "the store installed, file for file, with the MNV file of each chromosome added, and "
+        "refuses any other build (DownloadIntegrityError: nothing installed); a search then "
+        "reads each MNV's carriers by their phase. A store that has them already costs no "
+        "download, and an index of the panel downloaded with them needs none) [REQUIRED]\n"
         "\t--ref, reference genome name for --what genome/index [default: hg38]\n"
-        "\t--dataset, variant dataset name for --what vcf / build-inputs (e.g. hg38_HGDP1kGP, "
+        "\t--dataset, variant dataset name for --what vcf / build-inputs / indel-genotypes "
+        "(e.g. hg38_HGDP1kGP, "
         "hg38_HPRC, hg38_mega). `--what vcf` fetches the raw per-chromosome VCFs the default "
         "repo hosts (build from scratch: then `build-index-only --vcf VCFs/<dataset> "
         "--samplesID ... --pam ...`): HGDP + 1000 Genomes' and the mega's are the source VCFs "
@@ -6932,7 +6965,7 @@ def print_help_download() -> None:
         "VCFs and their .tbi under VCFs/hg38_HPRC/ to build from them); "
         "`--what build-inputs` fetches the PRE-ENRICHED genome kit so build-index-only skips "
         "enrichment and only indexes (fast / new-PAM path; kits exist for a subset of datasets) "
-        "[REQUIRED for --what vcf/build-inputs]\n"
+        "[REQUIRED for --what vcf/build-inputs/indel-genotypes]\n"
         "\t--index-name, precomputed index directory name for --what index "
         "(e.g. the reference index 20-NRR_3_hg38, the recommended variant-aware default "
         "20-NRR_3_hg38+hg38_HGDP1kGP (SpCas9 NRR, the default PAM; phased HGDP + 1000 "
@@ -7049,6 +7082,20 @@ def download_data() -> None:
         for dest in dests:
             print(f"Genotype oracle: {dest}", flush=True)
         return
+    # The MNVs of an installed panel's phased indel genotype store (2.10.1): its companion
+    # indel_genotypes_<vcf>, installed whole where it is the store installed with the MNV
+    # file of each chromosome added (an install of CRISPRme 2.10.0 has none; a search then
+    # reads each MNV's carriers by their phase). Not a component: handled before the loop.
+    if what == "indel-genotypes":
+        if not dataset:
+            error("--what indel-genotypes requires --dataset <the panel>, e.g. --dataset "
+                  "hg38_HPRC")
+        try:
+            dest = download_indel_genotypes(workdir, dataset, repo=repo)
+        except (ValueError, ImportError, RuntimeError) as e:
+            error(str(e))
+        print(f"Phased indel genotype store: {dest}", flush=True)
+        return
     if what == "all":
         components = ["genome", "annotations", "pams", "samples"]
     else:
@@ -7130,7 +7177,8 @@ def print_help_publish_index() -> None:
         "build-index-only) to a HuggingFace dataset repository as a single "
         "compressed archive, so it can later be fetched with "
         "'crisprme.py download --what index'. An HF write token is required "
-        "(provide --token or set HF_TOKEN; never commit it).\n"
+        "(provide --token or set HF_TOKEN; never commit it), but with --stage-only, which "
+        "uploads nothing.\n"
     )
     sys.stderr.write(
         "Options:\n"
@@ -7150,6 +7198,17 @@ def print_help_publish_index() -> None:
         "\t--replace-companions, for an index of format 2: replace a panel companion "
         "(its Dictionaries bundle or genotype store) the repo holds in another build "
         "[OPTIONAL, default: refused]\n"
+        "\t--stage-only <folder>, pack everything the publish would upload into "
+        "<folder>/indexes/ (the index's archive, each companion it would upload and its "
+        "record), with <folder>/staged.sha256 (the SHA-256 of each archive staged, the lines "
+        "indexes/SHA256SUMS takes from it), and upload NOTHING: no token is needed, the "
+        "repo's companion records are read anonymously, as the publish reads them, and it "
+        "prints the commands that publish the folder in ONE commit of the repo with "
+        "indexes/SHA256SUMS (scripts/hf_sha256sums.py --staged, then hf upload of the "
+        "folder), which it does not run. publish-index otherwise uploads each file in a commit "
+        "of its own, so a download in between can meet an index of one build and a bundle of "
+        "another (CRISPRme 2.10.1's republish of HPRC goes up so). The folder must be new or "
+        "empty [OPTIONAL]\n"
     )
     sys.stderr.write(
         "Where it goes (since 2.10.0): an index of index format 2 (CRISPRitz 2.10.0), or "
@@ -7179,11 +7238,20 @@ def publish_index_cmd() -> None:
     # ADDITIVE: --dictless drops the 152GB per-sample SNP dicts from the main
     # tarball (tiers replace them); default off => byte-for-byte-unchanged publish.
     dictless = "--dictless" in args
+    # --stage-only <folder>: pack into the folder, upload nothing (2.10.1)
+    stage = None
+    if "--stage-only" in args:
+        at = args.index("--stage-only") + 1
+        stage = args[at] if at < len(args) else ""
+        if not stage or stage.startswith("--"):
+            error("--stage-only needs the folder to pack into, e.g. --stage-only "
+                  "/scratch/stage_hg38_HPRC (a new or empty folder)")
+        stage = os.path.abspath(stage)
     try:
         # (it says where each archive went, the repo it was routed to included)
         publish_index(
             index_dir, repo=repo, token=token, display_name=name, dictless=dictless,
-            replace_companions="--replace-companions" in args,
+            replace_companions="--replace-companions" in args, stage_dir=stage,
         )
     except (ValueError, ImportError) as e:
         error(str(e))
