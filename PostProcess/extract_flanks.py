@@ -35,21 +35,44 @@ is REPORTED, under ``unresolved``, with the reason and the records at fault -- n
 and not silently dropped. A target near a contig end is truncated and said so. An input it
 cannot resolve is named exactly, as the checker names it, never guessed.
 
-OUTPUT. ``<out>.fa`` (one record per emitted sequence, no sample identities in any name)
-and ``<out>.tsv`` (one line per emitted sequence, joining back to the input row by its
-line number and, where the input has one, its rank). Deterministic: rows in input order,
-the reference entry first, then the haplotypes that HOLD the off-target, then by carrier
-count and by the sequence itself; carriers and variants sorted.
+THE WINDOW is the target plus a padding at each of its two ends, named for what each
+sits beside: ``--upstream`` beyond the PROTOSPACER's outer end and ``--downstream``
+beyond the PAM's outer end, both read in the GUIDE's orientation. Which GENOMIC side
+each lands on follows from the row's strand and from which end of the target the PAM is
+-- read from the run's own records, never assumed, because on a 5' PAM (Cas12a) the two
+ends swap. ``--window W`` is the symmetric form, and is exactly ``--upstream W
+--downstream W``. A ``--preset`` names a configuration, so another assay is a line in
+``flank_presets.conf`` rather than a change to this file.
+
+OUTPUT, three ways of reading one computation.
+  * ``<out>.fa`` -- one record per emitted sequence, no sample identities in any name.
+  * ``<out>.tsv`` -- one line per emitted sequence, joining back to the input row by its
+    line number and, where the input has one, its rank. Deterministic: rows in input
+    order, the reference entry first, then the haplotypes that HOLD the off-target, then
+    by carrier count and by the sequence itself; carriers and variants sorted.
+  * ``--annotate-table`` -- the INPUT table written back out with the sequences added as
+    columns (the reference sequence, the primary ALT, how many distinct ALTs the row
+    has), so a results table becomes an oligo order without a join. A row with several
+    distinct ALTs keeps every one of them in the two files above, reached by
+    ``flank_row_id``; none is dropped, and none is crammed into a cell unless
+    ``--alt-list`` asks for it.
+
+``--filter`` chooses which rows are done at all, as an expression over the table's OWN
+columns, with the CRISPR-Bulge sensitive operating point available by name
+(``CB_SENSITIVE``) rather than as a number to copy.
 
 COORDINATES. CRISPRme's ``Start_coordinate_*`` / curated ``Position`` is the 0-based
-reference coordinate of the target's leftmost base, on either strand. Flank coordinates in
-the TSV are printed 1-based inclusive (as a genome browser reads them); the target offset
-inside a flank is 0-based, as a Python slice reads it. Every flank is written on the PLUS
-strand of the reference, whatever the row's strand: one orientation, stated once, is what
-an oligo order needs. The TSV's ``protospacer_on_strand`` gives the target read on the
-row's own strand, for checking against the row's alignment.
+reference coordinate of the target's leftmost base, on either strand. Flank coordinates
+in the TSV are printed 1-based inclusive (as a genome browser reads them) and are always
+GENOMIC; the target offset inside a flank is 0-based, as a Python slice reads it.
+ORIENTATION: by default a flank is written as the GUIDE reads it, so the protospacer in
+the file runs 5'->3' and an oligo can be ordered off it directly; ``--orientation
+genome`` writes the reference's plus strand instead, whatever the row's strand. Which
+one was used is in every output line (``orientation``, ``emitted_strand``), and the
+TSV's ``protospacer_on_strand`` always gives the target read on the row's own strand.
 """
 
+import ast
 import contextlib
 import csv
 import glob
@@ -86,16 +109,45 @@ class FlankError(Exception):
     whole message: it names what is missing and what to pass, never a traceback."""
 
 
-# 200 bases either side of the target. An amplicon for validation sequencing (rhAmpSeq,
-# CRISPResso2 and the like) is typically 200-300 bp with its primers 50-150 bp away from
-# the cut, and a Sanger/TIDE amplicon 400-700 bp: 200 + target + 200 covers the first
-# comfortably and the short end of the second, while staying small enough that a top-1000
-# list is a file you can open. Change it with --window.
+# THE WINDOW. Two forms of one thing. A window is the target plus a padding at each of
+# its two ends, and the ends are named for what they sit beside:
+#
+#   --upstream N    N bases beyond the PROTOSPACER's outer end (its PAM-distal side)
+#   --downstream M  M bases beyond the PAM's outer end
+#   --window W      the symmetric form: the same as --upstream W --downstream W
+#
+# Both are read in the GUIDE's orientation, so they do not change meaning with the row's
+# strand or with where the nuclease's PAM sits; which genomic side each lands on is
+# worked out per row (Geometry.edges). For a 3' PAM (SpCas9: protospacer then PAM)
+# --upstream is literally "before the protospacer's first base" and --downstream
+# "after the PAM's last base". For a 5' PAM (Cas12a: PAM then protospacer) the two ends
+# of the target swap, so the SAME two flags land on the opposite genomic sides -- which
+# is the point of naming them for the protospacer and the PAM rather than for left and
+# right.
+#
+# THE DEFAULT IS THE ANCHORED FORM, 3 and 6. Three reasons. (1) An anchored window is
+# the general one: its meaning does not depend on how long the target is, while a
+# symmetric window is only the special case where the two paddings are equal, and is
+# still reachable in one flag (--window W). (2) The assay these numbers come from -- a
+# short oligo read straight off the site, no amplicon -- is the case where getting the
+# padding wrong is unrecoverable, because there is no primer slack to absorb it. (3) A
+# small default keeps a 1,000-row shortlist a file you can open; a user who wants the
+# amplicon-scale context asks for it, and gets it from one flag or the `amplicon` preset.
+# The length is never left to be inferred: every output says the window it used and the
+# bases it actually emitted (window_spec, pad_upstream, pad_downstream, flank_len).
+DEFAULT_UPSTREAM = 3
+DEFAULT_DOWNSTREAM = 6
+# the symmetric alternative. An amplicon for validation sequencing (rhAmpSeq, CRISPResso2
+# and the like) is typically 200-300 bp with its primers 50-150 bp away from the cut, and
+# a Sanger/TIDE amplicon 400-700 bp: 200 + target + 200 covers the first comfortably and
+# the short end of the second. It is the `amplicon` preset and the value --window takes
+# when it is given no number of its own.
 DEFAULT_WINDOW = 200
-# how many haplotypes of a site are written beside the reference. A 400 bp window over a
-# panel of thousands holds dozens of distinct haplotypes (on the 1000-site shortlist of a
-# genome-wide HGDP+1000G run: a median of 23, and one site with 4264), nearly all differing from
-# each other far from the target. Writing them all turns a shortlist into megabytes, so
+# how many haplotypes of a site are written beside the reference. How many a site HAS
+# depends strongly on the window: at --window 200 a panel of thousands gives dozens (on
+# the 1000-site shortlist of a genome-wide HGDP+1000G run: a median of 23, and one site
+# with 4264), nearly all differing from each other far from the target, while a 32-mer
+# spans too little to hold many. Writing them all turns a shortlist into megabytes, so
 # the most useful come first -- the sequences that HOLD the off-target, then by how many
 # haplotypes carry them -- and the rest are counted in the notes rather than written.
 # --max-haplotypes 0 writes every one. n_haplotypes always gives the true total.
@@ -104,6 +156,55 @@ DEFAULT_MAX_HAPLOTYPES = 10
 BLOCKS = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
 DEFAULT_BLOCK = "highest_CFD"
 _NO_VALUE = ("", "NA", "n", "-", ".")
+
+# ---- where the nuclease's PAM sits, relative to the protospacer, in the GUIDE's
+# orientation. Read from the run's own records, never assumed: a 5' PAM puts the two
+# paddings on the opposite genomic sides from a 3' one, so guessing SpCas9 on a Cas12a
+# run would write every window back to front.
+PAM_3PRIME = "3prime"     # SpCas9 and the rest of the NGG/NRG family: spacer then PAM
+PAM_5PRIME = "5prime"     # Cas12a (TTTV), and anything else that reads PAM then spacer
+PAM_SIDES = (PAM_3PRIME, PAM_5PRIME)
+
+# ---- what to do when the target's genomic footprint is not the nominal spacer+PAM
+# length, which is what a bulge in the alignment means: a DNA bulge is an extra genomic
+# base (the footprint is longer), an RNA bulge is a base of the guide with no genomic
+# partner (shorter). See Geometry.edges.
+POLICY_ANCHORED = "anchored"        # keep the paddings, let the total vary (default)
+POLICY_FIXED_TOTAL = "fixed-total"  # keep the total, move a padding
+LENGTH_POLICIES = (POLICY_ANCHORED, POLICY_FIXED_TOTAL)
+
+# ---- which orientation the emitted sequence is written in
+ORIENT_GUIDE = "guide"    # as the guide reads it: the protospacer 5'->3' (default)
+ORIENT_GENOME = "genome"  # the reference's plus strand, whatever the row's strand
+ORIENTATIONS = (ORIENT_GUIDE, ORIENT_GENOME)
+DEFAULT_ORIENTATION = ORIENT_GUIDE
+
+# ---- named window configurations. A preset is a NAME for a set of the flags below, so
+# that an assay with its own geometry is a line of configuration rather than a change to
+# this file: --preset-file <path> and $CRISPRME_FLANK_PRESETS add to (and override) these
+# by name, and --help lists whatever is loaded. Nothing here is special-cased anywhere
+# else in the module: a preset only supplies defaults for flags the user did not give.
+PRESET_KEYS = ("upstream", "downstream", "window", "length_policy", "orientation",
+               "max_haplotypes", "filter", "description")
+BUILTIN_PRESETS = {
+    "oligo": {
+        "upstream": "3", "downstream": "6",
+        "description": "a short oligo read straight off the site: 3 nt beyond the "
+                       "protospacer, 6 nt beyond the PAM (a 32-mer for a 20-nt spacer "
+                       "with a 3-nt PAM). The default geometry.",
+    },
+    "amplicon": {
+        "window": "200",
+        "description": "amplicon-scale context: 200 bases beyond each end of the "
+                       "target (a 423 bp interval for a 23-nt target), room to place "
+                       "primers 50-150 bp from the cut.",
+    },
+}
+# a preset file shipped beside this module, so the built-in set itself is editable
+# without touching code; then $CRISPRME_FLANK_PRESETS, then --preset-file (last wins).
+PRESET_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "flank_presets.conf")
+PRESET_ENV = "CRISPRME_FLANK_PRESETS"
 
 # What the REFERENCE entry's note may say, and the three different things it means. The
 # reference sequence is the same in all three; what differs is how much was CHECKED, and
@@ -125,10 +226,10 @@ TSV_COLUMNS = (
     "target_strand",
     "haplotype",         # ref | hap1, hap2, ... | unresolved
     "fasta_id",
-    "flank_start",       # 1-based inclusive, on the reference
-    "flank_end",         # 1-based inclusive, on the reference
+    "flank_start",       # 1-based inclusive, on the reference (ALWAYS genomic)
+    "flank_end",         # 1-based inclusive, on the reference (ALWAYS genomic)
     "flank_len",         # the bases of THIS haplotype between them (an indel moves it)
-    "target_offset",     # 0-based, into the flank sequence of this entry
+    "target_offset",     # 0-based, into the flank sequence of this entry AS EMITTED
     "target_len",        # bases of this entry's flank the target covers
     "target_found",      # yes: this haplotype reads the row's protospacer+PAM here
     "target_sequence",   # those bases, plus strand
@@ -143,8 +244,27 @@ TSV_COLUMNS = (
                          # unknown (overlapping records), the bare sample where
                          # neither copy is (an unphased or missing genotype)
     "variants",          # the records written into this flank
+    # ---- the geometry this line was cut with, so nobody has to infer it from the
+    # command line that produced the file (or from a length that a bulge or an indel
+    # moved). Every one of these is a property of the ROW, not of the run.
+    "orientation",       # guide | genome: which way the sequence above is written
+    "emitted_strand",    # + | -: the genomic strand the emitted sequence reads
+    "window_spec",       # e.g. up3+down6, or window200 for the symmetric form
+    "pad_upstream",      # bases emitted beyond the protospacer's outer end, AS APPLIED
+    "pad_downstream",    # bases emitted beyond the PAM's outer end, AS APPLIED
+    "pam_side",          # 3prime | 5prime | unknown: which end of the target is the PAM
+    "length_policy",     # anchored | fixed-total
+    "nominal_target_len",   # spacer+PAM length, gaps taken out: 23 for a 20-nt SpCas9
+    "target_span_ref",   # reference coordinates the target covers (a bulge moves it)
+    "bulge_type",        # none | DNA:n | RNA:n | DNA:n,RNA:n | unknown
     "notes",
 )
+
+# a row whose genomic footprint is not the nominal spacer+PAM length: the class a fixed
+# total-length assumption gets wrong. Greppable, and the three columns above say by how
+# much and why.
+NOTE_FOOTPRINT = "target-span-not-nominal"
+NOTE_LENGTH_ADJUSTED = "padding-moved-to-hold-the-total"
 
 
 # --------------------------------------------------------------------------- #
@@ -166,11 +286,14 @@ def open_table(path):
                         path, len(names), ", ".join(sorted(names)[:8])
                         + (", ..." if len(names) > 8 else "")))
             with zf.open(names[0]) as fh:
-                yield (line.decode("utf-8", "replace").rstrip("\n") for line in fh)
+                yield (line.decode("utf-8", "replace").rstrip("\r\n") for line in fh)
         return
     op = gzip.open if path.endswith(".gz") else open
     with op(path, "rt", errors="replace") as fh:
-        yield (line.rstrip("\n") for line in fh)
+        # "\r\n" and not "\n": a table written on Windows would otherwise leave a
+        # carriage return on the end of its last column, in the notes of every line
+        # and in the middle of a line the column mode writes back out
+        yield (line.rstrip("\r\n") for line in fh)
 
 
 # Where the guide itself is named, in the order preferred. ``Aligned_spacer+PAM`` is the
@@ -211,6 +334,11 @@ def table_columns(header, block):
                                           "Aligned_protospacer+PAM_REF_(%s)" % block)),
             "rank": _column(head, ("rank",)),
             "guide": _column(head, _GUIDE_COLUMNS),
+            # the guide side of the alignment AS WRITTEN, gaps and all: the PAM's side
+            # reads off its run of N's and a DNA bulge off its gaps, and both are lost
+            # once the gaps are taken out for the ``guide`` column
+            "spacer": _column(head, ("Aligned_spacer+PAM_(%s)" % block,
+                                     "Aligned_spacer+PAM")),
         }, "integrated (%s)" % block
     start = _column(head, ("Position", "Start_coordinate"))
     aligned = _column(head, ("Aligned_protospacer+PAM",))
@@ -225,16 +353,26 @@ def table_columns(header, block):
             % (block, ", ".join(missing)))
     return {"chrom": chrom, "start": start, "strand": strand, "aligned": aligned,
             "aligned_ref": None, "rank": _column(head, ("rank",)),
-            "guide": _column(head, _GUIDE_COLUMNS)}, "curated"
+            "guide": _column(head, _GUIDE_COLUMNS),
+            "spacer": _column(head, ("Aligned_spacer+PAM",))}, "curated"
 
 
-def read_rows(path, block=DEFAULT_BLOCK, max_rows=0):
-    """[(row_id, dict)] of a results table: its sites, in file order. ``row_id`` is the
-    1-based data line number, the key the output joins back on. A line whose start or
-    alignment is unreadable is kept with a note rather than dropped: a shortlist the user
-    handed us must come back the same length."""
+def read_rows(path, block=DEFAULT_BLOCK, max_rows=0, row_filter=None):
+    """([(row_id, dict)], the shape's name, the header, {filter counts}) of a results
+    table: its sites, in file order. ``row_id`` is the 1-based data line number, the key
+    the output joins back on. A line whose start or alignment is unreadable is kept with
+    a note rather than dropped: a shortlist the user handed us must come back the same
+    length.
+
+    ``row_filter`` (a RowFilter) selects which rows are reconstructed. A row it does not
+    keep is dropped HERE and counted, so nothing downstream has to know about it; the
+    annotate-table writer reads the input again and marks those lines, so the user's own
+    table still comes back whole.
+    """
     csv.field_size_limit(1 << 30)
     out = []
+    counts = {"read": 0, "kept": 0, "filtered_out": 0, "filter_missing": 0,
+              "truncated": False, "last_line": 0}
     with open_table(path) as lines:
         reader = csv.reader(lines, delimiter="\t")
         try:
@@ -246,11 +384,24 @@ def read_rows(path, block=DEFAULT_BLOCK, max_rows=0):
             if not row or (len(row) == 1 and not row[0].strip()):
                 continue
             if max_rows and len(out) >= max_rows:
+                # stop READING, do not just skip: a genome-wide integrated table has
+                # millions of lines and --max-rows is how a user says "a shortlist"
+                counts["truncated"] = True
                 break
+            counts["read"] += 1
+            counts["last_line"] = line_no
 
             def cell(key, _row=row):
                 i = cols.get(key)
                 return _row[i].strip() if i is not None and i < len(_row) else ""
+
+            if row_filter is not None:
+                keep, missing = row_filter.keep(row)
+                if missing:
+                    counts["filter_missing"] += 1
+                if not keep:
+                    counts["filtered_out"] += 1
+                    continue
 
             rec = {"chrom": cell("chrom"), "strand": cell("strand"),
                    "rank": cell("rank"),
@@ -261,6 +412,11 @@ def read_rows(path, block=DEFAULT_BLOCK, max_rows=0):
             if aligned in _NO_VALUE:
                 aligned = cell("aligned_ref")
             rec["aligned"] = aligned.upper()
+            # the guide side of the alignment as written. Its gaps are the row's DNA
+            # bulges and its run of N's names the PAM's side; both are read per row, so
+            # a table mixing alignments (or guides) is still read right.
+            spacer = cell("spacer").upper()
+            rec["spacer"] = "" if spacer in ("NA", ".") else spacer
             try:
                 rec["start"] = int(cell("start"))
             except ValueError:
@@ -273,7 +429,548 @@ def read_rows(path, block=DEFAULT_BLOCK, max_rows=0):
                 rec["note"] = ((rec["note"] + ";" if rec["note"] else "")
                                + "unreadable-alignment")
             out.append((line_no, rec))
-    return out, shape
+    counts["kept"] = len(out)
+    return out, shape, header, counts
+
+
+# --------------------------------------------------------------------------- #
+# named window configurations
+# --------------------------------------------------------------------------- #
+def load_presets(paths=()):
+    """{name: {key: value}}: BUILTIN_PRESETS, then the file shipped beside this module,
+    then $CRISPRME_FLANK_PRESETS, then each --preset-file, every one overriding the ones
+    before it BY NAME.
+
+    An unknown key is refused rather than ignored: a preset that silently does nothing
+    is a window the user believes they asked for and did not get, and this command's
+    output goes to an oligo order.
+    """
+    import configparser
+    out = {name: dict(body) for name, body in BUILTIN_PRESETS.items()}
+    files = [PRESET_FILE] if os.path.isfile(PRESET_FILE) else []
+    env = os.environ.get(PRESET_ENV)
+    if env:
+        for p in env.split(os.pathsep):
+            if p.strip():
+                files.append(p.strip())
+    files.extend(paths)
+    for path in files:
+        if not os.path.isfile(path):
+            raise FlankError("the preset file does not exist: %s" % path)
+        parser = configparser.ConfigParser()
+        parser.optionxform = str   # keys as written
+        try:
+            with open(path, errors="replace") as fh:
+                parser.read_file(fh, source=path)
+        except configparser.Error as exc:
+            raise FlankError("%s is not a readable preset file (%s). A preset is an INI "
+                             "section: [name] then one key = value per line, from: %s"
+                             % (path, exc, ", ".join(PRESET_KEYS)))
+        for name in parser.sections():
+            body = {}
+            for key, value in parser.items(name):
+                if key not in PRESET_KEYS:
+                    raise FlankError(
+                        "preset [%s] of %s sets %r, which is not a preset key. The keys "
+                        "are: %s" % (name, path, key, ", ".join(PRESET_KEYS)))
+                body[key] = value.strip()
+            out[name] = body
+    return out
+
+
+def preset_help(presets):
+    """The presets, as --help lists them."""
+    lines = []
+    for name in sorted(presets):
+        body = presets[name]
+        how = []
+        if body.get("window"):
+            how.append("--window %s" % body["window"])
+        if body.get("upstream"):
+            how.append("--upstream %s" % body["upstream"])
+        if body.get("downstream"):
+            how.append("--downstream %s" % body["downstream"])
+        for key in ("length_policy", "orientation", "max_haplotypes", "filter"):
+            if body.get(key):
+                how.append("--%s %s" % (key.replace("_", "-"), body[key]))
+        lines.append("      %-14s %s" % (name, " ".join(how) or "(nothing)"))
+        if body.get("description"):
+            import textwrap
+            lines.extend(textwrap.wrap(body["description"], 70,
+                                       initial_indent=" " * 21,
+                                       subsequent_indent=" " * 21))
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# the nuclease: which end of the target is the PAM
+# --------------------------------------------------------------------------- #
+def read_pam_file(path):
+    """(motif, side, length) of a CRISPRme PAM file: one line, ``<sequence> <n>``, where
+    the sequence is the guide written as N's with the PAM in place and ``n`` is the PAM's
+    length, NEGATIVE when the PAM leads (5', Cas12a) and positive when it trails (3').
+    The same reading crisprme.py complete-search does."""
+    with open(path, errors="replace") as fh:
+        first = fh.readline().split()
+    if len(first) < 2:
+        raise FlankError("%s is not a CRISPRme PAM file (its first line is not "
+                         "'<sequence> <signed PAM length>')" % path)
+    try:
+        signed = int(first[-1])
+    except ValueError:
+        raise FlankError("%s is not a CRISPRme PAM file (its first line does not end in "
+                         "a signed PAM length)" % path)
+    seq = first[0].upper()
+    if signed < 0:
+        return seq[:-signed], PAM_5PRIME, -signed
+    if signed == 0:
+        raise FlankError("%s gives a PAM length of 0" % path)
+    return seq[-signed:], PAM_3PRIME, signed
+
+
+def pam_side_from_spacer(spacer, motif_len=None):
+    """The PAM's side read off the guide side of a row's alignment, or None.
+
+    The guide is written with an N at every PAM position, so a trailing run of N's is a
+    3' PAM and a leading one a 5' PAM -- the same reading ``scripts/check_alt_pam.py``
+    does. Gaps are taken out first: a DNA bulge in the PAM region writes one into the
+    guide. Returns (side, length), or None where the two ends cannot be told apart (a
+    guide with no N's, or one with N's at both ends -- a degenerate spacer).
+    """
+    s = (spacer or "").replace("-", "").upper()
+    if not s:
+        return None
+    lead = len(s) - len(s.lstrip("N"))
+    trail = len(s) - len(s.rstrip("N"))
+    if lead >= len(s):       # all N: a PAM-less guide tells us nothing about a side
+        return None
+    want = motif_len
+    if want:
+        if trail >= want and lead < want:
+            return PAM_3PRIME, want
+        if lead >= want and trail < want:
+            return PAM_5PRIME, want
+        return None
+    if trail and not lead:
+        return PAM_3PRIME, trail
+    if lead and not trail:
+        return PAM_5PRIME, lead
+    return None
+
+
+def resolve_pam(resdir, cmd, workdir, pam_file, pam_motif, pam_side, spacers):
+    """(side, motif, length, how it was found). Never assumes SpCas9.
+
+    In order: what the user gave; the PAM FILE the run's own command line names (which
+    carries the side in the sign of its length, so it is the one unambiguous source);
+    the ``Pam`` line of the run's .Params.txt for the motif, with the side read off the
+    alignments in the table; the alignments alone. Where none of them answers, the side
+    is None and the caller decides whether that matters -- it does not for a symmetric
+    window, and run() refuses an asymmetric one rather than guess.
+    """
+    if pam_side and pam_side not in PAM_SIDES:
+        raise FlankError("--pam-side must be one of: %s" % ", ".join(PAM_SIDES))
+    if pam_file:
+        motif, side, length = read_pam_file(pam_file)
+        return side, motif, length, "PAM: %s %s (--pam-file %s)" % (
+            motif, side, pam_file)
+    if pam_motif and pam_side:
+        return pam_side, pam_motif.upper(), len(pam_motif), (
+            "PAM: %s %s (--pam-motif/--pam-side)" % (pam_motif.upper(), pam_side))
+    motif = pam_motif.upper() if pam_motif else None
+    if resdir and not motif:
+        named = _flag_value(cmd, "--pam")
+        if named:
+            path = named if os.path.isabs(named) or workdir is None else os.path.join(
+                workdir, named)
+            if os.path.isfile(path):
+                motif, side, length = read_pam_file(path)
+                # an explicit --pam-side still wins: the user may be reading a table
+                # the run's own PAM does not describe
+                side = pam_side or side
+                return side, motif, length, (
+                    "PAM: %s %s (%s)" % (motif, side, "--pam-side, with the motif of "
+                                         "the run's --pam %s" % named if pam_side else
+                                         "the run's --pam %s" % named))
+        params = run_params(resdir) if resdir else {}
+        if params.get("Pam"):
+            motif = params["Pam"].strip().upper()
+    if pam_side:
+        return pam_side, motif, len(motif) if motif else None, (
+            "PAM: %s %s (--pam-side)" % (motif or "motif not recorded", pam_side))
+    # the motif's length is known but not its side (or neither): ask the table's own
+    # alignments, which carry the guide written with an N at every PAM position
+    seen = set()
+    for spacer in spacers:
+        answer = pam_side_from_spacer(spacer, len(motif) if motif else None)
+        if answer:
+            seen.add(answer)
+    if len(seen) == 1:
+        side, length = seen.pop()
+        return side, motif or ("N" * length), length, (
+            "PAM: %s %s (read off the table's Aligned_spacer+PAM%s)"
+            % (motif or "N" * length, side,
+               ", its length from the run's Params.txt" if motif else ""))
+    if motif:
+        return None, motif, len(motif), (
+            "PAM: %s, side unknown (the run records the motif but not which end it is "
+            "on, and the table's alignments do not say)" % motif)
+    return None, None, None, "PAM: not recorded by the run and not readable from the table"
+
+
+# --------------------------------------------------------------------------- #
+# the window
+# --------------------------------------------------------------------------- #
+def bulge_counts(spacer, protospacer):
+    """(DNA bulges, RNA bulges) of a row's alignment, from its two aligned strings.
+
+    CRISPRme writes a bulge as a gap in the side that has no base there: a gap in the
+    GUIDE is a DNA bulge (a genomic base with no partner -- the footprint is one base
+    LONGER per bulge) and a gap in the PROTOSPACER an RNA bulge (a guide base with no
+    genomic partner -- one base SHORTER). Checked against a real run's
+    ``Bulge_type`` column, which agrees on all four cases (X, RNA, DNA, RNA,DNA).
+    """
+    return (spacer or "").count("-"), (protospacer or "").count("-")
+
+
+def bulge_label(dna, rna, known):
+    if not known:
+        return "unknown"
+    parts = [("DNA:%d" % dna) if dna else "", ("RNA:%d" % rna) if rna else ""]
+    return ",".join(p for p in parts if p) or "none"
+
+
+class Geometry(object):
+    """How far beyond each end of the target to reach, and in which direction.
+
+    ``upstream`` is the padding beyond the PROTOSPACER's outer end and ``downstream`` the
+    padding beyond the PAM's outer end, both in the guide's orientation. For a 3' PAM
+    those are literally "before the protospacer's first base" and "after the PAM's last
+    base"; for a 5' PAM the target's two ends swap, so the same two numbers land on the
+    opposite genomic sides. ``Geometry.edges`` does that mapping per row.
+    """
+
+    __slots__ = ("upstream", "downstream", "pam_side", "policy", "symmetric")
+
+    def __init__(self, upstream, downstream, pam_side=None, policy=POLICY_ANCHORED,
+                 symmetric=False):
+        self.upstream = upstream
+        self.downstream = downstream
+        self.pam_side = pam_side
+        self.policy = policy
+        self.symmetric = symmetric
+
+    @property
+    def spec(self):
+        """What the output calls this window."""
+        if self.symmetric:
+            return "window%d" % self.upstream
+        return "up%d+down%d" % (self.upstream, self.downstream)
+
+    def edges(self, strand, span, nominal):
+        """(left, right, upstream applied, downstream applied, adjustment).
+
+        ``span`` is the reference coordinates the target covers and ``nominal`` the
+        spacer+PAM length with its gaps taken out (None where the table does not say).
+        They differ exactly where the alignment carries a bulge, or where an indel of
+        the haplotype the target was located on sits inside it.
+
+        Under the default ANCHORED policy the paddings are kept and the emitted length
+        varies: the bases beyond the target are the bases the user asked for, and the
+        sequence is what that piece of genome really is. Under FIXED-TOTAL the reference
+        interval is held at upstream + nominal + downstream, and the difference comes
+        out of the padding -- beyond the PAM first, then beyond the protospacer, never
+        below zero.
+        """
+        up, down, adjust = self.upstream, self.downstream, 0
+        if self.policy == POLICY_FIXED_TOTAL and nominal is not None:
+            adjust = nominal - span
+            down += adjust
+            if down < 0:
+                up, down = max(0, up + down), 0
+            up = max(0, up)
+        five, three = ((down, up) if self.pam_side == PAM_5PRIME else (up, down))
+        # the guide's 5' end is at the genomic left on a + row and at the right on a -
+        left, right = (five, three) if strand != "-" else (three, five)
+        return left, right, up, down, adjust
+
+
+# --------------------------------------------------------------------------- #
+# selecting rows: a general expression over the table's own columns
+# --------------------------------------------------------------------------- #
+class _Missing(object):
+    """A cell the table does not fill (blank, NA, '-', '.'): not zero, not a string to
+    compare against. Any comparison it takes part in is False, and the row is counted."""
+
+    __slots__ = ()
+
+    def __repr__(self):
+        return "<missing>"
+
+
+MISSING = _Missing()
+_MISSING_CELLS = frozenset(("", "NA", "N/A", "-", ".", "NaN", "nan", "None", "null"))
+
+
+def column_alias(name):
+    """The name a filter expression can write a column by: every run of characters that
+    cannot be in a Python name becomes one underscore (``CRISPR-Bulge`` ->
+    ``CRISPR_Bulge``, ``CFD_score_(highest_CFD)`` -> ``CFD_score_highest_CFD``). The
+    exact name is always reachable as ``col("...")``."""
+    return re.sub(r"\W+", "_", name).strip("_")
+
+
+def cb_sensitive_point():
+    """(threshold, recall target) of the CRISPR-Bulge sensitive operating point, from
+    PostProcess/cb_operating_point.py -- the single source of truth the report, the risk
+    card and the panel selection all key on. Taken BY NAME rather than written as a
+    literal, so a filter written today still means "the sensitive threshold" after the
+    operating point is re-fitted or CRISPRME_CB_RECALL_TARGET is set."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.append(here)
+    try:
+        import cb_operating_point as cbop
+    except ImportError as exc:   # pragma: no cover - a broken install, named not guessed
+        raise FlankError(
+            "--filter uses CB_SENSITIVE, the CRISPR-Bulge sensitive operating point, "
+            "which lives in cb_operating_point.py beside this command in %s, and it is "
+            "not there: write the number itself, or repair the install (%s)"
+            % (here, exc))
+    return cbop.sensitive_threshold(), cbop.recall_target()
+
+
+class RowFilter(object):
+    """``--filter`` : which rows of the table get flanks, as an expression over the
+    table's OWN columns.
+
+    The expression is Python's grammar cut down to what a row test needs -- comparisons,
+    and/or/not, arithmetic, ``in`` -- evaluated over a whitelist of names: one per column
+    (``column_alias``), ``col("exact name")`` for any column, and the named constants
+    below. No attribute access, no indexing, no call but the few named here, so a table
+    or an expression cannot run anything.
+
+    Names are checked against the header ONCE, before a single row is read, so a typo is
+    an error that names the columns rather than a run that quietly selects nothing.
+    """
+
+    FUNCTIONS = {"abs": abs, "min": min, "max": max, "len": len, "int": int,
+                 "float": float}
+    _NODES = (ast.Expression, ast.BoolOp, ast.UnaryOp, ast.BinOp, ast.Compare,
+              ast.Constant, ast.Name, ast.Call, ast.Tuple, ast.List, ast.Load,
+              ast.And, ast.Or, ast.Not, ast.USub, ast.UAdd, ast.Add, ast.Sub,
+              ast.Mult, ast.Div, ast.Mod, ast.Eq, ast.NotEq, ast.Lt, ast.LtE,
+              ast.Gt, ast.GtE, ast.In, ast.NotIn)
+
+    def __init__(self, expression, header):
+        self.expression = expression
+        self.header = list(header)
+        threshold, recall = cb_sensitive_point()
+        self.constants = {"CB_SENSITIVE": threshold, "CB_RECALL": recall,
+                          "MISSING": MISSING}
+        self.index = {}
+        clash = set()
+        for i, name in enumerate(header):
+            alias = column_alias(name)
+            if not alias:
+                continue
+            if alias in self.index and self.index[alias] != i:
+                clash.add(alias)
+            self.index[alias] = i
+        for alias in clash:
+            del self.index[alias]
+        self.exact = {name: i for i, name in enumerate(header)}
+        self.clash = clash
+        try:
+            self.tree = ast.parse(expression.strip(), mode="eval")
+        except SyntaxError as exc:
+            raise FlankError("--filter %r is not an expression: %s" % (expression, exc))
+        self._check(self.tree)
+
+    # ---- validation, once
+    def _check(self, tree):
+        # the Name node of ``max(a, b)`` is the function, not a column: told apart by
+        # identity, so a column really named max is still read as a column
+        called = {id(n.func) for n in ast.walk(tree)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        for node in ast.walk(tree):
+            if not isinstance(node, self._NODES):
+                raise FlankError(
+                    "--filter may not use %s. It is a row test over the table's "
+                    "columns: comparisons, and/or/not, arithmetic, 'in', and the "
+                    "functions %s." % (type(node).__name__,
+                                       ", ".join(sorted(self.FUNCTIONS))))
+            if isinstance(node, ast.Call):
+                if not isinstance(node.func, ast.Name) or node.func.id not in (
+                        set(self.FUNCTIONS) | {"col", "has"}):
+                    raise FlankError(
+                        "--filter may only call col(), has() and %s"
+                        % ", ".join(sorted(self.FUNCTIONS)))
+                if node.func.id in ("col", "has"):
+                    if (len(node.args) != 1
+                            or not isinstance(node.args[0], ast.Constant)
+                            or not isinstance(node.args[0].value, str)):
+                        raise FlankError("--filter: %s() takes one column name in "
+                                         "quotes" % node.func.id)
+                    self._known_column(node.args[0].value)
+            elif isinstance(node, ast.Name):
+                if node.id in self.constants or node.id in self.index:
+                    continue
+                if id(node) in called:
+                    continue   # the name of a function being called, checked above
+                if node.id in self.FUNCTIONS or node.id in ("col", "has"):
+                    raise FlankError("--filter: %s is a function, not a column of this "
+                                     "table: write %s(...)" % (node.id, node.id))
+                if node.id in self.clash:
+                    raise FlankError(
+                        "--filter: %s is the name of more than one column of this "
+                        "table; write the one you mean as col(\"...\")" % node.id)
+                if node.id not in self.index:
+                    raise FlankError(
+                        "--filter: this table has no column %s. Its columns are: %s. "
+                        "A name with a character Python cannot hold is written with "
+                        "underscores (CRISPR-Bulge is CRISPR_Bulge) or as "
+                        "col(\"CRISPR-Bulge\"). The named constants are: %s."
+                        % (node.id, ", ".join(self.header),
+                           ", ".join(sorted(self.constants))))
+
+    def _known_column(self, name):
+        if name not in self.exact:
+            raise FlankError('--filter: this table has no column "%s". Its columns are: '
+                             "%s" % (name, ", ".join(self.header)))
+
+    # ---- one row
+    def keep(self, row):
+        """(keep it?, was a value missing?)
+
+        ONE rule, so there is nothing subtle to get wrong: a row is kept when the
+        expression is true AND every cell the expression actually read had a value. A
+        cell the table does not fill is not zero and not an empty string, and a row
+        selected on a value nobody measured is a site put into an assay for no reason;
+        a negated test would otherwise let exactly those rows through. Evaluation
+        short-circuits, so ``has("CRISPR-Bulge")`` is the way to ask about presence
+        without reading the value: ``not has("X") or X > 1`` keeps a row with no X.
+        """
+        state = {"missing": False}
+        value = self._eval(self.tree.body, row, state)
+        if state["missing"]:
+            return False, True
+        return bool(value) and value is not MISSING, False
+
+    def _cell(self, i, row, state):
+        text = row[i].strip() if i < len(row) else ""
+        if text in _MISSING_CELLS:
+            state["missing"] = True
+            return MISSING
+        try:
+            return float(text)
+        except ValueError:
+            return text
+
+    def _eval(self, node, row, state):
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, ast.Name):
+            if node.id in self.constants:
+                return self.constants[node.id]
+            if node.id not in self.index:
+                # a function's name written where a value belongs ("abs > 1"): said as
+                # a message, never as a KeyError out of the middle of a run
+                raise FlankError("--filter: %s is a function, not a column of this "
+                                 "table: write %s(...)" % (node.id, node.id))
+            return self._cell(self.index[node.id], row, state)
+        if isinstance(node, ast.Call):
+            name = node.func.id
+            if name == "col":
+                return self._cell(self.exact[node.args[0].value], row, state)
+            if name == "has":
+                i = self.exact[node.args[0].value]
+                text = row[i].strip() if i < len(row) else ""
+                return text not in _MISSING_CELLS
+            args = [self._eval(a, row, state) for a in node.args]
+            if any(a is MISSING for a in args):
+                return MISSING
+            return self.FUNCTIONS[name](*args)
+        if isinstance(node, (ast.Tuple, ast.List)):
+            return [self._eval(e, row, state) for e in node.elts]
+        if isinstance(node, ast.BoolOp):
+            if isinstance(node.op, ast.And):
+                for sub in node.values:
+                    v = self._eval(sub, row, state)
+                    if v is MISSING or not v:
+                        return False
+                return True
+            for sub in node.values:
+                v = self._eval(sub, row, state)
+                if v is not MISSING and v:
+                    return True
+            return False
+        if isinstance(node, ast.UnaryOp):
+            v = self._eval(node.operand, row, state)
+            if isinstance(node.op, ast.Not):
+                return v is MISSING or not v
+            if v is MISSING:
+                return MISSING
+            return -v if isinstance(node.op, ast.USub) else +v
+        if isinstance(node, ast.BinOp):
+            a, b = self._eval(node.left, row, state), self._eval(node.right, row, state)
+            if a is MISSING or b is MISSING:
+                return MISSING
+            return self._arith(node.op, a, b)
+        if isinstance(node, ast.Compare):
+            left = self._eval(node.left, row, state)
+            for op, right_node in zip(node.ops, node.comparators):
+                right = self._eval(right_node, row, state)
+                # a cell the table does not fill is not zero and not a string: a row
+                # whose value is missing does not pass, and is counted so the user is
+                # told how many there were rather than left to wonder
+                if left is MISSING or right is MISSING:
+                    return False
+                if not self._compare(op, left, right):
+                    return False
+                left = right
+            return True
+        raise FlankError("--filter may not use %s" % type(node).__name__)
+
+    def _arith(self, op, a, b):
+        try:
+            if isinstance(op, ast.Add):
+                return a + b
+            if isinstance(op, ast.Sub):
+                return a - b
+            if isinstance(op, ast.Mult):
+                return a * b
+            if isinstance(op, ast.Div):
+                return a / b
+            return a % b
+        except (TypeError, ZeroDivisionError) as exc:
+            raise FlankError("--filter %r: %s" % (self.expression, exc))
+
+    def _compare(self, op, a, b):
+        try:
+            if isinstance(op, ast.Eq):
+                return a == b
+            if isinstance(op, ast.NotEq):
+                return a != b
+            if isinstance(op, ast.In):
+                return a in b
+            if isinstance(op, ast.NotIn):
+                return a not in b
+            if isinstance(op, ast.Lt):
+                return a < b
+            if isinstance(op, ast.LtE):
+                return a <= b
+            if isinstance(op, ast.Gt):
+                return a > b
+            return a >= b
+        except TypeError:
+            # comparing a word with a number: the expression asks something of a column
+            # that does not hold numbers. Said once, with both values, rather than
+            # quietly dropping every row of the table
+            raise FlankError(
+                "--filter %r compares %r with %r, which have no order. Check the column "
+                "names: a text column (an origin, a gene) cannot be compared with a "
+                "number." % (self.expression, a, b))
 
 
 # --------------------------------------------------------------------------- #
@@ -701,7 +1398,7 @@ def target_span(refseq, chrom, row, variants, probe, include_filtered):
     return fallback, "protospacer-not-located"
 
 
-def site_entries(refseq, chrom, row, variants, window, include_filtered,
+def site_entries(refseq, chrom, row, variants, geometry, include_filtered,
                  max_haplotypes=0, ref_note=REF_NOTE_CHECKED):
     """([Entry], [(who, reason)], {facts}) for one input row.
 
@@ -716,6 +1413,10 @@ def site_entries(refseq, chrom, row, variants, window, include_filtered,
     ``ref_note`` is what the reference entry may claim (REF_NOTE_*): the caller knows
     whether a VCF was read for this contig at all, and the default claim is about every
     sample of the panel.
+
+    ``geometry`` says how far beyond each end of the target to reach. Which genomic side
+    each padding lands on is worked out HERE, from the row's own strand and the PAM's
+    side, because both can differ from row to row.
     """
     notes = set(row["note"].split(";")) if row["note"] else set()
     probe_bases = row["aligned"].replace("-", "")
@@ -725,7 +1426,25 @@ def site_entries(refseq, chrom, row, variants, window, include_filtered,
                                      include_filtered)
     if note:
         notes.add(note)
-    flo, fhi = t_lo - window, t_hi + window
+    # the spacer+PAM length a window of a fixed total assumes: the guide side of the
+    # alignment with its gaps taken out. A bulge makes the genomic footprint differ
+    # from it -- longer for a DNA bulge, shorter for an RNA one -- and that is the
+    # class a 32-mer assumption gets wrong, so it is said per row either way.
+    dna_b, rna_b = bulge_counts(row.get("spacer"), row["aligned"])
+    nominal = len(row["spacer"].replace("-", "")) if row.get("spacer") else None
+    span = t_hi - t_lo
+    pad_left, pad_right, up_applied, down_applied, adjust = geometry.edges(
+        row["strand"], span, nominal)
+    if nominal is not None and span != nominal:
+        notes.add("%s:%d/%d" % (NOTE_FOOTPRINT, span, nominal))
+    elif nominal is None and geometry.policy == POLICY_FIXED_TOTAL:
+        # fixed-total is measured against the spacer+PAM length, and this table does
+        # not carry it: say so rather than quietly behave as if anchored
+        notes.add("no-nominal-length(the table has no Aligned_spacer+PAM: "
+                  "--length-policy fixed-total has nothing to hold the total to)")
+    if adjust:
+        notes.add("%s:%+d" % (NOTE_LENGTH_ADJUSTED, adjust))
+    flo, fhi = t_lo - pad_left, t_hi + pad_right
     if flo < 0:
         notes.add("truncated-at-contig-start")
         flo = 0
@@ -801,7 +1520,14 @@ def site_entries(refseq, chrom, row, variants, window, include_filtered,
              # and 4,124).
              "n_samples": len({s for v in members.values() for s, _h in v}
                               | {w.split(":")[0] for w, _r in unresolved}),
-             "n_haplotypes": len(entries)}
+             "n_haplotypes": len(entries),
+             # the geometry of THIS row, so no reader has to infer it from a length a
+             # bulge or an indel moved
+             "window_spec": geometry.spec, "pad_upstream": up_applied,
+             "pad_downstream": down_applied, "pam_side": geometry.pam_side or "unknown",
+             "length_policy": geometry.policy, "nominal_target_len": nominal,
+             "target_span_ref": span,
+             "bulge_type": bulge_label(dna_b, rna_b, bool(row.get("spacer")))}
     return [ref_entry] + alts, sorted(set(unresolved)), facts
 
 
@@ -831,7 +1557,11 @@ def write_outputs(results, out_prefix, anonymise):
                 fa.write(">%s %s\n" % (line["fasta_id"], " ".join(
                     "%s=%s" % (k, line[k]) for k in
                     ("chrom", "flank_start", "flank_end", "target_offset", "target_len",
-                     "target_strand", "target_found", "n_carriers", "row_id"))))
+                     "target_strand", "target_found", "n_carriers", "row_id",
+                     # which way round these bases are written, and in what window:
+                     # the FASTA is used on its own, so it must not need the TSV to be
+                     # read right
+                     "orientation", "emitted_strand", "window_spec"))))
                 for piece in wrap(line.pop("_seq")):
                     fa.write(piece + "\n")
             else:
@@ -843,11 +1573,193 @@ def write_outputs(results, out_prefix, anonymise):
 
 
 # --------------------------------------------------------------------------- #
+# the column mode: the input table, with the sequences beside the row
+# --------------------------------------------------------------------------- #
+# The REF and the primary ALT sequence ON THE ROW, which is what turns a results table
+# into an oligo order without a join. A row can have SEVERAL distinct ALT sequences, and
+# a column is one cell wide: so the count is a column of its own and the full set stays
+# in the companion .fa/.tsv, reachable by flank_row_id. Nothing is dropped silently, and
+# nothing is crammed into a cell unless --alt-list asks for it.
+ANNOTATE_COLUMNS = (
+    "flank_row_id",          # the join key into <out>.tsv and <out>.fa
+    "flank_window",          # up3+down6 / window200: the geometry these cells were cut with
+    "flank_orientation",     # guide | genome
+    "flank_strand",          # + | -: the genomic strand the two sequences below read
+    "flank_ref",             # the REFERENCE sequence over the window
+    "flank_ref_len",
+    "flank_ref_offset",      # 0-based offset of the target inside flank_ref
+    "flank_ref_target_len",  # bases of flank_ref the target covers
+    "flank_alt",             # the PRIMARY ALT sequence (see primary_alt)
+    "flank_alt_len",
+    "flank_alt_offset",
+    "flank_alt_target_len",
+    "flank_alt_count",       # how many DISTINCT ALT sequences this row has, all of them
+    "flank_alt_carriers",    # carrier haplotypes of the primary ALT
+    "flank_notes",
+)
+ANNOTATE_ALT_LIST = "flank_alt_all"   # --alt-list: every ALT sequence, delimited
+ALT_LIST_SEP = "|"
+
+
+def annotate_columns(alt_list=False):
+    return list(ANNOTATE_COLUMNS) + ([ANNOTATE_ALT_LIST] if alt_list else [])
+
+
+def annotation_rows(out_lines):
+    """{row_id: {column: value}} for the column mode, read off the same lines the TSV
+    and the FASTA are written from -- one computation, three outputs, so the three can
+    never disagree.
+
+    The PRIMARY ALT is ``hap1``: the first of the row's ALT sequences in the order the
+    rest of the command already uses -- the sequences that HOLD the off-target first,
+    then by how many haplotypes carry them, then by the sequence itself. That is the one
+    a validation assay wants if it only has room for one.
+    """
+    by_row = defaultdict(list)
+    for line in out_lines:
+        by_row[line["row_id"]].append(line)
+    out = {}
+    for row_id, lines in by_row.items():
+        ref = next((d for d in lines if d["haplotype"] == "ref"), None)
+        alts = [d for d in lines if d["haplotype"].startswith("hap")]
+        alts.sort(key=lambda d: int(d["haplotype"][3:]))
+        first = alts[0] if alts else None
+        notes = ref["notes"] if ref is not None else (
+            lines[0]["notes"] if lines else "")
+        # n_haplotypes counts the reference, and it is the TRUE total whether or not
+        # --max-haplotypes wrote them all: the count must not shrink because the file
+        # was kept readable
+        total = 0
+        if ref is not None and str(ref.get("n_haplotypes", "")).isdigit():
+            total = max(0, int(ref["n_haplotypes"]) - 1)
+        cells = {
+            "flank_row_id": row_id,
+            "flank_window": (ref or first or {}).get("window_spec", ""),
+            "flank_orientation": (ref or first or {}).get("orientation", ""),
+            "flank_strand": (ref or first or {}).get("emitted_strand", ""),
+            "flank_ref": (ref or {}).get("_seq", ""),
+            "flank_ref_len": (ref or {}).get("flank_len", ""),
+            "flank_ref_offset": (ref or {}).get("target_offset", ""),
+            "flank_ref_target_len": (ref or {}).get("target_len", ""),
+            "flank_alt": (first or {}).get("_seq", ""),
+            "flank_alt_len": (first or {}).get("flank_len", ""),
+            "flank_alt_offset": (first or {}).get("target_offset", ""),
+            "flank_alt_target_len": (first or {}).get("target_len", ""),
+            "flank_alt_count": total,
+            "flank_alt_carriers": (first or {}).get("n_carriers", ""),
+            "flank_notes": notes,
+            ANNOTATE_ALT_LIST: ALT_LIST_SEP.join(d["_seq"] for d in alts),
+        }
+        out[row_id] = cells
+    return out
+
+
+def write_annotated_table(table, path, annot, header, alt_list=False,
+                          filter_drop=False, filtered=False, last_read=0):
+    """Write the input table back out with the sequence columns added, line for line.
+
+    Every original column is copied VERBATIM, in its own order: the user's table comes
+    back as their table, with columns on the end. A row the command did not reconstruct
+    -- one the filter did not keep, one past --max-rows, one whose coordinates could not
+    be read -- keeps its line with the added cells empty and ``flank_notes`` saying
+    which, so the table never comes back shorter than it went in (``--filter-drop``
+    asks for the shortened form).
+    """
+    columns = annotate_columns(alt_list)
+    clash = [c for c in columns if c in header]
+    if clash:
+        raise FlankError(
+            "the table already has the column(s) %s, and the column mode would have to "
+            "overwrite them: rename them, or write the companion .tsv instead"
+            % ", ".join(clash))
+    op = gzip.open if path.endswith(".gz") else open
+    written = kept = 0
+    with open_table(table) as lines, op(path, "wt") as fh:
+        # the ORIGINAL text, not a csv round trip: a cell holding a quote character
+        # would come back without it, and the user's table must come back as theirs.
+        # The blank-line rule is read_rows', so the line numbers are the same key.
+        stream = iter(lines)
+        try:
+            fh.write(next(stream) + "\t" + "\t".join(columns) + "\n")
+        except StopIteration:   # pragma: no cover - run() refuses an empty table
+            raise FlankError("%s is empty" % table)
+        for line_no, raw in enumerate(stream, start=1):
+            row = raw.split("\t")
+            if len(row) == 1 and not row[0].strip():
+                continue
+            written += 1
+            cells = annot.get(line_no)
+            if cells is None:
+                past = last_read and line_no > last_read
+                if filter_drop and filtered and not past:
+                    continue
+                cells = {c: "" for c in columns}
+                cells["flank_row_id"] = line_no
+                cells["flank_notes"] = ("not-read(--max-rows)" if past
+                                        else ("filtered-out" if filtered
+                                              else "no-flank-written"))
+            kept += 1
+            # the line as it was read, then the added columns on the end
+            fh.write(raw + "\t" + "\t".join(str(cells.get(c, "")) for c in columns)
+                     + "\n")
+    return {"path": path, "rows_in": written, "rows_out": kept, "columns": columns}
+
+
+# --------------------------------------------------------------------------- #
 # the command
 # --------------------------------------------------------------------------- #
+def resolve_window(upstream, downstream, window, preset, presets):
+    """(upstream, downstream, symmetric?) from what the user gave and the preset chosen.
+
+    Precedence, highest first: the flag itself, the preset, the built-in default. The
+    symmetric ``--window W`` is exactly ``--upstream W --downstream W`` -- one window,
+    two ways of saying it -- so the two forms can never drift apart; giving both is
+    refused rather than resolved, because which the user meant is not ours to decide.
+    """
+    body = {}
+    if preset:
+        if preset not in presets:
+            raise FlankError("there is no preset %r. The presets are: %s. Add one with a "
+                             "--preset-file (or $%s): a section [name] with any of %s."
+                             % (preset, ", ".join(sorted(presets)), PRESET_ENV,
+                                ", ".join(PRESET_KEYS)))
+        body = presets[preset]
+
+    def of(key, given):
+        if given is not None:
+            return given
+        if body.get(key):
+            try:
+                return int(body[key])
+            except ValueError:
+                raise FlankError("preset [%s] gives %s = %r, which is not a whole "
+                                 "number of bases" % (preset, key, body[key]))
+        return None
+
+    up, down, win = of("upstream", upstream), of("downstream", downstream), \
+        of("window", window)
+    if win is not None and (up is not None or down is not None):
+        raise FlankError(
+            "--window %d and --upstream/--downstream say two different things about one "
+            "window: --window W IS --upstream W --downstream W, so give one form or the "
+            "other." % win)
+    if win is not None:
+        if win < 0:
+            raise FlankError("--window must be 0 or more")
+        return win, win, True
+    up = DEFAULT_UPSTREAM if up is None else up
+    down = DEFAULT_DOWNSTREAM if down is None else down
+    if up < 0 or down < 0:
+        raise FlankError("--upstream and --downstream must be 0 or more")
+    return up, down, False
+
+
 def run(targets=None, results=None, reference=None, vcfs=(), vcf_dirs=(), samples=(),
-        out=None, window=DEFAULT_WINDOW, block=DEFAULT_BLOCK, anonymise=False,
-        include_filtered=False, max_rows=0, max_haplotypes=DEFAULT_MAX_HAPLOTYPES,
+        out=None, window=None, upstream=None, downstream=None, preset=None,
+        preset_files=(), length_policy=None, orientation=None, pam_file=None,
+        pam_motif=None, pam_side=None, row_filter=None, annotate_table=None,
+        alt_list=False, filter_drop=False, block=DEFAULT_BLOCK, anonymise=False,
+        include_filtered=False, max_rows=0, max_haplotypes=None,
         reference_only=False, log=None):
     """Write the flanking sequences of a results table. Returns a summary dict.
 
@@ -856,12 +1768,35 @@ def run(targets=None, results=None, reference=None, vcfs=(), vcf_dirs=(), sample
     say = log if log is not None else (lambda _m: None)
     if not out:
         raise FlankError("--out is needed (the prefix of the .fa and .tsv written)")
-    if window < 0:
-        raise FlankError("--window must be 0 or more")
-    if max_haplotypes < 0:
+    if max_haplotypes is not None and max_haplotypes < 0:
         raise FlankError("--max-haplotypes must be 0 (every one) or more")
     if block not in BLOCKS:
         raise FlankError("--block must be one of: %s" % ", ".join(BLOCKS))
+    presets = load_presets(preset_files)
+    body = presets.get(preset, {}) if preset else {}
+    up, down, symmetric = resolve_window(upstream, downstream, window, preset, presets)
+    policy = length_policy or body.get("length_policy") or POLICY_ANCHORED
+    if policy not in LENGTH_POLICIES:
+        raise FlankError("--length-policy must be one of: %s"
+                         % ", ".join(LENGTH_POLICIES))
+    orientation = orientation or body.get("orientation") or DEFAULT_ORIENTATION
+    if orientation not in ORIENTATIONS:
+        raise FlankError("--orientation must be one of: %s" % ", ".join(ORIENTATIONS))
+    if row_filter is None and body.get("filter"):
+        row_filter = body["filter"]
+    if max_haplotypes is None:
+        # not given: the preset's, else the default. (None rather than the default as
+        # the sentinel, so "--max-haplotypes 10" still beats a preset that says 0.)
+        if body.get("max_haplotypes"):
+            try:
+                max_haplotypes = int(body["max_haplotypes"])
+            except ValueError:
+                raise FlankError("preset [%s] gives max_haplotypes = %r, which is not "
+                                 "a whole number" % (preset, body["max_haplotypes"]))
+            if max_haplotypes < 0:
+                raise FlankError("preset [%s] gives a negative max_haplotypes" % preset)
+        else:
+            max_haplotypes = DEFAULT_MAX_HAPLOTYPES
     resdir = os.path.abspath(results) if results else None
     if resdir and not os.path.isdir(resdir):
         raise FlankError("the folder given for --results does not exist: %s" % resdir)
@@ -873,16 +1808,75 @@ def run(targets=None, results=None, reference=None, vcfs=(), vcf_dirs=(), sample
         table = result_table_of(resdir)
     else:
         raise FlankError("give --targets <results table> or --results <results folder>")
+    if annotate_table and os.path.abspath(annotate_table) == table:
+        raise FlankError(
+            "--annotate-table would write over the input table (%s): give it a path of "
+            "its own. The input is never modified in place." % table)
 
     ref_path, vcf_paths, sample_paths, how = resolve_inputs(
         resdir, reference, list(vcfs), list(vcf_dirs), list(samples), reference_only)
     for line in how:
         say("extract-flanks: " + line)
 
-    rows, shape = read_rows(table, block=block, max_rows=max_rows)
+    selector = None
+    if row_filter:
+        # the header first, so a name the table does not have is an error before a
+        # single site is reconstructed rather than an empty output an hour later
+        with open_table(table) as lines:
+            try:
+                header = next(csv.reader(lines, delimiter="\t"))
+            except StopIteration:
+                raise FlankError("%s is empty" % table)
+        selector = RowFilter(row_filter, header)
+        say("extract-flanks: --filter %s (CB_SENSITIVE = %g, the %d%%-recall "
+            "CRISPR-Bulge operating point)"
+            % (row_filter, selector.constants["CB_SENSITIVE"],
+               selector.constants["CB_RECALL"]))
+
+    rows, shape, header, counts = read_rows(table, block=block, max_rows=max_rows,
+                                            row_filter=selector)
     say("extract-flanks: %d row(s) from %s (%s table)" % (len(rows), table, shape))
+    if selector is not None:
+        say("extract-flanks: the filter kept %d of the %d row(s) read%s"
+            % (counts["kept"], counts["read"],
+               "; %d had no value for a column it asks about, and a row whose value is "
+               "missing is not kept" % counts["filter_missing"]
+               if counts["filter_missing"] else ""))
     if not rows:
+        if selector is not None and counts["read"]:
+            raise FlankError(
+                "the filter %r kept none of the %d rows of %s. Check the column names "
+                "and the direction of the comparison; the columns are: %s"
+                % (row_filter, counts["read"], table, ", ".join(header)))
         raise FlankError("%s has a header but no data rows" % table)
+
+    # which end of the target is the PAM. Read from the run's own records, never
+    # assumed: a 5' PAM (Cas12a) puts the two paddings on the opposite genomic sides
+    # from a 3' one, so a guess here writes every asymmetric window back to front.
+    spacers = []
+    for _i, r in rows:                 # the first 200 that have one, not the first 200
+        if r.get("spacer"):
+            spacers.append(r["spacer"])
+            if len(spacers) >= 200:
+                break
+    side, motif, pam_len, pam_how = resolve_pam(
+        resdir, run_command_line(resdir) if resdir else "",
+        run_workdir(resdir) if resdir else None, pam_file, pam_motif, pam_side,
+        spacers)
+    say("extract-flanks: " + pam_how)
+    if side is None and up != down:
+        raise FlankError(
+            "--upstream %d and --downstream %d put different numbers of bases beyond "
+            "the two ends of the target, so which end is the PAM decides which genomic "
+            "side each lands on -- and %s. Pass --pam-file <the PAM file the search "
+            "used> (its signed length carries the side), or --pam-motif <MOTIF> "
+            "--pam-side %s, or use the symmetric --window, for which the side does not "
+            "matter." % (up, down, pam_how[5:] if pam_how.startswith("PAM: ") else
+                         pam_how, "|".join(PAM_SIDES)))
+    geometry = Geometry(up, down, side, policy, symmetric)
+    say("extract-flanks: window %s, %s length, written in the %s orientation%s"
+        % (geometry.spec, policy, orientation,
+           " (%s %s PAM)" % (motif, side) if side else ""))
 
     panel = read_panel(sample_paths) if sample_paths else None
     variants = Variants(vcf_paths, panel)
@@ -907,6 +1901,9 @@ def run(targets=None, results=None, reference=None, vcfs=(), vcf_dirs=(), sample
     reference_reader.keep_all = False
     out_lines = []
     multi = 0
+    # how many DISTINCT ALT sequences each row gave, keyed by row: the number an assay
+    # sizes its extra targets from, and the column mode's flank_alt_count
+    alt_counts = {}
     by_chrom = defaultdict(list)
     for row_id, row in rows:
         by_chrom[row["chrom"]].append((row_id, row))
@@ -944,11 +1941,16 @@ def run(targets=None, results=None, reference=None, vcfs=(), vcf_dirs=(), sample
                 out_lines.append(_unreadable_line(row_id, row))
                 continue
             entries, unresolved, facts = site_entries(
-                refseq, chrom, row, variants, window, include_filtered, max_haplotypes,
-                ref_note=ref_note)
+                refseq, chrom, row, variants, geometry, include_filtered,
+                max_haplotypes, ref_note=ref_note)
             if facts["n_haplotypes"] > 1:
                 multi += 1
-            out_lines.extend(_lines_for(row_id, row, chrom, entries, unresolved, facts))
+            # n_haplotypes counts the reference entry, so the distinct ALT sequences of
+            # the row are one fewer: that is "how many ALT 32-mers does this site have",
+            # the number a user adds assay targets for
+            alt_counts[row_id] = facts["n_haplotypes"] - 1
+            out_lines.extend(_lines_for(row_id, row, chrom, entries, unresolved, facts,
+                                        orientation))
     if uncovered:
         say("extract-flanks: %d of the %d contig(s) the table names are in none of the "
             "%d VCF(s) read (%s): no sample was checked on them, so their rows are the "
@@ -958,12 +1960,34 @@ def run(targets=None, results=None, reference=None, vcfs=(), vcf_dirs=(), sample
     out_lines.sort(key=lambda d: (d["row_id"], d["_order"]))
     for d in out_lines:
         d.pop("_order", None)
+    # read off the lines BEFORE they are written: write_outputs takes the sequences out
+    # of them as it writes the FASTA, and the column mode needs the same bytes
+    annot = annotation_rows(out_lines) if annotate_table else None
     n_seq, n_lines = write_outputs(out_lines, out, anonymise)
+    multi_alt = sum(1 for n in alt_counts.values() if n > 1)
     say("extract-flanks: %d sequence(s) for %d row(s); %d row(s) have more than one "
-        "distinct haplotype" % (n_seq, len(rows), multi))
+        "distinct haplotype (the reference counted), %d have more than one distinct "
+        "ALT sequence, AT THE %s WINDOW"
+        % (n_seq, len(rows), multi, multi_alt, geometry.spec))
     say("extract-flanks: wrote %s.fa and %s.tsv" % (out, out))
+    annotated = None
+    if annotate_table:
+        annotated = write_annotated_table(
+            table, annotate_table, annot, header, alt_list=alt_list,
+            filter_drop=filter_drop, filtered=(selector is not None),
+            last_read=counts.get("last_line", 0))
+        say("extract-flanks: wrote %s: the %d line(s) of the input table with %d column(s) "
+            "added (%s)" % (annotate_table, annotated["rows_out"],
+                            len(annotated["columns"]),
+                            ", ".join(annotated["columns"])))
     return {"rows": len(rows), "sequences": n_seq, "lines": n_lines,
-            "multi_haplotype_rows": multi, "fasta": out + ".fa", "tsv": out + ".tsv",
+            "multi_haplotype_rows": multi, "multi_alt_rows": multi_alt,
+            "alt_counts": alt_counts, "window": geometry.spec,
+            "upstream": up, "downstream": down, "length_policy": policy,
+            "orientation": orientation, "pam_side": side, "pam_motif": motif,
+            "pam_len": pam_len, "filter": row_filter, "filter_counts": counts,
+            "annotated_table": annotated,
+            "fasta": out + ".fa", "tsv": out + ".tsv",
             "table": table, "shape": shape, "reference": ref_path,
             "vcfs": vcf_paths, "samples": sample_paths}
 
@@ -977,13 +2001,49 @@ def _unreadable_line(row_id, row):
     return d
 
 
-def _lines_for(row_id, row, chrom, entries, unresolved, facts):
+def _geometry_cells(row, facts, orientation):
+    """The columns that say how this row's window was cut, and which way round it is
+    written. The same on every entry of a row (a flank's geometry is the row's), and
+    written on the unresolved lines too, so a reader never has to go back to the command
+    line that made the file."""
+    flip = orientation == ORIENT_GUIDE and row["strand"] == "-"
+    return {
+        "orientation": orientation,
+        "emitted_strand": "-" if flip else "+",
+        "window_spec": facts["window_spec"],
+        "pad_upstream": facts["pad_upstream"],
+        "pad_downstream": facts["pad_downstream"],
+        "pam_side": facts["pam_side"],
+        "length_policy": facts["length_policy"],
+        "nominal_target_len": ("" if facts["nominal_target_len"] is None
+                               else facts["nominal_target_len"]),
+        "target_span_ref": facts["target_span_ref"],
+        "bulge_type": facts["bulge_type"],
+    }
+
+
+def _lines_for(row_id, row, chrom, entries, unresolved, facts,
+               orientation=DEFAULT_ORIENTATION):
+    """The TSV lines (and the sequences the FASTA gets) of one input row.
+
+    ORIENTATION is applied here and nowhere else: everything upstream reconstructs on
+    the reference's plus strand, which is where the VCF puts its records, and a
+    minus-strand row is turned round once, at the end, with its offset moved to match.
+    The coordinates stay genomic whatever the orientation -- a coordinate has only one
+    meaning -- and ``emitted_strand`` says which way the bases of that interval were
+    written.
+    """
     out = []
     n_haps = facts["n_haplotypes"]
     notes_site = sorted(facts["notes"])
+    geom = _geometry_cells(row, facts, orientation)
+    flip = geom["emitted_strand"] == "-"
     for k, e in enumerate(entries):
-        seq = e.seq
-        target = seq[e.offset:e.offset + e.length] if e.length else ""
+        seq, offset = e.seq, e.offset
+        if flip:
+            seq = rc(seq)
+            offset = len(seq) - e.offset - e.length
+        target = seq[offset:offset + e.length] if e.length else ""
         notes = sorted(set(notes_site) | e.notes)
         if not e.found:
             notes.append("protospacer-not-on-this-haplotype")
@@ -998,9 +2058,14 @@ def _lines_for(row_id, row, chrom, entries, unresolved, facts):
             "target_strand": row["strand"], "haplotype": e.label,
             "fasta_id": fasta_id(row_id, e.label),
             "flank_start": facts["flo"] + 1, "flank_end": facts["fhi"],
-            "flank_len": len(seq), "target_offset": e.offset, "target_len": e.length,
+            "flank_len": len(seq), "target_offset": offset, "target_len": e.length,
             "target_found": "yes" if e.found else "no", "target_sequence": target,
-            "protospacer_on_strand": (rc(target) if row["strand"] == "-" else target),
+            # the target read on the row's own strand, to check against the row's
+            # alignment. Under the guide orientation the emitted sequence already is
+            # that, so the two columns agree; under the genome orientation they differ
+            # on a minus-strand row, which is the point of keeping both.
+            "protospacer_on_strand": (target if flip else
+                                      (rc(target) if row["strand"] == "-" else target)),
             "n_haplotypes": n_haps, "n_samples": facts["n_samples"],
             "n_carriers": len(e.carriers),
             "carriers": ",".join("%s:%d" % (s, h) for s, h in sorted(e.carriers)),
@@ -1008,6 +2073,7 @@ def _lines_for(row_id, row, chrom, entries, unresolved, facts):
             "notes": ";".join(notes),
             "_order": k, "_seq": seq,
         }
+        d.update(geom)
         out.append(d)
     by_reason = defaultdict(list)
     for sample, reason in unresolved:
@@ -1024,28 +2090,94 @@ def _lines_for(row_id, row, chrom, entries, unresolved, facts):
             "carriers": ",".join(sorted(by_reason[reason])), "notes": reason,
             "_order": j, "_seq": "",
         })
+        d.update(geom)
         out.append(d)
     return out
 
 
-HELP = """crisprme.py extract-flanks --targets <table> | --results <folder> --out <prefix>
+HELP_TEMPLATE = """crisprme.py extract-flanks --targets <table> | --results <folder>
+    --out <prefix>
+    [--upstream 3] [--downstream 6] [--window W] [--preset <name>]
+    [--length-policy anchored|fixed-total] [--orientation guide|genome]
+    [--annotate-table <file.tsv>] [--alt-list] [--filter <expression>] [--filter-drop]
     [--reference <genome dir or FASTA>] [--vcf <bgzipped VCF>] [--vcf-dir <folder>]
-    [--samples <samplesID file>] [--window 200] [--block highest_CFD]
-    [--anonymise] [--include-filtered] [--max-rows N] [--max-haplotypes 10]
-    [--reference-only]
+    [--samples <samplesID file>] [--pam-file <PAM file>] [--pam-motif M --pam-side S]
+    [--block highest_CFD] [--anonymise] [--include-filtered] [--max-rows N]
+    [--max-haplotypes 10] [--reference-only] [--preset-file <file>]
 
 Writes the genomic sequence around each off-target site -- the REFERENCE flank and one
 flank per distinct observed haplotype, with the samples that carry each -- so a site on a
 shortlist can be turned into an oligo order. The protospacer+PAM is marked in every flank
 by its offset and length, so an indel that shifts it is visible rather than miscounted.
 
+THE WINDOW is the target plus a padding at each of its two ends, named for what each
+sits beside: --upstream beyond the PROTOSPACER's outer end, --downstream beyond the
+PAM's outer end, both read in the GUIDE's orientation. THE DEFAULT IS 3 AND 6 -- for a
+20-nt spacer with a 3-nt PAM, a 32-mer -- because an anchored window is the general
+form (a symmetric one is the case where the two are equal) and because a short oligo
+read straight off the site has no primer slack to absorb a padding error. For
+amplicon-scale context use --window 200 (which IS --upstream 200 --downstream 200), or
+--preset amplicon. Every output says the window it used and the bases it emitted.
+
     --targets          a results table: the report's top-N download (curated columns) or
                        an integrated_results.tsv (.tsv, .tsv.gz or .zip)
     --results          a CRISPRme results folder: its own records give the reference,
-                       the VCFs and the samples list, and -- unless --targets names
-                       another table -- its integrated table is the input. Give both to
-                       read a shortlist (the report's top-N) with the run's own inputs
+                       the VCFs, the samples list and the PAM, and -- unless --targets
+                       names another table -- its integrated table is the input. Give
+                       both to read a shortlist (the report's top-N) with the run's
+                       own inputs
     --out              the prefix of the two files written: <prefix>.fa and <prefix>.tsv
+    --upstream         bases beyond the protospacer's outer end (default 3)
+    --downstream       bases beyond the PAM's outer end (default 6)
+    --window           the symmetric form: the same as --upstream W --downstream W.
+                       Giving it with --upstream/--downstream is refused, not resolved
+    --preset           a named window configuration (below). A flag given on the command
+                       line always wins over the preset
+    --length-policy    what to do where the target's genomic footprint is not the
+                       nominal spacer+PAM length -- which is what a bulge means (a DNA
+                       bulge is one genomic base MORE, an RNA bulge one LESS):
+                         anchored     (default) keep the paddings, let the total vary.
+                                      The bases beyond the target are the bases asked
+                                      for and the sequence is genomically true
+                         fixed-total  hold the reference interval at
+                                      upstream+nominal+downstream and take the
+                                      difference out of the padding (beyond the PAM
+                                      first), for an assay that needs one length
+                       Either way every row says its own: flank_len, target_span_ref,
+                       nominal_target_len, bulge_type, and the note
+                       target-span-not-nominal on the rows affected
+    --orientation      guide (default: the protospacer reads 5'->3' as the guide does,
+                       which is what an oligo order wants) or genome (always the
+                       reference's plus strand). Coordinates are genomic either way;
+                       the orientation and emitted_strand columns say which was used
+    --annotate-table   also write the INPUT TABLE back out with the sequences added as
+                       columns: the reference sequence, the primary ALT sequence, how
+                       many distinct ALT sequences the row has, and where the target
+                       sits in each. A row with several ALTs keeps them all in the
+                       companion <prefix>.tsv/.fa, joined by flank_row_id
+    --alt-list         add one more column holding the ALT sequences of the row,
+                       '|'-delimited, for a user who wants a single file. It holds the
+                       ones WRITTEN: flank_alt_count is always the true total and
+                       flank_notes says how many --max-haplotypes left out, so pass
+                       --max-haplotypes 0 to have every one in the cell
+    --filter           an expression over the TABLE'S OWN columns; only the rows it
+                       keeps get flanks. Column names with a character a Python name
+                       cannot hold are written with underscores (CRISPR-Bulge is
+                       CRISPR_Bulge) or as col("CRISPR-Bulge"). CB_SENSITIVE is the
+                       CRISPR-Bulge sensitive operating point, taken from
+                       cb_operating_point rather than written as a number, so a filter
+                       written today still means the same thing after a re-fit. E.g.
+                       both the ALT and the REF alignment above it:
+                         --filter 'CRISPR_Bulge >= CB_SENSITIVE and
+                                   CRISPR_Bulge_ref >= CB_SENSITIVE'
+                       A row whose value for a column the expression READ is missing
+                       (blank, NA, '-', '.') is NOT kept, whichever way round the test
+                       is written, and how many there were is said. Evaluation
+                       short-circuits, so has("col") asks about presence without
+                       reading the value: not has("X") or X > 1 keeps a row with no X
+    --filter-drop      leave the rows the filter did not keep OUT of --annotate-table
+                       (by default they keep their line, with the added cells empty and
+                       flank_notes filtered-out, so your table comes back whole)
     --reference        the reference genome: a folder of per-chromosome FASTAs, or one
                        FASTA (default: the run's --genome, from its .command_line.txt)
     --vcf              a bgzipped VCF the run searched (repeatable). INDEX THEM FIRST
@@ -1055,8 +2187,16 @@ by its offset and length, so an indel that shifts it is visible rather than misc
     --vcf-dir          a folder of them (repeatable). Default: the dataset folder(s) the
                        run's --vcf list names, where they are still there
     --samples          a samplesID file (repeatable). Default: the run's .sampleID.txt
-    --window           bases of flank on either side of the target (default 200: an
-                       amplicon of ~250-300 bp with room to place primers 50-150 bp out)
+    --pam-file         the CRISPRme PAM file the search used: its signed length says
+                       which end of the target the PAM is on. Default: the run's own
+                       --pam, else the Pam of its Params.txt with the side read off the
+                       table's Aligned_spacer+PAM. SpCas9 is never assumed -- an
+                       asymmetric window on a run whose PAM side cannot be read is
+                       refused rather than guessed
+    --pam-motif        the PAM motif (NGG, NRG, TTTV, ...), with --pam-side
+    --pam-side         3prime (spacer then PAM: SpCas9) or 5prime (PAM then spacer:
+                       Cas12a). On a 5' PAM the two ends of the target swap, so
+                       --upstream and --downstream land on the opposite genomic sides
     --block            which alignment of an integrated row to take the site from:
                        highest_CFD (default), fewest_mm+b or highest_CRISPR_BULGE
     --anonymise        write no sample identity anywhere: the TSV's carriers column is
@@ -1075,7 +2215,27 @@ by its offset and length, so an indel that shifts it is visible rather than misc
                        n_haplotypes column always gives the true total, and the notes
                        say how many were left out
     --reference-only   do not read any VCF: the reference flank alone
-"""
+    --preset-file      an INI file of presets (repeatable), also read from
+                       $%s. A section [name] with any of
+                       %s
+
+PRESETS (--preset <name>):
+%s
+""" % (PRESET_ENV, "\n                       ".join(
+    __import__("textwrap").wrap(", ".join(PRESET_KEYS), 55)), "%s")
+
+
+def help_text():
+    """The help, with whatever presets this install actually has."""
+    try:
+        presets = load_presets()
+    except FlankError as exc:
+        return HELP_TEMPLATE % ("      (the preset file could not be read: %s)" % exc)
+    return HELP_TEMPLATE % preset_help(presets)
+
+
+# the module-level name the CLI and crisprme.py have always written to stderr
+HELP = help_text()
 
 
 def main(argv=None):
@@ -1088,24 +2248,44 @@ def main(argv=None):
     p.add_argument("--vcf", action="append", default=[])
     p.add_argument("--vcf-dir", dest="vcf_dir", action="append", default=[])
     p.add_argument("--samples", action="append", default=[])
-    p.add_argument("--window", type=int, default=DEFAULT_WINDOW)
+    # None, not a default: "not given" has to be told from "given the default", so a
+    # preset can supply the value and the flag can still win over it
+    p.add_argument("--window", type=int, default=None)
+    p.add_argument("--upstream", type=int, default=None)
+    p.add_argument("--downstream", type=int, default=None)
+    p.add_argument("--preset")
+    p.add_argument("--preset-file", dest="preset_file", action="append", default=[])
+    p.add_argument("--length-policy", dest="length_policy")
+    p.add_argument("--orientation")
+    p.add_argument("--annotate-table", dest="annotate_table")
+    p.add_argument("--alt-list", dest="alt_list", action="store_true")
+    p.add_argument("--filter", dest="row_filter")
+    p.add_argument("--filter-drop", dest="filter_drop", action="store_true")
+    p.add_argument("--pam-file", dest="pam_file")
+    p.add_argument("--pam-motif", dest="pam_motif")
+    p.add_argument("--pam-side", dest="pam_side")
     p.add_argument("--block", default=DEFAULT_BLOCK)
     p.add_argument("--anonymise", action="store_true")
     p.add_argument("--anonymize", dest="anonymise", action="store_true")
     p.add_argument("--include-filtered", dest="include_filtered", action="store_true")
     p.add_argument("--max-rows", dest="max_rows", type=int, default=0)
-    p.add_argument("--max-haplotypes", dest="max_haplotypes", type=int,
-                   default=DEFAULT_MAX_HAPLOTYPES)
+    p.add_argument("--max-haplotypes", dest="max_haplotypes", type=int, default=None)
     p.add_argument("--reference-only", dest="reference_only", action="store_true")
     p.add_argument("--help", "-h", action="store_true")
     args = p.parse_args(argv)
     if args.help or (not args.targets and not args.results):
-        sys.stderr.write(HELP)
+        sys.stderr.write(help_text())
         return 1
     try:
         run(targets=args.targets, results=args.results, reference=args.reference,
             vcfs=args.vcf, vcf_dirs=args.vcf_dir, samples=args.samples, out=args.out,
-            window=args.window, block=args.block, anonymise=args.anonymise,
+            window=args.window, upstream=args.upstream, downstream=args.downstream,
+            preset=args.preset, preset_files=args.preset_file,
+            length_policy=args.length_policy, orientation=args.orientation,
+            annotate_table=args.annotate_table, alt_list=args.alt_list,
+            row_filter=args.row_filter, filter_drop=args.filter_drop,
+            pam_file=args.pam_file, pam_motif=args.pam_motif, pam_side=args.pam_side,
+            block=args.block, anonymise=args.anonymise,
             include_filtered=args.include_filtered, max_rows=args.max_rows,
             max_haplotypes=args.max_haplotypes,
             reference_only=args.reference_only, log=lambda m: print(m))

@@ -447,7 +447,7 @@ jobs:
         # end (truncated, said, never a crash), an unphased call, a missing allele and a
         # slot whose records overlap (REPORTED, never written as a haplotype), identical
         # haplotypes deduplicated by sequence with their carriers, a minus-strand row
-        # written on the plus strand, both VCF reader paths (plain gzip and BGZF, written
+        # written on the plus strand on request, both VCF reader paths (plain gzip and BGZF, written
         # here), determinism, --anonymise leaking no sample identity, a record outside
         # PASS left out and counted, and every input the run's records name but that is
         # gone raised BY NAME. Then a MUTANT per rule (the offset read off the reference,
@@ -466,6 +466,23 @@ jobs:
         # the curated download's Aligned_spacer+PAM, --include-filtered marks what it
         # writes, n_samples counts a sample once, and the reference entry claims the
         # panel only on a contig a genotyped VCF covers.
+        # And the ANCHORED, PARAMETRIC window: the 3/6 default is a 32-mer on a
+        # mismatch-only site, --window W is exactly --upstream W --downstream W (giving
+        # both is refused), a minus-strand row keeps its padding in the guide's
+        # orientation, a 5' PAM puts the two paddings on the OTHER genomic sides (read
+        # from the run's PAM file or the table's run of N's -- SpCas9 is never assumed,
+        # and an asymmetric window on a run that cannot say is refused), a DNA bulge
+        # lengthens the window and an RNA bulge shortens it under the default anchored
+        # policy while --length-policy fixed-total holds the total and says which
+        # padding moved, the column mode writes the REF and primary ALT sequences and
+        # the TRUE count of distinct ALTs onto both table shapes (the extras kept in the
+        # companion files, not dropped and not crammed into a cell), --filter is a safe
+        # expression over the table's own columns with the CRISPR-Bulge operating point
+        # by name, and a preset is a config entry a flag still beats. One MUTANT each:
+        # an always-symmetric window, the strand ignored, a 5' PAM read as 3', the
+        # footprint assumed nominal, the ALT column filled from the reference, the ALT
+        # count taken from what was written, a missing value read as a number, the
+        # threshold frozen as a literal, and a preset that beats the flag.
         working-directory: PostProcess
         run: python -m unittest test_extract_flanks -v
 

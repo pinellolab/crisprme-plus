@@ -58,6 +58,13 @@ SAMPLES = ["S1", "S2", "S3", "S4", "S5"]
 # a made-up 23-mer (20 spacer + NGG), not any real guide: this suite needs a target the
 # arithmetic can be checked against, not a biological one
 TARGET = "GTCAGTACCTGATCGGATCAAGG"
+# the GUIDE as a results table writes it: the spacer, then one N per PAM base. That run
+# of N's is how the PAM's side is read off a table (a trailing run is a 3' PAM, a
+# leading one a 5' PAM), and its length with the gaps taken out is the nominal
+# spacer+PAM length a fixed-total window is measured against -- so the fixture carries
+# what the real file carries.
+SPACER = TARGET[:20] + "NNN"             # 20 spacer + a 3-nt 3' PAM: SpCas9
+SPACER_5P = "NNNN" + TARGET[:19]         # 4-nt 5' PAM then 19 spacer: Cas12a-shaped
 TARGET_AT = 400                          # 0-based start on the reference below
 CONTIG_LEN = 900
 
@@ -150,35 +157,42 @@ def write_samples(path, samples=SAMPLES):
     return path
 
 
-def write_targets(path, rows, curated=True, block="highest_CFD", spacer=TARGET,
-                  ref_aligned="NA"):
+def write_targets(path, rows, curated=True, block="highest_CFD", spacer=SPACER,
+                  ref_aligned="NA", extra=()):
     """A results table. ``rows``: (chrom, start0, strand, aligned protospacer+PAM).
 
     The curated shape is the report's top-N download down to the name it gives the
     guide: ``Aligned_spacer+PAM``, the guide written against the row's alignment. That
     table has no plain ``Spacer+PAM`` column at all, and it is the input of both
     documented examples, so the fixture carries what the real file carries.
+
+    ``extra``: (column name, [value per row]) pairs appended to the curated shape, for
+    the tests that filter on a score column.
     """
+    names = [c for c, _v in extra]
     with open(path, "w") as fh:
         if curated:
-            fh.write("rank\tChromosome\tPosition\tStrand\tAligned_spacer+PAM\t"
-                     "Aligned_protospacer+PAM\tCFD\n")
+            fh.write("\t".join(["rank", "Chromosome", "Position", "Strand",
+                                "Aligned_spacer+PAM", "Aligned_protospacer+PAM", "CFD"]
+                               + names) + "\n")
             for i, (chrom, start, strand, aligned) in enumerate(rows, 1):
-                fh.write("%d\t%s\t%d\t%s\t%s\t%s\t0.5000\n"
-                         % (i, chrom, start, strand, spacer, aligned))
+                fh.write("\t".join([str(i), chrom, str(start), strand, spacer, aligned,
+                                    "0.5000"]
+                                   + [str(v[i - 1]) for _c, v in extra]) + "\n")
         else:
             head = ["Spacer+PAM", "Chromosome"]
             for b in F.BLOCKS:
                 head += ["Start_coordinate_(%s)" % b, "Strand_(%s)" % b,
+                         "Aligned_spacer+PAM_(%s)" % b,
                          "Aligned_protospacer+PAM_REF_(%s)" % b,
                          "Aligned_protospacer+PAM_ALT_(%s)" % b]
-            fh.write("\t".join(head) + "\n")
-            for chrom, start, strand, aligned in rows:
-                row = [TARGET, chrom]
+            fh.write("\t".join(head + names) + "\n")
+            for i, (chrom, start, strand, aligned) in enumerate(rows, 1):
+                row = [spacer, chrom]
                 for b in F.BLOCKS:
-                    row += ([str(start), strand, ref_aligned, aligned] if b == block
-                            else ["0", "+", "NA", "NA"])
-                fh.write("\t".join(row) + "\n")
+                    row += ([str(start), strand, spacer, ref_aligned, aligned]
+                            if b == block else ["0", "+", spacer, "NA", "NA"])
+                fh.write("\t".join(row + [str(v[i - 1]) for _c, v in extra]) + "\n")
     return path
 
 
@@ -196,18 +210,20 @@ class Case(unittest.TestCase):
         return os.path.join(self.dir, name)
 
     def go(self, rows, records=(), window=40, bgzf=False, samples=SAMPLES, chrom="chr1",
-           seq=None, curated=True, spacer=TARGET, ref_aligned="NA", **kw):
+           seq=None, curated=True, spacer=SPACER, ref_aligned="NA", extra=(), **kw):
         genome = write_fasta(self.path("ref"), chrom, REF if seq is None else seq)
         vcf = None
         if records:
             vcf = self.path("v.vcf.gz")
             (write_vcf_bgzf if bgzf else write_vcf_gzip)(vcf, records, samples, chrom)
         table = write_targets(self.path("t.tsv"), rows, curated=curated, spacer=spacer,
-                              ref_aligned=ref_aligned)
+                              ref_aligned=ref_aligned, extra=extra)
         out = self.path("out")
+        if window is not None:
+            kw["window"] = window
         summary = F.run(targets=table, reference=genome, vcfs=[vcf] if vcf else [],
                         samples=[write_samples(self.path("s.txt"), samples)],
-                        out=out, window=window, **kw)
+                        out=out, **kw)
         return summary, read_tsv(out + ".tsv"), read_fasta(out + ".fa")
 
 
@@ -714,7 +730,7 @@ class Formats(Case):
         rec = snv(*SNV_BESIDE, gts={"S1": "1|0"})
         _s, table, _f = self.go(ROW, [rec], curated=False)
         self.assertEqual(len(entries(table)), 2)
-        self.assertEqual(entries(table)[0]["guide"], TARGET)
+        self.assertEqual(entries(table)[0]["guide"], SPACER)
 
     def test_the_curated_download_names_the_guide_aligned_and_it_is_still_read(self):
         """The report's top-N download -- the documented input -- has no plain
@@ -726,10 +742,10 @@ class Formats(Case):
         _s, table, _f = self.go(ROW, [rec])
         self.assertTrue(table)
         for row in table:
-            self.assertEqual(row["guide"], TARGET)
+            self.assertEqual(row["guide"], SPACER)
         # the same row with the alignment's gap in the guide cell
-        _s2, dashed, _f2 = self.go(ROW, [rec], spacer=TARGET[:4] + "-" + TARGET[4:])
-        self.assertEqual([r["guide"] for r in dashed], [TARGET] * len(dashed))
+        _s2, dashed, _f2 = self.go(ROW, [rec], spacer=SPACER[:4] + "-" + SPACER[4:])
+        self.assertEqual([r["guide"] for r in dashed], [SPACER] * len(dashed))
 
     def test_an_integrated_row_is_read_on_its_alt_alignment(self):
         """An integrated row carries BOTH alignments. The ALT one is the sequence the
@@ -789,13 +805,17 @@ class Formats(Case):
         _s2, bgz, _f2 = self.go(ROW, [rec], bgzf=True)
         self.assertEqual(plain, bgz)
 
-    def test_a_minus_strand_row_is_written_on_the_plus_strand(self):
+    def test_a_minus_strand_row_is_written_on_the_plus_strand_when_asked(self):
         row = [("chr1", TARGET_AT, "-", _rc(TARGET))]
-        _s, table, fasta = self.go(row)
+        _s, table, fasta = self.go(row, orientation="genome")
         got = entries(table)
         self.assertEqual(marked(got[0], fasta), TARGET)             # plus strand
         self.assertEqual(got[0]["protospacer_on_strand"], _rc(TARGET))
         self.assertEqual(got[0]["target_found"], "yes")
+        self.assertEqual(got[0]["orientation"], "genome")
+        self.assertEqual(got[0]["emitted_strand"], "+")
+        self.assertEqual(fasta[got[0]["fasta_id"]],
+                         REF[TARGET_AT - 40:TARGET_AT + 63])
 
 
 class Determinism(Case):
@@ -1163,6 +1183,50 @@ class Cli(Case):
         self.assertEqual(none.returncode, 1)
         self.assertIn("--targets", none.stderr)
 
+    def test_the_subcommand_passes_the_new_flags_through(self):
+        """The anchored window, the column mode and the filter, reached the way a user
+        reaches them: through crisprme.py, not through run()."""
+        cli = os.path.join(REPO, "crisprme.py")
+        import cb_operating_point as cbop
+        thr = cbop.sensitive_threshold()
+        rows = [("chr1", TARGET_AT, "+", TARGET)] * 2
+        table = write_targets(self.path("t.tsv"), rows,
+                              extra=[("CRISPR-Bulge", [thr * 10, thr / 10]),
+                                     ("CRISPR-Bulge_ref", [thr * 10, thr * 10])])
+        ok = subprocess.run(
+            [sys.executable, cli, "extract-flanks", "--targets", table,
+             "--reference", write_fasta(self.path("ref")),
+             "--upstream", "3", "--downstream", "6",
+             "--annotate-table", self.path("ann.tsv"), "--alt-list",
+             "--filter", "CRISPR_Bulge >= CB_SENSITIVE and "
+                         "CRISPR_Bulge_ref >= CB_SENSITIVE",
+             "--out", self.path("out")],
+            capture_output=True, text=True, cwd=self.dir)
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        got = entries(read_tsv(self.path("out.tsv")))
+        self.assertEqual([r["row_id"] for r in got], ["1"])
+        self.assertEqual(got[0]["flank_len"], "32")
+        ann = read_tsv(self.path("ann.tsv"))
+        self.assertEqual(len(ann), 2)
+        self.assertEqual(ann[0]["flank_ref_len"], "32")
+        self.assertEqual(ann[1]["flank_notes"], "filtered-out")
+        self.assertIn("flank_alt_all", ann[0])
+        # and the presets reach the subcommand's help
+        helped = subprocess.run([sys.executable, cli, "extract-flanks", "--help"],
+                                capture_output=True, text=True, cwd=self.dir)
+        self.assertIn("PRESETS (--preset <name>)", helped.stderr)
+        self.assertIn("--upstream", helped.stderr)
+        for flag, text in (("--upstream", "nope"), ("--downstream", "-4"),
+                           ("--length-policy", "nope"), ("--orientation", "nope"),
+                           ("--pam-side", "nope")):
+            bad = subprocess.run(
+                [sys.executable, cli, "extract-flanks", "--targets", table,
+                 "--out", self.path("o"), flag, text],
+                capture_output=True, text=True, cwd=self.dir)
+            self.assertEqual(bad.returncode, 1, flag)
+            self.assertTrue(bad.stderr.startswith("Error: "), bad.stderr)
+            self.assertIn(flag, bad.stderr)
+
 
 # --------------------------------------------------------------------------- #
 # the shared reader, and the checker it came from
@@ -1219,6 +1283,549 @@ class SharedWithTheChecker(unittest.TestCase):
         self.assertIn("variant_haplotypes.py", source)
         self.assertIn("run_records.py", source)
         self.assertIn("ships scripts/", source)
+
+
+# --------------------------------------------------------------------------- #
+# the anchored window: the padding is named for the end of the target it sits
+# beyond, not for a genomic side
+# --------------------------------------------------------------------------- #
+# a 5'-PAM row: the protospacer+PAM is still 23 bases of genome at the same place, but
+# the guide's N's are at its FRONT, so the two paddings land on the other genomic sides
+FIVE_PRIME = dict(spacer=SPACER_5P)
+
+
+class AnchoredWindows(Case):
+    def test_the_default_is_a_32mer_on_a_mismatch_only_site(self):
+        """3 bases beyond the protospacer + the 23-base target + 6 beyond the PAM, and
+        the target at offset 3. Every number of it is in the output: nobody has to
+        count, and nobody has to remember the command line."""
+        _s, table, fasta = self.go(ROW, window=None)
+        got = entries(table)[0]
+        self.assertEqual(fasta[got["fasta_id"]], REF[TARGET_AT - 3:TARGET_AT + 29])
+        self.assertEqual(got["flank_len"], "32")
+        self.assertEqual(got["target_offset"], "3")
+        self.assertEqual(got["target_len"], "23")
+        self.assertEqual(marked(got, fasta), TARGET)
+        self.assertEqual(got["window_spec"], "up3+down6")
+        self.assertEqual((got["pad_upstream"], got["pad_downstream"]), ("3", "6"))
+        self.assertEqual(got["nominal_target_len"], "23")
+        self.assertEqual(got["target_span_ref"], "23")
+        self.assertEqual(got["bulge_type"], "none")
+        self.assertEqual(got["length_policy"], "anchored")
+
+    def test_the_two_forms_of_one_window_agree(self):
+        """--window W IS --upstream W --downstream W, so the two cannot drift apart."""
+        rec = snv(*SNV_BESIDE, gts={"S1": "1|0", "S2": "1|1"})
+        _s, sym, _f = self.go(ROW, [rec], window=40)
+        _s2, anchored, _f2 = self.go(ROW, [rec], window=None, upstream=40, downstream=40)
+        self.assertEqual([r["flank_len"] for r in sym],
+                         [r["flank_len"] for r in anchored])
+        self.assertEqual([r["target_sequence"] for r in sym],
+                         [r["target_sequence"] for r in anchored])
+        self.assertEqual(sym[0]["window_spec"], "window40")
+        self.assertEqual(anchored[0]["window_spec"], "up40+down40")
+
+    def test_giving_both_forms_is_refused_rather_than_resolved(self):
+        with self.assertRaises(F.FlankError) as e:
+            self.go(ROW, window=40, upstream=3)
+        self.assertIn("--window", str(e.exception))
+        self.assertIn("one form or the other", str(e.exception))
+
+    def test_the_fasta_header_says_which_way_round_and_in_what_window(self):
+        """The FASTA is used on its own, so it must not need the TSV to be read right:
+        a reverse-complemented record that does not say so is a wrong oligo."""
+        row = [("chr1", TARGET_AT, "-", _rc(TARGET))]
+        _s, table, _f = self.go(row, window=None)
+        head = {}
+        with open(self.path("out.fa")) as fh:
+            for line in fh:
+                if line.startswith(">"):
+                    head = dict(f.split("=", 1) for f in line.split()[1:])
+                    break
+        self.assertEqual(head["orientation"], "guide")
+        self.assertEqual(head["emitted_strand"], "-")
+        self.assertEqual(head["window_spec"], "up3+down6")
+        self.assertEqual(head["target_offset"], "3")
+
+    def test_a_padding_of_zero_is_the_target_itself(self):
+        _s, table, fasta = self.go(ROW, window=None, upstream=0, downstream=0)
+        got = entries(table)[0]
+        self.assertEqual(fasta[got["fasta_id"]], TARGET)
+        self.assertEqual(got["flank_len"], "23")
+        self.assertEqual(got["target_offset"], "0")
+
+
+class StrandAndPamSide(Case):
+    def test_a_minus_strand_row_pads_in_the_guides_orientation(self):
+        """The same 3 and 6, read the same way round: on a minus row the 6 bases beyond
+        the PAM are at the genomic LEFT, and the emitted sequence is the reverse
+        complement of that interval, so the target is still at offset 3."""
+        row = [("chr1", TARGET_AT, "-", _rc(TARGET))]
+        _s, table, fasta = self.go(row, window=None)
+        got = entries(table)[0]
+        self.assertEqual(got["emitted_strand"], "-")
+        self.assertEqual(got["orientation"], "guide")
+        # the genomic interval: 6 to the left of the target, 3 to its right
+        self.assertEqual((got["flank_start"], got["flank_end"]),
+                         (str(TARGET_AT - 6 + 1), str(TARGET_AT + 23 + 3)))
+        self.assertEqual(fasta[got["fasta_id"]],
+                         _rc(REF[TARGET_AT - 6:TARGET_AT + 26]))
+        self.assertEqual(got["target_offset"], "3")
+        self.assertEqual(marked(got, fasta), _rc(TARGET))
+        self.assertEqual(got["protospacer_on_strand"], _rc(TARGET))
+
+    def test_a_five_prime_pam_puts_the_paddings_on_the_other_genomic_sides(self):
+        """Cas12a reads PAM then protospacer, so the target's two ends swap: the 6
+        bases beyond the PAM are now at the genomic LEFT of a plus-strand row, which is
+        where the 3 were under a 3' PAM. Read from the guide's own run of N's."""
+        _s, table, fasta = self.go(ROW, window=None, **FIVE_PRIME)
+        got = entries(table)[0]
+        self.assertEqual(got["pam_side"], "5prime")
+        self.assertEqual(fasta[got["fasta_id"]], REF[TARGET_AT - 6:TARGET_AT + 26])
+        self.assertEqual(got["target_offset"], "6")
+        self.assertEqual(marked(got, fasta), TARGET)
+        # ...and the 3' case is the mirror of it, at the same site
+        _s2, three, f3 = self.go(ROW, window=None)
+        self.assertEqual(f3[entries(three)[0]["fasta_id"]],
+                         REF[TARGET_AT - 3:TARGET_AT + 29])
+
+    def test_the_pam_side_comes_from_the_pam_file_given(self):
+        """A PAM file carries the side in the SIGN of its length: the one unambiguous
+        source, and the one the run's own command line names."""
+        five = self.path("5p.txt")
+        with open(five, "w") as fh:
+            fh.write("TTTN" + "N" * 19 + " -4\n")
+        self.assertEqual(F.read_pam_file(five), ("TTTN", "5prime", 4))
+        three = self.path("3p.txt")
+        with open(three, "w") as fh:
+            fh.write("N" * 20 + "NRG 3\n")
+        self.assertEqual(F.read_pam_file(three), ("NRG", "3prime", 3))
+        # a guide with no N's says nothing; the file still does
+        _s, table, fasta = self.go(ROW, window=None, spacer=TARGET, pam_file=five)
+        got = entries(table)[0]
+        self.assertEqual(got["pam_side"], "5prime")
+        self.assertEqual(fasta[got["fasta_id"]], REF[TARGET_AT - 6:TARGET_AT + 26])
+
+    def test_an_asymmetric_window_with_no_readable_pam_side_is_refused(self):
+        """Never assume SpCas9: with 3 and 6 on a table that does not say which end is
+        the PAM, writing the window either way round is a guess, so it is refused and
+        the three ways to answer are named."""
+        with self.assertRaises(F.FlankError) as e:
+            self.go(ROW, window=None, spacer=TARGET)
+        self.assertIn("--pam-file", str(e.exception))
+        self.assertIn("--pam-side", str(e.exception))
+        self.assertIn("--window", str(e.exception))
+
+    def test_pam_side_alone_answers_a_table_that_cannot(self):
+        """A guide with no N's says nothing about the side; --pam-side does, with no
+        motif needed, and it is what the row then reports."""
+        _s, table, fasta = self.go(ROW, window=None, spacer=TARGET,
+                                   pam_side="5prime")
+        got = entries(table)[0]
+        self.assertEqual(got["pam_side"], "5prime")
+        self.assertEqual(fasta[got["fasta_id"]], REF[TARGET_AT - 6:TARGET_AT + 26])
+        # the column is still read for the length and the bulges: it is only the SIDE
+        # that a guide written without its N's cannot give
+        self.assertEqual(got["nominal_target_len"], "23")
+        self.assertEqual(got["bulge_type"], "none")
+
+    def test_a_symmetric_window_does_not_need_the_pam_side(self):
+        """With the same padding at both ends the side changes nothing, so a table that
+        cannot say is still served."""
+        _s, table, fasta = self.go(ROW, window=40, spacer=TARGET)
+        got = entries(table)[0]
+        self.assertEqual(got["pam_side"], "unknown")
+        self.assertEqual(fasta[got["fasta_id"]], REF[TARGET_AT - 40:TARGET_AT + 63])
+
+
+class BulgeFootprint(Case):
+    """A bulge makes the target's genomic footprint differ from the nominal spacer+PAM
+    length -- longer by one per DNA bulge, shorter by one per RNA bulge -- which is
+    exactly what a fixed 32-mer assumes away. Both policies, and both said per row."""
+
+    DNA_SPACER = SPACER[:5] + "-" + SPACER[5:]      # the GUIDE carries the gap
+
+    def dna_row(self):
+        return [("chr1", TARGET_AT, "+", REF[TARGET_AT:TARGET_AT + 24])]
+
+    def rna_row(self):
+        # 23 alignment columns, one of them a gap in the PROTOSPACER: 22 genomic bases
+        bases = REF[TARGET_AT:TARGET_AT + 22]
+        return [("chr1", TARGET_AT, "+", bases[:11] + "-" + bases[11:])]
+
+    def test_a_dna_bulge_lengthens_the_window_and_says_so(self):
+        _s, table, fasta = self.go(self.dna_row(), window=None,
+                                   spacer=self.DNA_SPACER)
+        got = entries(table)[0]
+        self.assertEqual(got["bulge_type"], "DNA:1")
+        self.assertEqual(got["target_span_ref"], "24")
+        self.assertEqual(got["nominal_target_len"], "23")
+        self.assertEqual(got["flank_len"], "33")          # 3 + 24 + 6
+        self.assertEqual((got["pad_upstream"], got["pad_downstream"]), ("3", "6"))
+        self.assertIn("target-span-not-nominal:24/23", got["notes"])
+        self.assertEqual(fasta[got["fasta_id"]], REF[TARGET_AT - 3:TARGET_AT + 30])
+
+    def test_an_rna_bulge_shortens_it(self):
+        _s, table, fasta = self.go(self.rna_row(), window=None)
+        got = entries(table)[0]
+        self.assertEqual(got["bulge_type"], "RNA:1")
+        self.assertEqual(got["target_span_ref"], "22")
+        self.assertEqual(got["flank_len"], "31")          # 3 + 22 + 6
+        self.assertEqual(got["target_found"], "yes")
+        self.assertIn("target-span-not-nominal:22/23", got["notes"])
+
+    def test_fixed_total_holds_the_length_and_says_which_padding_moved(self):
+        for rows, spacer, pads in ((self.dna_row(), self.DNA_SPACER, ("3", "5")),
+                                   (self.rna_row(), SPACER, ("3", "7"))):
+            _s, table, fasta = self.go(rows, window=None, spacer=spacer,
+                                       length_policy="fixed-total")
+            got = entries(table)[0]
+            self.assertEqual(got["flank_len"], "32", got["notes"])
+            self.assertEqual((got["pad_upstream"], got["pad_downstream"]), pads)
+            self.assertEqual(got["length_policy"], "fixed-total")
+            self.assertIn("padding-moved-to-hold-the-total", got["notes"])
+            self.assertEqual(len(fasta[got["fasta_id"]]), 32)
+
+    def test_a_padding_is_never_pushed_below_zero(self):
+        """A bulge longer than the padding cannot make a negative one: the rest comes
+        off the other end, and the row still says what it emitted."""
+        long_spacer = SPACER[:5] + "---" + SPACER[5:]
+        rows = [("chr1", TARGET_AT, "+", REF[TARGET_AT:TARGET_AT + 26])]
+        _s, table, fasta = self.go(rows, window=None, spacer=long_spacer,
+                                   upstream=1, downstream=1, length_policy="fixed-total")
+        got = entries(table)[0]
+        self.assertEqual(got["bulge_type"], "DNA:3")
+        self.assertEqual((got["pad_upstream"], got["pad_downstream"]), ("0", "0"))
+        self.assertEqual(got["flank_len"], "26")
+        self.assertEqual(len(fasta[got["fasta_id"]]), 26)
+
+
+# --------------------------------------------------------------------------- #
+# the column mode: the input table back out, with the sequences on the row
+# --------------------------------------------------------------------------- #
+class ColumnMode(Case):
+    def annotate(self, rows, records=(), curated=True, **kw):
+        genome = write_fasta(self.path("ref"))
+        vcf = write_vcf_gzip(self.path("v.vcf.gz"), records) if records else None
+        table = write_targets(self.path("t.tsv"), rows, curated=curated,
+                              spacer=kw.pop("spacer", SPACER))
+        out, ann = self.path("out"), self.path("ann.tsv")
+        summary = F.run(targets=table, reference=genome,
+                        vcfs=[vcf] if vcf else [],
+                        samples=[write_samples(self.path("s.txt"))] if vcf else [],
+                        out=out, annotate_table=ann, **kw)
+        return (summary, read_tsv(ann), read_tsv(out + ".tsv"),
+                read_fasta(out + ".fa"))
+
+    def test_the_curated_download_comes_back_with_the_sequences_on_the_row(self):
+        rec = snv(TARGET_AT - 2, "A" if REF[TARGET_AT - 2] != "A" else "C",
+                  {"S1": "1|0"})
+        _s, ann, _tsv, _fa = self.annotate(ROW, [rec])
+        self.assertEqual(len(ann), 1)
+        row = ann[0]
+        # every original column is still there, in its own order
+        self.assertEqual(row["rank"], "1")
+        self.assertEqual(row["Aligned_protospacer+PAM"], TARGET)
+        self.assertEqual(row["flank_ref"], REF[TARGET_AT - 3:TARGET_AT + 29])
+        self.assertEqual(row["flank_ref_len"], "32")
+        self.assertEqual(row["flank_ref_offset"], "3")
+        self.assertEqual(row["flank_alt_count"], "1")
+        self.assertEqual(len(row["flank_alt"]), 32)
+        self.assertNotEqual(row["flank_alt"], row["flank_ref"])
+        self.assertEqual(row["flank_window"], "up3+down6")
+        self.assertEqual(row["flank_row_id"], "1")
+
+    def test_an_integrated_table_too(self):
+        _s, ann, _tsv, _fa = self.annotate(ROW, curated=False)
+        row = ann[0]
+        self.assertEqual(row["Spacer+PAM"], SPACER)
+        self.assertEqual(row["flank_ref"], REF[TARGET_AT - 3:TARGET_AT + 29])
+        self.assertEqual(row["flank_alt"], "")
+        self.assertEqual(row["flank_alt_count"], "0")
+
+    def test_several_alts_are_counted_and_kept_not_dropped(self):
+        """A row with more than one distinct ALT sequence: the columns carry the
+        primary one and the COUNT, and every one of them is still in the companion
+        files, reachable by flank_row_id. Nothing is dropped, nothing is crammed in."""
+        recs = [snv(TARGET_AT - 2, "A" if REF[TARGET_AT - 2] != "A" else "C",
+                    {"S1": "1|0"}),
+                snv(TARGET_AT + 25, "A" if REF[TARGET_AT + 25] != "A" else "C",
+                    {"S2": "1|0"})]
+        summary, ann, tsv, fasta = self.annotate(ROW, recs)
+        row = ann[0]
+        self.assertEqual(row["flank_alt_count"], "2")
+        self.assertEqual(summary["multi_alt_rows"], 1)
+        companion = [r for r in tsv if r["haplotype"].startswith("hap")]
+        self.assertEqual(len(companion), 2)
+        self.assertEqual({r["row_id"] for r in companion}, {row["flank_row_id"]})
+        # the column carries hap1 itself -- the same bytes the FASTA holds -- and the
+        # other one is in the companion files, not lost
+        self.assertEqual(row["flank_alt"], fasta[companion[0]["fasta_id"]])
+        self.assertEqual({fasta[r["fasta_id"]] for r in companion} - {row["flank_alt"]},
+                         {fasta[companion[1]["fasta_id"]]})
+        # the extras are NOT in the cell by default
+        self.assertNotIn("|", row["flank_alt"])
+        self.assertNotIn("flank_alt_all", row)
+
+    def test_alt_list_puts_them_all_in_one_cell_when_asked(self):
+        recs = [snv(TARGET_AT - 2, "A" if REF[TARGET_AT - 2] != "A" else "C",
+                    {"S1": "1|0"}),
+                snv(TARGET_AT + 25, "A" if REF[TARGET_AT + 25] != "A" else "C",
+                    {"S2": "1|0"})]
+        _s, ann, _tsv, _fa = self.annotate(ROW, recs, alt_list=True)
+        every = ann[0]["flank_alt_all"].split("|")
+        self.assertEqual(len(every), 2)
+        self.assertEqual(len(set(every)), 2)
+        self.assertIn(ann[0]["flank_alt"], every)
+
+    def test_the_cap_never_makes_the_count_or_the_notes_lie(self):
+        """--max-haplotypes keeps the file readable; it must not make the table say a
+        row has fewer ALT sequences than it has. The count is the true total, the
+        delimited list holds what was written, and the notes say what was left out."""
+        recs = [snv(TARGET_AT - 2, "A" if REF[TARGET_AT - 2] != "A" else "C",
+                    {"S1": "1|0"}),
+                snv(TARGET_AT + 25, "A" if REF[TARGET_AT + 25] != "A" else "C",
+                    {"S2": "1|0"})]
+        _s, ann, _tsv, _fa = self.annotate(ROW, recs, alt_list=True, max_haplotypes=1)
+        row = ann[0]
+        self.assertEqual(row["flank_alt_count"], "2")                  # the true total
+        self.assertEqual(len(row["flank_alt_all"].split("|")), 1)      # what was written
+        self.assertIn("haplotypes-not-written:1", row["flank_notes"])
+
+    def test_the_original_columns_come_back_byte_for_byte(self):
+        """The user's table must come back as THEIR table: the original text is copied,
+        not round-tripped through a CSV reader that would eat a quote character, and
+        the line count is the same whatever the filter did."""
+        genome = write_fasta(self.path("ref"))
+        table = self.path("t.tsv")
+        head = ('rank\tChromosome\tPosition\tStrand\tAligned_spacer+PAM\t'
+                'Aligned_protospacer+PAM\tNote')
+        body = ['1\tchr1\t%d\t+\t%s\t%s\t"quoted, with a comma"' % (TARGET_AT, SPACER,
+                                                                    TARGET),
+                '2\tchr1\t%d\t+\t%s\t%s\t' % (TARGET_AT, SPACER, TARGET)]
+        with open(table, "w") as fh:
+            fh.write(head + "\n" + "\n".join(body) + "\n")
+        F.run(targets=table, reference=genome, out=self.path("o"),
+              annotate_table=self.path("a.tsv"))
+        with open(self.path("a.tsv")) as fh:
+            lines = [ln.rstrip("\n") for ln in fh if ln.strip()]
+        self.assertEqual(len(lines), 3)
+        self.assertTrue(lines[0].startswith(head + "\t"))
+        for original, written in zip(body, lines[1:]):
+            self.assertTrue(written.startswith(original + "\t"), written)
+        self.assertIn('"quoted, with a comma"', lines[1])
+
+    def test_a_row_past_max_rows_says_so_rather_than_reading_as_empty(self):
+        """--max-rows stops the READING (a genome-wide table has millions of lines), so
+        the lines past it have no flank -- and must say which of the two reasons it is,
+        or an empty cell reads as "this site has no ALT sequence"."""
+        genome = write_fasta(self.path("ref"))
+        table = write_targets(self.path("t.tsv"),
+                              [("chr1", TARGET_AT, "+", TARGET)] * 3)
+        F.run(targets=table, reference=genome, out=self.path("o"), max_rows=1,
+              annotate_table=self.path("a.tsv"))
+        got = read_tsv(self.path("a.tsv"))
+        self.assertEqual(len(got), 3)
+        self.assertEqual(got[0]["flank_ref_len"], "32")
+        for row in got[1:]:
+            self.assertEqual(row["flank_ref"], "")
+            self.assertEqual(row["flank_notes"], "not-read(--max-rows)")
+
+    def test_a_column_it_would_overwrite_is_refused(self):
+        genome = write_fasta(self.path("ref"))
+        table = self.path("t.tsv")
+        with open(table, "w") as fh:
+            fh.write("rank\tChromosome\tPosition\tStrand\tAligned_spacer+PAM\t"
+                     "Aligned_protospacer+PAM\tflank_ref\n")
+            fh.write("1\tchr1\t%d\t+\t%s\t%s\tmine\n" % (TARGET_AT, SPACER, TARGET))
+        with self.assertRaises(F.FlankError) as e:
+            F.run(targets=table, reference=genome, out=self.path("o"),
+                  annotate_table=self.path("a.tsv"))
+        self.assertIn("flank_ref", str(e.exception))
+        self.assertIn("overwrite", str(e.exception))
+
+    def test_writing_over_the_input_table_is_refused(self):
+        genome = write_fasta(self.path("ref"))
+        table = write_targets(self.path("t.tsv"), ROW)
+        with self.assertRaises(F.FlankError) as e:
+            F.run(targets=table, reference=genome, out=self.path("o"),
+                  annotate_table=table)
+        self.assertIn("never modified in place", str(e.exception))
+
+
+class RowFilters(Case):
+    """--filter: which rows get flanks, as an expression over the table's own columns."""
+
+    EXPR = "CRISPR_Bulge >= CB_SENSITIVE and CRISPR_Bulge_ref >= CB_SENSITIVE"
+
+    def scored(self, alt, ref):
+        rows = [("chr1", TARGET_AT, "+", TARGET)] * len(alt)
+        return rows, [("CRISPR-Bulge", alt), ("CRISPR-Bulge_ref", ref)]
+
+    def test_both_scores_above_the_sensitive_threshold(self):
+        """The worked example: the pair only where the ALT and the REF alignment are
+        both at or above the CRISPR-Bulge sensitive operating point."""
+        import cb_operating_point as cbop
+        thr = cbop.sensitive_threshold()
+        rows, extra = self.scored([thr * 10, thr / 10, thr * 10, thr * 10],
+                                  [thr * 10, thr * 10, thr / 10, thr])
+        summary, table, _f = self.go(rows, window=None, extra=extra,
+                                     row_filter=self.EXPR)
+        self.assertEqual({int(r["row_id"]) for r in table}, {1, 4})
+        self.assertEqual(summary["filter_counts"]["kept"], 2)
+        self.assertEqual(summary["filter_counts"]["read"], 4)
+
+    def test_the_threshold_is_the_operating_points_not_a_literal(self):
+        """CB_SENSITIVE follows cb_operating_point, so a filter written today still
+        means 'the sensitive threshold' after a re-fit or a different recall target."""
+        import cb_operating_point as cbop
+        rows, extra = self.scored([2.0e-3], [2.0e-3])
+        at_95 = cbop.CB_RECALL_POINTS[95][0]
+        at_90 = cbop.CB_RECALL_POINTS[90][0]
+        self.assertLess(at_95, 2.0e-3)
+        self.assertGreater(at_90, 2.0e-3)
+        _s, kept, _f = self.go(rows, window=None, extra=extra, row_filter=self.EXPR)
+        self.assertEqual(len(entries(kept)), 1)
+        with mock.patch.dict(os.environ, {"CRISPRME_CB_RECALL_TARGET": "90"}):
+            with self.assertRaises(F.FlankError) as e:
+                self.go(rows, window=None, extra=extra, row_filter=self.EXPR)
+        self.assertIn("kept none", str(e.exception))
+
+    def test_a_missing_value_does_not_pass_and_is_counted(self):
+        """A cell the table does not fill is not zero: the row is not kept, and how
+        many such rows there were is said rather than left to be noticed."""
+        rows, extra = self.scored([0.5, 0.5], ["NA", 0.5])
+        summary, table, _f = self.go(rows, window=None, extra=extra,
+                                     row_filter=self.EXPR)
+        self.assertEqual({int(r["row_id"]) for r in table}, {2})
+        self.assertEqual(summary["filter_counts"]["filter_missing"], 1)
+
+    def test_a_negated_test_does_not_let_the_missing_rows_through(self):
+        """The rule is one rule: a row whose value the expression READ is missing is
+        not kept, whichever way round the test is written. Otherwise 'not above the
+        threshold' would quietly select every row nobody measured -- the opposite of
+        what a validation shortlist wants. has() asks about presence without reading
+        the value, and short-circuits, so the escape hatch still works."""
+        rows, extra = self.scored([0.5, "NA", 1e-9], [0.5, 0.5, 0.5])
+        _s, table, _f = self.go(rows, window=None, extra=extra,
+                                row_filter="not (CRISPR_Bulge >= CB_SENSITIVE)")
+        self.assertEqual({int(r["row_id"]) for r in table}, {3})
+        _s2, with_hatch, _f2 = self.go(
+            rows, window=None, extra=extra,
+            row_filter='not has("CRISPR-Bulge") or CRISPR_Bulge < CB_SENSITIVE')
+        self.assertEqual({int(r["row_id"]) for r in with_hatch}, {2, 3})
+
+    def test_a_name_the_table_does_not_have_is_refused_by_name(self):
+        rows, extra = self.scored([0.5], [0.5])
+        with self.assertRaises(F.FlankError) as e:
+            self.go(rows, window=None, extra=extra, row_filter="CRISPR_Bulgé > 0")
+        self.assertIn("has no column", str(e.exception))
+        self.assertIn("CRISPR-Bulge", str(e.exception))     # the columns are listed
+
+    def test_the_exact_name_is_always_reachable(self):
+        rows, extra = self.scored([0.5, 1e-9], [0.5, 0.5])
+        _s, table, _f = self.go(rows, window=None, extra=extra,
+                                row_filter='col("CRISPR-Bulge") >= CB_SENSITIVE')
+        self.assertEqual({int(r["row_id"]) for r in table}, {1})
+
+    def test_an_expression_that_is_not_a_row_test_is_refused(self):
+        rows, extra = self.scored([0.5], [0.5])
+        for bad, why in ((" __import__('os').system('true')", "may only call"),
+                         ("CFD.real > 0", "may not use"),
+                         ("[c for c in (1,)]", "may not use"),
+                         ("abs > 1", "is a function"),
+                         ('col("nope") > 1', 'has no column "nope"'),
+                         ("CFD >", "is not an expression")):
+            with self.assertRaises(F.FlankError) as e:
+                self.go(rows, window=None, extra=extra, row_filter=bad)
+            self.assertIn(why, str(e.exception), bad)
+
+    def test_a_filtered_row_keeps_its_line_in_the_table_unless_dropped(self):
+        rows, extra = self.scored([0.5, 1e-9], [0.5, 0.5])
+        genome = write_fasta(self.path("ref"))
+        table = write_targets(self.path("t.tsv"), rows, extra=extra)
+        F.run(targets=table, reference=genome, out=self.path("o"),
+              row_filter=self.EXPR, annotate_table=self.path("a.tsv"))
+        kept = read_tsv(self.path("a.tsv"))
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(kept[1]["flank_notes"], "filtered-out")
+        self.assertEqual(kept[1]["flank_ref"], "")
+        F.run(targets=table, reference=genome, out=self.path("o2"),
+              row_filter=self.EXPR, annotate_table=self.path("a2.tsv"),
+              filter_drop=True)
+        self.assertEqual(len(read_tsv(self.path("a2.tsv"))), 1)
+
+
+class Presets(Case):
+    def test_a_preset_names_a_window_and_a_flag_still_wins(self):
+        _s, table, fasta = self.go(ROW, window=None, preset="amplicon")
+        got = entries(table)[0]
+        self.assertEqual(got["window_spec"], "window200")
+        self.assertEqual(fasta[got["fasta_id"]],
+                         REF[TARGET_AT - 200:TARGET_AT + 223])
+        # the flag beats the preset
+        _s2, table2, _f2 = self.go(ROW, window=40, preset="amplicon")
+        self.assertEqual(entries(table2)[0]["window_spec"], "window40")
+
+    def test_a_preset_file_adds_one_without_a_code_change(self):
+        """The requirement that makes this general: another assay is a section in a
+        file, not an edit to the module."""
+        path = self.path("my.conf")
+        with open(path, "w") as fh:
+            fh.write("[mine]\nupstream = 5\ndownstream = 1\n"
+                     "description = my own assay\n")
+        _s, table, fasta = self.go(ROW, window=None, preset="mine",
+                                   preset_files=[path])
+        got = entries(table)[0]
+        self.assertEqual(got["window_spec"], "up5+down1")
+        self.assertEqual(fasta[got["fasta_id"]], REF[TARGET_AT - 5:TARGET_AT + 24])
+        self.assertIn("mine", F.preset_help(F.load_presets([path])))
+
+    def test_a_preset_may_carry_the_filter_and_the_cap_too(self):
+        """A preset is a name for a SET of flags, not for a window alone -- and
+        --max-haplotypes 10 (the default's own value) still beats a preset that says
+        something else, because "not given" is told from "given the default"."""
+        import cb_operating_point as cbop
+        thr = cbop.sensitive_threshold()
+        path = self.path("my.conf")
+        with open(path, "w") as fh:
+            fh.write("[assay]\nupstream = 3\ndownstream = 6\nmax_haplotypes = 1\n"
+                     "filter = CRISPR_Bulge >= CB_SENSITIVE\n")
+        rows = [("chr1", TARGET_AT, "+", TARGET)] * 2
+        extra = [("CRISPR-Bulge", [thr * 10, thr / 10])]
+        recs = [snv(TARGET_AT - 2, "A" if REF[TARGET_AT - 2] != "A" else "C",
+                    {"S1": "1|0"}),
+                snv(TARGET_AT + 25, "A" if REF[TARGET_AT + 25] != "A" else "C",
+                    {"S2": "1|0"})]
+        _s, table, _f = self.go(rows, recs, window=None, extra=extra,
+                                preset="assay", preset_files=[path])
+        self.assertEqual({int(r["row_id"]) for r in table}, {1})      # the filter
+        self.assertEqual(len([r for r in table
+                              if r["haplotype"].startswith("hap")]), 1)   # the cap
+        _s2, more, _f2 = self.go(rows, recs, window=None, extra=extra,
+                                 preset="assay", preset_files=[path],
+                                 max_haplotypes=10)
+        self.assertEqual(len([r for r in more
+                              if r["haplotype"].startswith("hap")]), 2)
+
+    def test_the_presets_are_listed_by_the_help(self):
+        text = F.help_text()
+        for name in F.load_presets():
+            self.assertIn(name, text)
+        self.assertIn("PRESETS (--preset <name>)", text)
+
+    def test_an_unknown_preset_and_an_unknown_key_are_refused(self):
+        with self.assertRaises(F.FlankError) as e:
+            self.go(ROW, window=None, preset="nope")
+        self.assertIn("no preset", str(e.exception))
+        self.assertIn("amplicon", str(e.exception))     # the ones there are, named
+        path = self.path("bad.conf")
+        with open(path, "w") as fh:
+            fh.write("[mine]\nupstraem = 5\n")
+        with self.assertRaises(F.FlankError) as e:
+            F.load_presets([path])
+        self.assertIn("upstraem", str(e.exception))
+        self.assertIn("is not a preset key", str(e.exception))
 
 
 # --------------------------------------------------------------------------- #
@@ -1447,6 +2054,128 @@ class Mutants(Case):
             with expect_failure(self, "a sample on both lists is counted twice"):
                 UnknownGenotypes(
                     "test_overlapping_records_on_one_slot_have_no_sequence").debug()
+
+    # ---- the anchored window, the strand, the PAM's side, the bulge, the columns,
+    # the filter: one mutant each
+    def test_an_always_symmetric_window_breaks_the_default_rule(self):
+        """The window before this change: one number, the same at both ends. A 32-mer
+        is 3 and 6, so a symmetric reading of them is a different sequence."""
+        real = F.Geometry.edges
+
+        def symmetric(self_, strand, span, nominal):
+            left, right, up, down, adj = real(self_, strand, span, nominal)
+            return self_.upstream, self_.upstream, up, down, adj
+        with mock.patch.object(F.Geometry, "edges", symmetric):
+            with expect_failure(self, "both paddings take the upstream number"):
+                AnchoredWindows("test_the_default_is_a_32mer_on_a_mismatch_only_site"
+                                ).debug()
+
+    def test_ignoring_the_strand_breaks_the_minus_strand_rule(self):
+        """The paddings mapped to the genomic sides as if every row were on the plus
+        strand: on a minus row the 3 and the 6 then swap ends."""
+        real = F.Geometry.edges
+
+        def plus_only(self_, strand, span, nominal):
+            return real(self_, "+", span, nominal)
+        with mock.patch.object(F.Geometry, "edges", plus_only):
+            with expect_failure(self, "a minus row is padded as if it were plus"):
+                StrandAndPamSide(
+                    "test_a_minus_strand_row_pads_in_the_guides_orientation").debug()
+
+    def test_assuming_spcas9_breaks_the_five_prime_pam_rule(self):
+        """The thing this must never do: read every run as a 3' PAM. On a Cas12a run
+        that puts both paddings on the wrong genomic side."""
+        with mock.patch.object(F, "pam_side_from_spacer",
+                               lambda spacer, motif_len=None: (F.PAM_3PRIME, 3)):
+            with expect_failure(self, "a 5' PAM is read as a 3' one"):
+                StrandAndPamSide(
+                    "test_a_five_prime_pam_puts_the_paddings_on_the_other_genomic_sides"
+                ).debug()
+
+    def test_a_footprint_taken_as_nominal_breaks_the_bulge_rule(self):
+        """The assumption the 32-mer makes: protospacer+PAM is always the nominal
+        number of genomic bases. It is not, wherever the alignment carries a bulge."""
+        with mock.patch.object(F, "bulge_counts", lambda spacer, proto: (0, 0)):
+            real = F.Geometry.edges
+
+            def nominal_span(self_, strand, span, nominal):
+                return real(self_, strand, nominal if nominal else span, nominal)
+            with mock.patch.object(F.Geometry, "edges", nominal_span):
+                with expect_failure(self, "the footprint is assumed to be nominal"):
+                    BulgeFootprint(
+                        "test_fixed_total_holds_the_length_and_says_which_padding_moved"
+                    ).debug()
+
+    def test_an_alt_column_filled_from_the_reference_breaks_the_column_rule(self):
+        """The quiet disaster of the column mode: the ALT cell carrying the reference
+        sequence, which is the very thing a user must not order oligos from."""
+        real = F.annotation_rows
+
+        def ref_in_alt(out_lines):
+            rows = real(out_lines)
+            for cells in rows.values():
+                cells["flank_alt"] = cells["flank_ref"]
+            return rows
+        with mock.patch.object(F, "annotation_rows", ref_in_alt):
+            with expect_failure(self, "the ALT column holds the reference"):
+                ColumnMode(
+                    "test_the_curated_download_comes_back_with_the_sequences_on_the_row"
+                ).debug()
+
+    def test_counting_only_what_was_written_breaks_the_alt_count_rule(self):
+        """The count must be the row's TRUE number of distinct ALT sequences, not the
+        number that fitted: a user sizes extra assay targets from it."""
+        real = F.annotation_rows
+
+        def written_only(out_lines):
+            rows = real(out_lines)
+            for cells in rows.values():
+                cells["flank_alt_count"] = 1 if cells["flank_alt"] else 0
+            return rows
+        with mock.patch.object(F, "annotation_rows", written_only):
+            with expect_failure(self, "the ALT count is what was written"):
+                ColumnMode(
+                    "test_several_alts_are_counted_and_kept_not_dropped").debug()
+
+    def test_a_missing_value_read_as_zero_breaks_the_filter_rule(self):
+        """An empty cell read as 0 passes a 'greater than' test it should fail and
+        fails a 'less than' one it should pass: either way the user gets a row they
+        did not ask for, silently."""
+        real = F.RowFilter._cell
+
+        def as_zero(self_, i, row, state):
+            text = row[i].strip() if i < len(row) else ""
+            if text in F._MISSING_CELLS:
+                return 1.0            # a number, and nothing said about it
+            return real(self_, i, row, state)
+        with mock.patch.object(F.RowFilter, "_cell", as_zero):
+            with expect_failure(self, "a missing value is read as a number"):
+                RowFilters("test_a_missing_value_does_not_pass_and_is_counted").debug()
+
+    def test_a_hardcoded_threshold_breaks_the_operating_point_rule(self):
+        """CB_SENSITIVE written as the number it happens to be today: the filter then
+        keeps saying 1.9e-4 after the operating point moves."""
+        real = F.cb_sensitive_point
+
+        def frozen():
+            _thr, recall = real()
+            return 1.9e-4, recall
+        with mock.patch.object(F, "cb_sensitive_point", frozen):
+            with expect_failure(self, "the threshold is a literal, not the point"):
+                RowFilters(
+                    "test_the_threshold_is_the_operating_points_not_a_literal").debug()
+
+    def test_a_preset_that_beats_the_flag_breaks_the_precedence_rule(self):
+        """A preset must supply a default, never override what the user typed."""
+        real = F.resolve_window
+
+        def preset_wins(upstream, downstream, window, preset, presets):
+            if preset:
+                return real(None, None, None, preset, presets)
+            return real(upstream, downstream, window, preset, presets)
+        with mock.patch.object(F, "resolve_window", preset_wins):
+            with expect_failure(self, "the preset beats the flag"):
+                Presets("test_a_preset_names_a_window_and_a_flag_still_wins").debug()
 
 
 if __name__ == "__main__":

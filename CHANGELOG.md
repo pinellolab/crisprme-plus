@@ -28,10 +28,9 @@ and the `release-crisprme` skill.
   offset and length are marked inside every flank, read from that haplotype's own
   coordinates, so an indel that shifts the site reads as a shifted offset rather than as a
   miscount, and a `target_found` column says whether the haplotype reads the row's
-  protospacer at all. The window is cut on the reference (200 bases either side by
-  default: a 423 bp interval, a 250-300 bp NGS amplicon with room for primers 50-150 bp
-  from the cut), so every haplotype of a site covers one genomic interval and an indel
-  inside it shows as a longer or shorter `flank_len`. It never invents a haplotype: an
+  protospacer at all. The window is cut on the reference, so every haplotype of a site
+  covers one genomic interval and an indel inside it shows as a longer or shorter
+  `flank_len`. It never invents a haplotype: an
   unphased heterozygous call, a missing allele, a slot whose records describe the same
   bases twice, two genotyped VCFs that share a sample, a target near a contig end and an
   input the run's records name but that is gone are each reported or refused BY NAME. With
@@ -68,6 +67,76 @@ and the `release-crisprme` skill.
   imports no CRISPRme module). README section 2.2.12, METHODS section 7.1,
   `docs/offtarget_risk_summary_METHODS.md` section 3.6, and a new CI suite
   (`PostProcess/test_extract_flanks.py`) with a mutant for every rule.
+- **`extract-flanks`: an ANCHORED, PARAMETRIC window, the REF and ALT sequences as
+  COLUMNS of your own table, and a general row filter -- so one command serves a
+  32-mer oligo assay and an amplicon design without an edit to it.** The window is now
+  the target plus a padding at each of its two ends, each named for what it sits
+  beside, in the GUIDE's orientation: `--upstream N` beyond the protospacer (default
+  3), `--downstream M` beyond the PAM (default 6) -- a 32-mer for a 20-nt spacer with a
+  3-nt PAM, with the protospacer+PAM at `target_offset 3`. The anchored form is the
+  default because it is the general one (its meaning does not depend on the target's
+  length) and because a short oligo read straight off the site has no primer slack to
+  absorb a padding error; the symmetric form is `--window W`, which IS
+  `--upstream W --downstream W` (giving both is refused, not resolved), and
+  `--preset amplicon` is the former 200. A `--preset` is a NAME for a set of these
+  flags, read from `PostProcess/flank_presets.conf`, `$CRISPRME_FLANK_PRESETS` and
+  `--preset-file`, listed by `--help`, and always beaten by a flag on the command line:
+  an assay with its own geometry is a line of configuration, not a change to CRISPRme.
+  STRAND AND PAM SIDE ARE READ, NEVER ASSUMED: on a minus-strand row the bases beyond
+  the PAM are at the genomic left, and on a 5' PAM (Cas12a TTTV, PAM then protospacer)
+  the target's two ends swap, so the same two numbers land on the OPPOSITE genomic
+  sides -- taken from the PAM file the run's own command line names (whose signed
+  length carries the side), else its `Params.txt` `Pam` with the side read off the
+  table's `Aligned_spacer+PAM` run of N's, else `--pam-file` / `--pam-motif
+  --pam-side`; where none of them answers and the two paddings differ, the command
+  refuses rather than guess SpCas9. Sequences are now written as the GUIDE reads them
+  by default (`--orientation genome` for the reference's plus strand, the former
+  behaviour), with `orientation` and `emitted_strand` on every line and coordinates
+  genomic either way. BULGES ARE HANDLED EXPLICITLY, not assumed away: a 32-mer assumes
+  protospacer+PAM is 23 genomic bases, which fails wherever the alignment carries a
+  bulge (a DNA bulge is one genomic base more, an RNA bulge one less -- and
+  bulge-carrying sites are the class CRISPR-Bulge under-detects, so they are
+  over-represented in any sensitive-threshold fill-in). The default keeps the paddings
+  and lets the total vary, which keeps the sequence genomically true;
+  `--length-policy fixed-total` holds the reference interval at
+  upstream+spacer+PAM+downstream and takes the difference out of the padding (beyond
+  the PAM first, never below zero). Either way the row says its own: `flank_len`,
+  `target_span_ref`, `nominal_target_len`, `bulge_type`, `pad_upstream`/`pad_downstream`
+  as applied, `window_spec`, `pam_side`, `length_policy`, and the greppable notes
+  `target-span-not-nominal:<span>/<nominal>` and
+  `padding-moved-to-hold-the-total:<+-n>`. `--annotate-table` writes the INPUT TABLE
+  back out with the sequences added as columns -- `flank_ref`, `flank_alt` (the primary
+  ALT: the one that HOLDS the off-target, most carried first), `flank_alt_count` (how
+  many DISTINCT ALT sequences the row has, the true total whatever `--max-haplotypes`
+  wrote), the length and the target's offset and length inside each, and
+  `flank_row_id` to join -- on the report's top-N download and on an
+  `integrated_results.tsv` alike. A row with several distinct ALTs keeps every one of
+  them in the companion FASTA/TSV: none is dropped, and none is crammed into a cell
+  unless `--alt-list` asks. `--filter` selects rows by an expression over the TABLE'S
+  OWN columns (a name Python cannot hold is written with underscores, `CRISPR-Bulge` as
+  `CRISPR_Bulge`, or as `col("...")`), with the CRISPR-Bulge sensitive operating point
+  available BY NAME as `CB_SENSITIVE` from `cb_operating_point` rather than copied as a
+  number, so a filter written today still means "the sensitive threshold" after a
+  re-fit: both alignments above it is
+  `--filter 'CRISPR_Bulge >= CB_SENSITIVE and CRISPR_Bulge_ref >= CB_SENSITIVE'`. A row
+  is kept when the expression is true AND every cell it read had a value -- a missing
+  cell is not zero, and a negated test would otherwise select exactly the rows nobody
+  measured; `has("col")` asks about presence without reading the value, and the count
+  of such rows is printed. A row the filter dropped still
+  keeps its line in the annotated table (`flank_notes filtered-out`) unless
+  `--filter-drop`. THE WINDOW DOMINATES HOW MANY ALT SEQUENCES A SITE HAS, which is what
+  an assay sizes its extra targets from, so every such figure is now labelled with the
+  window it belongs to: on the 1,000-site shortlist of a genome-wide HGDP+1000G run
+  (4,091 samples), `--window 200` gave 940 of 1,000 sites with at least one ALT flank
+  distinct from the reference and 939 with MORE THAN ONE (median 22 per site, max
+  4,263, 10,354 sequences), while the 32-mer default gave 803 and 546 (median 2, max
+  837, 3,069 sequences) -- fewer, but still more than half the sites with more than one
+  distinct ALT 32-mer, so a plan that assumes one ALT sequence per site is wrong on
+  about half of them at either window. The haplotype reconstruction, the carrier
+  accounting and what each column may claim are unchanged (at `--window 200
+  --orientation genome` the output is byte-identical to the previous behaviour over all
+  10,354 sequences of that run); the expanded CI suite
+  (`PostProcess/test_extract_flanks.py`, 129 tests) carries a mutant for each new rule.
 
 ### Changed
 - **The Docker image keeps no conda or pip package cache.** The Dockerfile's `micromamba clean

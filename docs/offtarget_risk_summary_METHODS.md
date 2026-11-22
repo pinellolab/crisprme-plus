@@ -206,14 +206,32 @@ crisprme.py extract-flanks \
   --results Results/<job> \
   --targets <job>_report/data/top1000.tsv \
   --vcf-dir VCFs/<dataset> \
+  --upstream 3 --downstream 6 \
+  --filter 'CRISPR_Bulge >= CB_SENSITIVE and CRISPR_Bulge_ref >= CB_SENSITIVE' \
+  --annotate-table flanks/panel_with_oligos.tsv \
   --out flanks/panel
 ```
 
 Per input row it writes the **reference** flank and one flank per **distinct observed
 haplotype** (deduplicated by sequence, each with its carriers and — where the VCF is
-phased — the haplotype side), 200 bases either side by default, with the protospacer+PAM's
-offset and length marked inside every flank and a `target_found` column saying whether that
-haplotype actually reads the row's protospacer.
+phased — the haplotype side), with the protospacer+PAM's offset and length marked inside
+every flank and a `target_found` column saying whether that haplotype actually reads the
+row's protospacer. The window is anchored on the target's two ends and parametric:
+`--upstream` beyond the protospacer and `--downstream` beyond the PAM, in the guide's
+orientation (3 and 6 by default — a 32-mer for a 20-nt spacer with a 3-nt PAM);
+`--window 200` is the symmetric, amplicon-scale form. `--annotate-table` puts the
+reference and the primary ALT sequence, and the count of distinct ALT sequences, as
+columns of the panel itself, and `--filter` selects the rows — here, the sites whose ALT
+**and** REF alignments both reach the sensitive operating point of §3.5, taken by name
+(`CB_SENSITIVE`) rather than copied as a number.
+
+Sites whose alignment carries a **bulge** are the ones to watch here: the genomic
+footprint of protospacer+PAM is then not the nominal 23 bases (a DNA bulge is one more,
+an RNA bulge one less), so a fixed-length oligo is wrong on exactly the class this
+document shows CRISPR-Bulge under-detects (§3.5) and which is therefore
+over-represented in any sensitive-threshold fill-in. The default keeps the paddings and
+lets the length vary, and every row states its own `flank_len`, `target_span_ref`,
+`nominal_target_len` and `bulge_type`.
 
 This matters for exactly the sites this document is about. A variant-created off-target
 exists only on the haplotype that carries its variant: primers designed from the reference
