@@ -34,6 +34,22 @@ _CB_ROWS = [("0.5-1", "CRISPR-Bulge ≥ 0.5"), ("0.2-0.5", "CRISPR-Bulge 0.2–0
             ("gt0", f"CRISPR-Bulge {cbop.sensitive_label_text()}, sensitive")]
 _MIN_BAND = 0.2  # lowest score edge the card displays; scores below are pre-filtered out
 
+# The modal shows the held-out CRISPR-Bulge AUPR twice and they do not match to three
+# decimals: the table renders crispr_bulge_calibration.npz (fitted, and AUPR-scored, on the
+# report's 3-decimal CRISPR-Bulge column -> 0.613), while pr_curves.png re-scores the SAME
+# 287 held-out sites at full precision and integrates tie groups as one step (-> 0.622,
+# titled 0.62). Same sites, same model; only the score precision and the AP rule differ, and
+# 0.622 sits well inside the artifact's 0.56-0.70 CI. Say so rather than let a reader find
+# two numbers and stop. Both values are checked against their own sources by
+# test_pr_figures.test_modal_explains_the_two_crispr_bulge_auprs, so neither can drift
+# silently; refitting the artifact at full precision is a backlog item, not a release fix
+# (it would move the deployed probability map and every expected count built on it).
+_CB_AUPR_FIGURE_NOTE = (
+    ' The CRISPR-Bulge panel below is titled AUPR 0.62 where this table says 0.613: the '
+    'figure re-scores the same 287 held-out sites at full precision and groups tied scores, '
+    'while the calibration artifact behind the table is fitted on the report’s 3-decimal '
+    'CRISPR-Bulge column. Same sites, same model — the difference is far inside the 90% CI.')
+
 
 def _esc(x) -> str:
     return _html.escape("" if x is None else str(x))
@@ -217,6 +233,7 @@ def render_risk_card(meta: dict, cfd_scores: Optional[Sequence[float]],
 
 def _render_modal(cal) -> str:
     summary_html = ""
+    cb_row = ""
     if cal is not None:
         def _fmt(scorer):
             # per-scorer + None-guarded: a missing/corrupt artifact for ONE scorer must
@@ -237,19 +254,21 @@ def _render_modal(cal) -> str:
                         f'<td>{cov_txt}</td></tr>')
             except Exception:  # noqa: BLE001 - one scorer's artifact issue must not drop the other
                 return ""
-        rows = _fmt("cfd") + _fmt("crispr_bulge")
+        cb_row = _fmt("crispr_bulge")
+        rows = _fmt("cfd") + cb_row
         if rows:
             summary_html = (
                 '<table class="rc-tbl"><tr class="rc-hdr"><td>scorer</td>'
                 '<td>held-out AUPR (90% CI)</td><td>≥0.2 single-guide coverage</td></tr>'
                 f'{rows}</table>')
+    pr = _pr_curve_uri()
     aupr_note = (
         '<p style="font-size:0.85em;color:#64748b">No-skill AUPR baseline = the off-target '
         'prevalence ≈ 1.22×10⁻⁴; both scorers are far above it. The two AUPRs sit on different '
         'held-out benchmark sets (CFD 359 sites / 46 guides, CRISPR-Bulge 287 / 40) and are '
-        'not directly comparable across scorers.</p>'
+        'not directly comparable across scorers.'
+        f'{_CB_AUPR_FIGURE_NOTE if (cb_row and pr) else ""}</p>'
         if summary_html else "")
-    pr = _pr_curve_uri()
     pr_html = (f'<div class="rc-pr"><img alt="Precision-recall of each scorer" src="{pr}" '
                f'style="max-width:100%">'
                f'<div style="font-size:0.8em;color:#64748b;margin-top:4px">'

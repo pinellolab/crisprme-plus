@@ -26,7 +26,7 @@ points strictly inside a vertical run (same recall, falling precision) are
 collinear with the run's endpoints, so dropping them changes neither the rendered
 polyline nor the average precision, which is a sum of ``delta_recall * precision``.
 
-Stage 1, as used for the committed PNGs (ml008, nice -n 19, ~11 min on CPU)::
+Stage 1, as used for the committed PNGs (nice -n 19, ~11 min on CPU)::
 
     CBULGE_REPO=<crispr-bulge-checkout> \\
     python3 scripts/render_pr_figures.py build \\

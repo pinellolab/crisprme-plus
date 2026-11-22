@@ -19,7 +19,10 @@ file. These tests check the chain end to end:
     changing either without re-rendering fails;
   * when the local matplotlib/freetype matches the one that rendered the
     committed PNGs, re-rendering reproduces them byte for byte;
-  * ``risk_card`` still finds and embeds both PNGs.
+  * ``risk_card`` still finds and embeds both PNGs, and the modal's two held-out
+    CRISPR-Bulge AUPRs -- the table's (fitted on the 3-decimal score column) and
+    the curve's own title (full precision, tie-grouped) -- still match the two
+    sources the modal says they come from, and are still explained there.
 """
 import base64
 import hashlib
@@ -229,6 +232,34 @@ class TestCommittedFigures(unittest.TestCase):
                 blob = base64.b64decode(uri.split(",", 1)[1])
                 with open(os.path.join(_CALDIR, name), "rb") as fh:
                     self.assertEqual(blob, fh.read())
+
+    def test_modal_explains_the_two_crispr_bulge_auprs(self):
+        # The modal prints the held-out CRISPR-Bulge AUPR twice: the table from
+        # crispr_bulge_calibration.npz (fitted and AUPR-scored on the report's 3-decimal
+        # score column) and the curve's own title (full precision, tie-grouped). They are
+        # the same 287 sites and differ in the third decimal, so the modal must SAY why,
+        # and both quoted values must keep matching their sources.
+        import risk_card
+        d = np.load(_DATA, allow_pickle=False)
+        note = risk_card._CB_AUPR_FIGURE_NOTE
+        self.assertIn(f"AUPR {float(d['cb_ap']):.2f}", note)
+        self.assertIn(f"{int(d['cb_pos'])} held-out sites", note)
+        art = os.path.join(_CALDIR, "crispr_bulge_calibration.npz")
+        if not os.path.exists(art):
+            self.skipTest("no crispr_bulge_calibration.npz to check the table against")
+        meta = json.loads(str(np.load(art, allow_pickle=False)["meta"]))
+        point, (lo, hi) = meta["aupr"]["point"], meta["aupr"]["ci"]
+        self.assertIn(f"{point:.3f}", note)                       # what the table renders
+        self.assertEqual(int(meta["n_positives"]), int(d["cb_pos"]))   # same support
+        self.assertEqual(int(meta["n_sites"]), int(d["cb_n"]))
+        # "far inside the 90% CI" has to stay true of the figure's value
+        self.assertLess(lo, float(d["cb_ap"]))
+        self.assertLess(float(d["cb_ap"]), hi)
+        # and the sentence must actually reach the modal, next to the table it explains
+        _card, modal = risk_card.render_risk_card(
+            {"guide_display": "ACTGAAATCTGTAAGCAGGC"}, [0.6, 0.3, 0.05], [0.6, 0.3, 0.05])
+        self.assertIn(note.strip(), modal)
+        self.assertLess(modal.index(f"{point:.3f}"), modal.index(note.strip()))
 
     def test_panel_titles_name_their_support_not_in_domain(self):
         # "(in-domain)" was false: in_domain is n_bulge <= 1, true for every row of
