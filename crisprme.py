@@ -8493,6 +8493,14 @@ def crisprme_help() -> None:
         "\tScores a supplied LIST of off-target sites (e.g. Cas-OFFinder output) with "
         "the CRISPRme+ CFD + CRISPR-Bulge calculations, with an optional per-site "
         "variant carrier overlay -- no genome search\n\n"
+        "crisprme.py extract-flanks\n"
+        "\tWrites the genomic sequence around each off-target of a shortlist -- the "
+        "REFERENCE flank and one flank per distinct observed haplotype, with the "
+        "samples carrying each and the protospacer marked -- so a site can be turned "
+        "into a validation oligo order (FASTA + a TSV index, or the input table back "
+        "out with the REF and ALT sequences as columns). The window is anchored on the "
+        "target's two ends and parametric (3 nt beyond the protospacer and 6 beyond "
+        "the PAM by default: a 32-mer for a 20-nt spacer), with named presets\n\n"
         "crisprme.py gnomAD-converter\n"
         "\tConverts gnomAD VCF files into CRISPRme compatible VCFs (supports "
         "gnomAD v3.1, v4.0, and v4.1 (incl. joint VCFs))\n\n"
@@ -8637,6 +8645,163 @@ def targets_scoring_cmd():
     print(f"targets-scoring: wrote {n} scored sites to {output}")
 
 
+def extract_flanks_cmd():
+    """``crisprme.py extract-flanks --targets <table> | --results <folder> --out <prefix>
+    [--upstream 3] [--downstream 6] [--window W] [--preset <name>]
+    [--length-policy anchored|fixed-total] [--orientation guide|genome]
+    [--annotate-table <file>] [--alt-list] [--filter <expr>] [--filter-drop]
+    [--reference <genome dir or FASTA>] [--vcf <VCF>] [--vcf-dir <dir>]
+    [--samples <samplesID>] [--pam-file <file>] [--pam-motif M] [--pam-side S]
+    [--block highest_CFD] [--anonymise] [--include-filtered] [--max-rows N]
+    [--max-haplotypes 10] [--reference-only] [--preset-file <file>]``
+
+    Write the genomic sequence around each off-target site of a shortlist, so a site
+    can be ordered as validation oligos. Per input row it writes the REFERENCE flank
+    and one flank per DISTINCT observed haplotype -- deduplicated by sequence, each
+    with the samples (and the haplotype side, where the VCF is phased) that carry it --
+    with the protospacer+PAM's offset and length marked inside every flank, so an indel
+    that shifts the site is visible rather than miscounted.
+
+    The window is anchored on the target's two ends: ``--upstream`` beyond the
+    protospacer, ``--downstream`` beyond the PAM, in the GUIDE's orientation (3 and 6
+    by default -- a 32-mer for a 20-nt spacer with a 3-nt PAM); ``--window W`` is the
+    symmetric form. Which genomic side each padding lands on follows from the row's
+    strand and from the run's own PAM, read from its records rather than assumed.
+    ``--annotate-table`` writes the input table back out with the reference and the
+    primary ALT sequence as columns, and ``--filter`` is a row expression over the
+    table's own columns (with the CRISPR-Bulge sensitive operating point available as
+    ``CB_SENSITIVE``).
+
+    A sample whose genotype is unphased, has a missing allele, or whose records overlap
+    in the window is REPORTED, never guessed (a stricter rule than the search's own
+    observed-haplotype enumerator, which keeps an unphased individual as one putative
+    set: README 2.2.12). Input is the report's top-N download or an
+    integrated_results.tsv; with ``--results`` the reference, the VCFs and the samples
+    list are read from the run's own records. Index the VCFs (``tabix -p vcf``) first:
+    without a .tbi each is read end to end once before the first flank is written.
+    """
+    if "--help" in input_args or len(input_args) < 3:
+        sys.path.insert(0, script_path)
+        import extract_flanks as _ef
+        sys.stderr.write(_ef.help_text())
+        sys.exit(1)
+
+    def _val(flag, required=False):
+        if flag not in input_args:
+            if required:
+                error(f"{flag} must be provided (see 'extract-flanks --help')")
+            return None
+        try:
+            value = input_args[input_args.index(flag) + 1]
+        except IndexError:
+            error(f"please provide a value for {flag}")
+        if value.startswith("--"):
+            error(f"please provide a value for {flag}")
+        return value
+
+    def _all(flag):
+        out, i = [], 0
+        while True:
+            try:
+                i = input_args.index(flag, i) + 1
+            except ValueError:
+                return out
+            if i >= len(input_args) or input_args[i].startswith("--"):
+                error(f"please provide a value for {flag}")
+            out.append(os.path.abspath(input_args[i]))
+
+    targets = _val("--targets")
+    results = _val("--results")
+    if not targets and not results:
+        error("give --targets <results table> or --results <results folder> "
+              "(see 'extract-flanks --help')")
+    out = _val("--out", required=True)
+
+    def _bases(flag):
+        """A whole, non-negative number of bases, or None where the flag is absent:
+        None has to reach extract_flanks, which is what lets a --preset supply the
+        value and a flag given here still beat it."""
+        text = _val(flag)
+        if text is None:
+            return None
+        try:
+            value = int(text)
+        except ValueError:
+            error(f"{flag} must be an integer number of bases")
+        if value < 0:
+            error(f"{flag} must be 0 or more")
+        return value
+
+    window = _bases("--window")
+    upstream = _bases("--upstream")
+    downstream = _bases("--downstream")
+    max_rows = _val("--max-rows")
+    if max_rows is not None:
+        try:
+            max_rows = int(max_rows)
+        except ValueError:
+            error("--max-rows must be an integer")
+        if max_rows < 0:
+            error("--max-rows must be 0 or more (0: every row)")
+    max_haps = _val("--max-haplotypes")
+    if max_haps is not None:
+        try:
+            max_haps = int(max_haps)
+        except ValueError:
+            error("--max-haplotypes must be an integer")
+        if max_haps < 0:
+            error("--max-haplotypes must be 0 or more (0: every haplotype)")
+    block = _val("--block")
+    reference = _val("--reference")
+    preset = _val("--preset")
+    length_policy = _val("--length-policy")
+    orientation = _val("--orientation")
+    annotate_table = _val("--annotate-table")
+    row_filter = _val("--filter")
+    pam_file = _val("--pam-file")
+    pam_motif = _val("--pam-motif")
+    pam_side = _val("--pam-side")
+
+    sys.path.insert(0, script_path)
+    import extract_flanks as _ef
+
+    if block is not None and block not in _ef.BLOCKS:
+        error("--block must be one of: " + ", ".join(_ef.BLOCKS))
+    if length_policy is not None and length_policy not in _ef.LENGTH_POLICIES:
+        error("--length-policy must be one of: " + ", ".join(_ef.LENGTH_POLICIES))
+    if orientation is not None and orientation not in _ef.ORIENTATIONS:
+        error("--orientation must be one of: " + ", ".join(_ef.ORIENTATIONS))
+    if pam_side is not None and pam_side not in _ef.PAM_SIDES:
+        error("--pam-side must be one of: " + ", ".join(_ef.PAM_SIDES))
+    try:
+        _ef.run(
+            targets=os.path.abspath(targets) if targets else None,
+            results=os.path.abspath(results) if results else None,
+            reference=os.path.abspath(reference) if reference else None,
+            vcfs=_all("--vcf"), vcf_dirs=_all("--vcf-dir"), samples=_all("--samples"),
+            out=os.path.abspath(out),
+            window=window, upstream=upstream, downstream=downstream,
+            preset=preset, preset_files=_all("--preset-file"),
+            length_policy=length_policy, orientation=orientation,
+            annotate_table=os.path.abspath(annotate_table) if annotate_table else None,
+            alt_list="--alt-list" in input_args,
+            row_filter=row_filter, filter_drop="--filter-drop" in input_args,
+            pam_file=os.path.abspath(pam_file) if pam_file else None,
+            pam_motif=pam_motif, pam_side=pam_side,
+            block=block or _ef.DEFAULT_BLOCK,
+            anonymise=("--anonymise" in input_args or "--anonymize" in input_args),
+            include_filtered="--include-filtered" in input_args,
+            max_rows=max_rows or 0,
+            max_haplotypes=max_haps,
+            reference_only="--reference-only" in input_args,
+            log=lambda m: print(m),
+        )
+    except _ef.FlankError as flank_err:
+        # one line, the whole reason, no traceback: the same error style the other
+        # commands use for an input they cannot resolve
+        error(str(flank_err))
+
+
 if len(sys.argv) < 2:
     # no arg? print help, and make no data folder: it made the seven of a data folder
     # (Genomes/, Results/, ...) wherever one ran it to read the help (C14)
@@ -8659,6 +8824,8 @@ elif sys.argv[1] == "targets-integration":  # run targets integration
     target_integration()
 elif sys.argv[1] == "targets-scoring":  # score a supplied list of off-target sites
     targets_scoring_cmd()
+elif sys.argv[1] == "extract-flanks":  # flanking sequences per observed haplotype
+    extract_flanks_cmd()
 elif sys.argv[1] == "gnomAD-converter":  # run gnomad converter
     gnomAD_converter()
 elif sys.argv[1] == "generate-personal-card":  # run create personal card

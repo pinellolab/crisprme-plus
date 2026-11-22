@@ -361,6 +361,63 @@ Panel depth is a **risk/validation-size optimization** read off the expected-tru
 **not a recall guarantee** — detection is lossless (every site is listed); only score-ranked
 selection carries this trade.
 
+## 3.6. From a panel to an oligo order: flanking sequences per haplotype
+
+A validation panel names loci; an assay needs **sequence**. `crisprme.py extract-flanks`
+turns either the panel tier or the report's top-N download into the sequence around each
+site, ready for amplicon primers or probes:
+
+```bash
+crisprme.py extract-flanks \
+  --results Results/<job> \
+  --targets <job>_report/data/top1000.tsv \
+  --vcf-dir VCFs/<dataset> \
+  --upstream 3 --downstream 6 \
+  --filter 'CRISPR_Bulge >= CB_SENSITIVE and CRISPR_Bulge_ref >= CB_SENSITIVE' \
+  --annotate-table flanks/panel_with_oligos.tsv \
+  --out flanks/panel
+```
+
+Per input row it writes the **reference** flank and one flank per **distinct observed
+haplotype** (deduplicated by sequence, each with its carriers and — where the VCF is
+phased — the haplotype side), with the protospacer+PAM's offset and length marked inside
+every flank and a `target_found` column saying whether that haplotype actually reads the
+row's protospacer. The window is anchored on the target's two ends and parametric:
+`--upstream` beyond the protospacer and `--downstream` beyond the PAM, in the guide's
+orientation (3 and 6 by default — a 32-mer for a 20-nt spacer with a 3-nt PAM);
+`--window 200` is the symmetric, amplicon-scale form. `--annotate-table` puts the
+reference and the primary ALT sequence, and the count of distinct ALT sequences, as
+columns of the panel itself, and `--filter` selects the rows — here, the sites whose ALT
+**and** REF alignments both reach the sensitive operating point of §3.5, taken by name
+(`CB_SENSITIVE`) rather than copied as a number.
+
+Sites whose alignment carries a **bulge** are the ones to watch here: the genomic
+footprint of protospacer+PAM is then not the nominal 23 bases (a DNA bulge is one more,
+an RNA bulge one less), so a fixed-length oligo is wrong on exactly the class this
+document shows CRISPR-Bulge under-detects (§3.5) and which is therefore
+over-represented in any sensitive-threshold fill-in. The default keeps the paddings and
+lets the length vary, and every row states its own `flank_len`, `target_span_ref`,
+`nominal_target_len` and `bulge_type`.
+
+This matters for exactly the sites this document is about. A variant-created off-target
+exists only on the haplotype that carries its variant: primers designed from the reference
+alone can sit on a sequence that differs from the one being assayed, or amplify a locus
+that does not hold the site at all. And an indel in the window shifts the protospacer, so
+a position counted off the reference is off by the indel's length — the marked offset is
+read from the haplotype itself, so it is not.
+
+A sample whose genotype is unphased, has a missing allele, or whose records overlap in the
+window is **reported** rather than guessed; haplotypes are written by the same code as the
+independent indel-row check (`scripts/variant_haplotypes.py`). Note that "distinct
+observed haplotype" is a stricter rule here than in the report's `Observed` column: the
+search's enumerator (`observed_haplotypes.py`) keeps an unphased individual by collapsing
+its alts into one *putative* set, so no risk is missed, while this command writes
+sequence and so reports that individual as `unresolved` instead of choosing one. The two
+agree on a phased panel; on an unphased one the carrier lists will differ, by that rule.
+And where no VCF covers a contig the reference entry says `no-vcf-covers-this-contig`
+rather than claiming the panel is invariant there. See README §2.2.12 for the flags and
+METHODS §7.1 for the method.
+
 ## 4. Point calibration: isotonic, and why
 
 The raw score is a ranking number, not a probability. We map score → P(true off-target)
