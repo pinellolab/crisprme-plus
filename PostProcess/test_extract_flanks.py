@@ -513,6 +513,10 @@ class TooManyHaplotypes(Case):
         self.assertEqual(got[0]["n_haplotypes"], "6")  # the TRUE total, still
         self.assertIn("haplotypes-not-written:3", got[0]["notes"])
         self.assertIn("3 carrier haplotypes", got[0]["notes"])
+        # no note holds the column's own separator, so the column stays splittable
+        for row in table:
+            for note in row["notes"].split(";"):
+                self.assertNotIn(";", note)
         self.assertEqual(len(fasta), 3)
 
     def test_the_haplotypes_that_hold_the_off_target_come_first(self):
@@ -557,6 +561,25 @@ class Formats(Case):
         # the default block of that file says start 0: taking it would be another site
         F.run(targets=t, reference=genome, out=out + "2")
         self.assertEqual(entries(read_tsv(out + "2.tsv"))[0]["target_start"], "1")
+
+    def test_a_zipped_table_is_read_and_an_ambiguous_zip_is_refused(self):
+        import zipfile
+        plain = write_targets(self.path("t.tsv"), ROW)
+        one = self.path("one.zip")
+        with zipfile.ZipFile(one, "w") as zf:
+            zf.write(plain, "integrated_results.tsv")
+        genome = write_fasta(self.path("ref"))
+        F.run(targets=one, reference=genome, out=self.path("z"), window=40)
+        self.assertEqual(entries(read_tsv(self.path("z.tsv")))[0]["target_start"],
+                         str(TARGET_AT + 1))
+        many = self.path("many.zip")
+        with zipfile.ZipFile(many, "w") as zf:
+            zf.write(plain, "data/top1000.tsv")
+            zf.write(plain, "data/mmb_le_3.tsv")
+        with self.assertRaises(F.FlankError) as e:
+            F.run(targets=many, reference=genome, out=self.path("z2"))
+        self.assertIn("data/top1000.tsv", str(e.exception))
+        self.assertIn("unzip it", str(e.exception))
 
     def test_the_bgzf_reader_path_gives_the_same_answer(self):
         rec = snv(*SNV_BESIDE, gts={"S1": "1|0", "S2": "1|1"})
@@ -665,6 +688,18 @@ class RunRecords(Case):
 
     CMD = ("crisprme.py complete-search --genome Genomes/hg38 --vcf vcf.config.txt "
            "--samplesID samples.config.txt --output job1")
+
+    def test_a_shortlist_is_read_with_the_runs_own_inputs(self):
+        """--results for the inputs, --targets for the table: the report's top-N read
+        against the genome and VCFs the run actually searched."""
+        job = self.make_run(self.CMD)
+        short = write_targets(self.path("short.tsv"), ROW)
+        summary = F.run(results=job, targets=short, out=self.path("out"), window=40)
+        self.assertEqual(summary["table"], short)
+        self.assertTrue(summary["reference"].endswith(os.path.join("Genomes", "hg38")))
+        self.assertEqual(len(summary["vcfs"]), 1)
+        self.assertEqual([r["haplotype"] for r in entries(read_tsv(self.path("out.tsv")))],
+                         ["ref", "hap1"])
 
     def test_the_run_gives_its_genome_vcfs_and_samples(self):
         job = self.make_run(self.CMD)

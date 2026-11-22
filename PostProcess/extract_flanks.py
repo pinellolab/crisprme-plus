@@ -151,8 +151,10 @@ def open_table(path):
                      if n.endswith(".tsv") or n.endswith(".txt")]
             if len(names) != 1:
                 raise FlankError(
-                    "%s holds %d .tsv/.txt members, not one: unzip it and pass the table"
-                    % (path, len(names)))
+                    "%s holds %d .tsv/.txt members, not one, so which is the table is "
+                    "not ours to choose: unzip it and pass one of %s" % (
+                        path, len(names), ", ".join(sorted(names)[:8])
+                        + (", ..." if len(names) > 8 else "")))
             with zf.open(names[0]) as fh:
                 yield (line.decode("utf-8", "replace").rstrip("\n") for line in fh)
         return
@@ -729,14 +731,15 @@ def site_entries(refseq, chrom, row, variants, window, include_filtered,
         e.label = "hap%d" % i
     if max_haplotypes and len(alts) > max_haplotypes:
         left = alts[max_haplotypes:]
-        notes.add("haplotypes-not-written:%d(%d carrier haplotypes; --max-haplotypes 0 "
-                  "writes them all)" % (len(left), sum(len(e.carriers) for e in left)))
+        notes.add("haplotypes-not-written:%d(%d carrier haplotypes, "
+                  "--max-haplotypes 0 writes them all)"
+                  % (len(left), sum(len(e.carriers) for e in left)))
         alts = alts[:max_haplotypes]
     facts = {"t_lo": t_lo, "t_hi": t_hi, "flo": flo, "fhi": fhi, "probe": probe,
              "notes": notes, "filtered": filtered,
              "n_samples": len({s for v in members.values() for s, _h in v})
                           + len({w.split(":")[0] for w, _r in unresolved}),
-             "n_haplotypes": 1 + len(entries) - 1}
+             "n_haplotypes": len(entries)}
     return [ref_entry] + alts, sorted(set(unresolved)), facts
 
 
@@ -900,6 +903,8 @@ def _lines_for(row_id, row, chrom, entries, unresolved, facts):
         notes = sorted(set(notes_site) | e.notes)
         if not e.found:
             notes.append("protospacer-not-on-this-haplotype")
+        if e.label == "ref":
+            notes.append("reference-of-every-sample-without-a-variant-here")
         d = {
             "row_id": row_id, "rank": row["rank"], "guide": row["guide"], "chrom": chrom,
             "target_start": facts["t_lo"] + 1, "target_end": facts["t_hi"],
@@ -913,8 +918,7 @@ def _lines_for(row_id, row, chrom, entries, unresolved, facts):
             "n_carriers": len(e.carriers),
             "carriers": ",".join("%s:%d" % (s, h) for s, h in sorted(e.carriers)),
             "variants": ",".join(sorted(e.variants)),
-            "notes": ";".join(notes) + (";reference-of-every-sample-without-a-variant-here"
-                                        if e.label == "ref" else ""),
+            "notes": ";".join(notes),
             "_order": k, "_seq": seq,
         }
         out.append(d)

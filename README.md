@@ -2805,6 +2805,11 @@ carries.
   millions of rows; this command is meant for a shortlist.
 - `--reference-only` — read no VCF: the reference flank alone.
 
+> **Note:** on a large panel the TSV's `carriers` column can be long (a common haplotype
+> on a 4,000-sample panel has thousands of carriers): `--anonymise` keeps the counts and
+> drops the names, which also shrinks the file. The FASTA is unaffected — it carries only
+> the sequences and their counts.
+
 > **Note:** every flank is written on the **plus strand** of the reference, whatever the
 > row's strand — one orientation, stated once, is what an oligo order needs. The TSV's
 > `protospacer_on_strand` column gives the target read on the row's own strand, to check
