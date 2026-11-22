@@ -127,15 +127,11 @@ def _masked_sha256(path: str) -> str:
     return h.hexdigest()
 
 
-def companion_fingerprint(members: List[str]) -> Dict:
-    """What a panel companion holds, the same wherever it is computed: ``members`` are
-    (archive path, local path) pairs, a folder (Dictionaries/<dir>) or a file
-    (samplesIDs/<file>). Returns {"fingerprint": the SHA-256 of one line per file,
-    "<archive path>\\t<bytes>\\t<_masked_sha256>", in path order; "files"; "bytes";
-    "members": the archive paths}. A dot file (a marker this module writes) and an
-    AppleDouble file (._name) are left out, as the archive leaves them out."""
-    import hashlib
-    lines, total, files = [], 0, 0
+def _fingerprint_lines(members: List[str]) -> List[str]:
+    """The lines companion_fingerprint hashes, one per file of ``members``: "<archive
+    path>\\t<bytes>\\t<_masked_sha256>", in path order (dot files and AppleDouble files
+    left out)."""
+    lines = []
     for arc, local in sorted(members):
         if os.path.isdir(local):
             for root, dirs, names in os.walk(local):
@@ -145,18 +141,28 @@ def companion_fingerprint(members: List[str]) -> Dict:
                         continue
                     p = os.path.join(root, fn)
                     rel = os.path.join(arc, os.path.relpath(p, local)).replace(os.sep, "/")
-                    size = os.path.getsize(p)
-                    lines.append(f"{rel}\t{size}\t{_masked_sha256(p)}")
-                    total += size
-                    files += 1
+                    lines.append(f"{rel}\t{os.path.getsize(p)}\t{_masked_sha256(p)}")
         elif os.path.isfile(local):
-            size = os.path.getsize(local)
-            lines.append(f"{arc}\t{size}\t{_masked_sha256(local)}")
-            total += size
-            files += 1
+            lines.append(f"{arc}\t{os.path.getsize(local)}\t{_masked_sha256(local)}")
     lines.sort()
-    digest = hashlib.sha256("\n".join(lines).encode()).hexdigest()
-    return {"fingerprint": digest, "files": files, "bytes": total,
+    return lines
+
+
+def _fingerprint_of(lines: List[str]) -> str:
+    import hashlib
+    return hashlib.sha256("\n".join(sorted(lines)).encode()).hexdigest()
+
+
+def companion_fingerprint(members: List[str]) -> Dict:
+    """What a panel companion holds, the same wherever it is computed: ``members`` are
+    (archive path, local path) pairs, a folder (Dictionaries/<dir>) or a file
+    (samplesIDs/<file>). Returns {"fingerprint": the SHA-256 of one line per file,
+    "<archive path>\\t<bytes>\\t<_masked_sha256>", in path order; "files"; "bytes";
+    "members": the archive paths}. A dot file (a marker this module writes) and an
+    AppleDouble file (._name) are left out, as the archive leaves them out."""
+    lines = _fingerprint_lines(members)
+    return {"fingerprint": _fingerprint_of(lines), "files": len(lines),
+            "bytes": sum(int(line.split("\t")[1]) for line in lines),
             "members": sorted(arc for arc, _ in members)}
 
 # Components understood by the download command and their remote sub-paths.
@@ -1478,6 +1484,178 @@ def download_genotype_oracle(
                 f"({store}_{panel}.tar.gz): the carrier gate reads its SNP genotypes "
                 f"alone, so an indel inside a target takes no carrier off.\n")
     return out
+
+
+def _is_mnv_store_file(name: str) -> bool:
+    """Whether ``name`` is a file of a phased indel genotype store's MNV half (2.10.1:
+    gt_mnv_<chrom>.tsv.gz and its .done marker, build_indel_genotypes.store_files)."""
+    return name.startswith("gt_mnv_") and name.endswith((".tsv.gz", ".tsv.gz.done"))
+
+
+def _store_digests(folder: str) -> Dict[str, str]:
+    """{file name: "<bytes>\\t<_masked_sha256>"} of each file of a store folder, dot files
+    aside (companion_fingerprint's lines)."""
+    out = {}
+    for line in _fingerprint_lines([("x", folder)]):
+        path, size, digest = line.split("\t")
+        out[path[len("x/"):]] = f"{size}\t{digest}"
+    return out
+
+
+def download_indel_genotypes(workdir: str, vcf: str, repo: Optional[str] = None,
+                             token: Optional[str] = None) -> str:
+    """download --what indel-genotypes --dataset <vcf> (2.10.1): bring an install's phased
+    indel genotype store (Dictionaries/indel_genotypes_<vcf>/) its MNVs, the MNV file of
+    each chromosome (gt_mnv_<chrom>.tsv.gz, build_indel_genotypes.store_files), which a
+    store of CRISPRme 2.10.0 has none of: a search then reads each MNV's carriers by their
+    phase (the plan of 2.10.1's MNVs, question 1, option A). It fetches the panel's
+    companion indel_genotypes_<vcf> (indexes/<name>.tar.gz, 0.61 GB for HPRC once
+    republished) and installs it whole, in place of the store, where it is the documented
+    upgrade: the store installed here, file for file (each indel file and its marker the
+    same bytes), with an MNV file added for each of its chromosomes. No manifest of an
+    installed index names a fingerprint of this companion (an index's manifest names its
+    panel's Dictionaries bundle, which holds the store, and its genotype store: an install
+    keeps their markers), so the store installed is what the index was installed with, and
+    any other build of the companion is refused (DownloadIntegrityError, nothing of it
+    installed), as a download refuses a companion the index's manifest does not name: one
+    whose files are not what its record says, one whose indel files differ from those
+    installed, one that leaves a chromosome without its MNV file. A repo whose companion
+    holds no MNV file yet (2.10.0's) is said, and nothing installed. A store whose every
+    chromosome has a whole MNV file costs no call to the Hub. Returns the store's folder.
+
+    The repo: ``repo`` where named (--hf-repo, CRISPRME_HF_REPO), else the one the panel's
+    Dictionaries bundle came from (its marker), else this release's (FORMAT2_HF_REPO)."""
+    import build_indel_genotypes as big
+    name = f"indel_genotypes_{vcf}"
+    dicts = os.path.join(workdir, "Dictionaries")
+    store = os.path.join(dicts, name)
+    chroms = sorted(f[len("gt_indel_"):-len(".tsv.gz")] for f in _listdir_or_none(store)
+                    if f.startswith("gt_indel_") and f.endswith(".tsv.gz"))
+    if not chroms:
+        raise ValueError(
+            f"No phased indel genotype store of {vcf} is installed in {dicts} ({name}/, its "
+            f"gt_indel_<chromosome>.tsv.gz files): this step adds the MNVs to an installed "
+            f"one. Install the panel's index (crisprme.py download --what index "
+            f"--index-name <its index>), which brings its store with the MNVs the repo's "
+            f"holds, or build it with build-index-only and the dataset's VCFs.")
+    if os.path.isdir(os.path.join(store, ".building")):
+        raise ValueError(
+            f"{store} is unfinished: a build-index-only run is writing it, or stopped before "
+            f"it was done. Let that run finish, or run build-index-only again to its end, "
+            f"which writes its MNV files too. Nothing was fetched.")
+
+    def whole(folder, chrom):
+        path = big.store_files(folder, chrom)[1]
+        return big.store_is_current(path) and big.read_mnv_lines(path)[0] is not None
+
+    if all(whole(store, c) for c in chroms):
+        sys.stdout.write(f"{name}/ holds the MNVs of each of its {len(chroms)} chromosome(s) "
+                         f"already (gt_mnv_<chromosome>.tsv.gz beside each indel file, "
+                         f"whole): nothing fetched ({store})\n")
+        return store
+    bundle = installed_companion(workdir, f"{BUNDLE_PREFIX}{vcf}")
+    if repo_overridden(repo):
+        repo = resolve_repo(repo)
+    elif bundle and bundle.get("repo"):
+        repo = bundle["repo"]
+    else:
+        repo = FORMAT2_HF_REPO
+    prefix = _COMPONENT_PREFIXES["index"]
+    remote = f"{prefix}/{name}.tar.gz"
+    staging = os.path.join(workdir, f".hf_stage_{name}")
+    extract_tmp = os.path.join(dicts, f".extract_{name}")
+    shutil.rmtree(staging, ignore_errors=True)
+    shutil.rmtree(extract_tmp, ignore_errors=True)
+    nothing = "Nothing of it was installed."
+    try:
+        _hf_snapshot(repo, [remote, f"{prefix}/{name}.json"], staging, token)
+        tgz = os.path.join(staging, prefix, f"{name}.tar.gz")
+        if not os.path.isfile(tgz):
+            raise ValueError(f"{repo} holds no {remote}, the phased indel genotypes of {vcf}: "
+                             f"nothing was installed. Check --dataset, or name the repo "
+                             f"that holds them (--hf-repo).")
+        record = _read_json_file(os.path.join(staging, prefix, f"{name}.json")) or {}
+        os.makedirs(extract_tmp)
+        with tarfile.open(tgz) as tf:
+            safe_tar.extract(tf, extract_tmp)
+        shutil.rmtree(staging, ignore_errors=True)  # (the archive, unpacked)
+        inner = _read_json_file(os.path.join(extract_tmp, "bundle.json")) or {}
+        got = os.path.join(extract_tmp, "Dictionaries", name)
+        extra = sorted(set(_listdir_or_none(extract_tmp)) - {"Dictionaries", "bundle.json"}) + \
+            sorted(f"Dictionaries/{d}" for d in _listdir_or_none(os.path.join(extract_tmp,
+                                                                                "Dictionaries"))
+                   if d != name)
+        if not os.path.isdir(got) or extra:
+            raise DownloadIntegrityError(
+                f"{remote} in {repo} is not the phased indel genotypes of {vcf} alone (it "
+                f"holds {', '.join(extra) or f'no Dictionaries/{name}/'}). {nothing}")
+        new = _store_digests(got)
+        fingerprint = _fingerprint_of([f"Dictionaries/{name}/{n}\t{v}" for n, v in new.items()])
+        said = record.get("fingerprint") or inner.get("fingerprint")
+        if said and said != fingerprint:
+            raise DownloadIntegrityError(
+                f"{remote} in {repo} holds other files than its record says (fingerprint "
+                f"{fingerprint}, the record {said}): a transfer cut short, or an archive and "
+                f"a record of two publishes. {nothing} Run this download again.")
+        have = _store_digests(store)
+        differ = sorted(n for n in set(have) | set(new)
+                        if not _is_mnv_store_file(n) and have.get(n) != new.get(n))
+        if differ:
+            raise DownloadIntegrityError(
+                f"{remote} in {repo} is another build of the phased indel genotypes of {vcf} "
+                f"than the one installed in {dicts}: {len(differ)} of its indel files "
+                f"(beside its MNV files) differ from those installed, or are not in one of "
+                f"the two ({', '.join(differ[:4])}{', ...' if len(differ) > 4 else ''}). The "
+                f"index installed with this store was built with it, and this step installs "
+                f"the repo's store only where it is the one installed with an MNV file added "
+                f"for each chromosome (the upgrade of CRISPRme 2.10.1). {nothing} To take the "
+                f"repo's build of {vcf}, download its index again (remove it, and its _INDELS "
+                f"folder, from genome_library/, then crisprme.py download --what index "
+                f"--index-name <the index>).")
+        if not any(_is_mnv_store_file(n) for n in new):
+            raise ValueError(
+                f"{remote} in {repo} holds no MNV file: it is the store installed here, as "
+                f"CRISPRme 2.10.0 published it, so the repo does not hold the MNVs of {vcf} "
+                f"yet. Nothing was installed.")
+        lacking = [c for c in chroms if not whole(got, c)]
+        if lacking:
+            raise DownloadIntegrityError(
+                f"{remote} in {repo} holds no whole MNV file for {len(lacking)} of the "
+                f"{len(chroms)} chromosome(s) of the store installed "
+                f"({', '.join(lacking[:4])}{', ...' if len(lacking) > 4 else ''}): a store "
+                f"read with the MNVs of some chromosomes only. {nothing}")
+        # installed whole, in place of the store, as a companion's folders are
+        # (_install_companion): moved aside, the new one renamed in, the old one removed
+        backup = os.path.join(dicts, f".{name}.replaced")
+        if os.path.isdir(backup) and not os.path.exists(store):
+            os.rename(backup, store)
+        shutil.rmtree(backup, ignore_errors=True)
+        os.rename(store, backup)
+        os.rename(got, store)
+        shutil.rmtree(backup, ignore_errors=True)
+    finally:
+        shutil.rmtree(extract_tmp, ignore_errors=True)
+        shutil.rmtree(staging, ignore_errors=True)
+    added = sorted(n for n in new if n not in have)
+    _write_marker(workdir, name, {
+        "name": name, "fingerprint": fingerprint, "repo": repo,
+        "members": [f"Dictionaries/{name}"],
+        "indexes": (bundle or {}).get("indexes", []),
+        "replaced": _fingerprint_of([f"Dictionaries/{name}/{n}\t{v}" for n, v in have.items()]),
+        "installed_at": datetime.now(timezone.utc).isoformat()})
+    sys.stdout.write(
+        f"Installed {name} from {repo} into {dicts}: the phased indel genotype store of {vcf} "
+        f"with the MNV file of each of its {len(chroms)} chromosome(s) ({len(added)} file(s) "
+        f"added), its indel files the ones installed, byte for byte. A search now reads each "
+        f"MNV's carriers by their phase.\n")
+    return store
+
+
+def _listdir_or_none(path: str) -> List[str]:
+    try:
+        return sorted(os.listdir(path))
+    except OSError:
+        return []
 
 
 def _derive_perdb_datasets(vcf_name: str, ref: str = "hg38") -> List[str]:

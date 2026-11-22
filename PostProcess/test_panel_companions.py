@@ -542,6 +542,245 @@ class AnArchiveOf281NamesItsSuccessor(_Base):
         self.assertIsNone(hf.successor_index(NRR))
 
 
+def add_mnv_files(root, vcf=VCF, chroms=("chr22",), mtime=1):
+    """The panel's phased indel genotype store gains its MNV files (2.10.1: gt_mnv_<chrom>
+    and its marker, as build-index-only's STEP 1c and build_indel_genotypes --mnv-only write
+    them), its indel files left as they are."""
+    store = os.path.join(root, "Dictionaries", f"indel_genotypes_{vcf}")
+    for chrom in chroms:
+        _gz(os.path.join(store, f"gt_mnv_{chrom}.tsv.gz"), "120_AA_GG\tS1:1|0\n", mtime)
+        _write(os.path.join(store, f"gt_mnv_{chrom}.tsv.gz.done"), b"1\nFILTER\tPASS,.\n")
+
+
+def _json(path):
+    with open(path) as fh:
+        return json.load(fh)
+
+
+def hub_files(hub, repo):
+    """{path: bytes} of every file of a repo of the fake hub."""
+    base = hub._repo(repo)
+    out = {}
+    for d, _dirs, names in os.walk(base):
+        for n in names:
+            with open(os.path.join(d, n), "rb") as fh:
+                out[os.path.relpath(os.path.join(d, n), base)] = fh.read()
+    return out
+
+
+class _NoNetwork(object):
+    """Any attempt to reach the network fails the test: a socket's connect, a name lookup,
+    urllib's urlopen. The fake hub answers in process, so with it in place a staged
+    publish and the download step make no network call."""
+
+    def __enter__(self):
+        import socket
+        import urllib.request
+
+        def refuse(*a, **k):
+            raise AssertionError("a network call was made: %r" % (a[:2],))
+
+        self._patches = [mock.patch.object(socket.socket, "connect", refuse),
+                         mock.patch.object(socket, "create_connection", refuse),
+                         mock.patch.object(socket, "getaddrinfo", refuse),
+                         mock.patch.object(urllib.request, "urlopen", refuse)]
+        for p in self._patches:
+            p.start()
+        return self
+
+    def __exit__(self, *exc):
+        for p in reversed(self._patches):
+            p.stop()
+        return False
+
+
+class TheMnvDownloadStep(_Base):
+    """download --what indel-genotypes --dataset <vcf> (2.10.1, the plan of 2.10.1's MNVs,
+    question 1, option A): an install of 2.10.0, whose phased indel genotype store has no MNV
+    file, fetches the panel's indel_genotypes_<vcf> companion and installs it whole, where it
+    is the documented upgrade: the store installed, file for file, with an MNV file for each
+    chromosome. Any other build is refused with DownloadIntegrityError (nothing installed),
+    as a download refuses a companion the index's manifest does not name; a repo whose store
+    has no MNV yet is said; a store that has them costs no hub call. Hermetic: the fake hub,
+    no network (_NoNetwork)."""
+
+    def setUp(self):
+        super().setUp()
+        self.work = make_panel(os.path.join(self.tmp, "work"), [NRR])
+        self.publish(os.path.join(self.work, "genome_library", NRR), dictless=True)
+        self.publish(os.path.join(self.work, "genome_library", "20-NRR_3_hg38"))
+        self.dest = os.path.join(self.tmp, "dest")
+        os.makedirs(self.dest)
+        self.download(self.dest, NRR)  # an install of 2.10.0
+        self.store = os.path.join(self.dest, "Dictionaries", f"indel_genotypes_{VCF}")
+        self.indel = os.path.join(self.store, "gt_indel_chr22.tsv.gz")
+        with open(self.indel, "rb") as fh:
+            self.indel_bytes = fh.read()
+
+    def republish(self, work=None):
+        """The panel's republish of 2.10.1 (--replace-companions): its store with the MNV
+        files."""
+        work = work or self.work
+        add_mnv_files(work)
+        self.publish(os.path.join(work, "genome_library", NRR), dictless=True,
+                     replace_companions=True)
+
+    def step(self, **kw):
+        out = io.StringIO()
+        with mock.patch.object(hf, "_require_hf", return_value=self.hub), \
+                mock.patch("sys.stdout", out), mock.patch("sys.stderr", io.StringIO()), \
+                _NoNetwork():
+            hf.download_indel_genotypes(self.dest, VCF, **kw)
+        return out.getvalue()
+
+    def assert_untouched(self):
+        self.assertEqual(sorted(os.listdir(self.store)),
+                         ["gt_indel_chr22.tsv.gz"])
+        with open(self.indel, "rb") as fh:
+            self.assertEqual(fh.read(), self.indel_bytes)
+        self.assertFalse([n for n in os.listdir(os.path.join(self.dest, "Dictionaries"))
+                          if n.startswith((".extract_", f".indel_genotypes_{VCF}"))])
+        self.assertFalse([n for n in os.listdir(self.dest) if n.startswith(".hf_stage_")])
+
+    def test_it_installs_the_store_with_its_mnv_files(self):
+        self.republish()
+        mark = len(self.hub.calls)
+        said = self.step()
+        self.assertEqual(self.hub.fetched(mark), [f"indexes/indel_genotypes_{VCF}.tar.gz",
+                                                  f"indexes/indel_genotypes_{VCF}.json"])
+        self.assertEqual(sorted(os.listdir(self.store)), [
+            "gt_indel_chr22.tsv.gz", "gt_mnv_chr22.tsv.gz", "gt_mnv_chr22.tsv.gz.done"])
+        with open(self.indel, "rb") as fh:
+            self.assertEqual(fh.read(), self.indel_bytes)
+        import build_indel_genotypes as big
+        reader = big.IndelGenotypeReader(self.indel)
+        self.assertTrue(reader.has_mnv)
+        self.assertEqual(reader.carriers_dict(120, "AA", "GG"), {"S1": "1|0"})
+        marker = _json(hf.companion_marker(self.dest, f"indel_genotypes_{VCF}"))
+        record = _json(self.remote(FMT2, f"indexes/indel_genotypes_{VCF}.json"))
+        self.assertEqual((marker["fingerprint"], marker["repo"], marker["indexes"]),
+                         (record["fingerprint"], FMT2, [NRR]))
+        self.assertIn(f"Installed indel_genotypes_{VCF} from {FMT2}", said)
+        # a store that has them: no hub call
+        mark = len(self.hub.calls)
+        said = self.step()
+        self.assertEqual(self.hub.calls[mark:], [])
+        self.assertIn("nothing fetched", said)
+        # and the index is a complete install still: no hub call either
+        mark = len(self.hub.calls)
+        self.download(self.dest, NRR)
+        self.assertEqual(self.hub.calls[mark:], [])
+
+    def test_a_repo_whose_store_has_no_mnv_says_so(self):
+        with self.assertRaises(ValueError) as caught:
+            self.step()
+        self.assertIn("holds no MNV file", str(caught.exception))
+        self.assertIn("Nothing was installed", str(caught.exception))
+        self.assert_untouched()
+
+    def test_another_build_of_the_store_is_refused(self):
+        other = make_panel(os.path.join(self.tmp, "other"), [NRR])
+        _gz(os.path.join(other, "Dictionaries", f"indel_genotypes_{VCF}", "gt_indel_chr22.tsv.gz"),
+            "S2\t1|0\n", 1)
+        self.republish(other)
+        with self.assertRaises(hf.DownloadIntegrityError) as caught:
+            self.step()
+        self.assertIn("another build of the phased indel genotypes", str(caught.exception))
+        self.assertIn("gt_indel_chr22.tsv.gz", str(caught.exception))
+        self.assertIn("Nothing of it was installed", str(caught.exception))
+        self.assert_untouched()
+
+    def test_an_archive_that_is_not_what_its_record_says_is_refused(self):
+        self.republish()
+        record = self.remote(FMT2, f"indexes/indel_genotypes_{VCF}.json")
+        rec = _json(record)
+        rec["fingerprint"] = "0" * 64
+        with open(record, "w") as fh:
+            json.dump(rec, fh)
+        with self.assertRaises(hf.DownloadIntegrityError) as caught:
+            self.step()
+        self.assertIn("other files than its record says", str(caught.exception))
+        self.assert_untouched()
+
+    def test_a_chromosome_left_without_its_mnv_file_is_refused(self):
+        self.republish()
+        # the install has a chromosome the repo's store gives no MNV file
+        _gz(os.path.join(self.store, "gt_indel_chr21.tsv.gz"), "S1\t1|0\n", 1)
+        _gz(os.path.join(self.work, "Dictionaries", f"indel_genotypes_{VCF}",
+                         "gt_indel_chr21.tsv.gz"), "S1\t1|0\n", 1)
+        self.publish(os.path.join(self.work, "genome_library", NRR), dictless=True,
+                     replace_companions=True)
+        with self.assertRaises(hf.DownloadIntegrityError) as caught:
+            self.step()
+        self.assertIn("no whole MNV file for 1 of the 2 chromosome(s)", str(caught.exception))
+        self.assertFalse(os.path.exists(os.path.join(self.store, "gt_mnv_chr22.tsv.gz")))
+
+    def test_an_mnv_file_that_cannot_be_read_is_fetched_whole_again(self):
+        """A store whose MNV file is corrupt (its .done marker left as it was) is not taken
+        for one that has its MNVs: the step installs the repo's whole again."""
+        self.republish()
+        self.step()
+        mnv = os.path.join(self.store, "gt_mnv_chr22.tsv.gz")
+        with open(mnv, "rb") as fh:
+            whole = fh.read()
+        with open(mnv, "wb") as fh:
+            fh.write(whole[:10])
+        os.utime(mnv, (1, 1))
+        said = self.step()
+        self.assertIn(f"Installed indel_genotypes_{VCF}", said)
+        with open(mnv, "rb") as fh:
+            self.assertEqual(fh.read(), whole)
+
+    def test_no_store_or_an_unfinished_one_is_an_error(self):
+        os.makedirs(os.path.join(self.store, ".building"))
+        with self.assertRaises(ValueError) as caught:
+            self.step()
+        self.assertIn("is unfinished", str(caught.exception))
+        shutil.rmtree(self.store)
+        with self.assertRaises(ValueError) as caught:
+            self.step()
+        self.assertIn(f"No phased indel genotype store of {VCF} is installed", str(caught.exception))
+        self.assertEqual(self.hub.fetched(len(self.hub.calls)), [])
+
+    def test_the_command_line_and_its_help_name_it(self):
+        """crisprme.py download --what indel-genotypes --dataset <vcf> runs the step (its
+        refusals an Error, exit 1), --dataset required; download --help names it."""
+        import test_bulge_cap as tbc
+        crisprme = tbc.crisprme
+        self.addCleanup(setattr, crisprme, "input_args", crisprme.input_args)
+        self.republish()
+        crisprme.input_args = ["crisprme.py", "download", "--what", "indel-genotypes",
+                               "--dataset", VCF, "--path", self.dest]
+        out = io.StringIO()
+        with mock.patch.object(hf, "_require_hf", return_value=self.hub), \
+                mock.patch("sys.stdout", out), _NoNetwork():
+            crisprme.download_data()
+        self.assertIn(f"Phased indel genotype store: {self.store}", out.getvalue())
+        self.assertTrue(os.path.isfile(os.path.join(self.store, "gt_mnv_chr22.tsv.gz")))
+        crisprme.input_args = ["crisprme.py", "download", "--what", "indel-genotypes",
+                               "--path", self.dest]
+        with mock.patch("sys.stderr", io.StringIO()) as err, self.assertRaises(SystemExit):
+            crisprme.download_data()
+        self.assertIn("--what indel-genotypes requires --dataset", err.getvalue())
+        # a refusal (another build) is the command's Error, as a download's
+        shutil.rmtree(self.store)
+        os.makedirs(self.store)
+        _gz(os.path.join(self.store, "gt_indel_chr22.tsv.gz"), "S9\t1|0\n", 1)
+        crisprme.input_args = ["crisprme.py", "download", "--what", "indel-genotypes",
+                               "--dataset", VCF, "--path", self.dest]
+        with mock.patch.object(hf, "_require_hf", return_value=self.hub), \
+                mock.patch("sys.stdout", io.StringIO()), \
+                mock.patch("sys.stderr", io.StringIO()) as err, \
+                self.assertRaises(SystemExit) as code, _NoNetwork():
+            crisprme.download_data()
+        self.assertEqual(code.exception.code, 1)
+        self.assertIn("another build of the phased indel genotypes", err.getvalue())
+        with mock.patch("sys.stderr", io.StringIO()) as err, self.assertRaises(SystemExit):
+            crisprme.print_help_download()
+        self.assertIn("crisprme.py download --what indel-genotypes --dataset hg38_HPRC",
+                      " ".join(err.getvalue().split()))
+
+
 class TheDefaultReferenceIndex(unittest.TestCase):
     """download --what all fetches 20-NRR_3_hg38, and 2.8.1's NRR_3_hg38 where it cannot
     (before the rebuild is published). That download then said "This release's build of it is

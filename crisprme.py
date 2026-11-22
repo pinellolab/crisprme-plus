@@ -211,6 +211,7 @@ from validate_inputs import run_lightweight, run_full, resolve_vcf_dataset_dirs,
 from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside)
     download_component,
     download_genotype_oracle,
+    download_indel_genotypes,
     publish_index,
     resolve_repo,
     synthesize_combined_samplesid,
@@ -6936,14 +6937,24 @@ def print_help_download() -> None:
     sys.stderr.write(
         "Options:\n"
         "\t--what, component to fetch: genome | annotations | pams | samples | "
-        "vcf | build-inputs | index | assembly | genotype-oracle | all (all = "
+        "vcf | build-inputs | index | assembly | genotype-oracle | indel-genotypes | all "
+        "(all = "
         "genome+annotations+pams+samples, plus the default hg38 reference index so a "
         "reference scan works out of the box; genotype-oracle = the phased genotypes and "
         "indel genotypes of a panel, by default HGDP + 1000 Genomes, into Dictionaries/, "
         "which complete-search --prioritize-observed checks a sites-only dataset's rows "
-        "against; an installed index of the panel already brings them) [REQUIRED]\n"
+        "against; an installed index of the panel already brings them; indel-genotypes "
+        "(2.10.1) = the MNVs of an installed panel's phased indel genotype store, for an "
+        "index downloaded with CRISPRme 2.10.0, whose store has none: `crisprme.py download "
+        "--what indel-genotypes --dataset hg38_HPRC` fetches the panel's indel_genotypes_<vcf> "
+        "companion (0.61 GB for HPRC) and installs it whole in place of the store where it is "
+        "the store installed, file for file, with the MNV file of each chromosome added, and "
+        "refuses any other build (DownloadIntegrityError: nothing installed); a search then "
+        "reads each MNV's carriers by their phase. A store that has them already costs no "
+        "download, and an index of the panel downloaded with them needs none) [REQUIRED]\n"
         "\t--ref, reference genome name for --what genome/index [default: hg38]\n"
-        "\t--dataset, variant dataset name for --what vcf / build-inputs (e.g. hg38_HGDP1kGP, "
+        "\t--dataset, variant dataset name for --what vcf / build-inputs / indel-genotypes "
+        "(e.g. hg38_HGDP1kGP, "
         "hg38_HPRC, hg38_mega). `--what vcf` fetches the raw per-chromosome VCFs the default "
         "repo hosts (build from scratch: then `build-index-only --vcf VCFs/<dataset> "
         "--samplesID ... --pam ...`): HGDP + 1000 Genomes' and the mega's are the source VCFs "
@@ -6954,7 +6965,7 @@ def print_help_download() -> None:
         "VCFs and their .tbi under VCFs/hg38_HPRC/ to build from them); "
         "`--what build-inputs` fetches the PRE-ENRICHED genome kit so build-index-only skips "
         "enrichment and only indexes (fast / new-PAM path; kits exist for a subset of datasets) "
-        "[REQUIRED for --what vcf/build-inputs]\n"
+        "[REQUIRED for --what vcf/build-inputs/indel-genotypes]\n"
         "\t--index-name, precomputed index directory name for --what index "
         "(e.g. the reference index 20-NRR_3_hg38, the recommended variant-aware default "
         "20-NRR_3_hg38+hg38_HGDP1kGP (SpCas9 NRR, the default PAM; phased HGDP + 1000 "
@@ -7070,6 +7081,20 @@ def download_data() -> None:
             error(str(e))
         for dest in dests:
             print(f"Genotype oracle: {dest}", flush=True)
+        return
+    # The MNVs of an installed panel's phased indel genotype store (2.10.1): its companion
+    # indel_genotypes_<vcf>, installed whole where it is the store installed with the MNV
+    # file of each chromosome added (an install of CRISPRme 2.10.0 has none; a search then
+    # reads each MNV's carriers by their phase). Not a component: handled before the loop.
+    if what == "indel-genotypes":
+        if not dataset:
+            error("--what indel-genotypes requires --dataset <the panel>, e.g. --dataset "
+                  "hg38_HPRC")
+        try:
+            dest = download_indel_genotypes(workdir, dataset, repo=repo)
+        except (ValueError, ImportError, RuntimeError) as e:
+            error(str(e))
+        print(f"Phased indel genotype store: {dest}", flush=True)
         return
     if what == "all":
         components = ["genome", "annotations", "pams", "samples"]

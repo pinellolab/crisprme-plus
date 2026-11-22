@@ -1291,12 +1291,19 @@ class TheMnvStore(_Base):
     def test_the_notes_say_how_the_mnvs_were_read(self):
         """Once per chromosome whose indel log lists an MNV, on stdout (the search's
         log_verbose.txt), never stderr; the base world, whose log lists none, has neither
-        (test_a_store_of_an_earlier_release_is_noted)."""
+        (test_a_store_of_an_earlier_release_is_noted). The NOTE of a store of 2.10.0 names
+        the two ways to get its MNVs: build-index-only (whose STEP 1c adds them since
+        2.10.1: the review's item 2) and, for a downloaded index, the download step."""
         for fx, note, other in ((self.with_store, self.NOTE_READ, self.NOTE_NONE),
                                 (self.store_2100, self.NOTE_NONE, self.NOTE_READ)):
             self.assertEqual(fx.proc.stdout.count(note), 1, fx.proc.stdout[-3000:])
             self.assertNotIn(other, fx.proc.stdout)
             self.assertEqual(fx.proc.stderr, "")
+        line = next(ln for ln in self.store_2100.proc.stdout.splitlines()
+                    if ln.startswith(self.NOTE_NONE))
+        self.assertIn("build-index-only of CRISPRme 2.10.1 or later with the dataset's VCFs "
+                      "adds the MNVs to the store", line)
+        self.assertIn("crisprme.py download --what indel-genotypes --dataset %s" % VCF, line)
 
     def test_an_mnv_file_cut_short_is_read_as_none_and_said(self):
         """The review's item 4: an MNV file that cannot be read to its end leaves the
