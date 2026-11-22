@@ -458,6 +458,14 @@ jobs:
         # read ONE haplotype writer (scripts/variant_haplotypes.py) and ONE reader of a
         # run's sidecars (scripts/run_records.py), both standard library only, and the
         # checker still imports no CRISPRme module and still runs standalone.
+        # It also holds what each column may CLAIM: a record straddling either edge of
+        # the flank window puts in only the bases inside it, a haplotype with a deletion
+        # inside the target marks the bases it really has there, a haploid call is one
+        # slot (and beside a diploid one is reported, never read onto both), an
+        # integrated row is read on its ALT alignment, the guide column is filled from
+        # the curated download's Aligned_spacer+PAM, --include-filtered marks what it
+        # writes, n_samples counts a sample once, and the reference entry claims the
+        # panel only on a contig a genotyped VCF covers.
         working-directory: PostProcess
         run: python -m unittest test_extract_flanks -v
 
