@@ -38,6 +38,18 @@ this pass, and is backlog item 45: the three challenger columns of §4's bake-of
 §7 ACTGA/NRG worked-example counts, and a refit of the page on the deployment-matched
 population.*
 
+*Second round, same date, after that re-verification was itself reviewed. Four further
+corrections, all to statements a reader acts on: the 0.613-vs-0.62 AUPR gap is now
+attributed to its measured main term, the stored CRISPR-Bulge column's PAM-internal-bulge
+scoring defect (§3), instead of to score precision and the AP rule, which are the two
+minority terms; "bulge=1 AP ≈ 0.01" is no longer described as the prevalence floor in §3 or
+in the modal, because CFD's 0.009 sits well above the 5.8×10⁻⁵ bulge=1 floor and §3.5's
+comparison against CRISPR-Bulge's 0.285 is the defensible framing; the direction of the
+on-target refit in §3 is inverted back — the deployment-matched map prints a **lower** CFD
+≥0.5 expected total, not a higher one; and the modal now carries §2's assay-detection floor
+and the benchmark's scope beside its AUPR table, and labels the support row that counts the
+whole held-out set rather than the sensitive tier.*
+
 ---
 
 ## 1. What the summary reports (and what it does not)
@@ -158,10 +170,13 @@ the same benchmark with those rows dropped gives:
 CFD moves furthest because its 46 on-targets tie at exactly 1.0 at the head of the ranking:
 that single tie group (51 rows, 46 of them positive — precision 0.902 at recall 0.128)
 carries **0.116 of the 0.168, 69% of the headline**, before CFD ranks one off-target. The
-effect on the card's *expected counts* is small: refit the isotonic map without those rows
-and the expected total CFD would print moves ×1.08 in the ≥0.5 band and ×1.02 over ≥0.2
-(×1.00 in 0.2–0.5), while **no CRISPR-Bulge band moves at all** — on-targets populate only
-the top bins. This is a discrimination-claim problem, not an expected-count problem. **The published values are kept in this release** so they stay
+effect on the card's *expected counts* is small, and it goes **downwards**, which matters
+because it is the decision band: the published map prints ×1.082 what a map refit without
+those rows prints in the ≥0.5 band and ×1.021 over ≥0.2, so the **deployment-matched refit
+lowers the CFD ≥0.5 expected total by about 8% (×0.92) and the ≥0.2 total by 2% (×0.98)**,
+leaving 0.2–0.5 unchanged (×1.00), while **no CRISPR-Bulge band moves at all** — on-targets
+populate only the top bins. The published map therefore slightly over-states the expected
+count in the band a reviewer acts on, rather than under-stating it. This is a discrimination-claim problem, not an expected-count problem. **The published values are kept in this release** so they stay
 comparable with the benchmark literature, and the deployment-matched values are printed
 beside them here and in the modal; re-fitting and re-rendering the page on the
 deployment-matched population is backlog item 45, not a release fix.
@@ -209,9 +224,18 @@ The modal's curve is titled **AUPR 0.62, not 0.613**, on the same 287 held-out p
 figure re-scores CRISPR-Bulge at full precision and groups tied scores, while the
 calibration artifact the headline number and the card's table come from is fitted on the
 report's 3-decimal CRISPR-Bulge column (0.613 trapezoid / 0.615 tie-grouped on that
-column; 0.618 / 0.622 at full precision). Same sites, same model, different score
-precision and AP rule — the gap is far inside the 0.56–0.70 CI, and the 3-decimal fit is
-the one the deployed probability map is built on. The CRISPR-Bulge operating points just
+column; 0.618 / 0.622 at full precision). Same sites, same model — but the largest term in
+that 0.0090 gap is **not** score precision: it is the **PAM-internal-bulge scoring defect in
+the stored column itself** (rows whose single bulge falls inside the PAM were scored after
+the guide-PAM normalization overwrote their alignment gap, so they are inflated and cost
+precision; every affected row is a labelled negative, so no recall figure moves). On the
+trapezoid rule that defect alone accounts for **0.6131 → 0.6180**; decomposed over the full
+0.0090 gap it is **54%**, against **26%** for the figure's full-precision rescoring and
+**20%** for its tie-grouped AP rule. The gap is far inside the 0.56–0.70 CI, and the
+3-decimal fit is the one the deployed probability map is built on; refitting it on the
+corrected column is a backlog item, not a correction this release needs. The modal carries
+the same attribution, so the page and this document explain the discrepancy the same way.
+The CRISPR-Bulge operating points just
 above are measured on that same 3-decimal column; at full precision the t≥0.5 point reads
 precision 0.728 rather than 0.724 (recalls are identical either way).
 
@@ -222,10 +246,11 @@ terminal columns — was scored as if absent; a PAM-proximal bulge scored like a
 This is a **per-site correctness fix, not a bulge-ranking improvement**: mismatch-only and
 in-range RNA-bulge scores are unchanged (bitwise), overall AUPR is unchanged (0.168; the
 benchmark is mismatch-dominated, 297/359 positives bulge-free), and CFD's bulge discrimination
-stays at the floor (bulge=1 AP ≈ 0.01). What it buys is **precision**: removing the
+stays far below CRISPR-Bulge's (bulge=1 AP ≈ 0.01 vs CRISPR-Bulge 0.285 on the 40 held-out
+guides). What it buys is **precision**: removing the
 PAM-proximal over-call drops ~9,000 spurious high-CFD bulge sites at t≥0.2 (precision
 0.006→0.007) and roughly doubles precision at t≥0.5 (0.05→0.085). It therefore *reinforces*
-the §3.5 panel logic (CRISPR-Bulge is the bulge ranker; CFD rescues a single-bulge site only at
+the §3.5 panel logic (CRISPR-Bulge is the bulge ranker; CFD *adds* a single-bulge site only at
 high confidence) rather than changing it. A ≥2-bp bulge (opt-in, outside the single-bulge
 calibration domain) applies the position factor per looped-out base — conservative (lower CFD),
 and flagged here because it is an extrapolation beyond the published matrix.

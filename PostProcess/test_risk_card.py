@@ -212,6 +212,7 @@ class TestModalSaysWhatWasMeasured(unittest.TestCase):
             counts = oc.artifact_summary(scorer)["band_counts"]
             for label, disp in spec:
                 c = counts[label]
+                disp = risk_card._SUPPORT_ROW_LABEL.get((scorer, label), disp)
                 row = (f'<tr><td>{disp}</td><td>{c["positives"]:,}</td>'
                        f'<td>{c["guides_with_positive"]}</td>'
                        f'<td>{c["guides_contributing"]}</td></tr>')
@@ -220,6 +221,37 @@ class TestModalSaysWhatWasMeasured(unittest.TestCase):
         # the band the support table exists for: 41 positives from 12 of 40 guides
         cb = oc.artifact_summary("crispr_bulge")["band_counts"]["0.2-0.5"]
         self.assertEqual((cb["positives"], cb["guides_with_positive"]), (41, 12))
+
+    def test_support_table_does_not_label_the_whole_support_as_the_sensitive_tier(self):
+        """band_counts["gt0"] is NOT the sensitive tier's support. fit_calibration bins the
+        support on a 2,000-bin grid whose first bin CENTRE is 0.00025 -- already above the
+        1.9e-4 threshold -- so the "gt0" mask selects every bin and the entry is the whole
+        held-out support (287 positives / 40 / 40, identical to n_positives / n_guides).
+        Rendered under the card's "sensitive" label it told the reader the 95%-recall tier
+        rests on all 287, when that tier carries 273 of them at full precision and 267 on
+        the 3-decimal column the artifact is fitted on. A table whose whole purpose is to
+        stop a band showing a count without its true support must not do it itself."""
+        import json
+        import numpy as np
+        meta = json.loads(str(np.load(
+            os.path.join(_CALDIR, "crispr_bulge_calibration.npz"), allow_pickle=False)["meta"]))
+        counts = meta["band_counts"]["gt0"]
+        # the artifact entry really is the whole support, not a tier
+        self.assertEqual(counts["positives"], meta["n_positives"])
+        self.assertEqual(counts["guides_with_positive"], meta["n_guides"])
+        self.assertEqual(counts["guides_contributing"], meta["n_guides"])
+        centres = (np.arange(meta["grid_B"]) + 0.5) / meta["grid_B"]
+        lo = meta["report_bands"]["gt0"][0]
+        self.assertEqual(int((centres >= lo).sum()), meta["grid_B"])  # every bin selected
+        modal = self._modal()
+        whole = risk_card._SUPPORT_ROW_LABEL[("crispr_bulge", "gt0")]
+        self.assertIn(f'<tr><td>{whole}</td><td>{counts["positives"]:,}</td>', modal)
+        # the sensitive label must not sit on that row, and the tier's own count is given
+        self.assertNotIn(
+            f'<tr><td>CRISPR-Bulge {risk_card.cbop.sensitive_label_text()}, sensitive</td>'
+            f'<td>{counts["positives"]:,}</td>', modal)
+        self.assertIn("carries <b>273 of the 287</b> at full precision", modal)
+        self.assertIn("267 on the 3-decimal column", modal)
 
     def test_modal_states_the_measured_value_of_the_two_cfd_rescue_arms(self):
         """On the 40 held-out guides the two CFD arms add 9,660 and 614 sites to the
@@ -268,6 +300,64 @@ class TestModalSaysWhatWasMeasured(unittest.TestCase):
         self.assertNotIn("no guide ever set its own probabilities", modal)
         self.assertIn("fit on all of those guides at once", modal)
         self.assertIn("not the shipped map itself", modal)
+
+    def test_modal_blames_the_stored_column_defect_for_the_aupr_gap(self):
+        """The page shows the held-out CRISPR-Bulge AUPR twice, 0.613 and 0.62, and must
+        explain the gap with its real main term. Measured on the chain stored -> rescored ->
+        full precision (trapezoid 0.6130872 / 0.6179856 / 0.6182664, tie-grouped 0.6148478 /
+        0.6197042 / 0.6220800): of the 0.0089928 gap, the stored column's PAM-internal-bulge
+        scoring defect is 54.0%, full-precision rescoring 26.4% and the tie-grouped AP rule
+        19.6%. "Same sites, same model -- the difference is score precision and the AP rule"
+        named the two minority terms and hid the majority one, on the one page where both
+        numbers are visible, and contradicted the same document's account of that defect."""
+        trap, step = (0.6130872, 0.6179856, 0.6182664), (0.6148478, 0.6197042, 0.6220800)
+        gap = step[2] - trap[0]
+        shares = [(step[0] - trap[0]) / gap, (step[1] - step[0]) / gap,
+                  (step[2] - step[1]) / gap]
+        self.assertAlmostEqual(sum(shares), 1.0, places=9)   # the split is exhaustive
+        self.assertEqual([round(s * 100) for s in shares], [20, 54, 26])
+        self.assertGreater(shares[1], shares[0] + shares[2])  # the defect IS the main term
+        note = risk_card._CB_AUPR_FIGURE_NOTE
+        modal = self._modal()
+        for doc in (note, modal):
+            self.assertNotIn("the difference is far inside", doc)  # the old framing
+            self.assertIn("54% of it is a scoring defect in the stored 3-decimal column", doc)
+            self.assertIn("single bulge falls inside the PAM", doc)
+            self.assertIn("26% of the gap", doc)
+            self.assertIn("tie-grouped AP rule for 20%", doc)
+            self.assertIn("far inside the 90% CI", doc)        # the CI remark stays
+            self.assertIn("labelled negative", doc)            # so no recall moves
+
+    def test_modal_does_not_call_cfds_bulge_ap_the_prevalence_floor(self):
+        """CFD's bulge=1 AP is 0.009175 against a bulge=1 prevalence floor of 62/1,077,819
+        = 5.75e-5 -- about 160x no-skill, not "essentially the prevalence floor". Two
+        paragraphs above, the same page calls CFD's 0.168 good because it is far above a
+        1.22e-4 floor (about 1,379x), so the floor wording contradicted the page's own
+        yardstick. METHODS 3.5's framing -- the comparison against CRISPR-Bulge -- is the
+        defensible one and is what both places now use."""
+        floor = 62 / 1077819
+        self.assertGreater(0.009175 / floor, 100)              # nowhere near the floor
+        modal = self._modal()
+        self.assertNotIn("essentially the prevalence floor", modal)
+        self.assertNotIn("at the floor", modal)
+        self.assertIn("bulge=1 AP ≈ 0.01 against CRISPR-Bulge’s 0.285", modal)
+
+    def test_modal_states_what_validated_means_and_the_benchmark_scope(self):
+        """METHODS 2 carries the assay-detection floor and the benchmark's scope; the modal
+        is what the collaborator reads and carried neither (0 occurrences of GUIDE-seq or
+        "reference genome", the assay floor only as one clause inside the panel-arms
+        paragraph, and no mention of the guide that supplies 22% / 27.5% of the positives).
+        Both belong beside the AUPR table, before the numbers they qualify."""
+        modal = self._modal()
+        for phrase in ("“Validated” here means assay-detected", "GUIDE-seq",
+                       "every double-strand break", "reference-genome sites only",
+                       "zero ≥2-gap rows", "46 guides",
+                       "one guide supplying 79 of CFD’s 359 positives (22%)",
+                       "27.5% of CRISPR-Bulge’s 287"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, modal)
+        # and it has to precede the figures it qualifies, not trail them
+        self.assertLess(modal.index("assay-detected.</b>"), modal.index("Choosing a threshold"))
 
 
 if __name__ == "__main__":

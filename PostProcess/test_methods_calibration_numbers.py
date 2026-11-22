@@ -200,6 +200,71 @@ class TestMethodsAndModalAgree(unittest.TestCase):
         self.assertTrue("99,477" in self.txt, "METHODS drops the 99%-recall list size")
         self.assertNotIn("roughly 6&times; the sites", modal)
 
+    def test_the_aupr_gap_is_attributed_to_the_stored_columns_defect_in_both(self):
+        """0.613 (table) vs 0.62 (figure) is 0.0090, and 54% of it is the stored CRISPR-Bulge
+        column's PAM-internal-bulge scoring defect, 26% the figure's full-precision rescoring
+        and 20% its tie-grouped AP rule (trapezoid 0.6130872 / 0.6179856 / 0.6182664,
+        tie-grouped 0.6148478 / 0.6197042 / 0.6220800). Both documents said "different score
+        precision and AP rule", which names the two minority terms; the same defect is
+        described elsewhere in this document, so the two sections contradicted each other on
+        a discrepancy the reader can see on the page."""
+        import risk_card
+        self.assertNotIn("different score", self.txt)
+        self.assertNotIn("precision and AP rule", self.txt)
+        self.assertNotIn("only the score precision and the AP rule differ",
+                         risk_card._CB_AUPR_FIGURE_NOTE)
+        for name, doc in (("METHODS", self.txt), ("modal", risk_card._CB_AUPR_FIGURE_NOTE)):
+            with self.subTest(doc=name):
+                self.assertIn("54%", doc)
+                self.assertIn("26%", doc)
+                self.assertIn("20%", doc)
+                self.assertTrue("inside the 0.56–0.70 CI" in doc or "inside the 90% CI" in doc,
+                                f"{name} drops the CI remark")
+        self.assertIn("0.6131 → 0.6180", self.txt)      # the trapezoid anchor, matching §2
+
+    def test_the_bulge_ap_is_not_called_the_prevalence_floor_in_either(self):
+        """CFD bulge=1 AP 0.009175 against a 5.75e-5 bulge=1 floor is ~160x no-skill, while
+        the page calls CFD's 0.168 good at ~1,379x the overall floor: "essentially the
+        prevalence floor" / "stays at the floor" contradicted that yardstick. §3.5's
+        comparison against CRISPR-Bulge's 0.285 is the defensible framing and is now used
+        in all three places."""
+        import risk_card
+        _card, modal = risk_card.render_risk_card(
+            {"guide_display": "G"}, [0.6, 0.3], [0.6, 0.3, 0.05])
+        for name, doc in (("METHODS", self.txt), ("modal", modal)):
+            with self.subTest(doc=name):
+                self.assertNotIn("essentially the prevalence floor", doc)
+                self.assertNotIn("at the floor", doc)
+                self.assertIn("0.285", doc)
+        self.assertEqual(self.txt.count("bulge=1 AP ≈ 0.01 vs CRISPR-Bulge 0.285"), 2)
+
+    def test_the_on_target_refit_moves_the_decision_band_down_not_up(self):
+        """The published map prints x1.082 what a map refit without the on-target rows
+        prints in CFD ≥0.5 and x1.021 over ≥0.2, so the deployment-matched count is LOWER
+        (x0.924, x0.979), not higher. The magnitudes were right and the direction was
+        inverted -- in the band a reviewer acts on."""
+        self.assertAlmostEqual(1 / 1.082, 0.924, places=3)
+        self.assertAlmostEqual(1 / 1.021, 0.979, places=3)
+        para = _one(r"(?s)(effect on the card's \*expected counts\*.*?top bins\.)", self.txt)
+        self.assertIn("lowers the CFD ≥0.5 expected total by about 8% (×0.92)", para)
+        self.assertIn("≥0.2 total by 2% (×0.98)", para)
+        self.assertIn("×1.082", para)
+        self.assertIn("×1.021", para)
+        self.assertNotIn("would print moves ×1.08", para)
+
+    def test_the_benchmark_scope_and_assay_floor_reached_the_page(self):
+        """METHODS §2 has both; the modal is what the collaborator reads and had neither."""
+        import risk_card
+        _card, modal = risk_card.render_risk_card(
+            {"guide_display": "G"}, [0.6, 0.3], [0.6, 0.3, 0.05])
+        for phrase in ("GUIDE-seq", "assay-detected", "reference-genome",
+                       "zero ≥2-gap rows", "22%", "27.5%"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, modal)
+        # the same dominant-guide share the document reports (METHODS wraps the sentence)
+        self.assertRegex(self.txt, r"79 of the 359 positives\s+\(79/359 = 22\.0%\)")
+        self.assertIn("79 of CFD’s 359 positives (22%)", modal)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

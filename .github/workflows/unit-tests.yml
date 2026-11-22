@@ -547,7 +547,12 @@ jobs:
         # nothing read the prose against the .npz. This re-reads every one of those
         # numbers from PostProcess/calibration/*.npz at run time, and cross-checks the
         # on-target disclosure, the rescue-arm counts and the 95%->99% list ratio between
-        # the document and risk_card's modal so the two cannot drift apart.
+        # the document and risk_card's modal so the two cannot drift apart. It also pins
+        # the four statements the re-verification found inverted or mis-attributed: which
+        # term dominates the 0.613-vs-0.62 AUPR gap (the stored column's PAM-internal-bulge
+        # defect, 54%), that bulge=1 AP ~0.01 is not "the prevalence floor", that the
+        # on-target refit moves the CFD >=0.5 expected total DOWN, and that the benchmark's
+        # scope and assay-detection floor reach the modal and not just the document.
         working-directory: PostProcess
         run: python -m unittest test_methods_calibration_numbers -v
 
