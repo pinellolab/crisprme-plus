@@ -11,6 +11,12 @@ the index builder and a second, non-backward-compatible index family appeared.
 > provenance is the next section. The rest of this page covers the archives of 2.8.1, which stay
 > in `lucapinello/crisprme-data` and `lucapinello/crisprme-data-general-index` for 2.8.1.
 
+> **2.10.1: pending.** CRISPRme 2.10.1 packs three of HPRC's archives again, with the MNV files of
+> its phased indel genotype store: `20-NRR_3_hg38+hg38_HPRC`, `dictionaries-bundle_hg38_HPRC` and
+> `indel_genotypes_hg38_HPRC` (the index files in the first are unchanged). Their sizes, SHA-256
+> and Hub commit are to be recorded here at the publish, in a section of their own. Until then,
+> and for 2.10.0, the rows of the next section are those of the Hub's commit `a4d4bc00`.
+
 ## The indexes of CRISPRme 2.10.0 (index format 2)
 
 The rebuild for 2.10.0 built the 26 archives of the index set: 16 indexes, the 7 companions of

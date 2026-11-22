@@ -598,9 +598,9 @@ rules behind them.
   dataset's VCF around the target; `assembly-search` searches an individual's assembled haplotypes,
   which hold every indel. No fix is planned yet.
 - **On HPRC, a carrier listed on an indel row whose haplotype holds an MNV there.** No store
-  CRISPRme reads holds an MNV (a record of two or more bases replaced by as many), so a carrier
-  whose haplotype holding the row's indel also holds an MNV inside the target is listed for the
-  target that haplotype would hold without the MNV. Of 2.10.0's panels only HPRC v2.1 has MNVs
+  CRISPRme 2.10.0 reads holds an MNV (a record of two or more bases replaced by as many), so a
+  carrier whose haplotype holding the row's indel also holds an MNV inside the target is listed for
+  the target that haplotype would hold without the MNV. Of 2.10.0's panels only HPRC v2.1 has MNVs
   (2.8.1's archives of HPRC v2.0 have them too): the README guide's genome-wide search lists
   carriers so 1,163 times at 94 sites per sample on indel rows (232 samples), each row at a CFD of
   0.085 or less, and 3,334 times on SNP rows; its strongest such row, chr5:177,802,035 (+) at a CFD
@@ -610,9 +610,41 @@ rules behind them.
   indels (above): on chr22, per sample, the release gate's check counts 21 sites of targets held
   only through two or more indels or MNVs, and, rebuilt from the VCF, 16 such sites need an MNV,
   each target at a CFD of at most 0.0164. To check a carrier, read its genotypes in the dataset's
-  VCF over the row's target. CRISPRme 2.10.1 is planned to read the MNVs' phase, which takes such
-  carriers off the rows of a sequence they do not have; an off-target held only through an MNV and
-  another indel or MNV stays missing.
+  VCF over the row's target. CRISPRme 2.10.1 reads the MNVs' phase where the dataset's store has
+  its MNV files (the next item), which takes such carriers off the rows of a sequence they do not
+  have. An off-target held only through an MNV and another indel or MNV stays missing, as one held
+  only through two indels does: CRISPRme 2.10.1 moves such a carrier from a wrong row to none.
+- **CRISPRme 2.10.1 on HPRC: a NOTE about the MNVs in `log_verbose.txt`.** Where a dataset has a
+  phased store, a search writes one such NOTE for each chromosome whose indel log lists an MNV.
+  HGDP + 1000 Genomes and the mega have no MNV, so their searches write none.
+  - `NOTE [indel-snp]: the MNVs of <dataset> on <chrom> were read from the phased indel genotype
+    store's MNV file ...`: the store holds the MNVs' phase, and the search read it. Nothing to do.
+  - `NOTE [indel-snp]: the phased indel genotype store of <dataset> on <chrom> holds no MNV ...`:
+    the store is one of 2.10.0, without the MNV files (`Dictionaries/indel_genotypes_<dataset>/`
+    holds `gt_indel_<chrom>.tsv.gz` and no `gt_mnv_<chrom>.tsv.gz`). The search read its MNVs as
+    2.10.0 did, and the item above holds for its rows. The NOTE says how to add the files.
+
+  To add them:
+  - **HPRC installed with CRISPRme 2.10.0.** Run the `download` step for HPRC's MNV store
+    (**to be filled in at integration: its command**). It fetches the `indel_genotypes_hg38_HPRC`
+    companion (0.61 GB), which holds the MNV files, and installs it whole. `download --what index`
+    alone does nothing on a complete install: it says the index `is already installed ...
+    (remove that folder to re-download)`. You can also remove
+    `genome_library/20-NRR_3_hg38+hg38_HPRC` and `genome_library/20-NRR_3_hg38+hg38_HPRC_INDELS`
+    and download the index again: about 32 GB (its archive and its Dictionaries bundle).
+  - **HPRC downloaded after CRISPRme 2.10.1's publish.** The bundle holds the MNV files already.
+    CRISPRme 2.10.0 reads no MNV file, so on this install it gives the same rows as before.
+  - **A dataset you built.** Run `build-index-only` of 2.10.1 again with the dataset's VCFs. It
+    adds the MNV files and leaves the indel files as they are. To add one chromosome's file alone:
+    `python PostProcess/build_indel_genotypes.py --mnv-only <vcf> <store folder> [<samplesID>]`,
+    the store folder being `Dictionaries/indel_genotypes_<dataset>/` and the samplesID the one the
+    build used.
+  - **A download of HPRC that fails once with "two builds".** The 2.10.1 publish replaces HPRC's
+    index archive and its bundle in one Hub commit. A download running at that moment can fetch
+    the old index archive, then the new bundle. It installs the index, then refuses the bundle:
+    `... the repo's index and companion come from two builds of the panel. Nothing of it was
+    installed.` The index is then in place without its Dictionaries. Run the same download again:
+    it fetches the index archive again (29.55 GB), then the bundle, and the install is complete.
 - **A carrier missing from a SNP row, beside a long indel.** A per-sample search reads the phased
   indel store within 500 bases of its SNP targets, so a carrier whose haplotype holds an indel in a
   SNP row's target that adds or deletes more bases than that, less the target's length, is left off

@@ -14,25 +14,61 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Added
-- **The phased indel genotype store holds the MNVs (the first part of the MNVs' phase on
-  HPRC).** An MNV is a record that replaces two or more bases with as many (AA>GG): HPRC v2.1 has
-  702,193 among its 49.5 million records, HGDP + 1000 Genomes and the mega none. CRISPRitz cuts a
-  fake-indel window for each, so MNV targets are found, but the store kept only the records whose
-  REF and ALT lengths differ, so nothing a search read said which haplotype holds an MNV. Each
-  chromosome's store (`Dictionaries/indel_genotypes_<vcf>/`) now has an MNV file beside its indel
-  file, `gt_mnv_<chrom>.tsv.gz`, in the same format and with the same `.done` marker: one line per
-  MNV ALT (REF and ALT of one length above 1) of a record whose FILTER is `PASS` or `.`, its
-  carriers' genotypes read as "this ALT or not" (a missing allele is not this ALT, and `/` stays
-  unphased). `build_indel_genotypes` writes both files in one pass over the VCF, each only where
-  it is missing or not current, so a store of 2.10.0 gains its MNV files and keeps its indel files
-  byte for byte, and a VCF with no MNV gets an MNV file of no record. CRISPRme 2.10.0 opens the
-  indel file by name: it reads the same rows from a store that has the MNV file. A search that
-  enriches a dataset itself writes both (`search_indel_snp.py store`), and
-  `build_indel_genotypes.py --mnv-only <vcf> <store folder> [<samplesID>]` adds the MNV file of
-  the VCF's chromosome to a store, its other files left as they are. build-index-only's store,
-  HPRC's store built again and its republish come with the rest of 2.10.1's MNV work.
+- **The phased indel genotype store holds the MNVs (the MNVs' phase on HPRC).** An MNV is a
+  record that replaces two or more bases with as many (AA>GG). HPRC v2.1 has 702,193 among its
+  49.5 million records; HGDP + 1000 Genomes and the mega have none. CRISPRitz cuts a fake-indel
+  window for each, so MNV targets are found. But the store kept only the records whose REF and ALT
+  lengths differ, so nothing a search read said which haplotype holds an MNV. Each chromosome's
+  store (`Dictionaries/indel_genotypes_<vcf>/`) now has an MNV file beside its indel file,
+  `gt_mnv_<chrom>.tsv.gz`, in the same format and with the same `.done` marker. It holds one line
+  per MNV ALT (REF and ALT of one length above 1) of a record whose FILTER is `PASS` or `.`. A
+  carrier's genotype is read as "this ALT or not": a missing allele is not this ALT, and `/` stays
+  unphased. On HPRC v2.1 the MNV files hold 699,719 lines and 11,655,450 carrier entries, 19.3 MB
+  gzipped, beside 604 MB of indel files (METHODS section 4, MNVs in the phased store).
+  - `build_indel_genotypes` writes both files in one pass over the VCF, each only where it is
+    missing or not current. A store of 2.10.0 thus gains its MNV files and keeps its indel files
+    byte for byte, and a VCF with no MNV gets an MNV file of no record.
+  - `build-index-only` (its STEP 1c) writes, for each chromosome, whichever file of the store is
+    missing or not current, a job per chromosome. The store's unfinished mark and the check for a
+    partial store cover both files. A build of 2.10.0 run again with 2.10.1 gains the MNV files.
+  - A search that enriches a dataset itself does the same (`search_indel_snp.py store`).
+  - `build_indel_genotypes.py --mnv-only <vcf> <store folder> [<samplesID>]` adds the MNV file of
+    the VCF's chromosome to a store and leaves its other files as they are. A samplesID file or a
+    store folder that is named but not found is an error.
+  - CRISPRme 2.10.0 opens the indel file by name, so it reads the same rows from a store that has
+    the MNV file.
+- **`publish-index --stage-only`.** It packs a publish's archives and their records into a folder
+  and uploads nothing. A re-pack can then go up to the Hub in one commit, with
+  `indexes/SHA256SUMS`, where `publish-index` makes one commit per file. HPRC's republish uses it
+  (Changed).
+- **A `download` step that adds HPRC's MNV store to an install of 2.10.0.** It fetches the
+  `indel_genotypes_hg38_HPRC` companion (0.61 GB), which holds the MNV files, and installs it
+  whole. A search of 2.10.1 then reads the MNVs' phase on that install, without the index being
+  downloaded again (about 32 GB). `docs/TROUBLESHOOTING.md` §15 gives the command.
 
 ### Changed
+- **HPRC's Dictionaries are published again, with the MNV files.** Only
+  `Dictionaries/indel_genotypes_hg38_HPRC/` changes: it gains 24 `gt_mnv_<chrom>.tsv.gz` and their
+  markers (about 19.3 MB). Its indel files, the registry, the indel logs, the genotype store, the
+  index and its INDELS index stay byte for byte. `dictionaries-bundle_hg38_HPRC` and
+  `indel_genotypes_hg38_HPRC` are packed again. So is `20-NRR_3_hg38+hg38_HPRC` (29.55 GB): its
+  index files are the same, but its manifest names the bundle by its fingerprint, and a download
+  refuses a bundle the manifest does not name. `genotypes_hg38_HPRC` stays as it is (the same
+  fingerprint). The three archives and `indexes/SHA256SUMS` go up in one Hub commit
+  (`publish-index --replace-companions --stage-only`, then one upload of the staged folder). No
+  index name, index format or catalog entry changes. `docs/INDEX_PROVENANCE.md` gives the new
+  archives' sizes, SHA-256 and Hub commit (2.10.1); 2.10.0's stay in the Hub's history. CRISPRme
+  2.10.0 reads no MNV file, so it gives the same rows on the new archives. A download of HPRC in
+  flight at that commit can fail once, and works when run again (`docs/TROUBLESHOOTING.md` §15).
+- **The real-data checker reads the MNVs as the search does** (`scripts/check_indel_rows.py`). A
+  run of 2.10.1 says in its `log_verbose.txt`, for each chromosome whose indel log lists an MNV,
+  whether it read the MNVs from the store's MNV file (Fixed). The check takes its model from those
+  NOTEs. Where the run read no MNV file, it reads the run as 2.10.0's: a carrier listed through an
+  MNV that changes the target is a documented limit (`limit-indel-row-mnv`, `limit-snp-row-mnv`,
+  non-gating). Where the run read one, an MNV is a second record of the slot, read by the rules of
+  the Fixed entry, and such a listing fails the check on an indel row; the SNP-row report, which
+  is report-only, reports it. A target that needs an MNV and another indel-path record stays the
+  two-indel limit (`limit-two-indels`).
 - **The Docker image keeps no conda or pip package cache.** The Dockerfile's `micromamba clean
   --all --yes`, at the end of each RUN that installs an environment, removes the cached packages
   no environment uses, but keeps the folder of every package one uses, and in it each file the
@@ -53,36 +89,56 @@ and the `release-crisprme` skill.
 
 ### Fixed
 - **Where the phased store holds the MNVs, a search reads them by their phase.** Up to 2.10.0 an
-  indel row listed a carrier whose haplotype also holds an MNV inside the target, a SNP row did
-  the same, and an MNV row's carriers were the indel log's, their phase unknown (PUTATIVE): on
-  HPRC, in the README guide's genome-wide search, 1,163 indel-row listings at 94 sites per sample
-  (558 at 73 sites population-level) and 3,334 SNP-row listings at 219 sites, the limit METHODS
-  sections 4, 8 and 10 document. With a store that has its MNV file (Added):
+  indel row listed a carrier whose haplotype also holds an MNV inside the target, and a SNP row did
+  the same. An MNV row's carriers were the indel log's, their phase unknown (PUTATIVE). In the
+  README guide's genome-wide search on HPRC, 2.10.0's release gate counted 1,163 such indel-row
+  listings at 94 sites per sample (558 at 73 sites population-level) and 3,334 SNP-row listings at
+  219 sites: the limit METHODS sections 4, 8 and 10 document. With a store that has its MNV file
+  (Added):
   - the indel post-analysis, in either analysis mode, reads an MNV as one more record of the
-    store: an MNV row's carriers by their phase, each slot resolved with its own SNP alleles and
-    second records, and an MNV on the slot of another record's row read on the slot's bases, as
-    a second indel is, so a slot whose target bases the MNV changes leaves that row;
+    store. An MNV row's carriers are read by their phase, each slot resolved with its own SNP
+    alleles and second records. An MNV on the slot of another record's row is read on the slot's
+    bases, as a second indel is, so a slot whose target bases the MNV changes leaves that row;
   - a per-sample SNP row's carrier whose haplotype holds an MNV inside the target leaves the row
     (population-level SNP rows are unchanged);
   - the carrier gate finds an MNV a row names in the panel and tiers it on the phased haplotypes
-    (2.10.0 read it as "not in the panel"), and an MNV inside a SNP-only row's target takes a
-    haplotype holding it out of the combination, the state keeping its label, "indel in the
+    (2.10.0 read it as "not in the panel"). An MNV inside a SNP-only row's target takes a
+    haplotype holding it out of the combination; the state keeps its label, "indel in the
     target".
 
-  An MNV and an indel on one slot whose REFs share a base are read by the rules the PI confirmed
-  (2026-11-20): an MNV only on bases the window's deletion deletes changes nothing, as METHODS
-  section 4 reads any variant there; a deletion on bases an MNV replaces changes the MNV's target,
-  the slot read as the deletion's; and an MNV and an indel at one POS are other alleles of that
-  position, a phasing artefact, each read without the other on both records' rows. Two helpers
-  read an MNV as an indel up to 2.10.0: `indel_snp_cis.local_haplotype` wrote an MNV's bases after
-  the base before it, so a slot with an MNV on a target's first base in a repeat read as holding
-  the target, and `changes_span` counted an MNV's ALT as inserted bases. Both now read its bases
-  in the places of those they replace; the fixes touch the records whose REF and ALT have one
-  length alone, which no store of 2.10.0 holds. A store without the MNV file (2.10.0's, and 2.8.1's
-  HPRC v2.0 archives) is read as 2.10.0 read it, and the run's `log_verbose.txt` says so once for
-  each chromosome whose indel log lists an MNV, with how to add the file; a run that read one says
-  that too. A target held only through an MNV and another indel or MNV is still not generated (a
-  fake-indel window holds one record): that limit stays.
+  Two helpers read an MNV as an indel up to 2.10.0. `indel_snp_cis.local_haplotype` wrote an MNV's
+  bases after the base before it, so a slot with an MNV on a target's first base in a repeat read
+  as holding the target. `indel_snp_cis.changes_span` counted an MNV's ALT as inserted bases. Both
+  now read its bases in the places of those they replace. The fixes touch only the records whose
+  REF and ALT have one length, which no store of 2.10.0 holds.
+
+  An MNV and an indel whose REFs share a base on one phased slot (33,739 pairs on HPRC v2.1,
+  245,045 slots) are read by three rules the PI confirmed (2026-11-20). METHODS section 4 gives
+  each shape of such a pair on both records' rows:
+  - (a) an MNV only on bases the window's deletion deletes changes nothing, as METHODS section 4
+    reads any variant there;
+  - (b) a deletion on bases an MNV replaces is read as the deletion's haplotype: an MNV window
+    loses no base, so the slot leaves the MNV's rows;
+  - (c) an MNV and an indel at one POS are other alleles of that position, a phasing artefact:
+    each is read without the other, on both records' rows, where the chromosome's MNV file was
+    read.
+
+  The carrier gate keeps its 2.10.0 convention at one POS: another allele at the position of a
+  variant the row names makes the slot one of unknown phase (`phase not known`), where the indel
+  post-analysis lists the carrier by its phase. **Pending: the PI's decision for 2.10.1.** Two
+  readings are not set: a complex record wholly inside the bases a deletion deletes (2.10.1 reads
+  it as 2.10.0 did), and an SNV and an MNV that share a base on one slot, on the SNV's SNP rows (28
+  pairs on HPRC v2.1, 150 slots; read as an indel there is read).
+
+  A store without the MNV file (2.10.0's, and 2.8.1's HPRC v2.0 archives) is read as 2.10.0 read
+  it. The run's `log_verbose.txt` says so once for each chromosome whose indel log lists an MNV,
+  with how to add the file; a run that read one says that too. An MNV file that cannot be read
+  costs the MNVs alone: the chromosome's indel file is still read, and the carrier gate does not
+  stop on it. What all this changes in HPRC's rows is to be measured by the gates. HGDP + 1000
+  Genomes and the mega hold no MNV, so no row of theirs is to change; that too is to be measured by
+  the gates. Two limits stay. A target held only through an MNV and another indel or MNV is still
+  not generated (a fake-indel window holds one record), so the fix moves such a carrier from a
+  wrong row to none. And a target held only through two indels stays unreported, as in 2.10.0.
 - **The docs give the measured size of 2.10.0's image once unpacked, and of its arm64
   `.sif`.** The one-line installers' comments said "~7 GB+ once unpacked", the README "about
   7 GB on Apple Silicon, and more on amd64", and the Docker Quickstart's Apptainer step a `.sif`

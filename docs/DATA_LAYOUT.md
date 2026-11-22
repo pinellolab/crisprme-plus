@@ -65,6 +65,30 @@ your `--output` name. Each holds the shareable **`report.html`** + its `data/` f
 tables, and the run logs (`log.txt`, `log_verbose.txt`, `log_error.txt`). Deleting a `Results/` subfolder
 never touches your shared inputs.
 
+### The phased indel genotype store
+
+A genotyped dataset's `Dictionaries/` holds its phased indel genotype store, which says which
+haplotype holds each indel (and, from CRISPRme 2.10.1, each MNV: a record that replaces two or more
+bases with as many). It has two files per chromosome, each with a marker:
+
+```
+Dictionaries/indel_genotypes_<dataset>/
+├─ gt_indel_<chrom>.tsv.gz        one line per indel ALT: <POS>_<REF>_<ALT>, then sample:genotype,...
+├─ gt_indel_<chrom>.tsv.gz.done   its marker: the line count, then FILTER<tab>PASS,.
+├─ gt_mnv_<chrom>.tsv.gz          (from 2.10.1) the same, one line per MNV ALT
+└─ gt_mnv_<chrom>.tsv.gz.done     its marker, in the same form
+```
+
+- Each file is written whole, then its marker. A file is current when its marker is there, is as
+  new as the file, and records the FILTER rule. `build-index-only` writes again a file that is
+  missing or not current, and leaves the others as they are.
+- While `build-index-only` writes the store, a `.building` folder in it marks it unfinished, and a
+  search refuses it.
+- A store of CRISPRme 2.10.0 has no `gt_mnv_*` files. CRISPRme 2.10.1 reads it as 2.10.0 did and
+  says so in the run's `log_verbose.txt`; [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15 says how to
+  add the files. CRISPRme 2.10.0 reads the `gt_indel_*` files alone, so the `gt_mnv_*` files change
+  nothing for it.
+
 ## What a search reads vs. what it writes
 
 | A search **READS** (shared inputs) | A search **WRITES** |
