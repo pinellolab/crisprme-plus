@@ -123,6 +123,9 @@ def artifact_summary(scorer: str) -> dict:
     """Expose the bundled IND quantities (AUPR + CI, per-held-out-guide coverage,
     per-band guide/positive counts, prevalence, provenance) for the report/modal."""
     m = load_artifact(scorer)["meta"]
+    # n_sites is exposed alongside n_positives because the modal quotes both and they
+    # were confused there: "CFD 359 sites / 46 guides" named the POSITIVE count as the
+    # site count, four orders of magnitude out (2,940,588 sites carry those 359).
     return {k: m.get(k) for k in (
-        "scorer", "n_guides", "n_positives", "prevalence", "aupr",
+        "scorer", "n_guides", "n_positives", "n_sites", "prevalence", "aupr",
         "loo_total_count_coverage_nominal90", "band_counts", "phi_bands", "provenance")}

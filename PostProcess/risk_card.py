@@ -34,21 +34,95 @@ _CB_ROWS = [("0.5-1", "CRISPR-Bulge ≥ 0.5"), ("0.2-0.5", "CRISPR-Bulge 0.2–0
             ("gt0", f"CRISPR-Bulge {cbop.sensitive_label_text()}, sensitive")]
 _MIN_BAND = 0.2  # lowest score edge the card displays; scores below are pre-filtered out
 
+# The band-support table cannot reuse the card's label for "gt0". The card's gt0 ROW is the
+# sensitive tier (expected_counts thresholds the scores), but the artifact's band_counts
+# entry of the same name is the whole held-out support -- see _band_support_table. Labels
+# used only by that table live here so the card's own rows keep their operating-point names.
+_SUPPORT_ROW_LABEL = {
+    ("crispr_bulge", "gt0"): "CRISPR-Bulge, whole held-out support (all bands)",
+}
+
 # The modal shows the held-out CRISPR-Bulge AUPR twice and they do not match to three
 # decimals: the table renders crispr_bulge_calibration.npz (fitted, and AUPR-scored, on the
-# report's 3-decimal CRISPR-Bulge column -> 0.613), while pr_curves.png re-scores the SAME
-# 287 held-out sites at full precision and integrates tie groups as one step (-> 0.622,
-# titled 0.62). Same sites, same model; only the score precision and the AP rule differ, and
-# 0.622 sits well inside the artifact's 0.56-0.70 CI. Say so rather than let a reader find
-# two numbers and stop. Both values are checked against their own sources by
-# test_pr_figures.test_modal_explains_the_two_crispr_bulge_auprs, so neither can drift
-# silently; refitting the artifact at full precision is a backlog item, not a release fix
-# (it would move the deployed probability map and every expected count built on it).
+# STORED 3-decimal CRISPR-Bulge column -> 0.613), while pr_curves.png re-scores the SAME
+# 287 held-out positives at full precision and integrates tie groups as one step (-> 0.622,
+# titled 0.62). Same sites, same model -- but "only the score precision and the AP rule
+# differ" was wrong, and wrong about the majority of the gap. Measured on the chain
+# stored -> rescored -> full precision (trapezoid 0.6130872 -> 0.6179856 -> 0.6182664;
+# tie-grouped 0.6148478 -> 0.6197042 -> 0.6220800), the 0.0089928 gap is 54.0% the stored
+# column's PAM-internal-bulge scoring defect (rows whose single bulge falls inside the PAM
+# were handed to the model after the guide-PAM normalisation overwrote the alignment gap,
+# which inflates them; every affected row is a labelled negative, so no recall moves),
+# 26.4% the figure's full-precision rescoring and 19.6% the tie-grouped AP rule. The defect
+# is the same one the methods document describes for the benchmark's CRISPR-Bulge column,
+# so the two must not give the reader different explanations of a discrepancy that is
+# visible on this page. 0.622 still sits well inside the artifact's 0.56-0.70 CI. Both
+# values are checked against their own sources by
+# test_pr_figures.test_modal_explains_the_two_crispr_bulge_auprs and the attribution by
+# test_risk_card.test_modal_blames_the_stored_column_defect_for_the_aupr_gap, so neither
+# can drift silently; refitting the artifact on the corrected column is a backlog item, not
+# a release fix (it would move the deployed probability map and every expected count on it).
 _CB_AUPR_FIGURE_NOTE = (
-    ' The CRISPR-Bulge panel below is titled AUPR 0.62 where this table says 0.613: the '
-    'figure re-scores the same 287 held-out sites at full precision and groups tied scores, '
-    'while the calibration artifact behind the table is fitted on the report’s 3-decimal '
-    'CRISPR-Bulge column. Same sites, same model — the difference is far inside the 90% CI.')
+    ' The CRISPR-Bulge panel below is titled AUPR 0.62 where this table says 0.613, on the '
+    'same 287 held-out positives — and most of that 0.009 gap is not score precision. '
+    '<b>54% of it is a scoring defect in the stored 3-decimal column the calibration '
+    'artifact is fitted on</b>: rows whose single bulge falls inside the PAM were scored '
+    'after the guide-PAM normalisation overwrote the alignment gap, which inflates them and '
+    'costs precision. Every affected row is a labelled negative, so no recall figure on this '
+    'page moves. The figure’s full-precision rescoring accounts for 26% of the gap and its '
+    'tie-grouped AP rule for 20%, and the whole difference is far inside the 90% CI.')
+
+# What the benchmark IS, next to the numbers it produces. METHODS section 2 carries both
+# facts in full; neither reached this page, and this page is what the collaborator reads.
+# (1) The assay-detection floor: every "validated" positive is a site some assay recovered,
+# and no assay recovers every double-strand break, so the negatives conflate true negatives
+# with assay misses -- that biases recall optimistically and precision pessimistically, and
+# it belongs beside the recall and precision numbers, not in one clause four paragraphs
+# below. (2) Scope: four published assay sets from the CRISPR-Bulge repository's external
+# evaluation data (three GUIDE-seq read-count sets -- Tsai 2015, Chen 2017, Listgarten 2018
+# -- plus Refined TrueOT), reference-genome sites only, 46 guides, every positive <=1 gap
+# and zero >=2-gap rows, and ONE guide supplying 79 of CFD's 359 (22.0%) and 27.5% of
+# CRISPR-Bulge's held-out 287 -- the single most load-bearing fact about every number here.
+# Not stated: the nuclease. The repository's own documentation of these sets does not record
+# it in anything shipped here, so the page does not assert it.
+_SCOPE_NOTE = (
+    '<p style="font-size:0.85em;color:#64748b"><b>“Validated” here means assay-detected.</b> '
+    'Every positive is an off-target some published assay recovered, and no assay recovers '
+    'every double-strand break (GUIDE-seq is on the order of 30–50% of true DSBs), so the '
+    '“negatives” mix true negatives with assay misses: recall above is recall against the '
+    '<i>detected</i> set, which flatters recall and penalises precision, and a low score is '
+    'not clearance. <b>Scope of the benchmark:</b> four published assay sets distributed with '
+    'the CRISPR-Bulge repository (the Tsai 2015, Chen 2017 and Listgarten 2018 GUIDE-seq '
+    'read-count sets, plus Refined TrueOT), reference-genome sites only, 46 guides, every '
+    'positive at most one gap and <b>zero ≥2-gap rows</b>, and <b>one guide supplying 79 of '
+    'CFD’s 359 positives (22%) and 27.5% of CRISPR-Bulge’s 287</b> — so every number on this '
+    'page is clustered on that guide, which is why the intervals resample guides, not sites.</p>')
+
+# The benchmark's positives include each guide's own ON-TARGET -- 46 perfect (0-mismatch,
+# 0-gap) rows of CFD's 359, 40 of CRISPR-Bulge's 287, CFD exactly 1.0 on every one of them.
+# The card's own score arrays do not: generate_report.py builds them with `_mmb > 0`,
+# "off-targets (exclude perfect)". So every discrimination number on this page is measured
+# on a population the deployed ranking does not contain, and CFD's is measured mostly on it:
+# the CFD = 1.0 tie group is 51 rows, 46 positive, worth 0.902 x 0.128 = 0.116 of the 0.168
+# headline (69%) before CFD ranks a single off-target. Re-fitting and re-rendering the page
+# on the deployment-matched population would move numbers the collaborator has already seen
+# and is a backlog item (NEXT_RELEASE_PLAN item 45); for this release the page DISCLOSES it,
+# with the deployment-matched values beside the published ones, so a reviewer sees both.
+# Every number below is re-measured on the raw benchmark, not copied: CFD trapezoid AUPR
+# 0.168306 -> 0.025146; CRISPR-Bulge tie-grouped full-precision AP 0.622080 -> 0.520929
+# (3-decimal column, the table's rule: 0.613087 -> 0.510504); CFD >=0.5 precision 0.085345
+# -> 0.047576. Pinned by test_risk_card.test_modal_discloses_the_on_target_positives.
+_ONTARGET_NOTE = (
+    ' <b>Both supports count each guide’s own on-target as a positive</b> — 46 of CFD’s 359 '
+    'and 40 of CRISPR-Bulge’s 287 are perfect (0-mismatch, 0-gap) matches, which CFD scores '
+    'exactly 1.000 and which this report’s ranked list excludes. Recomputed with those rows '
+    'dropped, so the support matches the list you are reading, the same estimators give '
+    '<b>CFD AUPR 0.025</b> (from 0.168) and <b>CRISPR-Bulge 0.521</b> (from 0.622 at full '
+    'precision; 0.511 from 0.613 on the table’s 3-decimal column), and CFD’s ≥0.5 precision '
+    'falls from 0.085 to 0.048. CFD moves most because its 46 on-targets tie at the very top '
+    'of its ranking and carry 69% of the published 0.168. The table and figures on this page '
+    'are the benchmark-standard numbers, kept so they can be compared with the published '
+    'benchmark; the values in this paragraph are the ones that describe this report’s list.')
 
 
 def _esc(x) -> str:
@@ -138,10 +212,19 @@ _ISOTONIC = (
     "estimated chance the site is a true off-target, with one rule: a higher score never maps "
     "to a lower probability. Each scorer's curve was learned from experimentally confirmed "
     "off-targets across four published studies (359 for CFD, 287 for CRISPR-Bulge; see "
-    "METHODS §2), built so no guide ever set its own probabilities. The “expected true” "
-    "count is the sum of these per-site probabilities; "
-    "its 90% range is a guide-level bootstrap that reaches ~90% coverage for a single novel "
-    "guide. Both scorers are sequence-based, so the calibration applies to any ≤1-gap "
+    "METHODS §2). The map the report applies is fit on all of those guides at once, so it "
+    "closes on the benchmark by construction; what is rebuilt guide-by-guide, each guide's "
+    "numbers coming only from the other 45 (CRISPR-Bulge: 39), is the band-error table, the "
+    "overdispersion and the coverage check behind the range — not the shipped map itself "
+    "(METHODS §4). The “expected true” "
+    "count is the sum of these per-site probabilities; its 90% range is a guide-level "
+    "bootstrap. Rebuilt for each benchmark guide in turn, it contains that guide's own "
+    "realized count in 89–100% of folds against a nominal 90%: conservative in every band "
+    "the card shows except CFD 0.2–0.5, which measures 89%. That is coverage for a guide "
+    "resembling the benchmark's 46; it is not, and cannot be, validated for a clinically "
+    "novel guide at a different locus, whose own off-target propensity sits outside this "
+    "bootstrap and is the separate, usually larger uncertainty flagged above (METHODS "
+    "§5–§6). Both scorers are sequence-based, so the calibration applies to any ≤1-gap "
     "alignment (reference or variant allele); ≥2-gap sites and per-sample carrier incidence "
     "are out of scope.")
 _READ = (
@@ -231,6 +314,64 @@ def render_risk_card(meta: dict, cfd_scores: Optional[Sequence[float]],
     return card, modal
 
 
+def _band_support_table(cal) -> str:
+    """The benchmark support behind each band the card prints.
+
+    ``band_counts`` is already in both artifacts and already returned by
+    ``artifact_summary``; until now nothing displayed it, so the card gave an expected
+    count and a 90% range for a band without saying how many validated off-targets --
+    or how many guides -- that band rests on. The CRISPR-Bulge 0.2-0.5 row is the
+    reason it matters: 41 positives from 12 of 40 guides. Rendered from the artifact,
+    never hard-coded, so it cannot drift from the fit.
+
+    One row cannot carry its card label. ``band_counts["gt0"]`` is NOT the sensitive
+    tier's support: ``fit_calibration`` bins the support on a 2,000-bin grid whose first
+    bin centre is 0.00025, already above the 1.9e-4 threshold, so the "gt0" mask selects
+    every bin and the entry is the WHOLE held-out support (287 positives / 40 / 40). The
+    card's own gt0 row is the real tier -- ``expected_counts`` thresholds the scores
+    themselves -- but this table counts what the artifact counted, so the row is labelled
+    for that and the tier's own figure is given in the caption instead. A table built to
+    stop a band showing a count without its true support must not do it itself.
+    """
+    if cal is None:
+        return ""
+    rows = []
+    for scorer, spec in (("cfd", _CFD_ROWS), ("crispr_bulge", _CB_ROWS)):
+        try:
+            counts = (cal.artifact_summary(scorer) or {}).get("band_counts") or {}
+        except Exception:  # noqa: BLE001 - one scorer's artifact issue must not drop the other
+            continue
+        for label, disp in spec:
+            c = counts.get(label)
+            if not c:
+                continue
+            disp = _SUPPORT_ROW_LABEL.get((scorer, label), disp)
+            rows.append(
+                f'<tr><td>{_esc(disp)}</td><td>{c.get("positives", 0):,}</td>'
+                f'<td>{c.get("guides_with_positive", 0)}</td>'
+                f'<td>{c.get("guides_contributing", 0)}</td></tr>')
+    if not rows:
+        return ""
+    return (
+        '<table class="rc-tbl"><tr class="rc-hdr"><td>band (≤1-gap)</td>'
+        '<td>benchmark positives in it</td><td>guides carrying one</td>'
+        '<td>guides with any site in it</td></tr>'
+        f'{"".join(rows)}</table>'
+        '<p style="font-size:0.85em;color:#64748b">What each band&rsquo;s expected count and '
+        '90% range rest on. CFD&rsquo;s rows are 46 guides, CRISPR-Bulge&rsquo;s the 40 '
+        'held-out ones. A band whose positives come from few guides &mdash; CRISPR-Bulge '
+        '0.2&ndash;0.5 is 41 positives from 12 guides &mdash; has a range that is weakly '
+        'estimated and should be read as wide, whatever its printed width. Counting out each '
+        'guide&rsquo;s own on-target (see above) leaves the two &ge;0.5 rows at 53 positives '
+        'from 19 guides (CFD) and 102 from 19 (CRISPR-Bulge). The last row is the artifact&rsquo;s '
+        'whole-support count, not the sensitive tier&rsquo;s: the fit bins its support on a grid '
+        'whose first bin already sits above the threshold, so that entry counts every held-out '
+        f'positive. The sensitive tier itself &mdash; CRISPR-Bulge {cbop.sensitive_label_html()} '
+        '&mdash; carries <b>273 of '
+        'the 287</b> at full precision; 267 on the 3-decimal column the artifact is fitted '
+        'on, where 20 held-out positives round to 0.000.</p>')
+
+
 def _render_modal(cal) -> str:
     summary_html = ""
     cb_row = ""
@@ -259,34 +400,50 @@ def _render_modal(cal) -> str:
         if rows:
             summary_html = (
                 '<table class="rc-tbl"><tr class="rc-hdr"><td>scorer</td>'
-                '<td>held-out AUPR (90% CI)</td><td>≥0.2 single-guide coverage</td></tr>'
+                '<td>external-benchmark AUPR (90% CI)</td>'
+                '<td>≥0.2 single-guide coverage</td></tr>'
                 f'{rows}</table>')
     pr = _pr_curve_uri()
     aupr_note = (
         '<p style="font-size:0.85em;color:#64748b">No-skill AUPR baseline = the off-target '
-        'prevalence ≈ 1.22×10⁻⁴; both scorers are far above it. The two AUPRs sit on different '
-        'held-out benchmark sets (CFD 359 sites / 46 guides, CRISPR-Bulge 287 / 40) and are '
-        'not directly comparable across scorers.'
+        'prevalence, ≈ 1.22×10⁻⁴ on CFD’s support and ≈ 1.06×10⁻⁴ on CRISPR-Bulge’s; both '
+        'scorers are far above it. The two AUPRs sit on different supports and are not '
+        'directly comparable across scorers: CFD on <b>359 validated off-targets among '
+        '2,940,588 candidate sites</b> from all 46 benchmark guides, CRISPR-Bulge on '
+        '<b>287 among 2,703,869 sites</b> from the 40 guides it was not trained on. CFD has '
+        'no training set, so nothing is held out for it — its column is external, not '
+        'held-out.'
+        f'{_ONTARGET_NOTE}'
         f'{_CB_AUPR_FIGURE_NOTE if (cb_row and pr) else ""}</p>'
+        f'{_SCOPE_NOTE}'
         if summary_html else "")
+    support_html = _band_support_table(cal) if summary_html else ""
     pr_html = (f'<div class="rc-pr"><img alt="Precision-recall of each scorer" src="{pr}" '
                f'style="max-width:100%">'
                f'<div style="font-size:0.8em;color:#64748b;margin-top:4px">'
-               f'Precision-recall on held-out validated off-target sites. Marked points are the '
+               f'Precision-recall on externally validated off-target sites: the CRISPR-Bulge '
+               f'panel on the 40 guides it was not trained on, the CFD panel on all 46 (CFD has '
+               f'no training set, so nothing is held out for it). Both panels&rsquo; positives '
+               f'include each guide&rsquo;s own on-target &mdash; see the note above this '
+               f'figure for the deployment-matched values. Marked points are the '
                f'report&rsquo;s own operating points: <b>CFD</b> &ge;&nbsp;0.2 and &ge;&nbsp;0.5; '
                f'<b>CRISPR-Bulge</b> {cbop.sensitive_label_html()} (the sensitive default), '
                f'&ge;&nbsp;0.2, and &ge;&nbsp;0.5. The CRISPR-Bulge sensitive point is the 95%-recall '
-               f'threshold on the 40-guide benchmark; pushing recall higher moves left-and-down along '
+               f'threshold on the 40-guide benchmark; recall is the x-axis, so pushing recall higher '
+               f'moves right-and-down along '
                f'the curve (steeply more sites per true off-target).</div></div>') if pr else ""
     prb = _png_uri("pr_bulge_stratified.png")
     prb_html = (
         '<p>Stratified by bulge count, the scores separate sharply. CFD discriminates '
-        'mismatch-only off-targets (bulge=0 AP ≈ 0.27) but <b>cannot rank bulges</b> '
-        '(bulge=1 AP ≈ 0.01, essentially the prevalence floor); CRISPR-Bulge carries the '
-        'bulge signal (bulge=1 AP ≈ 0.28). The CRISPR-Bulge panel is restricted to the 40 '
+        'mismatch-only off-targets (bulge=0 AP ≈ 0.27, and ≈ 0.08 once each guide’s own '
+        'on-target is counted out) but <b>cannot rank bulges</b> '
+        '(bulge=1 AP ≈ 0.01 against CRISPR-Bulge’s 0.285 on the same 40 held-out guides); '
+        'CRISPR-Bulge carries the bulge signal. The CRISPR-Bulge panel is restricted to the 40 '
         'guides the model was not trained on; CFD has no training set, so its panel keeps '
         'all 46. This is why the recommended panel keys bulges on '
-        'CRISPR-Bulge and only rescues a single-bulge site on CFD when CFD is high (≥ 0.5). '
+        'CRISPR-Bulge and adds a single-bulge site on CFD only when CFD is high (≥ 0.5) — an '
+        'arm that on this benchmark adds 614 sites and recovers <b>none</b> of the 10 '
+        'bulge-carrying off-targets the CRISPR-Bulge sensitive tier misses. '
         'CFD’s position-aware bulge penalty (2.8.0) corrects the per-site score so a '
         'PAM-proximal bulge is no longer scored like a perfect match, but it does not make CFD '
         'a bulge ranker.</p>'
@@ -299,7 +456,7 @@ def _render_modal(cal) -> str:
         '<div class="rc-modal-head">How to read the off-target risk</div>'
         '<div class="rc-modal-body">'
         f'<p>{_READ}</p>'
-        f'{summary_html}{aupr_note}'
+        f'{summary_html}{aupr_note}{support_html}'
         f'{pr_html}'
         f'{prb_html}'
         '<p><b>Choosing a threshold.</b> The two scores behave differently: CFD is most reliable '
@@ -308,13 +465,22 @@ def _render_modal(cal) -> str:
         'cutoff would list essentially the whole genome. The <b>sensitive default is therefore a '
         f'principled operating point, {cbop.sensitive_label_text()}</b> &mdash; the threshold that '
         'recovers about 95% of validated off-targets on the 40-guide held-out benchmark (guide-bootstrap '
-        '95% CI wide; higher recall is reachable but the validation list grows steeply &mdash; 99% recall '
-        'is roughly 6&times; the sites, because the last few percent of true off-targets sit in the '
+        '95% CI wide; higher recall is reachable but the validation list grows steeply &mdash; on that '
+        'benchmark the 99%-recall list is <b>16&times;</b> the 95% one, 6,076 sites against 99,477, '
+        'because the last few percent of true off-targets sit in the '
         'score&rsquo;s noise floor). The recommended default panel is a union &mdash; <b>every '
         f'CRISPR-Bulge-flagged site ({cbop.sensitive_label_text()}, the sensitive default), plus the '
-        'high-CFD sites CRISPR-Bulge misses (CFD &ge; 0.2 on no-bulge sites, where CFD is reliable, and high '
+        'high-CFD sites CRISPR-Bulge ranks low (CFD &ge; 0.2 on no-bulge sites, where CFD is reliable, and high '
         'CFD &ge; 0.5 on single-bulge sites, where it is an extrapolation), plus perfect/near-perfect '
-        'matches and functional / cancer-gene hits</b>. Sites needing '
+        'matches and functional / cancer-gene hits</b>. <b>What the two CFD arms are worth was '
+        'measured, not assumed, and it is small:</b> on the 40 held-out guides they add 9,660 and 614 '
+        'sites to the 6,076-site sensitive tier &mdash; 2.7&times; the panel &mdash; and between them '
+        'recover <b>1</b> of the 14 validated off-targets that tier misses (the no-bulge arm that one; '
+        'the single-bulge arm none of the 10 missed sites that carry a bulge). They are kept as cheap '
+        'insurance against the benchmark&rsquo;s own blind spots &mdash; a site no assay ever detected '
+        'counts as a false positive here, so 1 in 10,274 is an upper bound on what they find, not a '
+        'measurement of what they would find in a new experiment &mdash; and not because the benchmark '
+        'shows them rescuing much. Sites needing '
         '&ge; 2 bulges are kept but demoted (uncalibrated for both scores). See the validation panel '
         '(Section 4) and METHODS &sect;3.5.</p>'
         f'<p><b>What “expected true” means.</b> {_ISOTONIC}</p>'
