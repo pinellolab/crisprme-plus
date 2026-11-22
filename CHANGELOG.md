@@ -33,6 +33,24 @@ and the `release-crisprme` skill.
   2.10.0. The website's example report, 2.10.0's, keeps its "report generator v2.4".
 
 ### Fixed
+- **An indel row whose reference alignment is shorter than its alignment gets a reference CFD of
+  0, and each chromosome's notes count such rows.** The indel post-analysis reads a row's
+  reference alignment from the plain reference, from the row's start, as many bases as its target
+  holds. Since 2.10.0 a row whose first base is one an insertion adds starts at the insertion's
+  anchor, so the reference holds at least that base; it holds fewer than the target only where an
+  insertion lies within one target of the end of a contig that ends in sequence, which hg38's
+  primary chromosomes do not (each ends in 10 kb or more of `N`). The bulge-aware CFD scorer takes
+  two alignments of one length: on a row with a DNA bulge it raised `IndexError: string index out
+  of range` and the search stopped (the traceback in `log_error.txt`; `post_analisi_indel.sh` run
+  alone went on silently), and on a row without one it scored the bases it had, up to a perfect
+  1.000 for a target the reference does not hold. Such a row now gets a `CFD_ref` of 0, there
+  being no reference target to score, and keeps its own CFD; one NOTE per chromosome, on stdout
+  (`log_verbose.txt`), says how many, also when the chromosome's post-analysis runs in pieces. A
+  row whose reference alignment is whole is scored as before. On hg38 nothing changes: every
+  indel record of the HGDP + 1000 Genomes, mega and HPRC panels ends at least 10,001 bases before
+  its chromosome's end, and the release gate's searches B1, B2, B6, B7 and B8, run again on
+  2.10.0, hold no indel row with a short reference alignment. Found, diagnosed and fixed by Ann
+  Cirincione (anncir1), PR 113.
 - **The docs give the measured size of 2.10.0's image once unpacked, and of its arm64
   `.sif`.** The one-line installers' comments said "~7 GB+ once unpacked", the README "about
   7 GB on Apple Silicon, and more on amd64", and the Docker Quickstart's Apptainer step a `.sif`
