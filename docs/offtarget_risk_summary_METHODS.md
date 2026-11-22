@@ -101,9 +101,9 @@ The positive set is **guide-clustered**: **one guide contributes 79 of the 359 p
 (79/359 = 22.0%)**, and 16 guides contribute exactly one. This single dominant cluster is
 the most influential element of the calibration; its leave-that-guide-out effect is
 reported as a full result in §5 and §7, not as a parenthetical. CRISPR-Bulge is evaluated
-only on guides held out of its training and on ≤1-gap sites (287 positives / 40 guides;
-bulge split 297+62 = 359 for CFD support), so its table is on a different support than
-CFD's and is footnoted as such.
+only on guides held out of its training and on ≤1-gap sites (287 positives / 40 guides,
+bulge split 240 + 47; CFD's support is all 359, bulge split 297 + 62), so its table is on
+a different support than CFD's and is footnoted as such.
 
 ## 3. Discrimination (precision–recall)
 
@@ -113,7 +113,8 @@ AUPR is primary (imbalance-appropriate). Held-out, with guide-cluster-bootstrap 
 
 **Caveats on these headline numbers (required reading alongside them).** Both AUPRs are
 point estimates from clustered positives (359 / 46 guides for CFD, 287 / 40 for CB) in
-which a single guide supplies 22% of CFD positives; AUPR is high-variance and
+which a single guide supplies 79 positives — 22% of CFD's, and 27.5% of CB's held-out 287,
+the same guide in both; AUPR is high-variance and
 cluster-dependent, so each number carries a wide **guide-cluster-bootstrap 90% CI**
 (reported above; resampling guides, not sites), CFD's spans 0.13–0.24, and the point
 value must always be read with it. The **no-skill AUPR baseline equals the prevalence,
@@ -121,6 +122,19 @@ value must always be read with it. The **no-skill AUPR baseline equals the preva
 comparable across scorers**: they are computed on different support (CFD 359 positives /
 46 guides vs CB 287 / 40), so the 0.168-vs-0.613 gap partly reflects different positive
 sets and held-out populations, not purely discrimination.
+
+**The same caveat binds harder on the bulge-stratified APs, and hardest on bulge=1.** The
+figure's CRISPR-Bulge bulge=1 curve (AP 0.285) rests on **47 positives from 12 of the 40
+held-out guides, 25 of them (53%) from one guide**; the CFD bulge=1 curve (AP ≈0.01) on 62
+positives from 17 of 46. Restricting the CRISPR-Bulge panels to genuinely held-out guides
+made that stratum *more* guide-concentrated, not less (it was 62 positives / 17 guides,
+40% from the same guide, while the 6 training guides were still in it). **No bootstrap CI
+is computed for the stratified APs**, so their three printed decimals are precision, not
+accuracy: 0.285 supports "CRISPR-Bulge ranks single-bulge sites far above CFD's prevalence
+floor, on a dozen guides", and must not be read as a point estimate of the same standing
+as the headline AUPRs above, which do carry CIs. A single-guide-driven bulge AP is also
+the weakest link in §3.5's panel logic; the panel is a union, so CFD ≥0.5 still rescues
+high-CFD single-bulge sites CRISPR-Bulge ranks low.
 
 AUROC (≈0.97/0.98) is reported only as a footnote: it is prevalence-invariant and does
 not reflect operating-point precision at this imbalance.
@@ -130,6 +144,15 @@ Operating points (held-out): CFD t≥0.2 → recall 0.72 / precision 0.007; t≥
 recall 0.50 / precision 0.72. **These CRISPR-Bulge recalls (0.50–0.60) are recall against
 the assay-detected set (§2), not against ground truth, and a low CRISPR-Bulge count is not
 clearance (§7).** These curves (overall and stratified by bulge count) are shown in the modal.
+The modal's curve is titled **AUPR 0.62, not 0.613**, on the same 287 held-out sites: the
+figure re-scores CRISPR-Bulge at full precision and groups tied scores, while the
+calibration artifact the headline number and the card's table come from is fitted on the
+report's 3-decimal CRISPR-Bulge column (0.613 trapezoid / 0.615 tie-grouped on that
+column; 0.618 / 0.622 at full precision). Same sites, same model, different score
+precision and AP rule — the gap is far inside the 0.56–0.70 CI, and the 3-decimal fit is
+the one the deployed probability map is built on. The CRISPR-Bulge operating points just
+above are measured on that same 3-decimal column; at full precision the t≥0.5 point reads
+precision 0.728 rather than 0.724 (recalls are identical either way).
 
 **CFD position-aware bulge penalty (2.8.0).** CFD now applies Doench's position-weighted
 DNA/RNA-bulge factors at each bulge's true spacer position (previously a DNA bulge was realigned
@@ -173,9 +196,10 @@ or cancer-driver gene, and — on a genotyped/phased panel — observed *cis* ha
 carriers.
 
 - **CRISPR-Bulge ≥ the 95%-recall threshold** carries the bulge sites and the ML-ranked core —
-  CFD cannot rank bulges (bulge=1 AP ≈ 0.01 vs CRISPR-Bulge ≈ 0.25; §3). CFD's 2.8.0 position-aware
-  bulge penalty fixes the *per-site* over-call (a PAM-proximal bulge no longer scores like a perfect
-  match) but does not make CFD a bulge ranker.
+  CFD cannot rank bulges (bulge=1 AP ≈ 0.01 vs CRISPR-Bulge 0.285 on the 40 held-out guides —
+  47 positives from 12 of them, 53% from one; read it with the support caveat in §3).
+  CFD's 2.8.0 position-aware bulge penalty fixes the *per-site* over-call (a PAM-proximal bulge
+  no longer scores like a perfect match) but does not make CFD a bulge ranker.
 - **CFD ≥ 0.2 on 0-bulge** rescues the high-CFD no-bulge sites CRISPR-Bulge misses (CFD is
   reliable off-bulge).
 - **CFD ≥ 0.5 on a single bulge** rescues the *high-CFD* 1-bulge sites: CFD now position-penalizes

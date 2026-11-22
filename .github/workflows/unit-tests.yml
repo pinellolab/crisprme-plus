@@ -527,6 +527,18 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_risk_card -v
 
+      - name: "PR figures the risk card embeds are reproducible from committed curve data (no negative sampling, CRISPR-Bulge panels held out)"
+        # Both PNGs under PostProcess/calibration/ were rendered out of tree, which is how
+        # they drifted: pr_curves.png drew CRISPR-Bulge precision from a 300k-negative
+        # sample of 2.7 M, and pr_bulge_stratified.png called a panel "(in-domain)" while
+        # filtering on a benchmark column that is true for every row, so it included the 6
+        # guides CRISPR-Bulge was trained on. scripts/render_pr_figures.py now draws them
+        # from a committed curve-data file; this re-derives every number they print, checks
+        # the sha256 chain data -> PNGs, and re-renders byte-for-byte when matplotlib and
+        # freetype match the versions recorded in PostProcess/calibration/pr_figures.sha256.
+        working-directory: PostProcess
+        run: python -m unittest test_pr_figures -v
+
       - name: "Top-1000 and Personal Risk Card plots draw every site (perfect matches starred, 1-edit sites kept, one site too); the report says what its top-1000 views leave out"
         # CRISPRme_plots.py / CRISPRme_plots_personal.py dropped every site with
         # mismatches+bulges <= 1, the on-target and any variant-created perfect match
