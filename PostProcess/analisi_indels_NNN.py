@@ -448,22 +448,25 @@ def preprocess_CFD_score(target):
         if target[-3] == 55:
             target[-3] = "{:.3f}".format(cfd_score)
         if target[-3] == 33:
-            # The reference alignment can come back SHORT -- empty, in practice.
-            # alignRefFromVar slices the plain reference chromosome at the row's
-            # coordinates, and an indel row can sit past the chromosome's end: a large
-            # insertion (e.g. a subtelomeric telomeric-repeat expansion) makes the fake
-            # indel genome longer than the real chromosome, so a target found inside the
-            # inserted sequence has no reference position at all. Python returns '' for
-            # an out-of-range slice rather than raising, so the empty alignment used to
-            # travel silently into cfd_score_bulge_aware, whose documented precondition
-            # is that the two alignments are the same length; with a DNA bulge in the
-            # guide it indexed the protospacer by the crRNA's positions and died with
-            # "IndexError: string index out of range", taking the whole indel
-            # post-analysis -- and so the entire run -- with it.
+            # The reference alignment can come back SHORT. alignRefFromVar slices the
+            # plain reference chromosome from the row's start, as many bases as the
+            # target holds. Since 2.10.0 a row whose first base is one an insertion adds
+            # starts at the insertion's anchor (indel_snp_cis.reference_start), so the
+            # slice holds that base and is never empty; it is cut short only when an
+            # insertion lies within one target of the end of a contig that ends in
+            # sequence, which hg38's primary chromosomes do not (each ends in 10 kb or
+            # more of N). A short alignment breaks cfd_score_bulge_aware's
+            # precondition, two alignments of one length. With a DNA bulge in the guide
+            # it indexes the protospacer by the crRNA's positions and raises
+            # "IndexError: string index out of range": a complete-search stops (the
+            # traceback lands in log_error.txt), and only post_analisi_indel.sh run
+            # alone is silent, analisi_indels_NNN.sh not checking this script's exit
+            # status. Without one it scores the bases it has, a number that means
+            # nothing.
             #
-            # There is genuinely no reference target to score here, so there is no
-            # reference CFD: report 0. The row itself is kept, with its own (ALT) CFD
-            # intact; only the reference comparison is unavailable.
+            # There is no reference target to score, so there is no reference CFD:
+            # report 0. The row itself is kept, with its own (ALT) CFD intact; only the
+            # reference comparison is unavailable.
             ref_aligned_target = target[-4]
             if not isinstance(ref_aligned_target, str) or len(
                 ref_aligned_target

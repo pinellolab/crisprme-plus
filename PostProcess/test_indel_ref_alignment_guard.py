@@ -1,16 +1,24 @@
-"""The reference-alignment CFD of an indel row when there is no reference (analisi_indels_NNN.py).
+"""The reference-alignment CFD of an indel row whose reference alignment is shorter than
+its alignment (analisi_indels_NNN.py).
 
 alignRefFromVar builds a row's reference alignment by slicing the plain reference
-chromosome at the row's coordinates. An indel row can sit past the end of its
-chromosome -- the per-chromosome fake indel genome is longer than the real
-chromosome, so a target found inside a large insertion has no reference position
-at all -- and Python returns '' for an out-of-range slice instead of raising. The
-empty alignment then reached cfd_score_bulge_aware, whose documented precondition
-is that the two alignments are the same length; with a DNA bulge in the guide it
-indexes the protospacer by the crRNA's positions and died with
-"IndexError: string index out of range", taking the whole indel post-analysis --
-and, because post_analisi_indel.sh exits 0 regardless, a whole chromosome's indel
-targets -- with it.
+chromosome from the row's start, as many bases as the target holds. Since CRISPRme
+2.10.0 a row whose first base is one an insertion adds starts at the insertion's
+anchor (indel_snp_cis.reference_start), so the slice holds that base and is never
+empty; it is cut short only when an insertion lies within one target of the end of a
+contig that ends in sequence, which hg38's primary chromosomes do not (each ends in
+10 kb or more of N). Up to 2.8.1 such a row started at its place on the haplotype,
+past the anchor, where the slice could be empty: Python returns '' for an
+out-of-range slice instead of raising.
+
+A short alignment breaks cfd_score_bulge_aware's precondition, two alignments of one
+length. With a DNA bulge in the guide it indexes the protospacer by the crRNA's
+positions and raises "IndexError: string index out of range": a complete-search
+stops (the traceback lands in log_error.txt, which the search treats as a failure),
+and only post_analisi_indel.sh run alone is silent, analisi_indels_NNN.sh not
+checking the analyzer's exit status. Without a DNA bulge the scorer scores the bases
+it has, a number that means nothing. The guard reports 0: there is no reference
+target to score.
 
 Following test_indel_pam_creation.py and test_indel_snp_overlay.py, the module's
 top level reads sys.argv and opens the fake genome, so the functions under test
@@ -79,19 +87,21 @@ def _row(ref_aligned, sentinel=SENTINEL_REF):
 
 class RefAlignmentGuard(unittest.TestCase):
     def test_empty_reference_alignment_scores_zero(self):
-        """The 2.8.0 out-of-range slice: '' . Used to raise IndexError."""
+        """An out-of-range slice: '' (a row that starts past the contig's end, which up
+        to 2.8.1 a row inside a large insertion could). Used to raise IndexError."""
         ns = _ns()
         out = ns["preprocess_CFD_score"](_row(""))
         self.assertEqual(out[-3], "0.000")
 
     def test_dash_reference_alignment_scores_zero(self):
-        """2.8.1 rewrote alignRefFromVar to return '-' here. Still short, still raised."""
+        """'-': an empty slice with a target's gap put back. Still short, still raised."""
         ns = _ns()
         out = ns["preprocess_CFD_score"](_row("-"))
         self.assertEqual(out[-3], "0.000")
 
     def test_short_reference_alignment_scores_zero(self):
-        """Short but non-empty, whatever the cause."""
+        """Short but non-empty (2.10.0's case: the slice from an insertion's anchor
+        reaches the end of a contig that ends in sequence), whatever the cause."""
         ns = _ns()
         out = ns["preprocess_CFD_score"](_row(REF_OK[:8]))
         self.assertEqual(out[-3], "0.000")
