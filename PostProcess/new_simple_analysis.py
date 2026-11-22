@@ -1359,7 +1359,10 @@ def _snp_slot_verdict(sample, slot, vset, lo, hi, touching, readings=None):
     carrier stays, PUTATIVE. An indel at the position of a SNP the row names is another
     allele of that base (a haplotype holding both is one VCF record), so a slot phased
     with both is a phasing artefact: it takes no carrier off the row, as for an indel
-    row's own position (2.8.1).
+    row's own position (2.8.1). An MNV there is not: it replaces that base and as many
+    after it, so a slot holding both is read base by base, the row's SNP against the
+    MNV's own base (2.10.1; indel_snp_cis.allele_breaks_record, which keeps a true
+    third-base conflict an artefact).
 
     ``readings`` (a dict of the target's, or None) keeps each reading of the bases: it
     depends on the haplotype only through the indels each way reads, those it reaches
@@ -1369,7 +1372,7 @@ def _snp_slot_verdict(sample, slot, vset, lo, hi, touching, readings=None):
     row = {lo + pc: alt for pc, alt in vset}
     mine, unknown = [], False
     for rec in touching:
-        if rec[0] - 1 in row:
+        if rec[0] - 1 in row and len(rec[1]) != len(rec[2]):
             continue  # another allele of a row SNP's base: a phasing artefact
         on = _snp_indel_on_slot(sample, slot, rec)
         if on is None:
@@ -1382,8 +1385,8 @@ def _snp_slot_verdict(sample, slot, vset, lo, hi, touching, readings=None):
     held = [list(mine), list(mine)]  # the indels each way reads
     unread = [[], []]                # those it reaches whose slot is unknown
     for rec in _snp_indels.near(first, last):
-        p, r, _a = rec
-        if rec in mine or p - 1 in row:
+        p, r, a = rec
+        if rec in mine or (p - 1 in row and len(r) != len(a)):
             continue
         reach = (p - 2 + len(r) >= lo, p - 1 <= hi)  # from the first base on, up to the last
         if not any(reach):

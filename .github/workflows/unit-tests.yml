@@ -314,6 +314,19 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_indel_haplotype_resolution test_indel_overlaid_rows test_check_alt_pam -v
 
+      - name: "The 2.10.1 overlap rules (an SNV and an MNV on one slot read base by base; an indel at a complex record's POS read with the complex record alone; a complex record inside deleted bases listed nowhere)"
+        # HPRC v2.1's decomposition leaves three shapes that no real haplotype has:
+        # vcfwave cuts each bubble into pieces, HPRC's merge joins pieces of different
+        # bubbles at one POS, and our own `bcftools norm -m -any -f hg38` left-aligns
+        # each indel against hg38 alone, so in a repeat it slides across the
+        # haplotype's other variants. Each reading was measured against HPRC's
+        # pre-vcfwave originals over 921 slots (16 of them confirmed against the
+        # carriers' assemblies), and this suite pins the one chosen for each shape on
+        # the real records, against a mutant of the shipped code: the reading before
+        # the rule, or the reading the measurement turned down.
+        working-directory: PostProcess
+        run: python -m unittest test_mnv_overlap_rules -v
+
       - name: "Indel row coordinates (2.8.1: an RNA-bulge row starts at its first aligned base, the REF text keeps the target's gaps; 2.10.0: a row whose first base is one an insertion adds starts at the insertion's anchor, and a PAM holding inserted bases or a deletion's junction is judged wherever in its repeat the VCF writes the indel; both strands, PAM at either end)"
         # Up to 2.8.0 analisi_indels_NNN.py took CRISPRitz's Cluster_Position for an
         # RNA-bulge row on the + strand with a 3' PAM and on the - strand with a 5' PAM,

@@ -993,7 +993,7 @@ def _holds_its_indel(dna, fake_start, indel_data):
 def _overlaid_positions(path):
     """The 1-based positions the per-haplotype resolution reads from the per-sample
     dictionary: every IUPAC code of this chromosome's overlaid indel targets, the bases
-    each target's own indel keeps past its POS (_ref_snps), and, around a target that
+    each target's own record is read against (_ref_snp_positions), and, around a target that
     holds a second indel of the phased store, the bases _breaking_slots reads a slot's
     sequence over (_frame)."""
     out = set()
@@ -1010,7 +1010,7 @@ def _overlaid_positions(path):
             if not _holds_its_indel(ln[2], int(ln[4]), idata):
                 continue  # dropped by the loop too
             _ipos, _iref, _ialt, _istart = _indel_window(idata)
-            out.update(range(_ipos + 1, _ipos + _isc.kept_bases(_iref, _ialt)))
+            out.update(_ref_snp_positions(_ipos, _iref, _ialt))
             amb = _isc.ambiguous_columns(ln[2])
             if not amb and _indelgt is None:
                 continue
@@ -1271,7 +1271,9 @@ def _breaking_slots(found, offsets, span, ipos, iref, ialt, istart, carriers):
     or two of its variants that overlap (two indels whose REFs share a base, any two at
     one POS among them, even a duplication and the deletion of the same bases; or a SNP
     alt on a base of a second indel's REF: a VCF writes a haplotype holding both as one
-    record, so the slot has no one sequence there, a phasing artefact). A way meets such
+    record, so the slot has no one sequence there, a phasing artefact; on a base of a
+    second MNV's REF only a true third-base conflict does, since 2.10.1, the slot being
+    read base by base: indel_snp_cis.allele_breaks_record). A way meets such
     a variant when it reaches a base of the variant's REF: a base of its stretch on the
     slot, or of the target on the window, whose bases it reads with the slot's own
     alleles. One past both, or before both, changes none of the bases compared and does
@@ -1340,7 +1342,7 @@ def _breaking_slots(found, offsets, span, ipos, iref, ialt, istart, carriers):
             # records of one base (_isc.overlapping_records)
             bad = unread[side] | {
                 (p, r, a) for (p, r, a) in held[side]
-                if any(allele(q) != genomeStr[q]
+                if any(_isc.allele_breaks_record(p, r, a, q, allele(q), genomeStr[q])
                        for q in range(max(p - 1, 0), min(p - 1 + len(r), len(genomeStr))))}
             bad |= _isc.overlapping_records(held[side])
             got = tuple(sorted(held[side] - bad))
@@ -1372,6 +1374,15 @@ def _breaking_slots(found, offsets, span, ipos, iref, ialt, istart, carriers):
     return out
 
 
+def _ref_snp_positions(ipos, iref, ialt):
+    """The 1-based positions _ref_snps reads a SNP record at: the bases of REF the indel
+    keeps past its own POS, or, for a window whose REF and ALT have one length (an MNV,
+    read base by base since 2.10.1), every base of its REF, its POS included."""
+    if len(iref) == len(ialt):
+        return range(ipos, ipos + len(iref))
+    return range(ipos + 1, ipos + _isc.kept_bases(iref, ialt))
+
+
 def _ref_snps(ipos, iref, ialt, first, last):
     """Carriers ({sample: genotype}) of each SNP alt on a base of REF the indel keeps past
     its own POS (a record left unnormalized: TCA>TC) that a target holds, ``first``..
@@ -1384,12 +1395,27 @@ def _ref_snps(ipos, iref, ialt, first, last):
     it takes no carrier off the window. A SNP alt on a base the indel deletes is not in
     the window's sequence, so it changes nothing. As for an overlapping indel, an unphased
     carrier of both is a multi-allelic heterozygote, one allele per haplotype, so only
-    phased and haploid carriers count."""
+    phased and haploid carriers count.
+
+    A window whose REF and ALT have one length (an MNV) is read base by base (2.10.1): the
+    window shows its ALT base at each base of its REF, its own POS included, so a SNP alt
+    on one of them that is not that base takes the carrier off. On a base the MNV keeps
+    (its ALT base is the reference base there) that is any SNP alt, the SNV's base winning
+    over the MNV's copy of the reference base; on one it replaces it is the true
+    third-base conflict alone, an alt naming the MNV's own base agreeing with it. On HPRC
+    v2.1 the first is 20 slots of 6 record pairs (the SNV's base real in all 16 the pre-
+    vcfwave originals decide, 2 of them confirmed against the carriers' assemblies) and
+    the second one slot of one pair, a decomposition artefact. Up to 2.10.0 neither was
+    read: an MNV window kept every carrier, whatever the slot's own alleles."""
+    equal = len(iref) == len(ialt)
     out = []
-    for p in range(ipos + 1, ipos + _isc.kept_bases(iref, ialt)):
-        if not first <= p - ipos <= last:
+    for p in _ref_snp_positions(ipos, iref, ialt):
+        k = p - ipos
+        if not first <= k <= last:
             continue
-        for carriers in (_snp_record(p) or {}).values():
+        for alt, carriers in (_snp_record(p) or {}).items():
+            if equal and alt.upper() == ialt[k].upper():
+                continue  # the slot's own base there is the window's: they agree
             kept = {s: g for s, g in carriers.items() if "/" not in g}
             if kept:
                 out.append(kept)

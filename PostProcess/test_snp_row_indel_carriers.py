@@ -89,6 +89,9 @@ def _write_store(path, indels):
             fh.write("%d_%s_%s\t%s\n" % (p, r, a, ",".join("%s:%s" % kv for kv in gts.items())))
 
 
+COMP = {"A": "T", "C": "G", "G": "C", "T": "A"}
+
+
 def _mnv_inside():
     """An MNV on the target's 10th and 11th bases (every base changed: TG>CA)."""
     p0 = T0 + 9
@@ -100,6 +103,27 @@ def _mnv_first():
     """An MNV on the target's first two bases."""
     ref = GENOME[T0:T0 + 2]
     return (T0 + 1, ref, ref.translate(str.maketrans("ACGT", "TGCA")))
+
+
+def _mnv_at_the_rows_snp():
+    """An MNV at the position of the SNP the row names, which puts the row's own alt
+    there (as 21 of HPRC v2.1's 28 SNV-MNV pairs do) and changes the base after it,
+    inside the target (chr13:29,389,333 ATATGTATG>GTATGTATA beside 29,389,333 A>G)."""
+    p0 = SNP_POS1 - 1
+    return (SNP_POS1, GENOME[p0:p0 + 2], "A" + COMP[GENOME[p0 + 1]])
+
+
+def _mnv_keeping_the_rows_snp():
+    """An MNV that spans the whole target (HPRC v2.1 has MNVs up to 75,266 bp), keeping
+    every base of it -- the one the row's SNP stands on included -- and changing two
+    bases on either side. Read base by base (2.10.1) it changes nothing of the target
+    and the row's SNP is the slot's base there, as the pre-vcfwave originals read the
+    bases an MNV keeps (chr9:67,744,565 TTTC>ATAA beside 67,744,566 T>C)."""
+    p0, p1 = T0 - 2, HI + 3
+    ref = GENOME[p0:p1]
+    alt = "".join(COMP[b] if q < T0 or q > HI else b
+                  for q, b in zip(range(p0, p1), ref))
+    return (p0 + 1, ref, alt)
 
 
 class _Fixture(object):
@@ -530,6 +554,29 @@ class ObservedPath(unittest.TestCase):
                 self.assertEqual((st["targets"], st["listings"], st["gone"]), (1, 2, 0))
                 got, _fx = self._carriers(snps, [], mnvs=mnvs, fast=True)
                 self.assertEqual(got, {"S1", "S2", "S3", "S6"})
+
+    def test_an_mnv_is_read_base_by_base_against_the_rows_snp(self):
+        """2.10.1, rule 2. An MNV at the position of the SNP the row names is not
+        another allele of that base, as an indel there is: it replaces that base and as
+        many after it, so the slot is read base by base. Here it names the row's own alt
+        at that base and changes the next one, inside the target: S1 leaves the row, S2
+        (the MNV on its other slot) stays. Up to 2.10.0 such a record was skipped as a
+        phasing artefact and S1 stayed."""
+        got, _fx = self._carriers({"S1": "1|0", "S2": "1|0"}, [],
+                                  mnvs=[(_mnv_at_the_rows_snp(),
+                                         {"S1": "1|0", "S2": "0|1"})])
+        self.assertEqual(got, {"S2"})
+
+    def test_an_mnv_that_keeps_the_base_the_rows_snp_stands_on(self):
+        """2.10.1, rule 2. On a base an MNV keeps, the SNV's base wins, so an MNV that
+        keeps every base of the target changes none of them and its carrier stays. Up to
+        2.10.0 a SNP alt anywhere on a record's REF left the slot with no one sequence
+        (a VCF would write a haplotype holding both as one record) and the carrier was
+        dropped; that rule still holds for an indel, and for a true third-base
+        conflict."""
+        got, _fx = self._carriers({"S1": "1|0", "S6": "1|0"}, [],
+                                  mnvs=[(_mnv_keeping_the_rows_snp(), {"S1": "1|0"})])
+        self.assertEqual(got, {"S1", "S6"})
 
     def test_an_mnv_past_the_target_or_unphased(self):
         """An MNV past the target changes none of its bases: its carrier (S1) stays; an

@@ -557,12 +557,31 @@ def breakers_of(changing, alleles, lo, hi, seq_at=None, own=()):
     tandem repeat's unit gained or lost) -- but one whose REF holds a SNP's base at another
     position whatever the reference says: a slot holding both holds two records of that
     base, whose bases cannot be read. Without the reference, every other indel that
-    changes the bases."""
+    changes the bases.
+
+    A record whose REF and ALT have one length (an MNV) is read base by base, as the
+    post-analysis reads it (2.10.1: indel_snp_cis.allele_breaks_record): a SNP of the row
+    on a base it keeps wins over the MNV's copy of the reference base, one on a base it
+    replaces agrees with the MNV's base, and only a true third-base conflict -- the
+    reference base, the MNV's and the SNP's all different -- leaves the haplotype with no
+    sequence and takes it off the row. That holds at the MNV's own POS too, which it
+    replaces as it does the bases after it. Up to 2.10.0 a SNP at an MNV's POS took it
+    off the gate's reading and a SNP anywhere else on its REF took the haplotype off."""
     out = []
     for p, r, a, g in changing:
-        if (p, r, a) in own or p in alleles:
+        if (p, r, a) in own:
             continue
-        over = any(p < q <= p + len(r) - 1 for q in alleles)
+        mnv = len(r) == len(a) > 1
+        touched = [q for q in alleles if p <= q <= p + len(r) - 1]
+        if not mnv:
+            if p in alleles:
+                continue  # another allele of that base: a phasing artefact
+            over = any(q > p for q in touched)
+        elif seq_at is None:
+            over = bool(touched)  # not read base by base without the reference
+        else:
+            over = any(isc.allele_breaks_record(p, r, a, q - 1, alleles[q],
+                                                seq_at(q - 1, q)) for q in touched)
         if not over and seq_at is not None and holds_target(seq_at, lo, hi, alleles,
                                                             (p, r, a)):
             continue
@@ -578,7 +597,14 @@ def holds_target(seq_at, lo, hi, alleles, indel):
     (indel_snp_cis.target_pairs). In a tandem repeat a unit gained or lost at the target's
     edge leaves its bases where they were. ``seq_at(a, b)``: the reference bases a..b-1
     (0-based, upper case; shorter at a chromosome's end). The bases the indel's REF and ALT
-    share at the start or at the end stay reference bases."""
+    share at the start or at the end stay reference bases.
+
+    A record whose REF and ALT have one length (an MNV) moves no base: its ALT bases stand
+    at the places of the bases they replace, and on a base it keeps the haplotype's own
+    allele there is its base (2.10.1, the base-by-base reading; indel_snp_cis
+    .local_haplotype reads it so for the post-analysis). Up to 2.10.0 it was read as an
+    indel: its bases stood at no reference position, and its copy of a kept reference base
+    hid the haplotype's allele."""
     p, r, a = indel
     p0 = p - 1
     n = hi - lo + 1
@@ -587,17 +613,24 @@ def holds_target(seq_at, lo, hi, alleles, indel):
     t = isc.shared_tail(r, a)
     gone_from, gone_to = p0 + c, p0 + len(r) - t  # reference bases the indel takes out
     put = a[c:len(a) - t].upper()                  # and the bases it puts in their place
+    mnv = len(r) == len(a) > 1                     # which it replaces one for one
     pad = n + len(r) + len(a)
     first = max(0, min(lo, p0) - pad)
     ref = seq_at(first, max(hi, p0 + len(r)) + 1 + pad)
     hap = []  # (reference position or None, base)
     for q in range(first, first + len(ref)):
-        if q == gone_from:
+        if q == gone_from and not mnv:
             hap.extend((None, b) for b in put)
         if gone_from <= q < gone_to:
+            if not mnv:
+                continue
+            b = put[q - gone_from]
+            # a base it keeps: the haplotype's own allele there
+            hap.append((q, b if b != ref[q - first].upper()
+                        else alleles.get(q + 1, ref[q - first])))
             continue
         hap.append((q, alleles.get(q + 1, ref[q - first])))
-    if gone_from >= first + len(ref):
+    if gone_from >= first + len(ref) and not mnv:
         hap.extend((None, b) for b in put)
     where = {q: i for i, (q, _b) in enumerate(hap) if q is not None}
     bases = "".join(b for _q, b in hap)
