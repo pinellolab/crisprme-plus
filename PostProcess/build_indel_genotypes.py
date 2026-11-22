@@ -387,9 +387,12 @@ def compile_indel_genotypes_safe(vcf_path, out_path, keep_samples=None):
 
 def compile_store_safe(vcf_path, indel_out=None, mnv_out=None, keep_samples=None):
     """Guarded ``compile_store``, as compile_indel_genotypes_safe guards its writer: its
-    (indel records, MNV records), or -1 on any other failure, the temporary files and the
-    markers of the files asked for removed; it raises only a failure that ends the build
-    (``ends_the_build``)."""
+    (indel records, MNV records) tuple, each None for a file not asked for, or None on any
+    other failure, the temporary files and the markers of the files asked for removed; it
+    raises only a failure that ends the build (``ends_the_build``). So a caller tells a
+    chromosome written (a tuple) from one skipped with a WARNING (None) by ``is not None``
+    (build-index-only's STEP 1c). compile_indel_genotypes_safe keeps its own contract (a
+    count, or -1)."""
     try:
         return compile_store(vcf_path, indel_out, mnv_out, keep_samples=keep_samples)
     except Exception as err:  # noqa: BLE001 - store is optional (-> PUTATIVE)
@@ -409,7 +412,7 @@ def compile_store_safe(vcf_path, indel_out=None, mnv_out=None, keep_samples=None
             f"{os.path.basename(vcf_path)} ({err})",
             flush=True,
         )
-        return -1
+        return None
 
 
 def merge_store_carriers(earlier, later):

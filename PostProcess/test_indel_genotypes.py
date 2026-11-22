@@ -525,8 +525,11 @@ def test_a_vcf_with_no_mnv_gets_an_mnv_file_of_no_record():
 
 def test_compile_store_leaves_no_part_of_a_file_on_a_kill():
     """A pass that dies (an OOM kill, an interrupt) leaves neither file nor a temporary
-    one, and no marker; compile_store_safe returns -1 on any other failure, the temporary
-    files and markers gone, and raises a failure that ends the build (a full disk)."""
+    one, and no marker; compile_store_safe returns None on any other failure (a tuple for a
+    chromosome written, so build-index-only's STEP 1c counts the written ones by `is not
+    None`; it returned -1, which STEP 1c's `>= 0` could not compare with a tuple), the
+    temporary files and markers gone, and raises a failure that ends the build (a full
+    disk). compile_indel_genotypes_safe keeps its contract: a count, or -1."""
     import errno
     vcf = _vcf_file(_VCF_MNV)
     d = tempfile.mkdtemp()
@@ -552,7 +555,9 @@ def test_compile_store_leaves_no_part_of_a_file_on_a_kill():
         except RuntimeError:
             pass
         assert sorted(os.listdir(d)) == []
-        assert big.compile_store_safe(vcf, indel_out, mnv_out) == -1
+        assert big.compile_store_safe(vcf, indel_out, mnv_out) is None
+        assert sorted(os.listdir(d)) == []
+        assert big.compile_indel_genotypes_safe(vcf, indel_out) == -1
         assert sorted(os.listdir(d)) == []
         big.iter_store_genotypes = full
         try:
