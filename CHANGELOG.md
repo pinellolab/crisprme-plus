@@ -108,6 +108,42 @@ and the `release-crisprme` skill.
   text no build reads. And a comment of `PostProcess/crisprme_hf.py` said that the data repo's
   `pams/` held the NGG, NNN and NRG files only, as it did until 2.10.0's release uploaded the
   index set's 9 PAM files (12 in all).
+- **The real-data checker reads a slot's haplotype past a long deletion that ends near the end
+  of what it writes** (`scripts/check_indel_rows.py`). Since 2.10.0 it writes a haplotype past a
+  deletion whose REF runs past the window it writes (the target and 2 x its length + 60 bases
+  either side) or past the stretch a soundness unit reads (1,046 bases either side of its rows),
+  but it did not follow one that ends inside either, within a target's length of its end: a
+  target read through that deletion's junction ran out of bases there, and the slot was found
+  without the target. The SBDSP1 search's check of 2.10.0 (the README guide, NRR, 6 mismatches +
+  1 DNA + 1 RNA bulge, cap 8, per sample, HGDP + 1000 Genomes) failed so, with 5 gating
+  `variant-missing` findings, every one on an alternative alignment of 23 bases: HG01790 at
+  chr3:22,226,250 (+) and HG02728 at chr6:169,126,041 (+). Beside the row's deletion each slot
+  holds a second one, left-aligned (chr3:22,226,279, 107 bases; chr6:169,126,096, 108), that
+  takes the target's last 2 and 4 bases and ends at the window's end or one base inside it, and
+  the bases after its junction are those same bases (it could be written 2 and 4 bases further
+  right, clear of the target): rebuilt from the VCF, each haplotype holds its row's 23 bases at
+  the row's place, and METHODS section 4 lists such a carrier (a second indel inside the target
+  whose bases come back keeps the row). The search lists both, as it should: the frame it reads
+  a slot over reaches past the deletion. The integrated row at chr3, one base shorter, lists
+  HG01790 too and passed: its window reached past the junction. The window and the stretch now
+  also reach past a deletion that ends within a target's length of their end, and before one
+  that begins so near their start; only a deletion of more than 60 bases (about 1 kb for the
+  stretch) can meet a target's reading and end so near. A search that left such a carrier off
+  its row is now found to miss it (`carrier-missing`; the check found the slot without the
+  target, and said nothing). On the search's own rows at the two sites (6 integrated and 55
+  alternative-alignment rows, 24 indel row blocks), read as the gate read the run, the check of
+  2.10.0 gives those 5 gating findings and this one none, in soundness and in both modes; each
+  gives the same one non-gating line besides (`limit-two-indels`, completeness, HG02728 at
+  chr6:169,126,042 (+)). Genome-wide on that run, in soundness as its validation ran 2.10.0's
+  check, this one exits 0: no gating finding, and its 128,670 other findings are 2.10.0's line
+  for line (119,217 `overlap-reading-agrees`, 9,309 `limit-overlapping-records`, 126
+  `limit-two-indels`, 18 `limit-putative-carrier`). Covered by `test_check_indel_rows`
+  (`AJunctionNearTheEdge`: both shapes, every end near the window's, the stretch's end, the
+  mirrors, and a carrier left off, for every number of the target's bases a second deletion can
+  take, up to 21 of a target of 23 and 22 of one of 24, so a margin of fewer bases than such a
+  reading needs fails; each test but its controls fails on the code before) and
+  `test_indel_haplotype_resolution` (the search keeps both carriers on hg38's bases, and takes
+  each off with another base past the junction).
 
 ## [2.10.0] - 2026-11-19
 

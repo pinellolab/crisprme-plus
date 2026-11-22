@@ -7206,6 +7206,290 @@ class ReadPastALongDeletion(Base):
         self.assertEqual({f[3] for f in bad}, {"S06"}, found)
 
 
+# the checks' window around a row's target of 23 bases (Target): ``2 * 23 + 60`` bases past
+# the last base the target or its record covers; and the stretch a soundness unit reads
+# around the row (run_unit, row_span): ``2 * (20 + 3) + 1000`` bases past the row's start
+# plus its target's length, and as many before its start
+WINDOW_ROOM = 2 * 23 + 60
+UNIT_PAD = 2 * (len(GUIDE) + 3) + 1000
+
+
+def world_junction_near_the_end(tmp, k, end, put_back=True, row_samples="S01,S02", cut=9,
+                                dna_bulge=False):
+    """The two rows the SBDSP1 search's real-data check of 2.10.0 gated (README guide, NRR,
+    6 mismatches + 1 DNA + 1 RNA bulge, cap 8, per sample, HGDP + 1000 Genomes), in small:
+    alternative alignments of 23 bases at chr3:22,226,250 (+) and chr6:169,126,041 (+).
+    A deletion makes a perfect target of S01 and S02 (world_deletion): the C after the
+    target's base ``cut`` (0-based; GUIDE[9] as world_deletion has it). S01's slot also holds
+    a second deletion, left-aligned, anchored on the target's base ``n - 1 - k`` (``n`` the
+    target's length), that takes the target's last ``k`` bases and the reference bases after
+    them up to ``end`` (0-based, exclusive); the ``k`` bases after its junction are those it
+    took (``put_back``; else the first of them differs), so the slot holds the target, read
+    from its first base on (METHODS section 4: a second indel inside the target whose bases
+    come back keeps the carrier; the deletion could be written ``k`` bases further right,
+    clear of the target). HG01790's deletion (chr3:22,226,279, 107 bases) takes 2 and ends
+    where the checks' window ended; HG02728's (chr6:169,126,096, 108 bases) takes 4 and ends
+    one base inside it. The second deletion begins past the first's REF for ``k`` up to
+    ``n - 2 - cut``: with the first on the target's first base (``cut`` 0), up to 21 of a
+    target of 23 (anchored on the first base it would delete the first one's bases, an
+    overlapping record), and 22 of one of 24, ``dna_bulge``'s (a C after GUIDE[9] that the
+    guide does not have, one DNA bulge). Returns (the Case, the target's start)."""
+    import random
+    target = GUIDE[:10] + ("C" if dna_bulge else "") + GUIDE[10:] + "TGG"
+    n = len(target)
+    assert 1 <= k <= n - 2 - cut
+    start = len(PRE)
+    anchor0 = start + n - k  # the target's base n - 1 - k, one past the first deletion's C
+    taken = target[n - k:]
+    tail = POST + LONG + LONG
+    rnd = random.Random(310 + k)
+    fill = [rnd.choice("ACGT") for _ in range(end - start - n - 1)]
+    if fill[0] == tail[0]:  # the bases come back k of them, no more
+        fill[0] = other(tail[0])
+    if fill[-1] == target[n - 1 - k]:  # left-aligned: it cannot be written further left
+        fill[-1] = other(target[n - 1 - k])
+    after = taken if put_back else other(taken[0]) + taken[1:]
+    seq = (PRE + target[:cut + 1] + "C" + target[cut + 1:] + "".join(fill) + after + tail)
+    assert seq[anchor0 + 1:anchor0 + 1 + k] == taken and seq[end:end + k] == after
+    d1 = (start + cut + 1, target[cut] + "C", target[cut], {"S01": "1|0", "S02": "0|1"})
+    d2 = (anchor0 + 1, seq[anchor0:end], seq[anchor0], {"S01": "1|0"})
+    crrna = GUIDE[:10] + ("-" if dna_bulge else "") + GUIDE[10:] + "NNN"
+    rows = [row_fields("chr21", start, "+", crrna, seq[start:start + n], target, "TGG", 0,
+                       1 if dna_bulge else 0, "DNA" if dna_bulge else "X",
+                       tok("chr21", d1), row_samples)]
+    return Case(tmp, seq, [d1, d2], rows), start
+
+
+def world_junction_near_the_start(tmp, k, back, row_samples="S01,S02", cut=9,
+                                  dna_bulge=False):
+    """world_junction_near_the_end mirrored: S01's second deletion, written as far right as
+    it goes (a record left unnormalized), is anchored ``back`` bases before the target and
+    takes the reference bases after its anchor up to and including the target's first ``k``,
+    and the ``k`` bases its anchor ends are those (it could be written ``k`` bases further
+    left, clear of the target): the slot holds the target up to its last base, not from its
+    first, which it deletes, so a listing of S01 is the documented limit of two indels on
+    one haplotype (limit-two-indels, METHODS section 8). The row's own deletion is the C
+    after the target's base ``cut``; the second deletion ends before its REF for ``k`` up to
+    ``cut``: with the first on the target's base n - 2 (the PAM's R), up to 21 of a target of
+    23, and 22 of one of 24 (``dna_bulge``, as world_junction_near_the_end's). Returns the
+    Case."""
+    import random
+    assert 1 <= k <= cut and back >= 2
+    target = GUIDE[:10] + ("C" if dna_bulge else "") + GUIDE[10:] + "TGG"
+    n = len(target)
+    rnd = random.Random(410 + k)
+    pre = [rnd.choice("ACGT") for _ in range(150)]
+    mid = [rnd.choice("ACGT") for _ in range(back - 1)]
+    if pre[-1] == mid[-1]:  # it can be written k bases further left, no more
+        pre[-1] = other(mid[-1])
+    if mid[0] == target[k]:  # written as far right as it goes
+        mid[0] = other(target[k])
+    seq = ("".join(pre) + target[:k] + "".join(mid) + target[:cut + 1] + "C"
+           + target[cut + 1:] + POST + LONG)
+    anchor0 = len(pre) + k - 1
+    start = anchor0 + back
+    assert seq[start:start + cut + 1] == target[:cut + 1]
+    assert seq[anchor0 - k + 1:anchor0 + 1] == target[:k]
+    d1 = (start + cut + 1, target[cut] + "C", target[cut], {"S01": "1|0", "S02": "0|1"})
+    d2 = (anchor0 + 1, seq[anchor0:start + k], seq[anchor0], {"S01": "1|0"})
+    crrna = GUIDE[:10] + ("-" if dna_bulge else "") + GUIDE[10:] + "NNN"
+    rows = [row_fields("chr21", start, "+", crrna, seq[start:start + n], target, "TGG", 0,
+                       1 if dna_bulge else 0, "DNA" if dna_bulge else "X",
+                       tok("chr21", d1), row_samples)]
+    return Case(tmp, seq, [d1, d2], rows)
+
+
+class AJunctionNearTheEdge(Base):
+    """A slot's haplotype goes on after the junction of a deletion that ends within a
+    target's length of the end of the window the checks write it over, or of the stretch a
+    soundness unit reads, as after one that runs past it (ReadPastALongDeletion): the
+    window and the stretch reach that far past such a deletion's end (Window.past_long_refs,
+    read_past), and, mirrored, before a deletion that begins so near their start. Up to
+    2.10.0 they followed only a deletion that runs past an end, so the haplotype stopped
+    short of the bases after the junction, and the SBDSP1 search's real-data check gated
+    two listed carriers whose slots hold their rows' targets (5 variant-missing findings,
+    HG01790 and HG02728, every one on an alternative alignment); the search lists them by
+    METHODS section 4, whose frame reaches past the deletion (analisi_indels_NNN._frame).
+    Each test but the controls fails up to 2.10.0: the carriers listed are found
+    variant-missing, and the one left off is not found missing. The margin each end is
+    followed by is pinned at the most a reading can need: every number of bases a target
+    of 23 lets a second deletion take (1 to 21), 22 of a target of 24 (one DNA bulge), the
+    mirrors at every offset from the start to a target's length inside it, and the
+    stretch's ends 1 to 25 inside it; a margin of fewer bases than such a reading needs
+    (22 past a deletion's end and 21 before its anchor, for a target of 24) fails them."""
+
+    def _end(self, start):
+        """The end of the checks' window around world_junction_near_the_end's target: its
+        last base is start + 23 (the first deletion's C is inside it)."""
+        return start + 23 + WINDOW_ROOM
+
+    def test_hg01790s_shape_the_deletion_ends_at_the_windows_end(self):
+        case, start = world_junction_near_the_end(self.tmp, 2, self._end(len(PRE)))
+        rc, found = case.run()
+        self.assertEqual((rc, found), (0, []), found)
+
+    def test_hg02728s_shape_one_base_inside_it(self):
+        case, start = world_junction_near_the_end(self.tmp, 4, self._end(len(PRE)) - 1)
+        rc, found = case.run()
+        self.assertEqual((rc, found), (0, []), found)
+
+    def test_every_end_near_the_windows_end(self):
+        """Every end from a target's length inside the window to past it: the window reaches
+        a target's length past each (up to 2.10.0 an end k - 1 to 0 bases inside it, and at
+        it, failed)."""
+        edge = self._end(len(PRE))
+        for k in (2, 4):
+            for end in range(edge - 25, edge + 3):
+                with self.subTest(k=k, end=end):
+                    case, _start = world_junction_near_the_end(self.tmp, k, end)
+                    rc, found = case.run()
+                    self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_a_deletion_whose_bases_do_not_come_back_is_still_caught(self):
+        """The control: past HG01790's deletion the first base is another, so the slot
+        lacks the target, and listing S01 fails, as it did up to 2.10.0."""
+        case, _start = world_junction_near_the_end(self.tmp, 2, self._end(len(PRE)),
+                                                   put_back=False)
+        rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)}, {("variant-missing", "S01")},
+                         found)
+
+    def test_the_carrier_left_off_is_found_missing(self):
+        """A search that took S01 off the row, as a first reading of those findings would
+        have had it, has lost a carrier whose slot holds the target: carrier-missing. Up to
+        2.10.0 the check found the slot without the target and said nothing."""
+        case, _start = world_junction_near_the_end(self.tmp, 2, self._end(len(PRE)),
+                                                   row_samples="S02")
+        rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)}, {("carrier-missing", "S01")},
+                         found)
+
+    def test_the_stretch_a_unit_reads_goes_past_such_a_deletion_too(self):
+        """HG01790's shape with a deletion of 1,045 bases that ends where the stretch the
+        unit reads around the row ends (row_span: the row's start, plus its target's 23
+        bases and UNIT_PAD): the window reaches past it, but no further than that stretch
+        (read_around), which read_past now widens."""
+        start = len(PRE)
+        case, _start = world_junction_near_the_end(self.tmp, 2, start + 23 + UNIT_PAD)
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_the_mirror_before_the_windows_start(self):
+        """The deletion begins at the window's start (WINDOW_ROOM before the target)."""
+        case = world_junction_near_the_start(self.tmp, 2, WINDOW_ROOM)
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertEqual({(f[1], f[3]) for f in found}, {("limit-two-indels", "S01")}, found)
+
+    def test_the_mirror_before_the_stretchs_start(self):
+        """The deletion begins where the stretch the unit reads begins (UNIT_PAD before the
+        row's start)."""
+        case = world_junction_near_the_start(self.tmp, 2, UNIT_PAD)
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertEqual({(f[1], f[3]) for f in found}, {("limit-two-indels", "S01")}, found)
+
+    # The margins are a target's length, not a few bases: the tests below take the most a
+    # reading through a junction can need, so a margin of fewer bases fails them (the
+    # tests above, of 2 and 4 bases taken, pass with a margin of 4 or 5).
+
+    def test_every_k_a_target_of_23_allows_near_the_windows_end(self):
+        """1 to 21 bases taken (the row's own deletion on the target's first base, cut 0: a
+        second deletion anchored on that base would delete the row's own bases, an
+        overlapping record, so 21 of 23 is the most), and every end from k + 1 bases inside
+        the window's end to one past it: the window reaches past each that ends within k of
+        it. Up to 2.10.0 the ends k - 1 to 0 bases inside it are found variant-missing, and
+        with a margin of m bases (m < k) those k - 1 to m inside."""
+        edge = self._end(len(PRE))
+        for k in range(1, 22):
+            for end in range(edge - k - 1, edge + 2):
+                with self.subTest(k=k, end=end - edge):
+                    case, _start = world_junction_near_the_end(self.tmp, k, end, cut=0)
+                    rc, found = case.run()
+                    self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_22_of_a_target_of_24_near_the_windows_end(self):
+        """The margin is the target's own length: a target of 24 bases (one DNA bulge)
+        allows 22 taken, and every end from 25 bases inside the end of its window (2 x 24
+        + 60 bases past it) to one past it is followed. A margin of 21 bases, enough for a
+        target of 23, fails 21 bases inside."""
+        n = 24
+        edge = len(PRE) + n + 2 * n + 60
+        for end in range(edge - n - 1, edge + 2):
+            with self.subTest(end=end - edge):
+                case, _start = world_junction_near_the_end(self.tmp, 22, end, cut=0,
+                                                           dna_bulge=True)
+                rc, found = case.run()
+                self.assertEqual((rc, found), (0, []), found)
+
+    def test_21_taken_is_still_caught_and_found_missing(self):
+        """The controls at 21 bases taken, 10 inside the window's end: past the junction the
+        first base is another, so the slot lacks the target and listing S01 fails (as up to
+        2.10.0); and a search that left S01 off, whose slot holds it, has lost a carrier
+        (up to 2.10.0 the check said nothing)."""
+        end = self._end(len(PRE)) - 10
+        case, _start = world_junction_near_the_end(self.tmp, 21, end, put_back=False, cut=0)
+        rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)}, {("variant-missing", "S01")},
+                         found)
+        case, _start = world_junction_near_the_end(self.tmp, 21, end, row_samples="S02",
+                                                   cut=0)
+        rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)}, {("carrier-missing", "S01")},
+                         found)
+
+    def test_the_mirror_at_every_offset_from_the_windows_start(self):
+        """The mirror with n - 2 bases taken (the row's own deletion on the target's base
+        n - 2, the PAM's R): 21 of a target of 23, 22 of one of 24 (one DNA bulge). The
+        deletion begins at the window's start (2 x n + 60 bases before the target) or 1 to
+        n - 1 bases inside it, and a reading through it needs the n - 3 bases before its
+        anchor, so the window reaches before each. Up to 2.10.0, and with a margin of m
+        bases for m < n - 3, the offsets m to n - 4 are found variant-missing."""
+        for n, bulge in ((23, False), (24, True)):
+            for j in range(0, n):
+                with self.subTest(n=n, offset=j):
+                    case = world_junction_near_the_start(self.tmp, n - 2, 2 * n + 60 - j,
+                                                         cut=n - 2, dna_bulge=bulge)
+                    rc, found = case.run()
+                    self.assertEqual((rc, gating(found)), (0, []), found)
+                    self.assertEqual({(f[1], f[3]) for f in found},
+                                     {("limit-two-indels", "S01")}, found)
+
+    def test_every_end_1_to_25_bases_inside_the_stretchs_end(self):
+        """n - 2 bases taken (21 of a target of 23, 22 of one of 24) by a deletion that ends 1
+        to 25 bases inside the stretch the unit reads (read_past's reach here is 26: the
+        guide and PAM's 23 bases, a bulge and 2): the stretch reaches past each, and the
+        window with it. Up to 2.10.0, and with a margin of m bases for m < n - 2, the ends
+        m to n - 3 bases inside are found variant-missing."""
+        for n, bulge in ((23, False), (24, True)):
+            b = len(PRE) + n + UNIT_PAD
+            for j in range(1, 26):
+                with self.subTest(n=n, inside=j):
+                    case, _start = world_junction_near_the_end(self.tmp, n - 2, b - j, cut=0,
+                                                               dna_bulge=bulge)
+                    rc, found = case.run()
+                    self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_the_mirror_at_every_offset_from_the_stretchs_start(self):
+        """The mirror with n - 2 bases taken, the deletion beginning at the stretch's start
+        or 1 to 25 bases inside it: the stretch reaches before each. Up to 2.10.0, and with
+        a margin of m bases for m < n - 3, the offsets m to n - 4 are found
+        variant-missing."""
+        for n, bulge in ((23, False), (24, True)):
+            for j in range(0, 26):
+                with self.subTest(n=n, offset=j):
+                    case = world_junction_near_the_start(self.tmp, n - 2, UNIT_PAD - j,
+                                                         cut=n - 2, dna_bulge=bulge)
+                    rc, found = case.run()
+                    self.assertEqual((rc, gating(found)), (0, []), found)
+                    self.assertEqual({(f[1], f[3]) for f in found},
+                                     {("limit-two-indels", "S01")}, found)
+
+
 def world_last_base_deleted(tmp, row_samples):
     """The gate's B10 (VEGFA site 3, per sample): chr1:21,194,250 (+), the fewest-edits
     block of an alternative alignment, hg38's bases 21,194,150..21,194,349 (0-based) as a
