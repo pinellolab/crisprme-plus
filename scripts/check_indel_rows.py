@@ -1702,25 +1702,35 @@ class Window(object):
         return q, q + 1
 
     def past_long_refs(self, lo, hi, room, first, last, n, at):
-        """[lo, hi) widened past every line whose REF runs past an end and that a reading of
-        a target of ``n`` bases over [first, last] can meet: on the right, one that begins
-        at most ``n`` bases past the target (or past such a line's end, which a reading
-        through it reads on from), on the left the same, mirrored; ``room`` bases past each,
-        within what the window read around ``at`` (read_around) and the contig. A haplotype
-        written over [lo, hi) (make_hap) stops at the junction of a deletion (or of any
-        edit) that runs past an end, so what a target reads through it would lack the bases
-        after the junction. Lines no reading meets are not followed (in a dense locus a
-        deletion begins at nearly every base)."""
+        """[lo, hi) widened past every line whose REF runs past an end, or ends fewer than
+        ``n`` bases inside it, and that a reading of a target of ``n`` bases over [first,
+        last] can meet: on the right, one that begins at most ``n`` bases past the target
+        (or past such a line's end, which a reading through it reads on from), on the left
+        the same, mirrored; ``room`` bases past each, within what the window read around
+        ``at`` (read_around) and the contig. A haplotype written over [lo, hi) (make_hap)
+        stops at hi, so what a target reads through the junction of a deletion (or of any
+        edit) that runs past an end, or ends within ``n`` bases of it, would lack the bases
+        after the junction: up to 2.10.0 only a line past an end was followed, and the
+        SBDSP1 search's real-data check (per sample, HGDP + 1000 Genomes) gated two listed
+        carriers whose slot holds the target, HG01790 on chr3:22,226,250 (+) and HG02728
+        on chr6:169,126,041 (+), alternative alignments of 23 bases: beside the row's
+        deletion each slot holds a second one (22,226,279's of 107 bases, 169,126,096's of
+        108) that takes the target's last 2 and 4 bases and ends at hi or one base inside
+        it, and the bases after its junction are those same bases (the deletion could be
+        written 2 and 4 bases further right). Lines no reading meets are not followed (in a
+        dense locus a deletion begins at nearly every base), and only a line of more than
+        ``room - 2 * n`` bases, a long deletion, can meet a reading and end so near an
+        end."""
         top, bottom = self.read_around(at)
         top, bottom = max(0, top), min(len(self.refseq), bottom)
         near_lo, near_hi = first - n, last + n
         while True:
             wlo, whi, wnlo, wnhi = lo, hi, near_lo, near_hi
             for k in self.lines_in(lo, hi):
-                if self.line_lo[k] < lo and self.line_hi[k] > near_lo:
+                if self.line_lo[k] - n < lo and self.line_hi[k] > near_lo:
                     wlo = min(wlo, self.line_lo[k] - room)
                     wnlo = min(wnlo, self.line_lo[k] - n)
-                if self.line_hi[k] > hi and self.line_lo[k] <= near_hi:
+                if self.line_hi[k] + n > hi and self.line_lo[k] <= near_hi:
                     whi = max(whi, self.line_hi[k] + room)
                     wnhi = max(wnhi, self.line_hi[k] + n)
             wlo, whi = max(wlo, min(top, lo)), min(whi, max(bottom, hi))
@@ -7484,18 +7494,21 @@ READ_PAST_ROUNDS = 8  # how many times a soundness unit's stretches are read pas
 
 def read_past(win, needed, reach, pad, n):
     """The stretches ``needed`` (sorted, apart) widened, ``pad`` bases past every line of
-    ``win`` whose REF runs past an end of one and that a reading of its rows' targets can
-    meet: one that begins at or before the end of the stretch's ``reach`` (or ends past its
-    start), which a reading through it reads ``n`` bases on from (Window.past_long_refs).
-    Returns the stretches and their reaches, sorted and merged."""
+    ``win`` whose REF runs past an end of one, or ends fewer than ``n`` bases inside it, and
+    that a reading of its rows' targets can meet: one that begins at or before the end of
+    the stretch's ``reach`` (or ends past its start), which a reading through it reads ``n``
+    bases on from (Window.past_long_refs: a Target's window reaches no further than the
+    stretch read around it, so a line that ends within ``n`` bases of the stretch's end
+    would leave a reading through its junction without the bases after it, as a window's
+    end did up to 2.10.0). Returns the stretches and their reaches, sorted and merged."""
     wide = []
     for (a, b), (ra, rb) in zip(needed, reach):
         wa, wb, wra, wrb = a, b, ra, rb
         for k in win.lines_in(a, b):
-            if win.line_lo[k] < a and win.line_hi[k] > ra:
+            if win.line_lo[k] - n < a and win.line_hi[k] > ra:
                 wa = min(wa, max(0, win.line_lo[k] - pad))
                 wra = min(wra, win.line_lo[k] - n)
-            if win.line_hi[k] > b and win.line_lo[k] <= rb:
+            if win.line_hi[k] + n > b and win.line_lo[k] <= rb:
                 wb = max(wb, min(len(win.refseq), win.line_hi[k] + pad))
                 wrb = max(wrb, win.line_hi[k] + n)
         wide.append((wa, wb, wra, wrb))

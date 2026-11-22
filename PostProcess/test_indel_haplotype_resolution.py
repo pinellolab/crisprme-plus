@@ -1314,6 +1314,76 @@ class AVariantPastTheStretch(unittest.TestCase):
                                     window[0] - 1 - 30, isc.IndelCarriers({sample: gt}))
         self.assertEqual({k: g for k, g, _o in out}, {second: {}})
 
+    # The SBDSP1 search of 2.10.0 (README guide, NRR, 6 mismatches + 1 DNA + 1 RNA bulge, cap
+    # 8, per sample, HGDP + 1000 Genomes), hg38 bases: two alternative alignments of 23 bases
+    # whose carrier's slot holds, beside the row's deletion, a long second deletion,
+    # left-aligned, that takes the target's last bases; past its junction the same bases
+    # follow (it could be written that many bases further right, clear of the target).
+    # chr3:22,226,100-22,226,429 and chr6:169,125,870-169,126,269 (0-based, end exclusive).
+    C3 = ("CTCTCCCAAAGTAAATGGAACTAAACAAAAAAAAAAAGTTAGCTAAGTACTGTTCATTTTATATCAATGTTTCCATTTCC"
+          "AAGTTTGATCCTATATAAAAAATATCCTCAATTCCTTTTTTAAGAGTATTCACTTTTACCACAGCTGGACACAAGAATTA"
+          "TAAGCAAGTTCTCAACAGAGATAAACGCACTTGGATGCATGGGGCCTCAGCACGACAGACCAGTGGAATCTTAGAGTCAT"
+          "AAACAGACAATGGGAAGGACTGCCATTTCAGAAAGCTACCCAGCACGAGCAGAGAGAGCTCAGCAGAAAACAGACAAAGA"
+          "TTCCCTGATC")
+    C6 = ("GAAAATGGACCAAAACACCCTCCCTCGAGCAGTTGAGAACTGCAGGATAAGTGAGGCACTTCAACCTCAAGGCTCATGCA"
+          "GCCTAAGTGAGGCAATTCAACCTCAAGGCCCATGCAGGCTAAGTGAGGCACCTCAATCTCAAGGCCCATGCAGGCTAAGT"
+          "GAGGCACCTCAATCTCAAGGCTTATGCAGGCTAAGTGAGGCACCTCAATCTCGAGGCTCATGCAGGCTAACTGAGGCACC"
+          "TCAATCTCAAGGCCCATGCAGCCTAAGTGAGGAACCTCAGCCTCAAGGCTCATGCAGGCTAAGTGAGGCACCTCAACCTC"
+          "TAGGCCCATGCAGCCTAAGTGAGGCACCTCAATCTCAAGGCCCATGCAGGCTAAGTGAGGCACCTCAATCTCGAGGCTCA")
+    LONG_END = {
+        # HG01790 on chr3:22,226,250 (+): 22,226,268 GTTCTCAAC>G makes the target
+        # ACaagAAT-TaTAAGCAAGagAGA (a DNA and an RNA bulge); 22,226,279's deletion of 107
+        # bases takes its last two, GA, and GA follows the junction
+        "chr3": dict(seq=C3, at=22226100, sample="HG01790", gt="0|1",
+                     window=(22226268, "GTTCTCAAC", "G"),
+                     second=(22226279, C3[22226278 - 22226100:22226386 - 22226100], "A"),
+                     offsets=(13, 35), span=(22226250, 22226280), after=22226386, snps={}),
+        # HG02728 on chr6:169,126,041 (+): 169,126,047's deletion of 36 bases makes the target
+        # ATCTcAAggCT-cAtGCAGGCTAA; 169,126,096's deletion of 108 bases takes its last four,
+        # CTAA, and CTAA follows the junction. The SNPs it holds inside that deletion are on
+        # its other slot (1|0).
+        "chr6": dict(seq=C6, at=169125870, sample="HG02728", gt="0|1",
+                     window=(169126047, C6[169126046 - 169125870:169126083 - 169125870], "A"),
+                     second=(169126096, C6[169126095 - 169125870:169126204 - 169125870], "G"),
+                     offsets=(25, 47), span=(169126041, 169126099), after=169126204,
+                     snps={169126107: {"A": {"HG02728": "1|0"}},
+                           169126114: {"G": {"HG02728": "1|0"}}}),
+    }
+
+    def _long_end_kept(self, site, mutate=False):
+        """Whether _breaking_slots keeps the slot of LONG_END[site]'s carrier on the row's
+        target (``mutate``: with another base right past the second deletion's junction)."""
+        d = self.LONG_END[site]
+        seq, at, sample, gt = d["seq"], d["at"], d["sample"], d["gt"]
+        window, second = d["window"], d["second"]
+        self.assertEqual(len(window[1]) - len(window[2]), 8 if site == "chr3" else 36)
+        self.assertEqual(len(second[1]) - len(second[2]), 107 if site == "chr3" else 108)
+        if mutate:
+            i = d["after"] - at
+            seq = seq[:i] + ("C" if seq[i] != "C" else "G") + seq[i + 1:]
+        for p, r, _a in (window, second):
+            self.assertEqual(seq[p - 1 - at:p - 1 - at + len(r)], r)
+        ns = self._analyzer({window: {sample: gt}, second: {sample: gt}}, d["snps"],
+                            seq=seq, at=at)
+        found = ns["_other_indels"](d["span"][0], d["span"][1], *window)
+        self.assertEqual([k for k, _g, _o in found], [second])
+        out = ns["_breaking_slots"](found, d["offsets"], d["span"], window[0], window[1],
+                                    window[2], window[0] - 1 - 30, isc.IndelCarriers({sample: gt}))
+        return {k: g for k, g, _o in out}[second] == {}
+
+    def test_a_long_second_deletion_whose_junction_puts_the_last_bases_back(self):
+        """Both carriers stay listed: read from the target's first base on, the slot holds
+        its bases, through the window's deletion (METHODS section 4), and the frame the slot
+        is written over (_frame) reaches past the second deletion's junction. The real-data
+        check of 2.10.0 gated both listings (variant-missing): its window stopped at that
+        junction (scripts/check_indel_rows.py, Window.past_long_refs)."""
+        self.assertTrue(self._long_end_kept("chr3"))
+        self.assertTrue(self._long_end_kept("chr6"))
+
+    def test_another_base_past_that_junction_takes_the_carrier_off(self):
+        self.assertFalse(self._long_end_kept("chr3", mutate=True))
+        self.assertFalse(self._long_end_kept("chr6", mutate=True))
+
     def test_overlapping_records(self):
         self.assertEqual(isc.overlapping_records(self.PAIR), set(self.PAIR))
         self.assertEqual(isc.overlapping_records([self.PAIR[0], self.SECOND]), set())
