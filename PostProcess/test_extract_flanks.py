@@ -1127,7 +1127,43 @@ class RunRecords(Case):
         self.assertEqual(len(entries(table, row_id=2)), 1)
 
 
+def _biopython_is_installed():
+    try:
+        import Bio.Seq  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 class Cli(Case):
+    """The command line, run as a user runs it.
+
+    ``crisprme.py`` imports Biopython at module load (``from Bio.Seq import Seq``) and
+    the unit-tests job installs the light deps only -- not Biopython, which is why the
+    other suites exec crisprme.py's definitions with Bio stubbed rather than import it
+    (``test_bulge_cap._load_crisprme``, ``test_annotation_tmpdirs._load_crisprme``).
+    These tests must run the REAL process, so where Biopython is absent they put that
+    same stub (``Seq = object``) on the subprocess's path instead of skipping: the CLI
+    wiring of a new subcommand is exactly what CI has to hold. ``extract-flanks``
+    reaches ``Seq`` nowhere -- only ``complete-search``'s guide extraction does -- and
+    where Biopython IS installed the real module is imported and nothing is stubbed.
+    """
+
+    def setUp(self):
+        super().setUp()
+        if _biopython_is_installed():
+            return
+        stub = os.path.join(self.dir, "_bio_stub")
+        os.makedirs(os.path.join(stub, "Bio"))
+        open(os.path.join(stub, "Bio", "__init__.py"), "w").close()
+        with open(os.path.join(stub, "Bio", "Seq.py"), "w") as fh:
+            fh.write("class Seq(object):\n    pass\n")
+        path = os.pathsep.join([stub] + ([os.environ["PYTHONPATH"]]
+                                         if os.environ.get("PYTHONPATH") else []))
+        patch = mock.patch.dict(os.environ, {"PYTHONPATH": path})
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def test_the_module_runs_standalone_and_prints_its_help(self):
         script = os.path.join(HERE, "extract_flanks.py")
         p = subprocess.run([sys.executable, script], capture_output=True, text=True)
