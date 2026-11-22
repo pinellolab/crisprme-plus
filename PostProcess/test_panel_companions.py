@@ -881,19 +881,24 @@ class TheMnvDownloadStep(_Base):
 
     def test_an_mnv_file_that_cannot_be_read_is_fetched_whole_again(self):
         """A store whose MNV file is corrupt (its .done marker left as it was) is not taken
-        for one that has its MNVs: the step installs the repo's whole again."""
+        for one that has its MNVs: the step installs the repo's whole again. So too one of 0
+        bytes, and a whole gzip file of no line where its marker, as new as the file, counts
+        one record (build_indel_genotypes.read_mnv_lines): at 6b5ab4d3 the step took the
+        latter for whole, and fetched nothing."""
         self.republish()
         self.step()
         mnv = os.path.join(self.store, "gt_mnv_chr22.tsv.gz")
         with open(mnv, "rb") as fh:
             whole = fh.read()
-        with open(mnv, "wb") as fh:
-            fh.write(whole[:10])
-        os.utime(mnv, (1, 1))
-        said = self.step()
-        self.assertIn(f"Installed indel_genotypes_{VCF}", said)
-        with open(mnv, "rb") as fh:
-            self.assertEqual(fh.read(), whole)
+        for what, data in (("cut short", whole[:10]), ("0 bytes", b""),
+                           ("not the file its marker counts", gzip.compress(b""))):
+            with open(mnv, "wb") as fh:
+                fh.write(data)
+            os.utime(mnv, (1, 1))
+            said = self.step()
+            self.assertIn(f"Installed indel_genotypes_{VCF}", said, what)
+            with open(mnv, "rb") as fh:
+                self.assertEqual(fh.read(), whole, what)
 
     def test_no_store_or_an_unfinished_one_is_an_error(self):
         os.makedirs(os.path.join(self.store, ".building"))

@@ -391,10 +391,11 @@ class StoreReader(unittest.TestCase):
             self.assertEqual(st.touching(LO, HI), [_mnv_inside()])
 
     def test_an_mnv_file_that_cannot_be_read_is_none(self):
-        """The review's item 4: an MNV file cut short, or not gzip at all, is read as no
-        MNV file (a store of 2.10.0: no SNP row loses a carrier for an MNV), the indel file
-        as it is, mnv_error saying why; at 516d42a0 the reader raised and the run read the
-        chromosome with no store at all. A corrupt indel file still raises."""
+        """The review's item 4: an MNV file cut short, not gzip at all, or of 0 bytes, is
+        read as no MNV file (a store of 2.10.0: no SNP row loses a carrier for an MNV), the
+        indel file as it is, mnv_error saying why; at 516d42a0 the reader raised and the run
+        read the chromosome with no store at all, and at 6b5ab4d3 a file of 0 bytes was read
+        as one of no MNV, with no NOTE. A corrupt indel file still raises."""
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "gt_indel_chrT.tsv.gz")
             mnv = os.path.join(d, "gt_mnv_chrT.tsv.gz")
@@ -406,7 +407,7 @@ class StoreReader(unittest.TestCase):
             st = ns["_SnpRowIndels"](path, [(LO, HI)], 50)
             self.assertEqual((st.indels, st.mnv_error), (sorted([_edge_del(), _mnv_inside()]),
                                                          None))
-            for data in (whole[:len(whole) // 2], b"plain text\n"):
+            for data in (whole[:len(whole) // 2], b"plain text\n", b""):
                 with open(mnv, "wb") as fh:
                     fh.write(data)
                 st = ns["_SnpRowIndels"](path, [(LO, HI)], 50)

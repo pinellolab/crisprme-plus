@@ -501,7 +501,7 @@ class _Fixture(object):
 
     def __init__(self, tmp, world, tiers=("registry", "tier1", "indelgt"), env=None,
                  max_total=None, indel_af=None, store_marker=True, mnv_store=False,
-                 cut_short=()):
+                 cut_short=(), emptied=()):
         self.tmp = tmp
         self.world = world
         d = os.path.join(tmp, "Dictionaries")
@@ -579,6 +579,10 @@ class _Fixture(object):
                     data = fh.read()
                 with open(path, "wb") as fh:
                     fh.write(data[:len(data) // 2])
+            for kind in emptied:
+                # a file of the store of 0 bytes (a copy stopped at once), its .done marker
+                # left as it was
+                open(os.path.join(igd, "gt_%s_%s.tsv.gz" % (kind, CHROM)), "wb").close()
         if indel_af is not None:
             iad = os.path.join(d, "indel_af_" + VCF)
             os.makedirs(iad)
@@ -1312,9 +1316,20 @@ class TheMnvStore(_Base):
         carriers unphased), with one NOTE on stdout, opening as a store of 2.10.0's does,
         and nothing on stderr. At 516d42a0 the whole store was dropped: the rows were those
         of a search with no phased store."""
+        self.assert_read_as_none(cut_short=("mnv",))
+
+    def test_an_mnv_file_of_0_bytes_is_read_as_none_and_said(self):
+        """An MNV file of 0 bytes (a copy stopped at once), its .done marker left as it was,
+        is one that cannot be read, as one cut short is. At 6b5ab4d3 gzip read it as a file
+        of no line: the rows were a store of 2.10.0's, but the run said that it read the
+        MNVs from the store's MNV file (the NOTE the real-data check takes its model from)
+        and wrote no NOTE of a file that cannot be read."""
+        self.assert_read_as_none(emptied=("mnv",))
+
+    def assert_read_as_none(self, **damage):
         tmp = tempfile.mkdtemp(prefix="indel_overlaid_rows_cut_")
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        cut = _Fixture(tmp, self.world, mnv_store=True, cut_short=("mnv",))
+        cut = _Fixture(tmp, self.world, mnv_store=True, **damage)
         self.assertEqual(cut.proc.returncode, 0, cut.proc.stderr[-2000:])
         self.assertEqual(cut.proc.stderr, "")
         key = lambda r: (r["dna"], r["start"], r["strand"], r["samples"], r["var"], r["cfd"])  # noqa: E731

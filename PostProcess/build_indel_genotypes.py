@@ -465,6 +465,20 @@ def store_lines(path):
         return fh.readlines()
 
 
+def marked_count(path):
+    """The record count that the .done marker of the store file at ``path`` gives (its first
+    line), where that marker is as new as the file (the marker store_is_complete trusts);
+    None where there is no such marker, or its first line is not a count."""
+    marker = _done_marker(path)
+    try:
+        if os.path.getmtime(marker) < os.path.getmtime(path):
+            return None
+        with open(marker) as m:
+            return int(m.readline())
+    except (OSError, ValueError):
+        return None
+
+
 def read_mnv_lines(mnv_path):
     """(the lines of a chromosome's MNV file, None), read whole (store_lines), or (None, why)
     where it cannot be read to its end: corrupt or cut short. Each reader of the store (the
@@ -474,13 +488,27 @@ def read_mnv_lines(mnv_path):
     stdout (mnv_unreadable_note); a corrupt indel file fails the store as before 2.10.1.
     Before, a corrupt MNV file failed the whole store: the indel post-analysis and the SNP
     rows read the chromosome with no store at all, and the gate's worker raised out of its
-    pool."""
+    pool.
+
+    Two files that gzip reads to their end are not read either. A file of 0 bytes (a copy or
+    a write stopped at once): gzip reads it as a file of no line, but compile_store writes
+    even a file of no MNV as a gzip stream, and store_is_complete already takes an empty
+    file for a missing one, so build-index-only writes it again and the download step
+    fetches it. Read, it said that the chromosome's MNVs were read by their phase while none
+    was. And a file whose .done marker, as new as the file (marked_count), counts other
+    records than the file holds lines: it is not the file the marker was written for."""
     try:
-        return store_lines(mnv_path), None
+        if os.path.getsize(mnv_path) == 0:
+            return None, "0 bytes: even a file of no MNV is a gzip stream"
+        lines = store_lines(mnv_path)
     except MemoryError:
         raise
     except Exception as err:  # noqa: BLE001 - not read to its end: no MNV file
         return None, (str(err) or type(err).__name__)
+    n = marked_count(mnv_path)
+    if n is not None and n != len(lines):
+        return None, f"its .done marker counts {n} record(s), the file holds {len(lines)} line(s)"
+    return lines, None
 
 
 def mnv_unreadable_note(vcf, chrom, mnv_path, why, reading):
@@ -517,10 +545,11 @@ class IndelGenotypeReader(object):
     MNVs can be told from no MNV at all (a store of 2.10.0 has no MNV file: its readers
     read the MNVs, from the indel log, as 2.10.0 did).
 
-    An MNV file that cannot be read to its end (corrupt, cut short: read_mnv_lines) is read
-    as no MNV file, the indel file as it is: ``has_mnv`` False, and ``mnv_error`` says why
-    (None where the file was read, or is not there), for the reader's NOTE
-    (mnv_unreadable_note). An indel file that cannot be read raises, as before 2.10.1."""
+    An MNV file that cannot be read to its end (corrupt, cut short, 0 bytes, or not the file
+    its .done marker counts: read_mnv_lines) is read as no MNV file, the indel file as it
+    is: ``has_mnv`` False, and ``mnv_error`` says why (None where the file was read, or is
+    not there), for the reader's NOTE (mnv_unreadable_note). An indel file that cannot be
+    read raises, as before 2.10.1."""
 
     __slots__ = ("_by_key", "reads_filter", "has_mnv", "mnv_error", "mnv_path")
 

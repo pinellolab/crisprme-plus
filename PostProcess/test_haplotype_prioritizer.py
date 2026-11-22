@@ -891,6 +891,16 @@ class TestTheGateReadsTheMnvsAsTheSearchRunsIt(unittest.TestCase):
 
     def test_an_mnv_file_cut_short_is_read_as_none_in_the_pool(self):
         self.cut_short("mnv")
+        self.assert_read_as_none()
+
+    def test_an_mnv_file_of_0_bytes_is_read_as_none_in_the_pool(self):
+        """A file of 0 bytes (a copy stopped at once), its .done marker left as it was, is
+        one that cannot be read, as one cut short is; at 6b5ab4d3 gzip read it as a file of
+        no line, and the gate wrote no NOTE."""
+        open(os.path.join(self.store, f"gt_mnv_{CHROM}.tsv.gz"), "wb").close()
+        self.assert_read_as_none()
+
+    def assert_read_as_none(self):
         done, tiers = self.gate()
         self.assertEqual((done.returncode, done.stderr), (0, ""), done.stderr)
         self.assertEqual(tiers, [("1", "B", "-", PANEL),

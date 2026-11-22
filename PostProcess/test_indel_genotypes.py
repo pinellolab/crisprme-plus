@@ -575,8 +575,10 @@ def test_compile_store_leaves_no_part_of_a_file_on_a_kill():
 
 def _corrupt_copies(mnv_out):
     """{what: bytes} of an MNV file that cannot be read to its end: cut short (a copy
-    stopped partway), not gzip at all, its stream damaged past its header, and text that is
-    not UTF-8. The reader takes none of their lines."""
+    stopped partway), not gzip at all, its stream damaged past its header, text that is
+    not UTF-8, and empty (0 bytes: a copy stopped at once, which gzip reads as a file of no
+    line, where compile_store writes even a file of no MNV as a gzip stream). The reader
+    takes none of their lines."""
     with open(mnv_out, "rb") as fh:
         whole = fh.read()
     assert len(whole) > 40
@@ -584,16 +586,19 @@ def _corrupt_copies(mnv_out):
     for k in range(20, len(damaged) - 8):
         damaged[k] ^= 0x5A
     return {"cut short": whole[:len(whole) // 2], "not gzip": b"not a gzip file\n",
-            "damaged": bytes(damaged), "not UTF-8": gzip.compress(b"120_AA_GG\tHG1:1|0\n\xff\xfe\n")}
+            "damaged": bytes(damaged), "not UTF-8": gzip.compress(b"120_AA_GG\tHG1:1|0\n\xff\xfe\n"),
+            "empty": b""}
 
 
 def test_a_corrupt_mnv_file_leaves_the_indel_file_read():
     """2.10.1, the review's item 4: an MNV file that cannot be read to its end (cut short,
-    not gzip, its stream damaged, not UTF-8) is read as no MNV file (a store of 2.10.0's
-    reading: has_mnv False), with why in mnv_error; the indel file is read as it is, every
-    indel and its carriers. At 516d42a0 the reader raised, and the indel post-analysis and
-    the SNP rows then read the chromosome with no store at all. A corrupt indel file still
-    raises, as it did (a store that cannot be read is no store)."""
+    not gzip, its stream damaged, not UTF-8, empty) is read as no MNV file (a store of
+    2.10.0's reading: has_mnv False), with why in mnv_error; the indel file is read as it
+    is, every indel and its carriers. At 516d42a0 the reader raised, and the indel
+    post-analysis and the SNP rows then read the chromosome with no store at all; at
+    6b5ab4d3 an empty file was read as one of no MNV (has_mnv True, mnv_error None), so the
+    run said that it read the chromosome's MNVs by their phase while it read none. A corrupt
+    indel file still raises, as it did (a store that cannot be read is no store)."""
     vcf = _vcf_file(_VCF_MNV)
     d = tempfile.mkdtemp()
     indel_out, mnv_out = big.store_files(d, "chr22")
@@ -626,6 +631,60 @@ def test_a_corrupt_mnv_file_leaves_the_indel_file_read():
             raise AssertionError("a corrupt indel file was read")
         except (EOFError, OSError):
             pass
+    finally:
+        os.remove(vcf)
+        _cleanup(indel_out, mnv_out)
+        os.rmdir(d)
+
+
+def test_an_mnv_file_its_marker_does_not_count_is_not_read():
+    """An MNV file that gzip reads to its end, but whose .done marker, as new as the file,
+    counts other records than the file holds lines, is not the file the marker was written
+    for: read as no MNV file, as a corrupt one is (why in mnv_error). A marker older than
+    the file, none, or one with no count leaves the file read as it is; so does a marker
+    that counts its lines, a file of no record included."""
+    vcf = _vcf_file(_VCF_MNV)
+    d = tempfile.mkdtemp()
+    indel_out, mnv_out = big.store_files(d, "chr22")
+    marker = big._done_marker(mnv_out)
+    try:
+        assert big.compile_store(vcf, indel_out, mnv_out) == (2, 4)
+        assert big.marked_count(mnv_out) == 4
+        assert big.read_mnv_lines(mnv_out)[1] is None
+        with open(marker) as m:
+            text = m.read()
+        with gzip.open(mnv_out, "wt") as fh:
+            fh.write("120_AA_GG\tHG1:1|0\n")      # one line where the marker counts 4
+        for when, reads in ((2000000000, False), (1000, True)):
+            os.utime(marker, (when, when))         # as new as the file, then older
+            lines, why = big.read_mnv_lines(mnv_out)
+            r = big.IndelGenotypeReader(indel_out)
+            if reads:
+                assert big.marked_count(mnv_out) is None
+                assert lines == ["120_AA_GG\tHG1:1|0\n"] and why is None
+                assert r.has_mnv and r.carriers(120, "AA", "GG") == "HG1:1|0"
+            else:
+                assert big.marked_count(mnv_out) == 4
+                assert lines is None and why == ("its .done marker counts 4 record(s), the "
+                                                 "file holds 1 line(s)"), why
+                assert r.has_mnv is False and r.mnv_error == why
+                assert r.carriers(120, "AA", "GG") == ""
+                assert r.carriers_dict(100, "AT", "A") == {"HG1": "1|0", "HG2": "0|1"}
+        for body in ("x\n", ""):                   # a marker with no count
+            with open(marker, "w") as m:
+                m.write(body)
+            assert big.marked_count(mnv_out) is None and big.read_mnv_lines(mnv_out)[1] is None
+        os.remove(marker)
+        assert big.marked_count(mnv_out) is None and big.read_mnv_lines(mnv_out)[1] is None
+        with open(marker, "w") as m:
+            m.write(text.replace("4\n", "1\n", 1))  # a marker that counts its line
+        assert big.marked_count(mnv_out) == 1
+        assert big.IndelGenotypeReader(indel_out).has_mnv
+        with gzip.open(mnv_out, "wt") as fh:
+            pass                                   # a file of no record, marked 0
+        with open(marker, "w") as m:
+            m.write(text.replace("4\n", "0\n", 1))
+        assert big.read_mnv_lines(mnv_out) == ([], None)
     finally:
         os.remove(vcf)
         _cleanup(indel_out, mnv_out)
