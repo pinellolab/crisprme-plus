@@ -236,8 +236,9 @@ limit (counted and listed under its own class, non-gating) or not (gating):
     insertion slots from both rows). All three are now read as the rules have it and
     checked like any other reading, so a run that LISTS a carrier one of those readings
     takes off a row fails the check; the other direction -- a run that does not list a
-    carrier a reading keeps -- is counted, never demanded (OPEN_READINGS, left empty,
-    says where to put the next open reading). A complex record wholly on bases the record
+    carrier a reading keeps -- raises nothing that gates, its target counted and never
+    demanded (OPEN_READINGS, left empty, says where to put the next open reading). A
+    complex record wholly on bases the record
     deletes or replaces puts bases of its own among them and takes the slot off
     ('complex'); reading it as changing nothing lists 692 false 23-mers of 4,864 and was
     turned down. An SNV on a base of an MNV record is read base by base: one naming the
@@ -479,7 +480,8 @@ holds the target: the row agrees with it) are notes. The two open readings of th
 branch, open-complex-in-deleted and open-snp-row-snv-mnv, are gone: their rules are
 decided and in the code (above), and a run that now LISTS a carrier one of the three
 readings takes off a row fails the check (the other direction, a run that does not list
-a carrier a reading keeps, is counted, never demanded).
+a carrier a reading keeps, raises nothing that gates: its target is counted, never
+demanded).
 Five non-gating classes are this
 checker's own COVERAGE GAPS, not CRISPRme limits: coverage-overlap-cap (a carrier whose
 slot's overlap zones within a target's reach of a record have more than 1024 readings:
@@ -2100,8 +2102,8 @@ GATE_RIVAL = ("the carrier gate reads such a slot as holding a rival allele of t
 #   where the reading before it kept the carrier of an MNV starting at a named SNV's
 #   position and took off every other. Both readings are now checked like any other, so a
 #   run that LISTS a carrier one of them takes off a row fails the check; a run that does
-#   not list a carrier one of them keeps is counted, never demanded, like any other
-#   listing of completeness. (Rule 3 was never here: its reading was specified in METHODS
+#   not list a carrier one of them keeps raises nothing that gates, its target counted and
+#   never demanded. (Rule 3 was never here: its reading was specified in METHODS
 #   and contradicted by the code, not open.)
 OPEN_READINGS = {}
 

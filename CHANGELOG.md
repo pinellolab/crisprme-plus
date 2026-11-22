@@ -92,7 +92,8 @@ and the `release-crisprme` skill.
   of the otherwise report-only SNP-row report that gates. The three shapes the decomposition
   leaves (Fixed) are read as the rules have them and checked like any other reading, so a run that
   **lists** a carrier one of those readings takes off a row fails the check; the other direction,
-  a run that does not list a carrier a reading keeps, is counted, never demanded. The two classes
+  a run that does not list a carrier a reading keeps, raises nothing that gates (its target is
+  counted, never demanded). The two classes
   that counted them apart while the readings were open, `open-complex-in-deleted` and
   `open-snp-row-snv-mnv`, are gone. On a slot of
   rule (c) the check reads the rows as the indel post-analysis does, and its findings there state

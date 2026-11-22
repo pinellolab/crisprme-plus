@@ -3199,8 +3199,8 @@ the one class of the SNP-row report that gates. A log that says both NOTEs of on
 refused (exit 2). The three readings of the shapes HPRC's decomposition leaves (§4, rules 1 to 3)
 are read as the rules have them and checked like any other reading, so a run that **lists** a
 carrier one of those readings takes off a row fails the check; the other direction — a run that
-does not list a carrier a reading keeps on a row — is counted, never demanded, like every other
-listing the check counts in completeness. The two classes that counted the readings apart while
+does not list a carrier a reading keeps on a row — raises nothing that gates: its target is
+counted, never demanded. The two classes that counted the readings apart while
 they were open, `open-complex-in-deleted` and `open-snp-row-snv-mnv`, are gone with them.
 On a slot of rule (c) the check reads the rows as the indel post-analysis does, and its
 findings there state the carrier gate's own convention (§5). A target that needs an MNV and another
