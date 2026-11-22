@@ -54,7 +54,9 @@ tabix index written by this file's own writer), and rows in the column layout of
 ``integrated_results.tsv``. No CRISPRme module is imported, as the checker imports none.
 """
 
+import ast
 import contextlib
+import gc
 import gzip
 import io
 import json
@@ -7206,6 +7208,290 @@ class ReadPastALongDeletion(Base):
         self.assertEqual({f[3] for f in bad}, {"S06"}, found)
 
 
+# the checks' window around a row's target of 23 bases (Target): ``2 * 23 + 60`` bases past
+# the last base the target or its record covers; and the stretch a soundness unit reads
+# around the row (run_unit, row_span): ``2 * (20 + 3) + 1000`` bases past the row's start
+# plus its target's length, and as many before its start
+WINDOW_ROOM = 2 * 23 + 60
+UNIT_PAD = 2 * (len(GUIDE) + 3) + 1000
+
+
+def world_junction_near_the_end(tmp, k, end, put_back=True, row_samples="S01,S02", cut=9,
+                                dna_bulge=False):
+    """The two rows the SBDSP1 search's real-data check of 2.10.0 gated (README guide, NRR,
+    6 mismatches + 1 DNA + 1 RNA bulge, cap 8, per sample, HGDP + 1000 Genomes), in small:
+    alternative alignments of 23 bases at chr3:22,226,250 (+) and chr6:169,126,041 (+).
+    A deletion makes a perfect target of S01 and S02 (world_deletion): the C after the
+    target's base ``cut`` (0-based; GUIDE[9] as world_deletion has it). S01's slot also holds
+    a second deletion, left-aligned, anchored on the target's base ``n - 1 - k`` (``n`` the
+    target's length), that takes the target's last ``k`` bases and the reference bases after
+    them up to ``end`` (0-based, exclusive); the ``k`` bases after its junction are those it
+    took (``put_back``; else the first of them differs), so the slot holds the target, read
+    from its first base on (METHODS section 4: a second indel inside the target whose bases
+    come back keeps the carrier; the deletion could be written ``k`` bases further right,
+    clear of the target). HG01790's deletion (chr3:22,226,279, 107 bases) takes 2 and ends
+    where the checks' window ended; HG02728's (chr6:169,126,096, 108 bases) takes 4 and ends
+    one base inside it. The second deletion begins past the first's REF for ``k`` up to
+    ``n - 2 - cut``: with the first on the target's first base (``cut`` 0), up to 21 of a
+    target of 23 (anchored on the first base it would delete the first one's bases, an
+    overlapping record), and 22 of one of 24, ``dna_bulge``'s (a C after GUIDE[9] that the
+    guide does not have, one DNA bulge). Returns (the Case, the target's start)."""
+    import random
+    target = GUIDE[:10] + ("C" if dna_bulge else "") + GUIDE[10:] + "TGG"
+    n = len(target)
+    assert 1 <= k <= n - 2 - cut
+    start = len(PRE)
+    anchor0 = start + n - k  # the target's base n - 1 - k, one past the first deletion's C
+    taken = target[n - k:]
+    tail = POST + LONG + LONG
+    rnd = random.Random(310 + k)
+    fill = [rnd.choice("ACGT") for _ in range(end - start - n - 1)]
+    if fill[0] == tail[0]:  # the bases come back k of them, no more
+        fill[0] = other(tail[0])
+    if fill[-1] == target[n - 1 - k]:  # left-aligned: it cannot be written further left
+        fill[-1] = other(target[n - 1 - k])
+    after = taken if put_back else other(taken[0]) + taken[1:]
+    seq = (PRE + target[:cut + 1] + "C" + target[cut + 1:] + "".join(fill) + after + tail)
+    assert seq[anchor0 + 1:anchor0 + 1 + k] == taken and seq[end:end + k] == after
+    d1 = (start + cut + 1, target[cut] + "C", target[cut], {"S01": "1|0", "S02": "0|1"})
+    d2 = (anchor0 + 1, seq[anchor0:end], seq[anchor0], {"S01": "1|0"})
+    crrna = GUIDE[:10] + ("-" if dna_bulge else "") + GUIDE[10:] + "NNN"
+    rows = [row_fields("chr21", start, "+", crrna, seq[start:start + n], target, "TGG", 0,
+                       1 if dna_bulge else 0, "DNA" if dna_bulge else "X",
+                       tok("chr21", d1), row_samples)]
+    return Case(tmp, seq, [d1, d2], rows), start
+
+
+def world_junction_near_the_start(tmp, k, back, row_samples="S01,S02", cut=9,
+                                  dna_bulge=False):
+    """world_junction_near_the_end mirrored: S01's second deletion, written as far right as
+    it goes (a record left unnormalized), is anchored ``back`` bases before the target and
+    takes the reference bases after its anchor up to and including the target's first ``k``,
+    and the ``k`` bases its anchor ends are those (it could be written ``k`` bases further
+    left, clear of the target): the slot holds the target up to its last base, not from its
+    first, which it deletes, so a listing of S01 is the documented limit of two indels on
+    one haplotype (limit-two-indels, METHODS section 8). The row's own deletion is the C
+    after the target's base ``cut``; the second deletion ends before its REF for ``k`` up to
+    ``cut``: with the first on the target's base n - 2 (the PAM's R), up to 21 of a target of
+    23, and 22 of one of 24 (``dna_bulge``, as world_junction_near_the_end's). Returns the
+    Case."""
+    import random
+    assert 1 <= k <= cut and back >= 2
+    target = GUIDE[:10] + ("C" if dna_bulge else "") + GUIDE[10:] + "TGG"
+    n = len(target)
+    rnd = random.Random(410 + k)
+    pre = [rnd.choice("ACGT") for _ in range(150)]
+    mid = [rnd.choice("ACGT") for _ in range(back - 1)]
+    if pre[-1] == mid[-1]:  # it can be written k bases further left, no more
+        pre[-1] = other(mid[-1])
+    if mid[0] == target[k]:  # written as far right as it goes
+        mid[0] = other(target[k])
+    seq = ("".join(pre) + target[:k] + "".join(mid) + target[:cut + 1] + "C"
+           + target[cut + 1:] + POST + LONG)
+    anchor0 = len(pre) + k - 1
+    start = anchor0 + back
+    assert seq[start:start + cut + 1] == target[:cut + 1]
+    assert seq[anchor0 - k + 1:anchor0 + 1] == target[:k]
+    d1 = (start + cut + 1, target[cut] + "C", target[cut], {"S01": "1|0", "S02": "0|1"})
+    d2 = (anchor0 + 1, seq[anchor0:start + k], seq[anchor0], {"S01": "1|0"})
+    crrna = GUIDE[:10] + ("-" if dna_bulge else "") + GUIDE[10:] + "NNN"
+    rows = [row_fields("chr21", start, "+", crrna, seq[start:start + n], target, "TGG", 0,
+                       1 if dna_bulge else 0, "DNA" if dna_bulge else "X",
+                       tok("chr21", d1), row_samples)]
+    return Case(tmp, seq, [d1, d2], rows)
+
+
+class AJunctionNearTheEdge(Base):
+    """A slot's haplotype goes on after the junction of a deletion that ends within a
+    target's length of the end of the window the checks write it over, or of the stretch a
+    soundness unit reads, as after one that runs past it (ReadPastALongDeletion): the
+    window and the stretch reach that far past such a deletion's end (Window.past_long_refs,
+    read_past), and, mirrored, before a deletion that begins so near their start. Up to
+    2.10.0 they followed only a deletion that runs past an end, so the haplotype stopped
+    short of the bases after the junction, and the SBDSP1 search's real-data check gated
+    two listed carriers whose slots hold their rows' targets (5 variant-missing findings,
+    HG01790 and HG02728, every one on an alternative alignment); the search lists them by
+    METHODS section 4, whose frame reaches past the deletion (analisi_indels_NNN._frame).
+    Each test but the controls fails up to 2.10.0: the carriers listed are found
+    variant-missing, and the one left off is not found missing. The margin each end is
+    followed by is pinned at the most a reading can need: every number of bases a target
+    of 23 lets a second deletion take (1 to 21), 22 of a target of 24 (one DNA bulge), the
+    mirrors at every offset from the start to a target's length inside it, and the
+    stretch's ends 1 to 25 inside it; a margin of fewer bases than such a reading needs
+    (22 past a deletion's end and 21 before its anchor, for a target of 24) fails them."""
+
+    def _end(self, start):
+        """The end of the checks' window around world_junction_near_the_end's target: its
+        last base is start + 23 (the first deletion's C is inside it)."""
+        return start + 23 + WINDOW_ROOM
+
+    def test_hg01790s_shape_the_deletion_ends_at_the_windows_end(self):
+        case, start = world_junction_near_the_end(self.tmp, 2, self._end(len(PRE)))
+        rc, found = case.run()
+        self.assertEqual((rc, found), (0, []), found)
+
+    def test_hg02728s_shape_one_base_inside_it(self):
+        case, start = world_junction_near_the_end(self.tmp, 4, self._end(len(PRE)) - 1)
+        rc, found = case.run()
+        self.assertEqual((rc, found), (0, []), found)
+
+    def test_every_end_near_the_windows_end(self):
+        """Every end from a target's length inside the window to past it: the window reaches
+        a target's length past each (up to 2.10.0 an end k - 1 to 0 bases inside it, and at
+        it, failed)."""
+        edge = self._end(len(PRE))
+        for k in (2, 4):
+            for end in range(edge - 25, edge + 3):
+                with self.subTest(k=k, end=end):
+                    case, _start = world_junction_near_the_end(self.tmp, k, end)
+                    rc, found = case.run()
+                    self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_a_deletion_whose_bases_do_not_come_back_is_still_caught(self):
+        """The control: past HG01790's deletion the first base is another, so the slot
+        lacks the target, and listing S01 fails, as it did up to 2.10.0."""
+        case, _start = world_junction_near_the_end(self.tmp, 2, self._end(len(PRE)),
+                                                   put_back=False)
+        rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)}, {("variant-missing", "S01")},
+                         found)
+
+    def test_the_carrier_left_off_is_found_missing(self):
+        """A search that took S01 off the row, as a first reading of those findings would
+        have had it, has lost a carrier whose slot holds the target: carrier-missing. Up to
+        2.10.0 the check found the slot without the target and said nothing."""
+        case, _start = world_junction_near_the_end(self.tmp, 2, self._end(len(PRE)),
+                                                   row_samples="S02")
+        rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)}, {("carrier-missing", "S01")},
+                         found)
+
+    def test_the_stretch_a_unit_reads_goes_past_such_a_deletion_too(self):
+        """HG01790's shape with a deletion of 1,045 bases that ends where the stretch the
+        unit reads around the row ends (row_span: the row's start, plus its target's 23
+        bases and UNIT_PAD): the window reaches past it, but no further than that stretch
+        (read_around), which read_past now widens."""
+        start = len(PRE)
+        case, _start = world_junction_near_the_end(self.tmp, 2, start + 23 + UNIT_PAD)
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_the_mirror_before_the_windows_start(self):
+        """The deletion begins at the window's start (WINDOW_ROOM before the target)."""
+        case = world_junction_near_the_start(self.tmp, 2, WINDOW_ROOM)
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertEqual({(f[1], f[3]) for f in found}, {("limit-two-indels", "S01")}, found)
+
+    def test_the_mirror_before_the_stretchs_start(self):
+        """The deletion begins where the stretch the unit reads begins (UNIT_PAD before the
+        row's start)."""
+        case = world_junction_near_the_start(self.tmp, 2, UNIT_PAD)
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertEqual({(f[1], f[3]) for f in found}, {("limit-two-indels", "S01")}, found)
+
+    # The margins are a target's length, not a few bases: the tests below take the most a
+    # reading through a junction can need, so a margin of fewer bases fails them (the
+    # tests above, of 2 and 4 bases taken, pass with a margin of 4 or 5).
+
+    def test_every_k_a_target_of_23_allows_near_the_windows_end(self):
+        """1 to 21 bases taken (the row's own deletion on the target's first base, cut 0: a
+        second deletion anchored on that base would delete the row's own bases, an
+        overlapping record, so 21 of 23 is the most), and every end from k + 1 bases inside
+        the window's end to one past it: the window reaches past each that ends within k of
+        it. Up to 2.10.0 the ends k - 1 to 0 bases inside it are found variant-missing, and
+        with a margin of m bases (m < k) those k - 1 to m inside."""
+        edge = self._end(len(PRE))
+        for k in range(1, 22):
+            for end in range(edge - k - 1, edge + 2):
+                with self.subTest(k=k, end=end - edge):
+                    case, _start = world_junction_near_the_end(self.tmp, k, end, cut=0)
+                    rc, found = case.run()
+                    self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_22_of_a_target_of_24_near_the_windows_end(self):
+        """The margin is the target's own length: a target of 24 bases (one DNA bulge)
+        allows 22 taken, and every end from 25 bases inside the end of its window (2 x 24
+        + 60 bases past it) to one past it is followed. A margin of 21 bases, enough for a
+        target of 23, fails 21 bases inside."""
+        n = 24
+        edge = len(PRE) + n + 2 * n + 60
+        for end in range(edge - n - 1, edge + 2):
+            with self.subTest(end=end - edge):
+                case, _start = world_junction_near_the_end(self.tmp, 22, end, cut=0,
+                                                           dna_bulge=True)
+                rc, found = case.run()
+                self.assertEqual((rc, found), (0, []), found)
+
+    def test_21_taken_is_still_caught_and_found_missing(self):
+        """The controls at 21 bases taken, 10 inside the window's end: past the junction the
+        first base is another, so the slot lacks the target and listing S01 fails (as up to
+        2.10.0); and a search that left S01 off, whose slot holds it, has lost a carrier
+        (up to 2.10.0 the check said nothing)."""
+        end = self._end(len(PRE)) - 10
+        case, _start = world_junction_near_the_end(self.tmp, 21, end, put_back=False, cut=0)
+        rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)}, {("variant-missing", "S01")},
+                         found)
+        case, _start = world_junction_near_the_end(self.tmp, 21, end, row_samples="S02",
+                                                   cut=0)
+        rc, found = case.run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual({(f[1], f[3]) for f in gating(found)}, {("carrier-missing", "S01")},
+                         found)
+
+    def test_the_mirror_at_every_offset_from_the_windows_start(self):
+        """The mirror with n - 2 bases taken (the row's own deletion on the target's base
+        n - 2, the PAM's R): 21 of a target of 23, 22 of one of 24 (one DNA bulge). The
+        deletion begins at the window's start (2 x n + 60 bases before the target) or 1 to
+        n - 1 bases inside it, and a reading through it needs the n - 3 bases before its
+        anchor, so the window reaches before each. Up to 2.10.0, and with a margin of m
+        bases for m < n - 3, the offsets m to n - 4 are found variant-missing."""
+        for n, bulge in ((23, False), (24, True)):
+            for j in range(0, n):
+                with self.subTest(n=n, offset=j):
+                    case = world_junction_near_the_start(self.tmp, n - 2, 2 * n + 60 - j,
+                                                         cut=n - 2, dna_bulge=bulge)
+                    rc, found = case.run()
+                    self.assertEqual((rc, gating(found)), (0, []), found)
+                    self.assertEqual({(f[1], f[3]) for f in found},
+                                     {("limit-two-indels", "S01")}, found)
+
+    def test_every_end_1_to_25_bases_inside_the_stretchs_end(self):
+        """n - 2 bases taken (21 of a target of 23, 22 of one of 24) by a deletion that ends 1
+        to 25 bases inside the stretch the unit reads (read_past's reach here is 26: the
+        guide and PAM's 23 bases, a bulge and 2): the stretch reaches past each, and the
+        window with it. Up to 2.10.0, and with a margin of m bases for m < n - 2, the ends
+        m to n - 3 bases inside are found variant-missing."""
+        for n, bulge in ((23, False), (24, True)):
+            b = len(PRE) + n + UNIT_PAD
+            for j in range(1, 26):
+                with self.subTest(n=n, inside=j):
+                    case, _start = world_junction_near_the_end(self.tmp, n - 2, b - j, cut=0,
+                                                               dna_bulge=bulge)
+                    rc, found = case.run()
+                    self.assertEqual((rc, gating(found)), (0, []), found)
+
+    def test_the_mirror_at_every_offset_from_the_stretchs_start(self):
+        """The mirror with n - 2 bases taken, the deletion beginning at the stretch's start
+        or 1 to 25 bases inside it: the stretch reaches before each. Up to 2.10.0, and with
+        a margin of m bases for m < n - 3, the offsets m to n - 4 are found
+        variant-missing."""
+        for n, bulge in ((23, False), (24, True)):
+            for j in range(0, 26):
+                with self.subTest(n=n, offset=j):
+                    case = world_junction_near_the_start(self.tmp, n - 2, UNIT_PAD - j,
+                                                         cut=n - 2, dna_bulge=bulge)
+                    rc, found = case.run()
+                    self.assertEqual((rc, gating(found)), (0, []), found)
+                    self.assertEqual({(f[1], f[3]) for f in found},
+                                     {("limit-two-indels", "S01")}, found)
+
+
 def world_last_base_deleted(tmp, row_samples):
     """The gate's B10 (VEGFA site 3, per sample): chr1:21,194,250 (+), the fewest-edits
     block of an alternative alignment, hg38's bases 21,194,150..21,194,349 (0-based) as a
@@ -7797,6 +8083,526 @@ class ARunSearchedInAContainer(Base):
         self.assertIsNone(C.log_root(res, "/DATA/Results/readme2/x.tsv\n"))
         self.assertIsNone(C.log_root(res, ""))
         self.assertIsNone(C.log_root(res, None))
+
+
+# --------------------------------------------------------------------------- #
+# 2.10.1: the MNVs read from the phased store's MNV file (MNV_RULES), and the open readings
+# (OPEN_READINGS) read as the code reads them
+# --------------------------------------------------------------------------- #
+MNV_NOTE = ("NOTE [indel-snp]: the MNVs of v on chr21 were read from the phased indel "
+            "genotype store's MNV file: each MNV's carriers by their phase, and an MNV on a "
+            "carrier's haplotype as a second record on another record's rows.\n")
+NO_MNV_NOTE = ("NOTE [indel-snp]: the phased indel genotype store of v on chr21 holds no MNV "
+               "(a store written before CRISPRme 2.10.1), and the indel log lists MNVs: each "
+               "MNV's carriers are its indel log's, their phase unknown, and an MNV on a "
+               "carrier's haplotype is not read on another record's rows. build-index-only "
+               "of CRISPRme 2.10.1 or later with the dataset's VCFs adds the MNVs to the "
+               "store.\n")
+
+
+def mnv_runs(test, seq, recs, rows, tag=""):
+    """One world checked as three runs, each in a folder of its own: of 2.10.0 (its log
+    writes no MNV NOTE), of 2.10.1 on a store of 2.10.0 (the NOTE of a store that holds no
+    MNV) and of 2.10.1 that read the store's MNV file (MNV_NOTE). The first two read the
+    MNVs as 2.10.0 did; the third reads them by MNV_RULES."""
+    out = []
+    for name, log in (("old", ""), ("nomnv", NO_MNV_NOTE), ("mnv", MNV_NOTE)):
+        d = os.path.join(test.tmp, tag + name)
+        os.makedirs(d)
+        out.append(as_2100(Case(d, seq, recs, rows), log=log, window=(30, 30)))
+    return out
+
+
+def pairs(found, only_gating=False):
+    return {(f[1], f[3]) for f in (gating(found) if only_gating else found)}
+
+
+def analyzer_notes():
+    """The 'NOTE [indel-snp]' texts the shipped analyzer prints (analisi_indels_NNN.py),
+    read from its source as text, not imported (the checker and its tests import no
+    CRISPRme module): each print's string, its f-string fields written back as {name}."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "analisi_indels_NNN.py")
+    with open(path) as fh:
+        tree = ast.parse(fh.read())
+    out = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "print"
+                and node.args):
+            continue
+        arg = node.args[0]
+        text = ""
+        for p in (arg.values if isinstance(arg, ast.JoinedStr) else [arg]):
+            if isinstance(p, ast.Constant) and isinstance(p.value, str):
+                text += p.value
+            elif isinstance(p, ast.FormattedValue):
+                text += "{%s}" % ast.unparse(p.value)
+        if "NOTE [indel-snp]" in text:
+            out.append(text)
+    return out
+
+
+class MnvStoreSemantics(Base):
+    """2.10.1: the run's log says, by dataset and chromosome, how it read the MNVs."""
+
+    def test_the_regexes_read_the_analyzers_own_notes(self):
+        """MNV_STORE and NO_MNV_STORE match the NOTEs the shipped analyzer prints (read
+        from its source), each its own and not the other's, and neither the older NOTEs'
+        regexes (OLD_STORE, NO_STORE)."""
+        notes = [n.replace("{_vcf}", "hg38_HPRC").replace("{current_chr}", "chr22")
+                 for n in analyzer_notes()]
+        read = [n for n in notes if C.MNV_STORE.search(n)]
+        none = [n for n in notes if C.NO_MNV_STORE.search(n)]
+        self.assertEqual(len(read), 1, notes)
+        self.assertEqual(len(none), 1, notes)
+        self.assertNotEqual(read, none)
+        self.assertEqual(C.MNV_STORE.search(read[0]).groups(), ("hg38_HPRC", "chr22"))
+        self.assertEqual(C.NO_MNV_STORE.search(none[0]).groups(), ("hg38_HPRC", "chr22"))
+        for n in read + none:
+            self.assertIsNone(C.OLD_STORE.search(n), n)
+            self.assertIsNone(C.NO_STORE.search(n), n)
+        # the notes these tests write are the analyzer's, filled in
+        self.assertTrue(C.MNV_STORE.search(MNV_NOTE) and C.NO_MNV_STORE.search(NO_MNV_NOTE))
+
+    def test_each_chromosome_reads_its_mnvs_as_its_note_says(self):
+        """run_semantics: the MNV store where its NOTE names the dataset and chromosome;
+        2.10.0's reading where the store-less NOTE names them, where no NOTE does (a run
+        of 2.10.0) and in a run before 2.10.0; a log that says both of one chromosome
+        is no reading, and main refuses the run (exit 2)."""
+        case, _info = world_deletion(self.tmp)
+        log = MNV_NOTE.replace("on chr21", "on chr22") + NO_MNV_NOTE
+        case = as_2100(case, log=log, window=(30, 30))
+        vcf = C.Vcf(case.vcf)
+        sem, _why = C.run_semantics(case.res, [vcf], ["chr21", "chr22", "chr1"], ["v"],
+                                    "hg38")
+        self.assertTrue(sem.mnv_store(vcf, "chr22"))
+        self.assertFalse(sem.mnv_store(vcf, "chr21"))
+        self.assertFalse(sem.mnv_store(vcf, "chr1"))
+        self.assertFalse(sem.values[("v", "chr21")].get("mnv_both"))
+        rc, found = case.run()
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        with open(os.path.join(case.res, "log_verbose.txt"), "w") as fh:
+            fh.write(MNV_NOTE + NO_MNV_NOTE)
+        sem, _why = C.run_semantics(case.res, [vcf], ["chr21"], ["v"], "hg38")
+        self.assertTrue(sem.values[("v", "chr21")].get("mnv_both"))
+        rc, _found = case.run()
+        self.assertEqual(rc, 2)
+        os.makedirs(os.path.join(self.tmp, "pre"))
+        pre, _info = world_deletion(os.path.join(self.tmp, "pre"))
+        sem, _why = C.run_semantics(pre.res, [C.Vcf(pre.vcf)], ["chr21"], ["v"], "hg38")
+        self.assertFalse(sem.release2100)
+        self.assertFalse(sem.mnv_store(C.Vcf(pre.vcf), "chr21"))
+
+
+class MnvStoreRows(Base):
+    """2.10.1: with the MNV store an MNV is one more record of the phased store (MNV_RULES):
+    its carriers read by their phase, an MNV beside the record a second record, and the
+    overlap rules (a)(i), (b) and (c) on both records' rows. Each world is checked as a run
+    of 2.10.0, as one of 2.10.1 on a store of 2.10.0 (the same reading: 2.10.0's) and as one
+    that read the MNV store."""
+
+    # --- an MNV beside the record: a second record ------------------------------ #
+    def _beside(self, listed):
+        """R4-F2's world: S01 holds the deletion that makes the perfect target and, on the
+        same slot, an MNV on two of its bases; S02 the deletion alone."""
+        seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+        dele = (len(PRE) + 10, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0", "S02": "0|1"})
+        p2 = len(PRE) + 1 + 14 + 1   # guide bases 15 and 16 (1-based POS)
+        r2 = seq[p2 - 1:p2 + 1]
+        mnv = (p2, r2, other(r2[0]) + other(r2[1]), {"S01": "1|0"})
+        s = len(PRE)
+        row = row_fields("chr21", s, "+", GUIDE + "NNN", seq[s:s + 23], GUIDE + "TGG",
+                         "TGG", 0, 0, "X", tok("chr21", dele), listed)
+        return seq, [dele, mnv], [row]
+
+    def test_a_listing_for_a_sequence_an_mnv_changes_gates_with_the_store(self):
+        """Without the MNV store S01, listed for the target its slot would hold without the
+        MNV, is 2.10.0's known limit (limit-indel-row-mnv, non-gating); with it the run read
+        the MNV as a second record, which takes S01 off: the listing gates
+        (indel-row-mnv-carrier), and the row without S01 passes both checks, the target
+        S01's slot holds needing both records (limit-two-indels)."""
+        old, nomnv, mnv = mnv_runs(self, *self._beside("S01,S02"))
+        for case in (old, nomnv):
+            rc, found = case.run()
+            self.assertEqual((rc, pairs(found)), (0, {("limit-indel-row-mnv", "S01")}),
+                             found)
+        rc, found = mnv.run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual(pairs(found), {("indel-row-mnv-carrier", "S01")}, found)
+        self.assertIn("MNV store", [f for f in found][0][2])
+        old, nomnv, mnv = mnv_runs(self, *self._beside("S02"), tag="right_")
+        rc, found = mnv.run(mode="both", budget=("2", "0", "0", "2"))
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertIn("limit-two-indels", classes(found), found)
+
+    # --- an MNV row: its carriers by their phase ---------------------------------- #
+    def test_an_mnv_rows_carriers_are_read_by_their_phase_with_the_store(self):
+        """An MNV restores the guide on S01's slot 0; the SNV that gives the guide's first
+        base is on its slot 1. Without the store CRISPRme resolves S01 PUTATIVE, and its
+        rule lists it for the target with the SNV (its strongest): a known limit,
+        non-gating. With it the MNV's carriers are read by their phase, and that listing
+        is a failure (no slot holds both); the row of S01's own target passes either way."""
+        q = len(PRE)   # guide base 0, 0-based
+        seq = PRE + other(GUIDE[0]) + GUIDE[1:8] + "AC" + GUIDE[10:] + "TGG" + POST
+        mnv = (len(PRE) + 9, "AC", GUIDE[8:10], {"S01": "1|0"})
+        snp = (q + 1, other(GUIDE[0]), GUIDE[0], {"S01": "0|1"})
+        s = len(PRE)
+        both = row_fields("chr21", s, "+", GUIDE + "NNN", seq[s:s + 23], GUIDE + "TGG",
+                          "TGG", 0, 0, "X", "%s,%s" % (tok("chr21", mnv), tok("chr21", snp)),
+                          "S01")
+        own = row_fields("chr21", s, "+", GUIDE + "NNN", seq[s:s + 23],
+                         other(GUIDE[0]) + GUIDE[1:] + "TGG", "TGG", 1, 0, "X",
+                         tok("chr21", mnv), "S01")
+        old, nomnv, store = mnv_runs(self, seq, [snp, mnv], [both])
+        for case in (old, nomnv):
+            rc, found = case.run()
+            self.assertEqual((rc, gating(found)), (0, []), found)
+            self.assertEqual(pairs(found), {("limit-putative-carrier", "S01")}, found)
+        rc, found = store.run()
+        self.assertEqual(rc, 1, found)
+        self.assertEqual(pairs(found, True), {("carrier-without-variants", "S01")}, found)
+        old, nomnv, store = mnv_runs(self, seq, [snp, mnv], [own], tag="own_")
+        for case in (old, nomnv, store):
+            rc, found = case.run(mode="both", budget=("1", "0", "0", "1"))
+            self.assertEqual((rc, gating(found)), (0, []), found)
+
+    # --- rule (b): an indel on bases an MNV replaces, on the MNV's rows ----------- #
+    def _shape4(self, listed):
+        """The plan's shape 4: an MNV restores the guide; S01's slot also holds a deletion
+        anchored before it that deletes the MNV's first base (the deletion's deleted bases
+        inside the MNV); S02 holds the MNV alone."""
+        seq = PRE + GUIDE[:8] + "AC" + GUIDE[10:] + "TGG" + POST
+        mnv = (len(PRE) + 9, "AC", GUIDE[8:10], {"S01": "1|0", "S02": "1|0"})
+        dele = (len(PRE) + 8, GUIDE[7] + "A", GUIDE[7], {"S01": "1|0"})
+        s = len(PRE)
+        row = row_fields("chr21", s, "+", GUIDE + "NNN", seq[s:s + 23], GUIDE + "TGG",
+                         "TGG", 0, 0, "X", tok("chr21", mnv), listed)
+        return seq, [dele, mnv], [row]
+
+    def test_rule_b_reads_the_slot_as_the_deletions_on_the_mnvs_rows(self):
+        """Rule (b): with the MNV store an MNV window loses no base, so the deletion on a
+        base the MNV replaces changes the target and the slot leaves the MNV's rows:
+        listing S01 fails (carrier-off-by-rule), leaving it off passes (counted). Without
+        it, 2.10.0's reading: the MNV's replaced bases count as lost, the deletion changes
+        nothing, and S01's listing agrees."""
+        old, nomnv, store = mnv_runs(self, *self._shape4("S01,S02"))
+        for case in (old, nomnv):
+            rc, found = case.run()
+            self.assertEqual((rc, pairs(found)), (0, {("overlap-reading-agrees", "S01")}),
+                             found)
+        rc, found = store.run()
+        self.assertEqual((rc, pairs(found, True)), (1, {("carrier-off-by-rule", "S01")}),
+                         found)
+        old, nomnv, store = mnv_runs(self, *self._shape4("S02"), tag="off_")
+        for case in (old, nomnv, store):
+            rc, found = case.run()
+            self.assertEqual((rc, pairs(found)), (0, {("limit-overlapping-records", "S01")}),
+                             found)
+
+    # --- rule (a)(i): an MNV only on bases the deletion deletes ------------------- #
+    def test_rule_a_an_mnv_on_deleted_bases_changes_nothing(self):
+        """Rule (a)(i), the plan's shape 5 on the deletion's rows: S01's slot holds the
+        deletion of CAG that makes the perfect target and an MNV CA>GT only on deleted
+        bases. Read with or without the MNV store it changes nothing: listing S01 agrees,
+        leaving it off is counted (METHODS keeps it), never a failure."""
+        seq = PRE + GUIDE[:10] + "CAG" + GUIDE[10:] + "TGG" + POST
+        dele = (len(PRE) + 10, GUIDE[9] + "CAG", GUIDE[9], {"S01": "1|0", "S02": "0|1"})
+        mnv = (len(PRE) + 11, "CA", "GT", {"S01": "1|0"})
+        s = len(PRE)
+        row = row_fields("chr21", s, "+", GUIDE + "NNN", seq[s:s + 23], GUIDE + "TGG",
+                         "TGG", 0, 0, "X", tok("chr21", dele), "S01,S02")
+        for case in mnv_runs(self, seq, [dele, mnv], [row]):
+            rc, found = case.run()
+            self.assertEqual((rc, pairs(found)), (0, {("overlap-reading-agrees", "S01")}),
+                             found)
+        for case in mnv_runs(self, seq, [dele, mnv], [set_field(row, samples="S02")],
+                             tag="off_"):
+            rc, found = case.run()
+            self.assertEqual((rc, pairs(found)), (0, {("limit-overlapping-records", "S01")}),
+                             found)
+
+    # --- rule (c): an MNV and an indel at one POS ---------------------------------- #
+    def test_rule_c_an_mnv_and_an_indel_at_one_pos_on_both_records_rows(self):
+        """Rule (c): an MNV and an indel at one POS are other alleles of that position, a
+        phasing artefact: on the deletion's row S01's slot is read without the MNV, on the
+        MNV's row S03's without the insertion, and both listings agree, in every run. With
+        the MNV store the finding says that the carrier gate reads such a slot otherwise
+        (GATE_RIVAL: 'phase not known'); without it, it does not."""
+        seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
+        p = len(PRE) + 10
+        dele = (p, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0", "S02": "0|1"})
+        mnv = (p, GUIDE[9] + "C", other(GUIDE[9]) + "G", {"S01": "1|0"})
+        s = len(PRE)
+        row = row_fields("chr21", s, "+", GUIDE + "NNN", seq[s:s + 23], GUIDE + "TGG",
+                         "TGG", 0, 0, "X", tok("chr21", dele), "S01,S02")
+        seq2 = PRE + GUIDE[:8] + "AC" + GUIDE[10:] + "TGG" + POST
+        m2 = (len(PRE) + 9, "AC", GUIDE[8:10], {"S03": "1|0", "S04": "0|1"})
+        ins = (len(PRE) + 9, "A", "AT", {"S03": "1|0"})
+        row2 = row_fields("chr21", s, "+", GUIDE + "NNN", seq2[s:s + 23], GUIDE + "TGG",
+                          "TGG", 0, 0, "X", tok("chr21", m2), "S03,S04")
+        for tag, world in (("del_", (seq, [dele, mnv], [row])),
+                           ("mnv_", (seq2, [m2, ins], [row2]))):
+            who = "S01" if tag == "del_" else "S03"
+            for case, store in zip(mnv_runs(self, *world, tag=tag), (False, False, True)):
+                rc, found = case.run()
+                self.assertEqual((rc, pairs(found)), (0, {("overlap-reading-agrees", who)}),
+                                 (tag, store, found))
+                self.assertEqual("phase not known" in found[0][2], store, (tag, found))
+
+    # --- carrier_verdict's PUTATIVE-truth branch (the MNV review's MNV-R1) -------- #
+    def _putative_world(self):
+        """A deletion makes the target, phased 1|0 on S01, with an MNV on two of its bases
+        on the same slot (1|0) and a second MNV that overlaps it with an unphased call
+        (0/1): no placement of that call gives the slot one sequence, so the truth there
+        is CRISPRme's PUTATIVE rule. An SNV on S01's other slot (0|1) gives the guide's
+        base at a column where the reference mismatches it, so the row, which names the
+        deletion alone, is not S01's strongest PUTATIVE target."""
+        seq = (PRE + GUIDE[:2] + other(GUIDE[2]) + GUIDE[3:10] + "C" + GUIDE[10:] + "TGG"
+               + POST)
+        dele = (len(PRE) + 10, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0"})
+        p2 = len(PRE) + 16
+        m1 = (p2, seq[p2 - 1:p2 + 1], other(seq[p2 - 1]) + other(seq[p2]), {"S01": "1|0"})
+        m2 = (p2 + 1, seq[p2:p2 + 2], other(seq[p2]) + other(seq[p2 + 1]), {"S01": "0/1"})
+        snp = (len(PRE) + 3, other(GUIDE[2]), GUIDE[2], {"S01": "0|1"})
+        s = len(PRE)
+        row = row_fields("chr21", s, "+", GUIDE + "NNN", seq[s:s + 23],
+                         GUIDE[:2] + other(GUIDE[2]) + GUIDE[3:] + "TGG", "TGG", 1, 0, "X",
+                         tok("chr21", dele), "S01")
+        return seq, [snp, dele, m1, m2], [row]
+
+    def test_the_putative_truth_branch_with_an_mnv_the_rules_do_not_read(self):
+        """MNV-R1: carrier_verdict's branch where the truth is the PUTATIVE rule. Its truth
+        lists S01 for the target with the SNV's base only (not this row's), while 2.10.0's
+        rules read S01's slot without its MNVs, whose phased one changes the target, and
+        list it here: the known limit (limit-indel-row-mnv), not a failure and not the
+        two-indel limit its other cause names. With the MNV store the rules read the
+        unphased MNV as a second record (PUTATIVE) and never list S01 here: the listing
+        2.10.0 made the limit gates (indel-row-mnv-carrier)."""
+        old, nomnv, store = mnv_runs(self, *self._putative_world())
+        for case in (old, nomnv):
+            rc, found = case.run()
+            self.assertEqual((rc, pairs(found)), (0, {("limit-indel-row-mnv", "S01")}),
+                             found)
+        rc, found = store.run()
+        self.assertEqual((rc, pairs(found)), (1, {("indel-row-mnv-carrier", "S01")}), found)
+        # the branch is the PUTATIVE truth's: truth() says 'unknown' for S01
+        seq, recs, rows = self._putative_world()
+        vcf = os.path.join(self.tmp, "putative.vcf.gz")
+        write_vcf(vcf, "chr21", recs)
+        win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)])
+        dele = win.by_key[(recs[1][0], recs[1][1], recs[1][2])][0]
+        stripped = GUIDE[:2] + other(GUIDE[2]) + GUIDE[3:] + "TGG"
+        tgt, cls, _d = C.row_target(win, {"start": len(PRE), "strand": "+", "alt": stripped,
+                                          "crrna": GUIDE + "NNN"}, [dele], dele)
+        self.assertIsNone(cls)
+        self.assertEqual(C.truth(win, tgt, "S01", win.lines_in(tgt.lo, tgt.hi))[0],
+                         "unknown")
+
+
+class MnvStoreSnpRows(Base):
+    """2.10.1, --snp-rows report: with the MNV store a SNP row's carrier whose slot holds an
+    MNV that changes the target is taken off, as for an indel; listing one gates
+    (snp-row-mnv-carrier, 2.10.0's limit-snp-row-mnv). An MNV on the base of a named SNV is
+    an open reading (open-snp-row-snv-mnv), listed or not."""
+
+    def _world(self, listed, mnvs=True):
+        """A SNP row: the SNV at guide base 6 (1-based) restores the guide. S01 holds it and
+        an MNV on guide bases 15 and 16 on one slot; S02 the SNV alone; S03 the SNV and an
+        MNV that starts at its position; S04 the SNV and an MNV that starts one base before
+        it (both MNVs on the SNV's base)."""
+        seq = PRE + GUIDE[:5] + "C" + GUIDE[6:] + "TGG" + POST
+        q = len(PRE) + 5
+        snp = (q + 1, "C", GUIDE[5], {"S01": "1|0", "S02": "0|1", "S03": "1|0",
+                                     "S04": "1|0"})
+        p2 = len(PRE) + 16
+        recs = [snp]
+        if mnvs:
+            recs += [(p2, seq[p2 - 1:p2 + 1], other(seq[p2 - 1]) + other(seq[p2]),
+                      {"S01": "1|0"}),
+                     (q + 1, seq[q:q + 2], other(seq[q]) + other(seq[q + 1]), {"S03": "1|0"}),
+                     (q, seq[q - 1:q + 1], other(seq[q - 1]) + other(seq[q]), {"S04": "1|0"})]
+        s = len(PRE)
+        row = row_fields("chr21", s, "+", GUIDE + "NNN", seq[s:s + 23], GUIDE + "TGG",
+                         "TGG", 0, 0, "X", tok("chr21", snp), listed)
+        return seq, recs, [row]
+
+    def test_a_snp_rows_carrier_with_an_mnv_in_the_target(self):
+        """Without the MNV store: S01 is 2.10.0's limit-snp-row-mnv, S03 and S04 too (the
+        MNV is read by no store). With it: listing S01 gates (snp-row-mnv-carrier), and S03
+        and S04 are the open reading -- the code keeps S03 (an MNV at a named SNV's
+        position, a phasing artefact) and takes S04 off."""
+        old, nomnv, store = mnv_runs(self, *self._world("S01,S02,S03,S04"))
+        for case in (old, nomnv):
+            rc, found = case.run(extra=("--snp-rows", "report"))
+            self.assertEqual(rc, 0, found)
+            self.assertEqual(pairs(found), {("limit-snp-row-mnv", "S01,S03,S04")}, found)
+        rc, found = store.run(extra=("--snp-rows", "report"))
+        self.assertEqual(rc, 1, found)
+        self.assertEqual(pairs(found, True), {("snp-row-mnv-carrier", "S01")}, found)
+        self.assertEqual(pairs(found), {("snp-row-mnv-carrier", "S01"),
+                                        ("open-snp-row-snv-mnv", "S03,S04")}, found)
+
+    def test_the_carriers_a_snp_row_leaves_out_with_the_store(self):
+        """The row listing S02 alone: without the store S01, S03 and S04 hold the target
+        as 2.10.0's rule reads it (no MNV) and are missing (report-only); with it S01 is
+        rightly off (its MNV changes the target), and S03 and S04, left off, are the open
+        reading."""
+        old, nomnv, store = mnv_runs(self, *self._world("S02"))
+        for case in (old, nomnv):
+            rc, found = case.run(extra=("--snp-rows", "report"))
+            self.assertEqual((rc, pairs(found)), (0, {("carrier-missing", "S01,S03,S04")}),
+                             found)
+        rc, found = store.run(extra=("--snp-rows", "report"))
+        self.assertEqual((rc, pairs(found)), (0, {("open-snp-row-snv-mnv", "S03,S04")}),
+                         found)
+
+
+    def test_a_per_sample_cluster_chain_drops_a_slots_mnv_with_the_store(self):
+        """snp_row_seqs, the SNP rows a per-sample run's merge cluster chains through: with
+        the MNV store a slot's MNVs, as its indels, are the drops that make its SNP targets
+        rows CRISPRme may write or not (it takes such a carrier off unless a repeat puts
+        the bases back); without it none is. (S01 alone holds the SNV, on the MNV's slot:
+        a sequence another slot gives with no such record has none.)"""
+        seq, recs, _rows = self._world("S01")
+        snp, mnv = (recs[0][:3] + ({"S01": "1|0"},)), recs[1]
+        vcf = os.path.join(self.tmp, "w.vcf.gz")
+        write_vcf(vcf, "chr21", [snp, mnv])
+        ctx = mock.Mock(snp_union=False)
+        mnvs = {mnv[:3]}
+        for store in (False, True):
+            sem = C.Semantics(True, {(None, None): {"all_alleles": True, "store_filter": True,
+                                                    "mnv_store": store}}, {})
+            win = C.Window(seq, "chr21", 0, len(seq), [C.Vcf(vcf)], sem=sem)
+            drops = {a.key for _sets, d, _so in C.snp_row_seqs(win, ctx, len(PRE),
+                                                                len(PRE) + 23) for a in d}
+            self.assertEqual(drops, mnvs if store else set(), store)
+
+
+class OpenComplexInDeleted(Base):
+    """Item 23 of the 2.10.1 backlog, an open reading (OPEN_READINGS): a complex record
+    wholly on bases the row's deletion deletes. METHODS section 4 keeps the carrier; the
+    code (changes_span) reads its ALT as inserted bases and takes the slot off. Read as the
+    code reads it, counted under its own class whether the row lists the carrier or not,
+    in soundness and in completeness, never gating."""
+
+    def _world(self, listed):
+        seq = PRE + GUIDE[:10] + "CAGTA" + GUIDE[10:] + "TGG" + POST
+        dele = (len(PRE) + 10, GUIDE[9] + "CAGTA", GUIDE[9], {"S01": "1|0", "S02": "0|1"})
+        cx = (len(PRE) + 12, "AGT", "C", {"S01": "1|0"})
+        s = len(PRE)
+        row = row_fields("chr21", s, "+", GUIDE + "NNN", seq[s:s + 23], GUIDE + "TGG",
+                         "TGG", 0, 0, "X", tok("chr21", dele), listed)
+        return Case(self.tmp, seq, [dele, cx], [row])
+
+    def test_listed_or_not_it_is_its_own_class(self):
+        rc, found = self._world("S01,S02").run()
+        self.assertEqual((rc, pairs(found)), (0, {("open-complex-in-deleted", "S01")}), found)
+        self.assertIn("listed, while", found[0][2])
+        self.assertIn("item 23", found[0][2])
+        rc, found = self._world("S02").run()
+        self.assertEqual((rc, pairs(found)), (0, {("open-complex-in-deleted", "S01")}), found)
+        self.assertIn("not listed", found[0][2])
+        rc, found = self._world("S02").run(mode="completeness", budget=("0", "0", "0", "0"))
+        self.assertEqual((rc, gating(found)), (0, []), found)
+        self.assertEqual(pairs(found), {("open-complex-in-deleted", "S01")}, found)
+
+
+class MnvOverlapReadings(unittest.TestCase):
+    """overlap_kind and complex_takes_off on the plan's overlap shapes, on both records'
+    rows, as 2.10.0 read an MNV (``mnv`` False) and with the MNV store (MNV_RULES). Records
+    (0-based places in the comments); ``cover`` is a target's covered span that holds both
+    records."""
+
+    COVER = (0, 40)
+
+    def kinds(self, a, b, cover=COVER):
+        """(on b's rows, as 2.10.0 read MNVs; with the MNV store) for allele ``a``."""
+        return (C.overlap_kind(a, b, cover=cover), C.overlap_kind(a, b, cover=cover,
+                                                                   mnv=True))
+
+    def test_rule_a_an_mnv_only_on_deleted_bases(self):
+        d = al(10, "ACG", "A")    # deletes CG (10, 11)
+        m = al(11, "CG", "TT")    # exactly the deleted bases (shape 5)
+        self.assertEqual(self.kinds(m, d), ("deleted", "deleted"))
+        # on the MNV's rows: rule (b), the deletion takes the slot off with the store
+        self.assertEqual(self.kinds(d, m), ("beside", "complex"))
+        # an MNV whose REF keeps a base past the deleted ones, its changed bases deleted:
+        # it changes nothing (it inserts no base), as the code reads it
+        m2 = al(11, "CGT", "TTT")
+        self.assertEqual(C.overlap_kind(m2, d, cover=self.COVER, mnv=True), "beside")
+        self.assertFalse(C.complex_takes_off(m2, d, self.COVER, mnv=True))
+
+    def test_rule_b_a_deletion_inside_the_mnv(self):
+        m = al(11, "CGT", "TTA")   # 10..12
+        d = al(10, "AC", "A")      # deletes 10, anchored before the MNV (shape 4)
+        self.assertEqual(self.kinds(d, m), ("beside", "complex"))
+        self.assertFalse(C.complex_takes_off(d, m, self.COVER))
+        self.assertTrue(C.complex_takes_off(d, m, self.COVER, mnv=True))
+        # on the deletion's rows the MNV changes a base it keeps: off with the store,
+        # not read without it
+        self.assertEqual(self.kinds(m, d), ("mnv", "complex"))
+
+    def test_rule_c_one_pos(self):
+        d = al(10, "AC", "A")
+        m = al(10, "AC", "GT")
+        i = al(10, "A", "AT")
+        for a, b in ((m, d), (d, m), (m, i), (i, m)):
+            self.assertEqual(self.kinds(a, b), ("artefact", "artefact"))
+
+    def test_shapes_one_and_two(self):
+        m = al(10, "AC", "GT")     # 9, 10
+        ins = al(11, "C", "CTT")   # anchored on the MNV's last base (shape 1)
+        self.assertEqual(self.kinds(m, ins), ("mnv", "complex"))
+        self.assertEqual(self.kinds(ins, m), ("complex", "complex"))
+        # a target that ends at the MNV: the insertion past it changes none of its bases
+        self.assertEqual(self.kinds(ins, m, cover=(0, 10)), ("beside", "beside"))
+        dele = al(11, "CGA", "C")  # anchored on the MNV's last base, deletes 11, 12 (shape 2)
+        self.assertEqual(self.kinds(m, dele), ("mnv", "complex"))
+        self.assertEqual(self.kinds(dele, m), ("complex", "complex"))
+        self.assertEqual(self.kinds(dele, m, cover=(0, 10)), ("beside", "beside"))
+
+    def test_the_open_reading_of_item_23(self):
+        d = al(10, "ACGTA", "A")   # deletes CGTA, 10..13
+        cx = al(12, "GTA", "C")    # a complex record wholly on them, 11..13
+        self.assertEqual(self.kinds(cx, d), ("complex-in-deleted", "complex-in-deleted"))
+        self.assertTrue(C.complex_in_deleted_off(cx, d, self.COVER))
+        # its edit starting on the target's first covered base: the point its ALT is read
+        # inserted at is no place between two covered bases
+        self.assertFalse(C.complex_in_deleted_off(cx, d, (11, 40)))
+        # a pure deletion, an SNV or an MNV there is 'deleted', as METHODS reads it
+        for a in (al(12, "GT", "G"), al(12, "G", "T"), al(12, "GT", "AA")):
+            self.assertEqual(C.overlap_kind(a, d, cover=self.COVER), "deleted", a.key)
+        self.assertIn("complex-in-deleted", C.LEFT_OUT)
+        with mock.patch.dict(C.OPEN_READINGS, clear=True):
+            self.assertEqual(C.overlap_kind(cx, d, cover=self.COVER), "deleted")
+
+
+class ForkPoolFreeze(Base):
+    def test_the_parents_objects_are_frozen_when_the_pool_forks(self):
+        """fork_pool: the parent's objects are in the permanent generation when the workers
+        fork (no worker's collection walks them, so none copies the parent's heap), and
+        out of it once the pool ends; the findings are those of one process. (A Python
+        3.12 interpreter starts with a few hundred objects frozen already: the count at the
+        fork is compared with the count before the run.)"""
+        import multiprocessing.context as mpc
+        seen = []
+        before = gc.get_freeze_count()
+        real = mpc.BaseContext.Pool
+
+        def pool(self_, *args, **kwargs):
+            seen.append(gc.get_freeze_count())
+            return real(self_, *args, **kwargs)
+
+        case, info = world_deletion(self.tmp)
+        write_results(case.res, [set_field(info["rows"][0], samples="S01")])
+        one = case.run(mode="both", budget=("0", "0", "0", "0"))
+        with mock.patch.object(mpc.BaseContext, "Pool", pool):
+            many = case.run(mode="both", budget=("0", "0", "0", "0"),
+                            extra=("--jobs", "3", "--tile", "20"))
+        self.assertEqual(one[0], many[0])
+        self.assertEqual(sorted(one[1]), sorted(many[1]))
+        self.assertTrue(seen and all(n > before + 1000 for n in seen), (before, seen))
+        self.assertEqual(gc.get_freeze_count(), 0)
+
 
 
 def shared_runs(a, b, k):
