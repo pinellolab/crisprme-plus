@@ -1075,11 +1075,12 @@ and the slot keeps a row only if the row's target is on those bases.
 - **A store without its MNV file** (2.10.0's, or that of 2.8.1's HPRC v2.0 archives) is read as
   2.10.0 read it: an MNV row's carriers come from the indel log, phase unknown, and no MNV is read
   on another record's rows. Rule (c) below does not apply there either, so the rows are 2.10.0's.
-- **The run says which.** Once for each chromosome whose indel log lists an MNV, the indel
-  post-analysis writes a NOTE to the run's `log_verbose.txt`: `NOTE [indel-snp]: the MNVs of
-  <dataset> on <chrom> were read from the phased indel genotype store's MNV file ...`, or, for a
-  store without it, `NOTE [indel-snp]: the phased indel genotype store of <dataset> on <chrom> holds
-  no MNV ...`, which says how to add the file. The real-data check reads these NOTEs (§8).
+- **The run says which.** Once for each chromosome that has a store and whose indel log lists an
+  MNV, the indel post-analysis writes a NOTE to the run's `log_verbose.txt`: `NOTE [indel-snp]:
+  the MNVs of <dataset> on <chrom> were read from the phased indel genotype store's MNV file ...`,
+  or, for a store without it, `NOTE [indel-snp]: the phased indel genotype store of <dataset> on
+  <chrom> holds no MNV ...`, which says how to add the file. The real-data check reads these NOTEs
+  (§8).
 - CRISPRme 2.10.0 opens the indel file by name and reads no MNV file, so it reads the same rows
   from a store of 2.10.1.
 
@@ -1113,10 +1114,10 @@ two records describe the same bases:
 | 6. The indel and the MNV at one POS (105 insertions, 54 deletions, 4 complex records) | 163 | 1,457 | read without the MNV (c) | read without the indel (c) |
 | 7. A complex record and an MNV | 676 | 3,418 | as in the shapes above, by where its bases lie | as in the shapes above |
 
-In shape 7, a complex record whose own ALT bases fall on bases the other record deletes or
-replaces is the pending case above (a complex record inside an indel's deleted bases). A slot that
-leaves a row so holds both records, and a target that needs both is not generated (one record per
-fake-indel window, §10): such targets go unreported.
+In shape 7, where the complex record puts its own ALT bases on bases the MNV replaces, the reading
+waits for the decision pending above (a complex record inside another record's deleted or replaced
+bases). A slot that leaves a row so holds both records, and a target that needs both is not
+generated (one record per fake-indel window, §10): such targets go unreported.
 
 The carrier gate (§5) reads shape 6 by its own convention, kept from 2.10.0, not by rule (c): an
 indel or an MNV at the position of a variant the row names is another ALT of that position on the
