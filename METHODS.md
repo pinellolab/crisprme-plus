@@ -2309,6 +2309,32 @@ and the annotation legend of Section 6. Allele frequencies can be omitted
 (`--no-maf`) for runs where they are not yet finalized, so the site set and
 scores can be shared without misleading frequency values.
 
+**How a CRISPR-Bulge score is shown, and both alignments of a site.** The curated schema
+(the in-report table and every download share it) is written for a reader who has to act on
+it, which for this score family means two things. *Precision:* a CRISPR-Bulge cell carries
+**6 significant digits** — `0.00019`, `2.35e-39`, `0` for a true zero, `-` for a row the
+model did not score — the same `"{:.6g}"` text the post-analyses already write into the
+search's own tables. Fixed decimals cannot work here: the sensitive operating point is
+`1.9e-4` (§3.5 of `docs/offtarget_risk_summary_METHODS.md`; `PostProcess/cb_operating_point.py`
+is the single source of both the threshold and this text, so the two cannot drift), 4
+decimals print the same `0.0002` on either side of it, and a whole genome-wide run reads
+`0.0000`. CFD keeps its 4 decimals: it is calibrated, uses the whole 0–1 range, and its own
+thresholds (0.05 / 0.2 / 0.5) are far from any display floor. *Both alignments:* the curated
+tables carry `Aligned_spacer+PAM`, `Aligned_protospacer+PAM_REF` and
+`Aligned_protospacer+PAM` (the variant sequence, the reference one on a row no variant
+creates) as three adjacent columns, so the site reads as an alignment and the base a variant
+changes — the base a validation assay must be designed around — is visible without going
+back to the raw table. A variant-created site with no reference alignment shows `-` there; a
+run with no variant off-target at all drops the `_REF` column rather than repeat the other
+one on every row, as it drops `Observed`. For the same reason the **CRISPR-Bulge score
+panels use a log10 y-axis** (CFD's stay linear 0–1), with the operating point drawn on it as
+a labelled line: on a linear 0–1 axis every point of a genome-wide run lies on the bottom
+rule. A log axis cannot show 0 and the model's float32 output underflows to exactly 0 for a
+few percent of the rows of such a run, so those sites are clipped onto a floor one decade
+below the smallest non-zero score, inside a shaded band the legend and the caption name as
+"0" — they are shown as zeros, never dropped in silence. **None of this changes the search's
+result tables**: it is display, applied to the report's own tables and panels.
+
 The report and all of its tables are built from the **best alignment per locus**
 (`bestMerge`). The exhaustive **alternative-alignments** file
 (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments at each

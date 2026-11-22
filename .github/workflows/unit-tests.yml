@@ -565,6 +565,15 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_top_plots -v
 
+      - name: "How the report SHOWS a CRISPR-Bulge score (6 significant digits in the curated tables, log10 score panels with the operating point and the zeros kept)"
+        # The curated tables printed 4 decimals, which cannot place a site against the
+        # 1.9e-4 sensitive operating point, and the score panels used a linear 0-1 axis,
+        # where every point of a genome-wide run lies on the bottom rule. Text and axis
+        # now come from cb_operating_point, so they cannot drift from the threshold.
+        # matplotlib + pandas only; the search tables are not touched.
+        working-directory: PostProcess
+        run: python -m unittest test_cb_report_display -v
+
       - name: "Observed-haplotypes sidecar (make_oh_sidecar: alt-origin superset, byte-identical rows, safe degrade)"
         working-directory: PostProcess
         run: python -m unittest test_make_oh_sidecar -v

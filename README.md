@@ -2493,6 +2493,14 @@ is under `data/`). Reading top to bottom:
 - **Key off-target table columns** — in the per-site table (and every download TSV):
   - **Chromosome / Position / Direction (`+`/`-`)** — where the off-target is and on which strand.
   - **crRNA vs DNA (aligned)** — the guide and the genomic sequence aligned; `-` marks a bulge.
+    Three columns, which read top to bottom as the alignment of the site:
+    `Aligned_spacer+PAM` (the guide), `Aligned_protospacer+PAM_REF` (the **reference**
+    sequence there) and `Aligned_protospacer+PAM` (the **variant** sequence, the reference
+    one on a row no variant creates). Reading the last two side by side shows which base a
+    variant changes, and gives the sequence to order oligos against for a validation assay.
+    A variant-created site absent from the reference has no reference alignment: its
+    `Aligned_protospacer+PAM_REF` is `-`. A reference-only search (no `--vcf`) has one
+    alignment per row, so it drops the `_REF` column instead of repeating it.
   - **Mismatches**, **Bulge_type** (`DNA` / `RNA` / `-`) and **Bulge_Size** — the alignment's edit make-up.
   - **Variant / rsID** — the variant(s) that create a *variant* off-target (`chrom;pos;ref;alt`,
     plus rsID when known); empty for reference off-targets.
@@ -2504,6 +2512,15 @@ is under `data/`). Reading top to bottom:
     *NAR* 2024) on its **own** scale (bands **0.5 / 0.2 / 0.1**). It was trained on off-targets
     with at most one bulge, so any site that needs **≥ 2 bulges is out-of-domain and shows `-`**
     (N/A) — read CFD for those sites (a `-` means "not scored", not "no risk").
+    Written with **6 significant digits** (`0.00019`, `2.35e-39`, `0` for a true zero), the
+    same text the search's own tables carry: this score's sensitive operating point is
+    `1.9e-4` and most sites of a genome-wide run score far below it, so a fixed-decimal
+    column could not say which side of the threshold a site is on. CFD, which is calibrated
+    and uses the whole 0–1 range, keeps its 4 decimals. For the same reason the report's
+    CRISPR-Bulge score panels use a **log10** y-axis with that operating point drawn on it
+    (CFD's panels stay linear 0–1); a log axis cannot show 0, so the sites whose score
+    underflows to exactly 0 are drawn in a shaded band at the bottom of the axis, one decade
+    below the smallest non-zero score and named in the legend, never dropped.
 - **Off-target risk summary (top of the report).** The top of the report **replaces the legacy
   `100/(100+Σ)` aggregated specificity score** with a per-scorer **risk card**: for CFD and for
   CRISPR-Bulge separately (never blended), the count of ≤1-gap off-target sites in each score band and a
