@@ -54,8 +54,9 @@ and the `release-crisprme` skill.
   `indel_genotypes_hg38_HPRC` are packed again. So is `20-NRR_3_hg38+hg38_HPRC` (29.55 GB): its
   index files are the same, but its manifest names the bundle by its fingerprint, and a download
   refuses a bundle the manifest does not name. `genotypes_hg38_HPRC` stays as it is (the same
-  fingerprint). The three archives and `indexes/SHA256SUMS` go up in one Hub commit
-  (`publish-index --replace-companions --stage-only`, then one upload of the staged folder). No
+  fingerprint). The three archives, the two companions' records and `indexes/SHA256SUMS` go up in
+  one Hub commit (`publish-index --replace-companions --stage-only`, then one upload of the staged
+  folder). No
   index name, index format or catalog entry changes. `docs/INDEX_PROVENANCE.md` gives the new
   archives' sizes, SHA-256 and Hub commit (2.10.1); 2.10.0's stay in the Hub's history. CRISPRme
   2.10.0 reads no MNV file, so it gives the same rows on the new archives. A download of HPRC in
