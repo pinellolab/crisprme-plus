@@ -565,8 +565,12 @@ def breakers_of(changing, alleles, lo, hi, seq_at=None, own=()):
     replaces agrees with the MNV's base, and only a true third-base conflict -- the
     reference base, the MNV's and the SNP's all different -- leaves the haplotype with no
     sequence and takes it off the row. That holds at the MNV's own POS too, which it
-    replaces as it does the bases after it. Up to 2.10.0 a SNP at an MNV's POS took it
-    off the gate's reading and a SNP anywhere else on its REF took the haplotype off."""
+    replaces as it does the bases after it -- though support() does not ask there: a
+    record at the position of a variant the row names is a rival allele of that position
+    on the slot, which makes the slot's phase unknown, the gate's own convention since
+    2.10.0 (PanelChrom.rivals, METHODS section 4). Up to 2.10.0 a SNP at an MNV's POS
+    took it off the gate's reading and a SNP anywhere else on its REF took the
+    haplotype off."""
     out = []
     for p, r, a, g in changing:
         if (p, r, a) in own:

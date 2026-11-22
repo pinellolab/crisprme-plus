@@ -1154,9 +1154,10 @@ The carrier gate (§5) reads shape 6 by its own convention, kept from 2.10.0, no
 indel or an MNV at the position of a variant the row names is another ALT of that position on the
 slot, so the gate does not count that slot as a haplotype holding the row's variants; where only
 such slots hold a combination, its state is `phase not known`. The indel post-analysis lists such
-a carrier by its phase. The gate changes no row, so only its state can differ there. It reads an
-SNV and an MNV on one slot by rule 2 below, as the post-analysis does
-(`haplotype_prioritizer.breakers_of`, `holds_target`).
+a carrier by its phase. The gate changes no row, so only its state can differ there. Away from
+that position it reads an SNV and an MNV on one slot by rule 2 below, as the post-analysis does
+(`haplotype_prioritizer.breakers_of`, `holds_target`); at the position of a variant the row names
+the convention above comes first, and the slot's phase is not known whatever the bases say.
 
 **Three shapes the decomposition leaves, and how 2.10.1 reads them.** Three more pairings put two
 records of one slot where no haplotype has them. They are artefacts of turning a pangenome graph
