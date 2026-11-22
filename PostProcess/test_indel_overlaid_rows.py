@@ -1349,6 +1349,24 @@ class TheMnvStore(_Base):
             self.assertNotIn(self.NOTE_READ, fx.proc.stdout)
             self.assertNotIn(self.NOTE_NONE, fx.proc.stdout)
 
+    def test_no_store_and_a_log_of_mnvs_says_no_mnv_note(self):
+        """The review's mutant E: the NOTEs on the MNVs are of a store that was read. With
+        none (a dataset built with CRISPRME_INDEL_SNP=0, or a store that failed) and a log
+        that lists MNVs, the run writes the NOTE of a dataset read without its store, once,
+        and neither MNV NOTE; read without that guard, the store's has_mnv on None ended the
+        run (its rows not written)."""
+        tmp = tempfile.mkdtemp(prefix="indel_overlaid_rows_nostore_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        fx = _Fixture(tmp, self.world, tiers=("registry", "tier1"))
+        self.assertEqual(fx.proc.returncode, 0, fx.proc.stderr[-2000:])
+        self.assertEqual(fx.proc.stderr, "")
+        self.assertTrue(fx.rows())
+        self.assertEqual(fx.proc.stdout.count(
+            "NOTE [indel-snp]: no phased indel genotype store of %s on %s:" % (VCF, CHROM)), 1)
+        self.assertNotIn(self.NOTE_READ, fx.proc.stdout)
+        self.assertNotIn(self.NOTE_NONE, fx.proc.stdout)
+        self.assertNotIn("holds no MNV", fx.proc.stdout)
+
     def test_the_mnv_file_changes_the_mnvs_readings_alone(self):
         """The MNV file changes the rows of the sites with an MNV (K5's perfect row loses
         S01), and no other row: every site without an MNV beside it has the same rows with
@@ -1370,6 +1388,35 @@ class TheMnvStore(_Base):
         base = _Fixture(tmp, World())
         self.assertEqual(base.proc.returncode, 0, base.proc.stderr[-2000:])
         self.assertEqual(sorted(map(key, base.rows())), got["store"])
+
+
+@unittest.skipUnless(_gnu_wc(), _SKIP_WC)
+class TheMnvFileOfNoRecord(_Base):
+    """The byte-identity guard of 2.10.1 (the plan's section 5): a dataset with no MNV, as
+    HGDP + 1000 Genomes and the mega, gets an MNV file of no record from build-index-only's
+    STEP 1c, and its store is read with it as without it: the same rows, the same
+    co-occurrence companion, the same stdout (no NOTE on the MNVs, its log listing none)."""
+
+    def test_the_same_run_with_and_without_it(self):
+        runs = {}
+        for name, kw in (("without", {}), ("with", dict(mnv_store=True))):
+            tmp = tempfile.mkdtemp(prefix="indel_overlaid_rows_%s_" % name)
+            self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+            runs[name] = _Fixture(tmp, self.world, **kw)
+            self.assertEqual(runs[name].proc.returncode, 0, runs[name].proc.stderr[-2000:])
+        mnv = os.path.join(runs["with"].tmp, "Dictionaries", "indel_genotypes_" + VCF,
+                           "gt_mnv_%s.tsv.gz" % CHROM)
+        with gzip.open(mnv, "rt") as fh:
+            self.assertEqual(fh.read(), "")
+        with open(runs["without"].out + ".bestCFD_INDEL.txt") as a, \
+                open(runs["with"].out + ".bestCFD_INDEL.txt") as b:
+            self.assertEqual(a.read(), b.read())
+        self.assertEqual(runs["without"].cooc(), runs["with"].cooc())
+        import re
+        strip = lambda fx: re.sub(r"\d+\.\d+", "<s>", fx.proc.stdout.replace(fx.tmp, "<T>"))  # noqa: E731
+        self.assertEqual(strip(runs["without"]), strip(runs["with"]))  # (timings aside)
+        self.assertNotIn("MNV", runs["with"].proc.stdout)
+        self.assertEqual(runs["with"].proc.stderr, "")
 
 
 class World30(World):

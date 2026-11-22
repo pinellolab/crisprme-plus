@@ -1464,6 +1464,37 @@ class TheMnvRules(unittest.TestCase):
         ns = self._ns(_Store(records, has_mnv=True), seq, 1000)
         self.assertEqual([k for k, _g, _o in ns["_other_indels"](1000, 1030, *deletion)], [])
 
+    def test_two_mnvs_at_one_pos_are_two_records_not_other_alleles(self):
+        """The review's mutant B: the same-POS rule (c) is for an MNV and an indel. Another
+        MNV at an MNV row's own POS, on its slot, is read as a second record that changes
+        the target's bases (as two indels at one POS that do not keep its anchor are), so
+        the slot leaves the MNV's rows; only an indel at that POS is another allele there,
+        read without it. (No HPRC v2.1 slot holds two MNVs that share a base: the plan's
+        census.) Read as another allele too, the second MNV was never read, and the slot
+        stayed on the row of an MNV its haplotype does not hold alone. Two MNVs that keep
+        their first base, as two indels that keep their anchor, stay other alleles of it."""
+        seq = self.SEQ
+        mnv = (1012, seq[11:13], self._other(seq[11:13]))        # TA>AT
+        other = (1012, seq[11:13], "GG")                          # TA>GG, at its POS
+        insertion = (1012, seq[11], seq[11] + "AA")               # T>TAA, at its POS
+        records = {mnv: {"S1": "1|0"}, other: {"S1": "1|0", "S2": "0|1"},
+                   insertion: {"S1": "1|0"}}
+        ns = self._ns(_Store(records, has_mnv=True), seq, 1000)
+        found = ns["_other_indels"](1000, 1030, *mnv)
+        self.assertEqual([(k, o) for k, _g, o in found], [(other, True)])
+        exact, putative = isc.resolve_carriers(
+            [], isc.IndelCarriers({"S1": "1|0", "S2": "1|0"}),
+            others=[g for _k, g, _o in found])
+        kept = set().union(*[e[0] for e in exact.values()], *putative.values())
+        self.assertEqual(kept, {"S2"})
+        # each way: the other MNV's rows read this one as a second record too
+        self.assertEqual([k for k, _g, _o in ns["_other_indels"](1000, 1030, *other)], [mnv])
+        # two MNVs that keep their first base: other alleles of it, as two indels are
+        keeps = {(1012, seq[11:14], seq[11] + "GG"): {"S1": "1|0"},
+                 (1012, seq[11:14], seq[11] + "CC"): {"S1": "1|0"}}
+        ns = self._ns(_Store(keeps, has_mnv=True), seq, 1000)
+        self.assertEqual(ns["_other_indels"](1000, 1030, 1012, seq[11:14], seq[11] + "GG"), [])
+
     def test_the_store_reader_brings_the_mnv_file(self):
         """The real reader (build_indel_genotypes.IndelGenotypeReader) of a store whose MNV
         file is beside its indel file: _other_indels finds the MNV inside the target, and the
