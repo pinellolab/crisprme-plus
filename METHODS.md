@@ -2390,6 +2390,64 @@ genotypes — so no carrier or homozygote count is estimated: the registry holds
 `--keep-intermediates`) gives as **NA**, and a per-dataset **`indel_af.tsv`** companion
 carries indel allele frequencies by source alongside the SNP+indel co-occurrence table.
 
+### 7.1 Flanking sequences for validation (`extract-flanks`)
+
+A shortlist says where each off-target is; validating one in the lab needs the **sequence
+around it**. For a site in a variant region that is not one sequence, and the haplotype
+that carries the variant making the off-target is usually not the reference one, so
+designing oligos from the reference alone can target the wrong locus.
+
+`crisprme.py extract-flanks` writes, per input row of a results table (the report's top-N
+download or an `integrated_results.tsv`): the **reference** flank, and one flank per
+**distinct observed haplotype**, deduplicated by sequence, each with the samples (and the
+haplotype side, where the VCF is phased) that carry it. A site with no variant in its
+window, or whose haplotypes all read alike, gives one entry.
+
+**How a haplotype is written.** The reference with every ALT allele the sample's genotype
+puts on that slot, each in place of its REF bases, as VCF 4.x defines it — by
+`scripts/variant_haplotypes.py`, the same reconstruction `scripts/check_indel_rows.py`
+(the independent real-data check of the indel path) is built on, so the release gate's
+notion of a haplotype and the user's validation sequence cannot drift apart. Only records
+whose `FILTER` is `PASS` or `.` are written by default, as CRISPRitz's enricher reads them
+and therefore as the search modelled them, so the emitted protospacer matches the row's
+own alignment; records outside them are **counted in the notes**, never silently dropped,
+and `--include-filtered` writes them.
+
+**The window.** Cut on the **reference** — the same genomic interval for every haplotype
+of a site, so the entries line up and the table can print one interval. An indel inside
+the window makes one haplotype's flank longer or shorter than another's, which is what
+that genome holds; the `flank_len` column gives it. The default is 200 bases either side
+(a 423 bp interval for a 23 bp protospacer+PAM: a 250–300 bp NGS amplicon with room for
+primers 50–150 bp from the cut, and the short end of a Sanger/TIDE amplicon). Near a
+contig end the window is truncated and the entry says so.
+
+**Marking the target.** Each entry gives the offset and the length of the protospacer+PAM
+inside its own flank, and whether that haplotype actually **reads** the row's
+protospacer. On a carrier of an insertion inside the target, the offset is the exact
+place its bases start; on a haplotype that does not hold the row's variant, the target's
+reference span is mapped through that haplotype's own coordinates, so an indel that
+shifts the site reads as a shifted offset rather than as a miscount. Flanks are always
+written on the plus strand; the row's strand and the protospacer read on it are columns.
+
+**What it refuses to guess.** A sample whose call in the window is unphased and
+heterozygous, has a missing allele, or has fewer copies than another of its calls has no
+known slot — which of its alleles share a haplotype is not in the VCF — and a slot whose
+records' REF spans meet describes those bases twice, so the VCF gives it no sequence.
+Either way the sample (or the one copy at fault) is listed under `unresolved` with the
+reason and the records, and no haplotype is written for it. Two genotyped VCFs that cover
+one chromosome and name a sample in common are refused outright. An input the run's
+records name but that is not there is raised **by name**, with what to pass instead.
+
+**Output.** A FASTA (one record per sequence, whose names never carry a sample identity)
+and a TSV index joining back to the input by its line number and, where the table has one,
+its rank. The order is deterministic: rows in input order, the reference entry first, then
+the haplotypes that hold the off-target, then by carrier count and sequence. A 400 bp
+window over a panel of thousands holds dozens of distinct haplotypes (on the 1000-site
+shortlist of a genome-wide HGDP+1000G run: a median of 23 per site, 940 of 1000 sites with
+more than one), nearly all differing from each other far from the target, so
+`--max-haplotypes` (default 10) writes the most useful and the notes count the rest, while
+`n_haplotypes` always gives the true total.
+
 ## 8. Off-target scoring, assumptions and limitations
 
 **Scoring models.** Candidate off-targets are scored with two independent,

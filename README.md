@@ -521,6 +521,7 @@ so the search above works out of the box on a fresh install.
 <br>&nbsp;&nbsp;&nbsp;&nbsp; 2.2.9 [Generate Report](#229-generate-report)
 <br>&nbsp;&nbsp;&nbsp;&nbsp; 2.2.10 [Reference-Index and Data-Distribution Commands](#2210-reference-index-and-data-distribution-commands)
 <br>&nbsp;&nbsp;&nbsp;&nbsp; 2.2.11 [Targets Scoring](#2211-targets-scoring)
+<br>&nbsp;&nbsp;&nbsp;&nbsp; 2.2.12 [Extract Flanks](#2212-extract-flanks)
 <br>3 [Test](#3-test)
 <br>&nbsp;&nbsp;3.1 [Quick Test](#31-quick-test)
 <br>&nbsp;&nbsp;3.2 [Detailed Test](#32-detailed-test)
@@ -1076,6 +1077,11 @@ outputs. The following is a summary of CRISPRme's key features:
   <br>Scores a supplied list of off-target sites (e.g. Cas-OFFinder output) with the 
   CRISPRme+ CFD + CRISPR-Bulge calculations and an optional per-site variant carrier 
   overlay — no genome search.
+
+- [**Extract Flanks**](#2212-extract-flanks) (`extract-flanks`) 
+  <br>Writes the genomic sequence around each off-target of a shortlist — the reference 
+  flank and one flank per distinct observed haplotype, with the samples carrying each 
+  and the protospacer marked — so a site can be turned into a validation oligo order.
 
 - [**GNOMAD Converter**](#225-gnomad-converter) (`gnomAD-converter`) 
   <br>Transforms GNOMAD VCFs (`vcf.bgz` format) into a format compatible with 
@@ -2686,6 +2692,124 @@ For a generic TSV instead of Cas-OFFinder output, map the columns explicitly:
 > requires an installed variant index via `--index-path`. Mismatch-only sites are
 > scored exactly; bulge rows must follow CRISPRme's alignment convention (bulge
 > columns as `-`).
+
+#### 2.2.12 Extract Flanks
+---
+
+Once a shortlist of off-targets is in hand, validating one in the lab means ordering
+oligos — amplicon primers, an ssODN, a probe — and for that you need the **sequence
+around the site**, not just its coordinates. **Extract Flanks** writes it.
+
+For a site in a variant region that is not one sequence. The reference has one; each
+distinct haplotype observed in the panel the search read has another; and the haplotype
+that carries the variant **making** the off-target is usually not the reference one.
+Ordering primers off the reference for a site that exists only on an ALT haplotype is how
+a validation assay quietly measures the wrong locus. So, per input row, `extract-flanks`
+writes:
+
+- the **reference** flank, and
+- one flank per **distinct observed haplotype**, deduplicated by sequence, each with the
+  samples (and the haplotype side, where the VCF is phased) that carry it.
+
+A site with no variant in its window gives one entry. A site whose haplotypes all read
+alike gives one entry. In every entry the **target's own coordinates are marked** — the
+offset and the length of the protospacer+PAM inside that flank — so nobody has to count
+bases, and an indel that shifts the site shows up as a shifted offset rather than as a
+miscount. The entry also says whether that haplotype actually **reads** the row's
+protospacer (`target_found`), which is the fastest way to see which sequence carries the
+off-target and which merely shares its locus.
+
+It never invents a haplotype. A sample whose genotype is unphased, has a missing allele,
+or whose records overlap in the window (the VCF gives no sequence there) is **reported**,
+under `unresolved`, with the reason and the records at fault. A target near a contig end
+is truncated, and says so. An input it cannot resolve is named exactly, never guessed.
+
+Haplotypes are written by the same code as `scripts/check_indel_rows.py`, the independent
+check of CRISPRme's indel rows (`scripts/variant_haplotypes.py`): two readers of one VCF
+that disagreed would be two different answers to "what does this individual hold here?",
+and one of them would send your oligos to the wrong sequence.
+
+Usage example — the report's top-1000 download, read with the run's own inputs:
+
+  ```bash
+  crisprme.py extract-flanks \
+    --results Results/my_job \
+    --targets my_job_report/data/top1000.tsv \
+    --out flanks/top1000
+  ```
+
+This writes `flanks/top1000.fa` (one record per sequence) and `flanks/top1000.tsv` (one
+line per sequence, joining back to the input by `row_id`, the table's line number, and by
+`rank` where the table has one). With `--results` the reference genome, the VCF datasets
+and the samples list come from the run's own records (`.command_line.txt`,
+`.sampleID.txt`). A run made with `--index-path` does not need its VCFs at search time, so
+they are often gone by then; point at them with `--vcf-dir`:
+
+  ```bash
+  crisprme.py extract-flanks \
+    --results Results/my_job \
+    --targets my_job_report/data/top1000.tsv \
+    --vcf-dir VCFs/hg38_HGDP1kGP \
+    --window 200 \
+    --out flanks/top1000
+  ```
+
+A worked line of the TSV reads: row `17` of the input, `chr8:127736231-127736253 (+)`,
+haplotype `hap1`, flank `chr8:127736031-127736453`, `flank_len 423`, `target_offset 200`,
+`target_len 23`, `target_found yes`, `n_carriers 312`, `variants chr8_127736240_A_AT`.
+Cut 423 bases out of the FASTA record `crisprme_row17_hap1`, and the protospacer+PAM is
+bases 200–222 of it; the 200 bases on either side are where the primers go. The `ref`
+entry of the same row is the sequence every sample **without** a variant in that window
+carries.
+
+##### Input Arguments
+---
+
+- `--targets` — a results table: the report's top-N download (curated columns) or an
+  `integrated_results.tsv` (`.tsv`, `.tsv.gz` or `.zip`).
+- `--results` — a CRISPRme results folder. Its own records give the reference, the VCFs
+  and the samples list, and — unless `--targets` names another table — its integrated
+  table is the input. Give **both** to read a shortlist with the run's own inputs.
+  (One of `--targets` / `--results` is required.)
+- `--out` (*Required*) — the prefix of the two files written: `<prefix>.fa` and
+  `<prefix>.tsv`.
+- `--reference` — the reference genome: a folder of per-chromosome FASTAs, or one FASTA.
+  Default: the run's `--genome`.
+- `--vcf` / `--vcf-dir` — the phased VCF(s) the run's index was built from (repeatable).
+  Default: the dataset folder(s) the run's `--vcf` list names, where they are still there.
+- `--samples` — a samplesID file (repeatable). Default: the run's `.sampleID.txt`.
+- `--window` — bases of flank on either side of the target (default `200`). For a 23 bp
+  protospacer+PAM that is a 423 bp interval: it covers a 250–300 bp NGS amplicon with
+  room to place primers 50–150 bp away from the cut, and the short end of a 400–700 bp
+  Sanger/TIDE amplicon. The flank is cut on the **reference**, so every haplotype of a site covers one
+  genomic interval and the entries line up; an indel inside the window then makes one
+  haplotype's flank longer or shorter, which is what that genome really holds
+  (`flank_len` says so).
+- `--block` — which alignment of an integrated row to take the site from: `highest_CFD`
+  (default), `fewest_mm+b` or `highest_CRISPR_BULGE`. (A curated download has one
+  projection and ignores this.)
+- `--max-haplotypes` — how many haplotypes to write per row beside the reference
+  (default `10`; `0` writes every one). A 400 bp window over a panel of thousands holds
+  dozens of distinct haplotypes, nearly all differing from each other far from the
+  target, so the most useful come first — the ones that **hold** the off-target, then by
+  carrier count. The `n_haplotypes` column always gives the true total and the notes say
+  how many were left out.
+- `--anonymise` (`--anonymize`) — write no sample identity anywhere: the `carriers`
+  column is blank and only the counts are kept. FASTA record names never carry a sample
+  identity, flag or no flag.
+- `--include-filtered` — also write the records whose `FILTER` is outside `PASS` and `.`.
+  By default they are left out, as the search left them out — so the flank matches the
+  row's own alignment — and counted in the `notes` column, so a low-quality call in your
+  amplicon window is never silently missing.
+- `--max-rows` — stop after N rows of the table. A genome-wide integrated table has
+  millions of rows; this command is meant for a shortlist.
+- `--reference-only` — read no VCF: the reference flank alone.
+
+> **Note:** every flank is written on the **plus strand** of the reference, whatever the
+> row's strand — one orientation, stated once, is what an oligo order needs. The TSV's
+> `protospacer_on_strand` column gives the target read on the row's own strand, to check
+> against the row's alignment. Flank coordinates are printed 1-based inclusive (as a
+> genome browser reads them); `target_offset` is 0-based, as a Python slice reads it.
 
 ## 3 Test
 

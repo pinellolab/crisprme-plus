@@ -195,6 +195,38 @@ Panel depth is a **risk/validation-size optimization** read off the expected-tru
 **not a recall guarantee** — detection is lossless (every site is listed); only score-ranked
 selection carries this trade.
 
+## 3.6. From a panel to an oligo order: flanking sequences per haplotype
+
+A validation panel names loci; an assay needs **sequence**. `crisprme.py extract-flanks`
+turns either the panel tier or the report's top-N download into the sequence around each
+site, ready for amplicon primers or probes:
+
+```bash
+crisprme.py extract-flanks \
+  --results Results/<job> \
+  --targets <job>_report/data/top1000.tsv \
+  --vcf-dir VCFs/<dataset> \
+  --out flanks/panel
+```
+
+Per input row it writes the **reference** flank and one flank per **distinct observed
+haplotype** (deduplicated by sequence, each with its carriers and — where the VCF is
+phased — the haplotype side), 200 bases either side by default, with the protospacer+PAM's
+offset and length marked inside every flank and a `target_found` column saying whether that
+haplotype actually reads the row's protospacer.
+
+This matters for exactly the sites this document is about. A variant-created off-target
+exists only on the haplotype that carries its variant: primers designed from the reference
+alone can sit on a sequence that differs from the one being assayed, or amplify a locus
+that does not hold the site at all. And an indel in the window shifts the protospacer, so
+a position counted off the reference is off by the indel's length — the marked offset is
+read from the haplotype itself, so it is not.
+
+A sample whose genotype is unphased, has a missing allele, or whose records overlap in the
+window is **reported** rather than guessed; haplotypes are written by the same code as the
+independent indel-row check (`scripts/variant_haplotypes.py`). See README §2.2.12 for the
+flags and METHODS §7.1 for the method.
+
 ## 4. Point calibration: isotonic, and why
 
 The raw score is a ranking number, not a probability. We map score → P(true off-target)

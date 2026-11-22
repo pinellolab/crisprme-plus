@@ -435,6 +435,32 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_check_indel_rows -v
 
+      - name: "extract-flanks (validation oligos: the reference flank + one per observed haplotype, the protospacer marked)"
+        # crisprme.py extract-flanks (PostProcess/extract_flanks.py): the sequence a user
+        # orders validation oligos from, so a wrong one is a wrong assay. Hermetic: a
+        # reference and a phased VCF written by the test, with the answer known by hand --
+        # a site with no variant, a SNV beside the target and one inside it (the second
+        # haplotype does NOT read the row's protospacer and must say so), an insertion
+        # and a deletion before the target (the marked offset moves by exactly their
+        # bases), an insertion INSIDE the target (its carrier reads the row's protospacer,
+        # the reference does not), two variants in one window, a contig start and a contig
+        # end (truncated, said, never a crash), an unphased call, a missing allele and a
+        # slot whose records overlap (REPORTED, never written as a haplotype), identical
+        # haplotypes deduplicated by sequence with their carriers, a minus-strand row
+        # written on the plus strand, both VCF reader paths (plain gzip and BGZF, written
+        # here), determinism, --anonymise leaking no sample identity, a record outside
+        # PASS left out and counted, and every input the run's records name but that is
+        # gone raised BY NAME. Then a MUTANT per rule (the offset read off the reference,
+        # an unphased call read as phased, no deduplication, the window cut by arithmetic,
+        # a variant named for a flank it does not change, a clash ignored, the protospacer
+        # claimed everywhere, a sample leaked into a FASTA name): each must break its own
+        # test, so no rule is untested. It also holds the reuse: the tool and the checker
+        # read ONE haplotype writer (scripts/variant_haplotypes.py) and ONE reader of a
+        # run's sidecars (scripts/run_records.py), both standard library only, and the
+        # checker still imports no CRISPRme module and still runs standalone.
+        working-directory: PostProcess
+        run: python -m unittest test_extract_flanks -v
+
       - name: "Dict-less bulge cap + defaults + 0-bulge indel routing (v2.3.3)"
         working-directory: PostProcess
         run: python -m unittest test_bulge_cap -v

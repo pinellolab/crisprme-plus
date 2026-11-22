@@ -13,6 +13,43 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+- **`crisprme.py extract-flanks`: the genomic sequence around an off-target, per observed
+  haplotype, to order validation oligos from.** A shortlist says where a site is;
+  validating one in the lab needs what is there. For a site in a variant region that is
+  not one sequence: the reference has one, each distinct haplotype observed in the panel
+  the search read has another, and the haplotype that carries the variant MAKING the
+  off-target is usually not the reference one, so primers designed off the reference can
+  measure the wrong locus. Given a results table (the report's top-N download or an
+  `integrated_results.tsv`), the command writes, per row, the reference flank and one
+  flank per distinct observed haplotype -- deduplicated by sequence, each with the samples
+  and, where the VCF is phased, the haplotype side that carries it -- as a FASTA plus a
+  TSV index that joins back by the input's line number and rank. The protospacer+PAM's
+  offset and length are marked inside every flank, read from that haplotype's own
+  coordinates, so an indel that shifts the site reads as a shifted offset rather than as a
+  miscount, and a `target_found` column says whether the haplotype reads the row's
+  protospacer at all. The window is cut on the reference (200 bases either side by
+  default: a 423 bp interval, a 250-300 bp NGS amplicon with room for primers 50-150 bp
+  from the cut), so every haplotype of a site covers one genomic interval and an indel
+  inside it shows as a longer or shorter `flank_len`. It never invents a haplotype: an
+  unphased heterozygous call, a missing allele, a slot whose records describe the same
+  bases twice, two genotyped VCFs that share a sample, a target near a contig end and an
+  input the run's records name but that is gone are each reported or refused BY NAME. With
+  `--results` the reference, the VCFs and the samples list come from the run's own
+  sidecars. `--anonymise` writes no sample identity anywhere (FASTA names never carry one);
+  `--max-haplotypes` (default 10) keeps the output readable without hiding anything -- the
+  haplotypes that hold the off-target come first, `n_haplotypes` always gives the true
+  total and the notes count what was left out. Haplotypes are written by the SAME code the
+  independent indel-row check is built on, now in `scripts/variant_haplotypes.py` (the VCF,
+  reference and haplotype readers) and `scripts/run_records.py` (a run's own sidecars),
+  both moved whole out of `scripts/check_indel_rows.py` and both standard library only:
+  two readers of one VCF that disagreed would be two answers to "what does this individual
+  hold here?", and one of them would send a user's oligos to the wrong sequence. The
+  checker's behaviour is unchanged (its full suite passes, and it still runs standalone and
+  imports no CRISPRme module). README section 2.2.12, METHODS section 7.1,
+  `docs/offtarget_risk_summary_METHODS.md` section 3.6, and a new CI suite
+  (`PostProcess/test_extract_flanks.py`) with a mutant for every rule.
+
 ### Changed
 - **The Docker image keeps no conda or pip package cache.** The Dockerfile's `micromamba clean
   --all --yes`, at the end of each RUN that installs an environment, removes the cached packages

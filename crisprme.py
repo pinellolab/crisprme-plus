@@ -8493,6 +8493,11 @@ def crisprme_help() -> None:
         "\tScores a supplied LIST of off-target sites (e.g. Cas-OFFinder output) with "
         "the CRISPRme+ CFD + CRISPR-Bulge calculations, with an optional per-site "
         "variant carrier overlay -- no genome search\n\n"
+        "crisprme.py extract-flanks\n"
+        "\tWrites the genomic sequence around each off-target of a shortlist -- the "
+        "REFERENCE flank and one flank per distinct observed haplotype, with the "
+        "samples carrying each and the protospacer marked -- so a site can be turned "
+        "into a validation oligo order (FASTA + a TSV index)\n\n"
         "crisprme.py gnomAD-converter\n"
         "\tConverts gnomAD VCF files into CRISPRme compatible VCFs (supports "
         "gnomAD v3.1, v4.0, and v4.1 (incl. joint VCFs))\n\n"
@@ -8637,6 +8642,114 @@ def targets_scoring_cmd():
     print(f"targets-scoring: wrote {n} scored sites to {output}")
 
 
+def extract_flanks_cmd():
+    """``crisprme.py extract-flanks --targets <table> | --results <folder> --out <prefix>
+    [--reference <genome dir or FASTA>] [--vcf <VCF>] [--vcf-dir <dir>]
+    [--samples <samplesID>] [--window 200] [--block highest_CFD] [--anonymise]
+    [--include-filtered] [--max-rows N] [--max-haplotypes 10] [--reference-only]``
+
+    Write the genomic sequence around each off-target site of a shortlist, so a site
+    can be ordered as validation oligos. Per input row it writes the REFERENCE flank
+    and one flank per DISTINCT observed haplotype -- deduplicated by sequence, each
+    with the samples (and the haplotype side, where the VCF is phased) that carry it --
+    with the protospacer+PAM's offset and length marked inside every flank, so an indel
+    that shifts the site is visible rather than miscounted.
+
+    A sample whose genotype is unphased, has a missing allele, or whose records overlap
+    in the window is REPORTED, never guessed. Input is the report's top-N download or an
+    integrated_results.tsv; with ``--results`` the reference, the VCFs and the samples
+    list are read from the run's own records.
+    """
+    if "--help" in input_args or len(input_args) < 3:
+        sys.path.insert(0, script_path)
+        import extract_flanks as _ef
+        sys.stderr.write(_ef.HELP)
+        sys.exit(1)
+
+    def _val(flag, required=False):
+        if flag not in input_args:
+            if required:
+                error(f"{flag} must be provided (see 'extract-flanks --help')")
+            return None
+        try:
+            value = input_args[input_args.index(flag) + 1]
+        except IndexError:
+            error(f"please provide a value for {flag}")
+        if value.startswith("--"):
+            error(f"please provide a value for {flag}")
+        return value
+
+    def _all(flag):
+        out, i = [], 0
+        while True:
+            try:
+                i = input_args.index(flag, i) + 1
+            except ValueError:
+                return out
+            if i >= len(input_args) or input_args[i].startswith("--"):
+                error(f"please provide a value for {flag}")
+            out.append(os.path.abspath(input_args[i]))
+
+    targets = _val("--targets")
+    results = _val("--results")
+    if not targets and not results:
+        error("give --targets <results table> or --results <results folder> "
+              "(see 'extract-flanks --help')")
+    out = _val("--out", required=True)
+    window = _val("--window")
+    if window is not None:
+        try:
+            window = int(window)
+        except ValueError:
+            error("--window must be an integer number of bases")
+        if window < 0:
+            error("--window must be 0 or more")
+    max_rows = _val("--max-rows")
+    if max_rows is not None:
+        try:
+            max_rows = int(max_rows)
+        except ValueError:
+            error("--max-rows must be an integer")
+        if max_rows < 0:
+            error("--max-rows must be 0 or more (0: every row)")
+    max_haps = _val("--max-haplotypes")
+    if max_haps is not None:
+        try:
+            max_haps = int(max_haps)
+        except ValueError:
+            error("--max-haplotypes must be an integer")
+        if max_haps < 0:
+            error("--max-haplotypes must be 0 or more (0: every haplotype)")
+    block = _val("--block")
+    reference = _val("--reference")
+
+    sys.path.insert(0, script_path)
+    import extract_flanks as _ef
+
+    if block is not None and block not in _ef.BLOCKS:
+        error("--block must be one of: " + ", ".join(_ef.BLOCKS))
+    try:
+        _ef.run(
+            targets=os.path.abspath(targets) if targets else None,
+            results=os.path.abspath(results) if results else None,
+            reference=os.path.abspath(reference) if reference else None,
+            vcfs=_all("--vcf"), vcf_dirs=_all("--vcf-dir"), samples=_all("--samples"),
+            out=os.path.abspath(out),
+            window=_ef.DEFAULT_WINDOW if window is None else window,
+            block=block or _ef.DEFAULT_BLOCK,
+            anonymise=("--anonymise" in input_args or "--anonymize" in input_args),
+            include_filtered="--include-filtered" in input_args,
+            max_rows=max_rows or 0,
+            max_haplotypes=(_ef.DEFAULT_MAX_HAPLOTYPES if max_haps is None else max_haps),
+            reference_only="--reference-only" in input_args,
+            log=lambda m: print(m),
+        )
+    except _ef.FlankError as flank_err:
+        # one line, the whole reason, no traceback: the same error style the other
+        # commands use for an input they cannot resolve
+        error(str(flank_err))
+
+
 if len(sys.argv) < 2:
     # no arg? print help, and make no data folder: it made the seven of a data folder
     # (Genomes/, Results/, ...) wherever one ran it to read the help (C14)
@@ -8659,6 +8772,8 @@ elif sys.argv[1] == "targets-integration":  # run targets integration
     target_integration()
 elif sys.argv[1] == "targets-scoring":  # score a supplied list of off-target sites
     targets_scoring_cmd()
+elif sys.argv[1] == "extract-flanks":  # flanking sequences per observed haplotype
+    extract_flanks_cmd()
 elif sys.argv[1] == "gnomAD-converter":  # run gnomad converter
     gnomAD_converter()
 elif sys.argv[1] == "generate-personal-card":  # run create personal card
