@@ -130,5 +130,145 @@ class TestRiskCard(unittest.TestCase):
         self.assertIn("95%-recall threshold", modal)        # explains what the sensitive point is
 
 
+class TestModalSaysWhatWasMeasured(unittest.TestCase):
+    """The explanation page must describe the benchmark it was measured on.
+
+    Every claim below was contradicted by a re-measurement of the raw benchmark
+    (2,940,588 rows / 359 positives / 46 guides; CRISPR-Bulge held-out 2,703,869 /
+    287 / 40) and is pinned here against the shipped artifacts so it cannot come back.
+    """
+
+    def setUp(self):
+        oc._CACHE.clear()
+        oc.set_artifact_dir(_CALDIR)
+
+    def tearDown(self):
+        oc._CACHE.clear()
+        oc.set_artifact_dir(_CALDIR)
+
+    def _modal(self):
+        _card, modal = risk_card.render_risk_card(
+            {"guide_display": "G", "nuclease": "SpCas9", "pam": "NRG"},
+            cfd_scores=[0.6, 0.3, 0.25], cb_scores=[0.6, 0.3, 0.05])
+        return modal
+
+    def test_modal_discloses_the_on_target_positives(self):
+        """The benchmark counts each guide's own on-target as a positive; the card's score
+        arrays do not (generate_report builds them with `_mmb > 0`, "exclude perfect"). The
+        page must say so where the numbers are, with the deployment-matched values beside
+        them: measured on the benchmark with the 46/40 perfect-match rows dropped, CFD's
+        trapezoid AUPR is 0.025 (from 0.168), CRISPR-Bulge's tie-grouped full-precision AP
+        0.521 (from 0.622), and CFD's >=0.5 precision 0.048 (from 0.085)."""
+        modal = self._modal()
+        self.assertIn("on-target as a positive", modal)
+        self.assertIn("46 of CFD’s 359", modal)
+        self.assertIn("40 of CRISPR-Bulge’s 287", modal)
+        for matched in ("0.025", "0.521", "0.511", "0.048"):
+            self.assertIn(matched, modal)
+        # and it must not be buried: the disclosure sits with the AUPR table, before the
+        # figure whose panel titles print the same numbers.
+        self.assertLess(modal.index("on-target as a positive"), modal.index("rc-pr"))
+
+    def test_modal_does_not_call_the_cfd_column_held_out(self):
+        """CFD has no training set: its support is all 46 guides, the 6 CRISPR-Bulge
+        trained on included, so nothing is held out for it. The table header, the note and
+        the figure caption said "held-out" of both scorers."""
+        modal = self._modal()
+        self.assertNotIn("held-out AUPR", modal)
+        self.assertIn("external-benchmark AUPR", modal)
+        self.assertIn("nothing is held out for it", modal)
+        self.assertNotIn("on held-out validated off-target sites", modal)
+
+    def test_modal_counts_positives_as_positives_not_sites(self):
+        """"CFD 359 sites / 46 guides" said the AUPR rested on 359 rows. 359 and 287 are
+        positive counts; the sites are 2,940,588 and 2,703,869, and both come from the
+        artifacts that the table's own numbers come from."""
+        modal = self._modal()
+        self.assertNotIn("359 sites", modal)
+        for scorer, pos in (("cfd", 359), ("crispr_bulge", 287)):
+            s = oc.artifact_summary(scorer)
+            self.assertEqual(int(s["n_positives"]), pos)
+            self.assertIn(f"{pos} validated off-targets" if scorer == "cfd" else f"{pos} among",
+                          modal)
+            self.assertIn(f"{int(s['n_sites']):,}", modal)
+
+    def test_modal_pr_caption_has_the_axes_the_figures_plot(self):
+        """The figures plot recall on x, so higher recall moves RIGHT and down. The caption
+        said "left-and-down", which reads the trade-off backwards."""
+        modal = self._modal()
+        self.assertNotIn("left-and-down", modal)
+        self.assertIn("right-and-down", modal)
+        self.assertIn("recall is the x-axis", modal)
+
+    def test_modal_shows_each_bands_benchmark_support(self):
+        """band_counts is in both artifacts and returned by artifact_summary, and nothing
+        displayed it: the card gave an expected count and a 90% range for a band without
+        saying how many positives, or how many guides, it rests on. Every number in the
+        new table must come from the artifact."""
+        modal = self._modal()
+        self.assertIn("benchmark positives in it", modal)
+        self.assertIn("guides carrying one", modal)
+        for scorer, spec in (("cfd", risk_card._CFD_ROWS), ("crispr_bulge", risk_card._CB_ROWS)):
+            counts = oc.artifact_summary(scorer)["band_counts"]
+            for label, disp in spec:
+                c = counts[label]
+                row = (f'<tr><td>{disp}</td><td>{c["positives"]:,}</td>'
+                       f'<td>{c["guides_with_positive"]}</td>'
+                       f'<td>{c["guides_contributing"]}</td></tr>')
+                with self.subTest(band=disp):
+                    self.assertIn(row, modal)
+        # the band the support table exists for: 41 positives from 12 of 40 guides
+        cb = oc.artifact_summary("crispr_bulge")["band_counts"]["0.2-0.5"]
+        self.assertEqual((cb["positives"], cb["guides_with_positive"]), (41, 12))
+
+    def test_modal_states_the_measured_value_of_the_two_cfd_rescue_arms(self):
+        """On the 40 held-out guides the two CFD arms add 9,660 and 614 sites to the
+        6,076-site sensitive tier and recover 1 of the 14 validated off-targets it misses;
+        10 of those 14 carry a bulge and the CFD bulge arm recovers none of them. The page
+        asserted the opposite ("rescues the high-CFD sites CRISPR-Bulge misses")."""
+        modal = self._modal()
+        self.assertNotIn("the high-CFD sites CRISPR-Bulge misses", modal)
+        for n in ("9,660", "614", "6,076", "2.7&times;"):
+            self.assertIn(n, modal)
+        self.assertIn("recover <b>1</b> of the 14", modal)
+        self.assertIn("none of the 10 missed sites that carry a bulge", modal)
+
+    def test_modal_recall_growth_is_the_measured_sixteen_fold(self):
+        """95% -> 99% recall on the held-out benchmark is 6,076 -> 99,477 sites = 16x at the
+        shipped thresholds (16.4x at the exact recall quantiles), not the "roughly 6x" the
+        page carried, which came from a worked search."""
+        modal = self._modal()
+        self.assertNotIn("roughly 6&times; the sites", modal)
+        self.assertIn("99%-recall list is <b>16&times;</b>", modal)
+        self.assertIn("99,477", modal)
+
+    def test_modal_coverage_claim_matches_the_shipped_artifacts(self):
+        """The page claimed "~90% coverage for a single novel guide" while METHODS said the
+        interval cannot be validated for a novel clinical guide. What the artifacts measure
+        is per-held-out-BENCHMARK-guide coverage, 89-100% over the displayed bands, lowest
+        CFD 0.2-0.5. The modal must quote that range, name the band that falls short, and
+        keep METHODS' limit on a clinically novel guide."""
+        modal = self._modal()
+        cov = []
+        for scorer, spec in (("cfd", risk_card._CFD_ROWS), ("crispr_bulge", risk_card._CB_ROWS)):
+            table = oc.artifact_summary(scorer)["loo_total_count_coverage_nominal90"]
+            cov += [table[label] for label, _disp in spec if table.get(label) is not None]
+        self.assertEqual(f"{int(round(min(cov) * 100))}–{int(round(max(cov) * 100))}%", "89–100%")
+        self.assertIn("89–100% of folds against a nominal 90%", modal)
+        self.assertIn("CFD 0.2–0.5, which measures 89%", modal)
+        self.assertNotIn("reaches ~90% coverage for a single novel guide", modal)
+        self.assertIn("cannot be, validated for a clinically novel guide", modal)
+
+    def test_modal_does_not_claim_the_shipped_map_is_leave_one_guide_out(self):
+        """p_point is the ALL-guide isotonic fit (it closes on the benchmark by
+        construction); leave-one-guide-out enters only the band errors, phi and the
+        coverage check. "built so no guide ever set its own probabilities" described the
+        validation, not the map that ships."""
+        modal = self._modal()
+        self.assertNotIn("no guide ever set its own probabilities", modal)
+        self.assertIn("fit on all of those guides at once", modal)
+        self.assertIn("not the shipped map itself", modal)
+
+
 if __name__ == "__main__":
     unittest.main()

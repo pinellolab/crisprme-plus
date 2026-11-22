@@ -18,6 +18,26 @@ specific ratio would imply knowledge we do not have (§5, §6, §7). The three r
 after a second-round fix (the §6 magnitude reframed as a cross-guide population envelope, distinct
 from a per-guide multiplier; the §7 interval corrected to [2, 81]).*
 
+*Revised 2026-11-22 (2.10.1), after an audit of the risk-card modal and an adversarial
+re-verification of that audit. **The 2026-10-20 sign-off line above says the reviewers
+verified that the shipped `.npz` artifacts match this text. For the CFD artifact that
+stopped being true when its score column was refitted and this document was not.** Every
+CFD φ, the decision-band φ, the ≥0.2 aggregate φ, the per-held-out-guide coverage table,
+the §4 global LOGO residual, the §4 CFD [0.2,0.5) band error and the §7 dominant-guide φ
+move were the superseded pre-2.7.11 artifact's; all are now the shipped ones, each named
+as corrected where it appears, and
+`PostProcess/test_methods_calibration_numbers.py` re-reads them from the `.npz` in CI so
+the drift cannot recur. Also corrected in this revision: the benchmark's positives include
+each guide's own on-target while the report's ranked list excludes them (§3, now disclosed
+with the deployment-matched values rather than silently restated); the two CFD panel arms
+are measured rather than asserted (§3, §3.5); the 95%→99% list ratio (§3.5); "held-out"
+applied to the CFD column, which has no training set (§3); 287/359 printed as sites rather
+than positives (§3); the "1–3 guides" decision-band support, which matched no artifact
+(§5, §8); and the "≈ +0.66" cross-band correlation (§7). What was **not** recomputed in
+this pass, and is backlog item 45: the three challenger columns of §4's bake-off table, the
+§7 ACTGA/NRG worked-example counts, and a refit of the page on the deployment-matched
+population.*
+
 ---
 
 ## 1. What the summary reports (and what it does not)
@@ -107,9 +127,44 @@ a different support than CFD's and is footnoted as such.
 
 ## 3. Discrimination (precision–recall)
 
-AUPR is primary (imbalance-appropriate). Held-out, with guide-cluster-bootstrap 90% CIs
-(300 guide-resamples): **CFD AUPR 0.168 (90% CI 0.13–0.24)**, **CRISPR-Bulge AUPR 0.613
-(90% CI 0.56–0.70)**.
+AUPR is primary (imbalance-appropriate). On the external benchmark, with
+guide-cluster-bootstrap 90% CIs (300 guide-resamples): **CFD AUPR 0.168 (90% CI
+0.13–0.24)**, **CRISPR-Bulge AUPR 0.613 (90% CI 0.56–0.70)**. CRISPR-Bulge's is measured on
+the 40 guides held out of its training; **CFD has no training set, so nothing is held out
+for it** — its support is all 46 benchmark guides, the 6 CRISPR-Bulge trained on included.
+"External" is the word that is true of both columns; "held-out" is true only of
+CRISPR-Bulge's, and the card, the figures and this section now say which.
+
+**The benchmark counts each guide's own on-target as a positive; the report's ranked list
+does not.** 46 of CFD's 359 positives and 40 of CRISPR-Bulge's 287 are perfect (0-mismatch,
+0-gap) matches — one per guide, CFD exactly 1.000 on every one of them, CRISPR-Bulge
+0.998–1.000 — while the card's score arrays are built as "off-targets (exclude perfect)"
+(`generate_report.py`). Every discrimination number in this section is therefore measured
+on a population the deployed ranking does not contain. Re-running the same estimators on
+the same benchmark with those rows dropped gives:
+
+| quantity | as published | deployment-matched (on-targets dropped) |
+|---|---|---|
+| CFD AUPR (trapezoid, the artifact's rule) | 0.168 | **0.025** |
+| CRISPR-Bulge AUPR (tie-grouped, full precision — the figure's 0.62) | 0.622 | **0.521** |
+| CRISPR-Bulge AUPR (trapezoid, 3-decimal column — the table's 0.613) | 0.613 | **0.511** |
+| CFD bulge=0 AP | 0.272 | 0.076 |
+| CFD t≥0.5 precision / recall | 0.085 / 0.276 | **0.048** / 0.169 |
+| CFD t≥0.2 precision / recall | 0.0073 / 0.721 | 0.0060 / 0.681 |
+| CRISPR-Bulge t≥0.5 precision / recall | 0.728 / 0.495 | 0.658 / 0.413 |
+| CRISPR-Bulge t≥1.9×10⁻⁴ precision / recall | 0.0449 / 0.951 | 0.0386 / 0.943 |
+| guides carrying a decision-band (≥0.5) positive | 46 / 40 | 19 / 19 |
+
+CFD moves furthest because its 46 on-targets tie at exactly 1.0 at the head of the ranking:
+that single tie group (51 rows, 46 of them positive — precision 0.902 at recall 0.128)
+carries **0.116 of the 0.168, 69% of the headline**, before CFD ranks one off-target. The
+effect on the card's *expected counts* is small: refit the isotonic map without those rows
+and the expected total CFD would print moves ×1.08 in the ≥0.5 band and ×1.02 over ≥0.2
+(×1.00 in 0.2–0.5), while **no CRISPR-Bulge band moves at all** — on-targets populate only
+the top bins. This is a discrimination-claim problem, not an expected-count problem. **The published values are kept in this release** so they stay
+comparable with the benchmark literature, and the deployment-matched values are printed
+beside them here and in the modal; re-fitting and re-rendering the page on the
+deployment-matched population is backlog item 45, not a release fix.
 
 **Caveats on these headline numbers (required reading alongside them).** Both AUPRs are
 point estimates from clustered positives (359 / 46 guides for CFD, 287 / 40 for CB) in
@@ -133,18 +188,24 @@ is computed for the stratified APs**, so their three printed decimals are precis
 accuracy: 0.285 supports "CRISPR-Bulge ranks single-bulge sites far above CFD's prevalence
 floor, on a dozen guides", and must not be read as a point estimate of the same standing
 as the headline AUPRs above, which do carry CIs. A single-guide-driven bulge AP is also
-the weakest link in §3.5's panel logic; the panel is a union, so CFD ≥0.5 still rescues
-high-CFD single-bulge sites CRISPR-Bulge ranks low.
+the weakest link in §3.5's panel logic — and the union's CFD single-bulge arm does not
+repair it: **measured on the 40 held-out guides, CFD ≥0.5 on single-bulge sites adds 614
+sites to the sensitive tier and recovers none of the 10 bulge-carrying validated
+off-targets that tier misses** (see §3.5 for the full arm-by-arm measurement). The arm is
+retained as insurance against the benchmark's own blind spots, not on evidence that it
+rescues anything.
 
 AUROC (≈0.97/0.98) is reported only as a footnote: it is prevalence-invariant and does
 not reflect operating-point precision at this imbalance.
 
-Operating points (held-out): CFD t≥0.2 → recall 0.72 / precision 0.007; t≥0.5 → recall
+Operating points (external benchmark; CRISPR-Bulge on its 40 held-out guides, CFD on all
+46): CFD t≥0.2 → recall 0.72 / precision 0.007; t≥0.5 → recall
 0.28 / precision 0.085. CRISPR-Bulge t≥0.26 → recall 0.60 / precision 0.50; t≥0.5 →
 recall 0.50 / precision 0.72. **These CRISPR-Bulge recalls (0.50–0.60) are recall against
 the assay-detected set (§2), not against ground truth, and a low CRISPR-Bulge count is not
 clearance (§7).** These curves (overall and stratified by bulge count) are shown in the modal.
-The modal's curve is titled **AUPR 0.62, not 0.613**, on the same 287 held-out sites: the
+The modal's curve is titled **AUPR 0.62, not 0.613**, on the same 287 held-out positives
+(2,703,869 sites): the
 figure re-scores CRISPR-Bulge at full precision and groups tied scores, while the
 calibration artifact the headline number and the card's table come from is fitted on the
 report's 3-decimal CRISPR-Bulge column (0.613 trapezoid / 0.615 tie-grouped on that
@@ -200,18 +261,45 @@ carriers.
   47 positives from 12 of them, 53% from one; read it with the support caveat in §3).
   CFD's 2.8.0 position-aware bulge penalty fixes the *per-site* over-call (a PAM-proximal bulge
   no longer scores like a perfect match) but does not make CFD a bulge ranker.
-- **CFD ≥ 0.2 on 0-bulge** rescues the high-CFD no-bulge sites CRISPR-Bulge misses (CFD is
+- **CFD ≥ 0.2 on 0-bulge** adds the high-CFD no-bulge sites CRISPR-Bulge ranks low (CFD is
   reliable off-bulge).
-- **CFD ≥ 0.5 on a single bulge** rescues the *high-CFD* 1-bulge sites: CFD now position-penalizes
-  the bulge but is still not calibrated to rank bulges, so only high-confidence calls are rescued
+- **CFD ≥ 0.5 on a single bulge** adds the *high-CFD* 1-bulge sites: CFD now position-penalizes
+  the bulge but is still not calibrated to rank bulges, so only high-confidence calls are added
   (CRISPR-Bulge remains the primary bulge ranker; this only *adds* sites it scored low).
 - **≥2-bulge sites** are excluded from scoring-driven selection (uncalibrated for both scores)
   but kept-and-demoted in the report, never dropped.
 
+**What the two CFD arms are worth, measured.** On the 40 held-out guides, with CRISPR-Bulge
+at full precision:
+
+| arm | sites added | validated off-targets recovered |
+|---|---|---|
+| CRISPR-Bulge ≥ 1.9×10⁻⁴ (the base tier) | 6,076 | 273 of 287 (recall 0.9512) |
+| + CFD ≥ 0.2 on 0-bulge sites | +9,660 | **+1** |
+| + CFD ≥ 0.5 on single-bulge sites | +614 | **0** |
+| union | 16,350 | 274 (recall 0.9547) |
+
+The two arms **2.7× the panel for +0.35 pp of recall**. Of the 14 positives the base tier
+misses, **10 carry a bulge and the CFD single-bulge arm recovers none of them**; the one
+recovery is a no-bulge site. The same answer on all 46 guides (+12,188/+1 and +704/0) and
+with the on-target rows excluded. Earlier drafts of this section and of the modal stated
+the rescue as a fact; it is not one on this benchmark. **The arms are kept anyway**, for a
+reason the table cannot show: a site no assay ever detected is scored here as a false
+positive (§2), so 1 in 10,274 is an *upper bound* on what the arms find on the detected
+set, not an estimate of what they would find in a new experiment. They are cheap insurance
+against the benchmark's blind spots, and the panel text must say so rather than claim a
+measured benefit.
+
 **Recall vs. validation size.** Recall above ~95% is reachable but the list grows **steeply**,
 because the last few percent of true off-targets sit in the noise floor shared with the
 negatives. On the benchmark the trade is ≈**9 sites per true off-target at 90% recall, ≈21 at
-95%, ≈354 at 99%** (≈6× the 95% list), ≈790 at 100%. For the ACTGA/NRG worked example (189,957
+95%, ≈354 at 99%**, ≈790 at 100%. In list sizes on the 40 held-out guides, the 99%-recall list
+is **≈16× the 95% one — 6,076 sites against 99,477** at the shipped thresholds (16.4× at the
+exact recall quantiles, 6,048 → 99,406). Earlier drafts said "≈6×" here; that figure is the
+ACTGA/NRG worked example's ratio, not the benchmark's, and the "≈21 → ≈354" in the same
+sentence already implies ≈17×. (`PostProcess/cb_operating_point.py`'s docstring still carries a
+third version of the same claim, "~6x … 206 → 1,286 loci"; that file belongs to another lane
+and is listed for correction there.) For the ACTGA/NRG worked example (189,957
 candidate loci) the 95% threshold yields **162 off-target validation loci** (90% → 58; 99% → 1,158; the shipped crispr_bulge_gt_0.tsv tier; +2 perfect-match candidate on-targets), measured
 directly on the regenerated full-precision report (not the per-true-OT ratios above, which are
 benchmark-wide averages).
@@ -222,8 +310,15 @@ selection carries this trade.
 ## 4. Point calibration: isotonic, and why
 
 The raw score is a ranking number, not a probability. We map score → P(true off-target)
-with **isotonic regression** (monotone, pool-adjacent-violators), fit **leave-one-guide-out**
-(LOGO; a guide never informs its own probabilities). We chose isotonic after a bake-off
+with **isotonic regression** (monotone, pool-adjacent-violators). **The map that ships is
+fit on all benchmark guides at once** — it is a deployment map, and it closes on its own
+training data by construction. **Leave-one-guide-out (LOGO) is the validation, not the
+fit**: the band-error table below, the overdispersion φ of §5 and the per-held-out-guide
+coverage check are each computed from refits in which a guide never informs its own
+numbers. Saying the shipped map is "fit leave-one-guide-out" (as earlier drafts and the
+modal did) presents an in-sample closure as an out-of-sample guarantee; the out-of-sample
+statement is the LOGO total-count residual at the end of this section.
+We chose isotonic after a bake-off
 against fairly-specified smooth monotone challengers (logistic-on-logit, monotone spline,
 beta calibration), judged on **per-band signed expected-count error**.
 
@@ -239,8 +334,18 @@ pipeline supports it; the global LOGO residuals in the last paragraph *are* out-
 | decision band | isotonic | logit-logistic | monotone spline | beta |
 |---|---|---|---|---|
 | CFD [0.5,1] | **+1.7%** | +10.6% | +10.6% | −19.5% |
-| CFD [0.2,0.5) | **+3.6%** | −16.6% | −16.6% | +27.6% |
+| CFD [0.2,0.5) | **+14.3%** | −16.6% | −16.6% | +27.6% |
 | CRISPR-Bulge [0.5,1] | **+0.0%** | +14.1% | +14.5% | −6.9% |
+
+*Fit provenance of this table (read before comparing columns).* The **isotonic** column is
+the shipped fit, re-derived from `{cfd,crispr_bulge}_calibration.npz`: CFD [0.5,1] +1.68%,
+CFD [0.2,0.5) **+14.32%**, CRISPR-Bulge [0.5,1] +0.03%. The CFD [0.2,0.5) cell previously
+read +3.6%, which is this band's error on the **superseded pre-2.7.11 CFD score column**
+(+3.57% there) — one of a family of pre-2.7.11 values this document carried; the rest are
+corrected in §5 and §7. **The three challenger columns have not been recomputed on the
+current CFD column** and are retained as the historical bake-off; recomputing them is part
+of backlog item 45. The decision-band conclusion below does not depend on them: it rests on
+isotonic's own [0.5,1] errors, which are shipped-fit values.
 
 The smooth maps buy a better *global* figure by **under-counting the high-risk decision
 band (the unsafe direction)**; beta is rejected specifically because it under-counts the
@@ -252,14 +357,22 @@ therefore describe isotonic as the best of the fair candidates for *this* data, 
 absolute ceiling and not as a method with a guaranteed conservative direction.
 
 **Global vs decision-band bias (do not conflate).** Isotonic's *global/total-count* LOGO
-residual is a small over-estimate (**+3.8% CFD, +4.9% CB**), i.e. mildly conservative in
-aggregate. **This +4–5% figure is a global, total-count number and does NOT describe the
-decision band.** In the safety-relevant decision band the signed band error is **+1.7%
-(CFD) and +0.0% (CB)**, i.e. **effectively unbiased, not +4–5% conservative**. The
-aggregate +3.8%/+4.9% is dominated by the low/screen bands. **An IND reviewer must not
-infer a +4–5% safety margin in the band where a clinician acts; the decision-band bias
-there is ≈0–1.7%.** The deployment map (fit on all guides) is in-sample unbiased (Σp
-358.1 vs 359; 284.3 vs 287).
+residual on the shipped fits is an over-estimate of **+25.0% for CFD and +4.9% for
+CRISPR-Bulge** (448.7 expected against 359 observed; 301.0 against 287). Earlier drafts
+gave CFD as +3.8%, which is the superseded pre-2.7.11 column's residual (+3.80% there); on
+the current column it is six times that. **Neither figure describes the decision band.**
+For CFD the +25.0% is almost entirely the screen bands — the 0.1–0.2 band over-predicts by
+**+114%** (130.7 expected against 61 observed) and 0–0.1 under-predicts by −11.8% — while
+in the safety-relevant decision band the signed band error is **+1.7% (CFD) and +0.0%
+(CB)**, i.e. effectively unbiased, and across the whole ≥0.2 aggregate **+9.5% (CFD) and
++1.8% (CB)**. **An IND reviewer must not read the global residual either as a safety margin
+or as a defect in the band where a clinician acts: the decision-band bias there is ≈0–1.7%
+and the ≥0.2 bias ≈+2–9%. CFD's screen bands below 0.2 are not calibrated to a standard the
+decision band meets, and the card does not display them.** The deployment map (fit on all
+guides) is in-sample unbiased: summed through the runtime `np.interp` path over every
+benchmark row, Σp 358.9 vs 359 for CFD and 284.3 vs 287 for CRISPR-Bulge (exactly 359.000
+and 287.000 at the bin level the isotonic fit closes on — the small shortfall is the linear
+interpolation between bin centres that `offtarget_calibration` applies at report time).
 
 ## 5. Uncertainty: prediction interval (what it covers and what it does not)
 
@@ -279,49 +392,78 @@ guide**, because the per-guide multiplicative prior shift (§6) is outside the b
 novel guide's uncertainty; the summary flags it qualitatively rather than with a specific
 multiplier, because an individual guide's own off-target propensity is unknown.**
 
-**Overdispersion φ is weakly estimated and must be read as assumption-driven, not
-data-validated, in the decision band.** φ is estimated per band by method of moments. In
-the low/action bands it rests on many guides (CFD φ ≈ 1.83 / 1.92 / 0.99) and is
-reasonably supported. In the **decision band it rests on only 1–3 guides carrying positives
-(§8.2)**: a method-of-moments overdispersion estimate from 1–3 clusters has essentially no
-degrees of freedom and enormous sampling error. The reported decision-band values
-(**φ ≈ 0.19 CFD, 0.01 CB**) are therefore **not meaningfully estimated**, and the resulting
-decision-band interval width is **assumption-driven, not empirically estimated**. The
-decision-band coverage figures below must not be presented as data-validated. *The report
-should state, per band, the number of guides contributing any positive; absent a pooled /
+**Overdispersion φ is weakly estimated in the decision band, and the band's positives come
+from few guides once the on-targets are counted out.** φ is estimated per band by method of
+moments. The shipped values, read from the artifacts, are **CFD φ ≈ 1.47 / 0.98 / 0.89**
+for 0–0.1 / 0.1–0.2 / 0.2–0.5 and **0.28 in the decision band**; CRISPR-Bulge's decision
+band is **0.01**. (Earlier drafts gave 1.83 / 1.92 / 0.99 and a decision-band 0.19: those
+are the superseded pre-2.7.11 CFD artifact's values throughout.)
+
+**Correction to the support claim.** Earlier drafts said the decision band "rests on only
+1–3 guides carrying positives". **No artifact, current or superseded, contains 1–3.** The
+shipped `band_counts` say the ≥0.5 band carries **99 positives from all 46 guides** (CFD)
+and **142 positives from all 40 guides** (CRISPR-Bulge). The band whose support really is thin is
+**CRISPR-Bulge 0.2–0.5: 41 positives from 12 of 40 guides**, and the decision band's
+support does thin sharply once each guide's own on-target is excluded (§3) — **53 positives
+from 19 guides** (CFD ≥0.5) and **102 from 19** (CRISPR-Bulge ≥0.5), i.e. roughly half the
+guides, not 1–3. The underlying argument stands on the corrected numbers: a
+method-of-moments φ from 19 effective clusters, in a band whose per-guide counts are small
+and heavily tied to one dominant guide (§2), has few degrees of freedom and large sampling
+error, so the **decision-band interval width remains assumption-driven rather than
+tightly estimated**, and the decision-band coverage figures below must not be presented as
+strongly data-validated. *The card now states, per band, the number of positives and the
+number of guides carrying one (`band_counts`, displayed in the modal); absent a pooled /
 hierarchical / shrinkage estimate of φ with a stated prior, the decision-band interval
-width is a modelling assumption.* (Direction of the resulting values: φ is large in the
+width stays a modelling assumption.* (Direction of the resulting values: φ is large in the
 low/action bands (interval honestly wide where a single guide's rate is least
 predictable) and small at the top.)
 
-**Validation: per-held-out-guide (single novel guide) coverage.** We validate on the
-deployment case directly: leave **one** guide out, build *its* per-band 90% prediction
+**Validation: per-held-out-guide coverage (a guide new to the fit, drawn from the
+benchmark's own population).** We validate on the nearest thing to the deployment case the
+data supports: leave **one** guide out, build *its* per-band 90% prediction
 interval from the other 45 (CB: 39) guides, and check whether that held-out guide's **own**
-realized true-positive count falls inside. This is the single-deployed-guide estimand, not
+realized true-positive count falls inside. This is the single-guide estimand, not
 the aggregate total-count, which would average out exactly the between-guide variation §6
-identifies as dominant. Averaged over the 46 (CB: 40) folds, realized coverage of the
+identifies as dominant. **It is not the same as covering a clinically novel guide**: the
+held-out guide is still one of the benchmark's 46, so this check bounds map and
+guide-selection uncertainty within that population, and the paragraph above — the interval
+cannot be validated to cover a novel clinical guide — continues to hold. The modal states
+it in those two parts. Averaged over the 46 (CB: 40) folds, realized coverage of the
 nominal 90% interval is:
 
 | coverage of nominal 90% | CFD 0.2–0.5 | CFD ≥0.5 | **CFD ≥0.2** | CB ≥0.2 |
 |---|---|---|---|---|
-| naive Poisson-binomial (1.3–6.3× too narrow) | ~72% | 83% | n/a | n/a |
-| two-level, no overdispersion | 76% | 87% | n/a | n/a |
-| **two-level + overdispersion (shipped)** | **95%** | **93%** | **95%** | **100%** |
+| naive Poisson-binomial (1.3–6.3× too narrow) † | ~72% | 83% | n/a | n/a |
+| two-level, no overdispersion † | 76% | 87% | n/a | n/a |
+| **two-level + overdispersion (shipped)** | **89.1%** | **95.7%** | **95.7%** | **100%** |
 
-**All shipped bands reach ≥90% on this single-guide estimand**, so the interval is
-coverage-valid for a single deployed guide, not merely for the aggregate total. How to read
-these numbers:
+† The two retired-estimator rows were measured on the superseded pre-2.7.11 CFD column and
+have not been recomputed; they are kept only as the historical comparison. The shipped row
+is read directly from `loo_total_count_coverage_nominal90` in the two artifacts. Earlier
+drafts printed that row as 95 / 93 / 95 / 100, which is the pre-2.7.11 CFD artifact's
+coverage (95.7 / 93.5 / 95.7), not what ships.
+
+**One shipped band falls below nominal: CFD 0.2–0.5, at 89.1% (41 of 46 folds).** The other
+bands are **conservative**, 95.7–100%. The earlier claim that "all shipped bands reach ≥90%"
+was true of the superseded artifact, not of this one. How to read these numbers:
 - They are empirical coverages from only **46 (CB: 40) folds**, binomial SE ≈4.4pp (n=46) /
-  ≈4.7pp (n=40) at p = 0.90, so **"95% vs 93%" are not statistically distinguishable**, and
-  the three-of-four over-90% values indicate a mildly **conservative (slightly too wide)**
-  interval, acceptable for an IND but labelled conservative rather than "nominal." **"100%"
+  ≈4.7pp (n=40) at p = 0.90, so **89.1% is one fold below nominal and is not statistically
+  distinguishable from 90%** — two independent reruns of the same check with different
+  Monte-Carlo streams put it at 87.0% (40/46) and 91.3% (42/46). Read it as "at nominal,
+  within sampling error, and the only band not visibly conservative," not as validated
+  ≥90%. The over-90% values indicate a mildly **conservative (slightly too wide)** interval,
+  acceptable for an IND but labelled conservative rather than "nominal." **"100%"
   at n = 40** implies an exact one-sided 90% Clopper–Pearson lower bound of **94.4%**
   (95.1% for 46/46), not literal full coverage.
-- Overdispersion φ is well-supported for the **≥0.2 aggregate** (0.806, estimated on all 46
-  guides) but the **decision-band** φ (≈0.19 CFD, ≈0.01 CB) rests on only **1–3 guides
-  (§8.2)** (a method-of-moments estimate with essentially no degrees of freedom), so the
-  decision-band interval width is an **assumption, not a data estimate**, and the
-  contributing-guide count is stated on the decision-band rows.
+- Coverage is also only **partly** out-of-sample: the fold refits the isotonic map without
+  guide *q*, but the φ that sets the interval's width is estimated on all guides including
+  *q*. With 40–46 clusters the leakage is small, but "validated per held-out guide" is a
+  statement about the map, not about the width.
+- Overdispersion φ is well-supported for the **≥0.2 aggregate** (**0.826**, estimated on all
+  46 guides) but the **decision-band** φ (**≈0.28 CFD, ≈0.01 CB**) comes from a band whose
+  positives, excluding on-targets, sit on 19 guides (§3, above), so the decision-band
+  interval width is better read as an **assumption than as a data estimate**, and the
+  per-band positive and guide counts are now displayed in the modal.
 
 The naive Poisson-binomial interval (treating sites as independent, 1.3–6.3× too narrow)
 under-covers to ~72% and is retired.
@@ -331,8 +473,10 @@ contributing 79/359 = 22% of positives (§2) drives the calibration. Removing it
 (leave-that-guide-out) shifts the CFD action-band interval ~20%; the full recomputed
 point estimate and interval for the worked example under this guide's removal are given in
 §7. The number of benchmark guides carrying **any** decision-band positive (the count on
-which both the decision-band calibration and φ hinge) is **1–3 (§8.2)** and must be stated
-on the face of the decision-band rows.
+which both the decision-band calibration and φ hinge) is **46 (CFD ≥0.5) and 40 (CB ≥0.5)
+as the artifacts record it, and 19 and 19 once each guide's own on-target is excluded**
+(§3) — not the "1–3" earlier drafts gave. It is stated on the face of the decision-band
+rows, in the modal's per-band support table.
 
 ## 6. Prevalence / prior-shift
 
@@ -400,10 +544,15 @@ make):**
 - **The ≥0.2 point (≈28) is the jointly-computed estimate** over the pooled 5,671 sites
   (sub-bands ≈6 + ≈21); the "≈28" is rounding, not an arithmetic error.
 - **The ≥0.2 interval [2, 81] is computed on the pooled ≥0.2 band with its own
-  overdispersion (φ ≈ 0.806), not by combining the sub-bands.** Naively summing the
+  overdispersion (shipped φ ≈ **0.826**; earlier drafts said 0.806, the pre-2.7.11 value),
+  not by combining the sub-bands.** Naively summing the
   sub-band draws *as if independent* would wrongly raise the lower bound to ~5, because a
-  guide's promiscuity is correlated across bands (empirical cross-band correlation ≈ +0.66);
-  modelling that correlation (pooled band) puts the floor at **2**, where it belongs.
+  guide's promiscuity is correlated across bands. Earlier drafts put that correlation at
+  "≈ +0.66", which reproduces under no definition we can find; measured on the 46 benchmark
+  guides it is **+0.91 Pearson on per-guide positive counts (0.2–0.5 vs ≥0.5), +0.73
+  Spearman, +0.79 on the LOGO residuals** (CRISPR-Bulge: +0.90 / +0.62 / +0.79). The
+  correlation is stronger than the retired figure claimed, so the argument for pooling is
+  stronger too; modelling it (pooled band) puts the floor at **2**, where it belongs.
 - **CRISPR-Bulge ≥0.2 | 6 | ≈2 | [0, 6]: a low CB count is NOT clearance.** The lower
   bound of 0 on 6 sites must not be read as "nothing here." Per §1–§3, CRISPR-Bulge
   confirms only ~half of assay-detected off-targets and is defined only on ≤1-gap
@@ -411,8 +560,11 @@ make):**
   low CB number means CB did not prioritize these sites, not that the locus is clear.
 - **Dominant-guide (22%) sensitivity.** Dropping the single 79-positive benchmark guide
   (§2, §5) and refitting on the other 45 moves the CFD ≥0.2 row from ≈28 [2, 81] to
-  **≈23** (~−18% point; φ_≥0.2 0.806 → 0.62); the headline does not hinge on that one
-  cluster.
+  **≈23** (~−18% point); on the shipped fit the matching overdispersion move is
+  **φ_≥0.2 0.826 → 0.737** (earlier drafts said 0.806 → 0.62, both pre-2.7.11 values). The
+  headline does not hinge on that one cluster. *The ≈28 / [2, 81] / ≈23 figures themselves
+  are from the ACTGA/NRG search and were not recomputed against the shipped artifact in
+  this pass; see backlog item 45.*
 
 The deployment prior-shift axis (§6) applies on top of the CFD ≥0.2 estimate: this guide's
 own off-target propensity at its locus is unknown and can move the count substantially in
@@ -424,13 +576,18 @@ estimates are different views of the same sites and are **not additive**.
 
 1. **Information ceiling**: 359 positives in 46 guides (one holding 22%). No calibrator
    manufactures information the scores lack; CFD's AUPR 0.168 (baseline prevalence
-   1.22×10⁻⁴) makes its bands inherently wide. The honest interval width is the
-   deliverable, not a defect.
-2. **Top-band resolution**: the decision band rests on **1–3 guides carrying positives**;
-   its point is accurate but its interval is wide by construction, and its φ (hence its
-   width) is assumption-driven, not data-estimated (§5).
-3. **Generalization**: single-guide deployment coverage is validated per-held-out-guide
-   (§5; ≥90% in all shipped bands); a chemically/structurally novel clinical guide at a
+   1.22×10⁻⁴ — and **0.025 on the population the report actually ranks**, once each guide's
+   own on-target is excluded, §3) makes its bands inherently wide. The honest interval
+   width is the deliverable, not a defect.
+2. **Top-band resolution**: the decision band carries 99 (CFD) / 142 (CB) positives from
+   every benchmark guide, but **only 53 and 102 from 19 guides each once the on-targets are
+   excluded** (§3, §5; the "1–3 guides" of earlier drafts matched no artifact). Its point
+   is accurate but its interval is wide by construction, and its φ (hence its width) is
+   assumption-driven more than data-estimated (§5).
+3. **Generalization**: single-guide coverage is validated per-held-out-**benchmark**-guide
+   (§5; 89.1% in the CFD 0.2–0.5 band, 95.7–100% in the others, against a nominal 90%, so
+   one band sits at nominal and the rest are conservative); a chemically/structurally novel
+   clinical guide at a
    different locus nonetheless remains an extrapolation, addressed by the prevalence axis (§6).
 4. **Prevalence transfer** (§6) dominates the absolute count — across guides the plausible
    envelope spans roughly an order of magnitude or more — and is larger than the §5 interval;
@@ -460,8 +617,11 @@ estimates are different views of the same sites and are **not additive**.
   be shipped alongside this component, see header); the "How to read this" modal
   (reusing the observed-haplotypes modal) holds the PR curves with their bootstrap CIs and
   prevalence baseline, the calibration explanation, the expected-count-is-not-a-ceiling and
-  low-CB-is-not-clearance notes, the priority-order guidance, and the 2-gap / uncalibrated-
-  support note.
+  low-CB-is-not-clearance notes, the priority-order guidance, the 2-gap / uncalibrated-
+  support note, the on-target disclosure of §3 with its deployment-matched values, and a
+  per-band support table rendered from `band_counts` (positives, guides carrying one,
+  guides contributing any site) so no band shows an expected count and a range without
+  the support behind them.
 
 
 ## 10. Data provenance & references

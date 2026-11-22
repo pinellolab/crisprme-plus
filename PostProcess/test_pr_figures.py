@@ -238,12 +238,15 @@ class TestCommittedFigures(unittest.TestCase):
         # crispr_bulge_calibration.npz (fitted and AUPR-scored on the report's 3-decimal
         # score column) and the curve's own title (full precision, tie-grouped). They are
         # the same 287 sites and differ in the third decimal, so the modal must SAY why,
-        # and both quoted values must keep matching their sources.
+        # and both quoted values must keep matching their sources. 287 is a count of
+        # POSITIVES, not of sites (there are 2,703,869 of those), and the note has to say
+        # which: "287 held-out sites" told a reviewer the AUPR rested on 287 rows.
         import risk_card
         d = np.load(_DATA, allow_pickle=False)
         note = risk_card._CB_AUPR_FIGURE_NOTE
         self.assertIn(f"AUPR {float(d['cb_ap']):.2f}", note)
-        self.assertIn(f"{int(d['cb_pos'])} held-out sites", note)
+        self.assertIn(f"{int(d['cb_pos'])} held-out positives", note)
+        self.assertNotIn(f"{int(d['cb_pos'])} held-out sites", note)
         art = os.path.join(_CALDIR, "crispr_bulge_calibration.npz")
         if not os.path.exists(art):
             self.skipTest("no crispr_bulge_calibration.npz to check the table against")
@@ -271,6 +274,30 @@ class TestCommittedFigures(unittest.TestCase):
         self.assertIn("40 held-out guides", cb_title)
         self.assertIn("all 46 guides", cfd_title)
         self.assertIn("held-out", rpf.overall_titles(d)[1])
+
+    def test_overall_caption_does_not_call_the_cfd_panel_held_out(self):
+        # "Precision-recall on held-out validated off-target sites" labelled BOTH panels
+        # held out. CFD has no training set: its panel is all 46 guides, the 6
+        # CRISPR-Bulge trained on included, so nothing is held out for it. The caption
+        # must also disclose that the positives include each guide's own on-target --
+        # 46 of CFD's 359, 40 of CRISPR-Bulge's 287 -- which the report's ranked list
+        # excludes, so the AUPRs in the panel titles do not describe that list.
+        d = np.load(_DATA, allow_pickle=False)
+        cap = rpf.OVERALL_SUPTITLE
+        self.assertNotIn("on held-out validated", cap)
+        self.assertIn("externally validated", cap)
+        self.assertIn("CFD: all 46, nothing held out", cap)
+        self.assertIn("CRISPR-Bulge: 40 held-out guides", cap)
+        self.assertIn("on-target", cap)
+        # the two positive counts the caption quotes are the curve data's own
+        self.assertIn(f"46 of {int(d['cfd_pos'])}", cap)
+        self.assertIn(f"40 of {int(d['cb_pos'])}", cap)
+        # the deployment-matched AUPRs, measured on the benchmark with the 46/40
+        # perfect-match rows dropped (CFD trapezoid 0.025146; CRISPR-Bulge tie-grouped
+        # full precision 0.520929). They must be strictly below the published ones.
+        self.assertIn("CFD 0.025, CRISPR-Bulge 0.521", cap)
+        self.assertLess(0.025, float(d["cfd_ap"]))
+        self.assertLess(0.521, float(d["cb_ap"]))
 
     def test_legend_counts_are_the_held_out_counts(self):
         d = np.load(_DATA, allow_pickle=False)

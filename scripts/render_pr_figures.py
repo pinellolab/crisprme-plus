@@ -77,6 +77,28 @@ STRATA = (("all ≤1-gap", None, "#2b6cb0", "-", 2.0),
           ("bulge=1", 1, "#e53e3e", "-", 2.4))
 CFD_MARKS = (0.2, 0.5)
 
+# Caption of pr_curves.png. Two things it used to get wrong, both of which a reviewer
+# reads straight off the image without opening the modal:
+#   * it called BOTH panels "held-out". Nothing is held out for CFD -- CFD has no
+#     training set, so its panel is all 46 benchmark guides, the 6 CRISPR-Bulge trained
+#     on included. "External" is the word that is true of both panels; the CRISPR-Bulge
+#     panel's own title still says "held-out", because that one is.
+#   * it did not say that the benchmark's positives include each guide's own ON-TARGET
+#     (46 perfect matches of CFD's 359, 40 of CRISPR-Bulge's 287), while the report's
+#     ranked list excludes them. The AUPRs in the panel titles are therefore measured on
+#     a population the report does not rank. Dropping those rows and re-running the same
+#     estimators gives CFD 0.025 (trapezoid, from 0.168) and CRISPR-Bulge 0.521
+#     (tie-grouped full precision, from 0.622) -- measured on the benchmark, see
+#     risk_card._ONTARGET_NOTE and METHODS section 3.
+# Caption text only: no curve, AP, count or marked point moves (pr_figure_data.npz is
+# untouched, and test_pr_figures re-derives every printed number from it).
+OVERALL_SUPTITLE = (
+    "Precision-recall on externally validated off-target sites "
+    "(CRISPR-Bulge: 40 held-out guides; CFD: all 46, nothing held out)\n"
+    "positives include each guide's own on-target (46 of 359, 40 of 287); "
+    "excluding them: CFD 0.025, CRISPR-Bulge 0.521\n"
+    "marked points = the report's own thresholds (CB sensitive default = 95%-recall)")
+
 
 # ---------------------------------------------------------------- curve maths
 def pr_curve(scores, labels):
@@ -412,9 +434,7 @@ def render_overall(d, path, dpi=130):
         a.set_xlabel("Recall")
         a.set_ylabel("Precision")
         _axes(a)
-    fig.suptitle("Precision-recall on held-out validated off-target sites\n"
-                 "marked points = the report's own thresholds "
-                 "(CB sensitive default = 95%-recall)", fontsize=9)
+    fig.suptitle(OVERALL_SUPTITLE, fontsize=9)
     fig.tight_layout()
     fig.savefig(path, dpi=dpi)
     plt.close(fig)

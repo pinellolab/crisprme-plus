@@ -539,6 +539,18 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_pr_figures -v
 
+      - name: "The off-target METHODS document quotes the calibration artifacts that ship (no pre-2.7.11 phi, coverage or band support)"
+        # docs/offtarget_risk_summary_METHODS.md travels with the off-target risk report.
+        # Its phi values, decision-band phi, per-held-out-guide coverage table, >=0.2
+        # aggregate phi and global LOGO residual were still the superseded
+        # cfd_calibration.npz.pre2711's long after the CFD column was refitted, because
+        # nothing read the prose against the .npz. This re-reads every one of those
+        # numbers from PostProcess/calibration/*.npz at run time, and cross-checks the
+        # on-target disclosure, the rescue-arm counts and the 95%->99% list ratio between
+        # the document and risk_card's modal so the two cannot drift apart.
+        working-directory: PostProcess
+        run: python -m unittest test_methods_calibration_numbers -v
+
       - name: "Top-1000 and Personal Risk Card plots draw every site (perfect matches starred, 1-edit sites kept, one site too); the report says what its top-1000 views leave out"
         # CRISPRme_plots.py / CRISPRme_plots_personal.py dropped every site with
         # mismatches+bulges <= 1, the on-target and any variant-created perfect match
