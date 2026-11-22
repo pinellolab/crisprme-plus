@@ -386,13 +386,70 @@ class TestGenerateReport(unittest.TestCase):
                     "COSMIC_cancer_gene"):
             self.assertIn(ann, expected_curated)
 
+    def test_both_alignments_and_the_crispr_bulge_precision_in_every_curated_table(self):
+        """A collaborator validating a site needs BOTH alignments of it (which base does
+        the variant change?) and a CRISPR-Bulge score they can place against the 1.9e-4
+        operating point. The curated schema is shared, so the in-report table and every
+        download must carry both -- and CFD must keep its 4 decimals."""
+        import csv
+
+        import cb_operating_point as cbop
+
+        _, _, extract = self._build_and_extract(report_full=True)
+        html = self._read(os.path.join(extract, "report.html"))
+        label = gr.scorer_label()
+        seen = 0
+        for fname in ("top1000.tsv", "panel_top100.tsv", "cfd_ge_0.50.tsv",
+                      "mmb_le_2.tsv", "variant_created.tsv"):
+            with open(self._dpath(extract, fname)) as handle:
+                rows = list(csv.DictReader(handle, delimiter="\t"))
+            for row in [r for r in rows if r["Chromosome"] == "chr5"]:
+                seen += 1
+                with self.subTest(file=fname):
+                    # the REF alignment is its own column; the ALT one keeps its place,
+                    # so spacer / REF / ALT read as the three lines of an alignment
+                    # (this fixture's schema has no aligned-spacer column: "-")
+                    self.assertEqual(row["Aligned_protospacer+PAM_REF"],
+                                     "CTCTCAGCTGGTACACGGCAtGG")
+                    self.assertEqual(row["Aligned_protospacer+PAM"],
+                                     "CTCTCAGCTGGTACACGGCAAGG")
+                    # CRISPR-Bulge at the precision of the operating point, CFD at 4
+                    # decimals (calibrated, uses the whole 0-1 range)
+                    self.assertEqual(row[label], cbop.score_text(0.88))
+                    self.assertEqual(row[label + "_ref"], cbop.score_text(0.18))
+                    self.assertEqual(row["CFD"], "0.9000")
+                    self.assertEqual(row["CFD_ref"], "0.2000")
+        self.assertGreaterEqual(seen, 4)  # the row is in several of those tables
+        # the in-report table shows the same three lines, each monospaced
+        self.assertIn("<th>Aligned_protospacer+PAM_REF</th>", html)
+        for aln in ("CTCTCAGCTGGTACACGGCAtGG", "CTCTCAGCTGGTACACGGCAAGG"):
+            self.assertIn(f"<code>{aln}</code>", html)
+
+    def test_a_reference_only_run_has_no_duplicate_alignment_column(self):
+        """Every row of such a run IS the reference: a REF alignment column would repeat
+        Aligned_protospacer+PAM on every row, as an empty Observed column would. Both are
+        dropped, from the table and from every download alike."""
+        rd, _itsv = self._reference_only_result_dir()
+        self.assertEqual(gr.main(["--result-dir", rd, "--samplesID-dir", self.sid_dir]), 0)
+        with zipfile.ZipFile(os.path.join(rd, f"{os.path.basename(rd)}_report.zip")) as zf:
+            top = zf.read("data/top1000.tsv").decode().splitlines()
+            html = zf.read("report.html").decode()
+        header = top[0].split("\t")
+        self.assertNotIn("Aligned_protospacer+PAM_REF", header)
+        self.assertIn("Aligned_protospacer+PAM", header)
+        self.assertNotIn("Aligned_protospacer+PAM_REF", html)
+        # the one alignment each row has is still shown (the REF fallback)
+        self.assertEqual(top[1].split("\t")[header.index("Aligned_protospacer+PAM")],
+                         "cTCTCAGCTGGTACACGGCAAGG")
+
     def test_curated_column_list_is_the_shared_set(self):
         # the ONE curated set, with CRISPR-Bulge when computed
         self.assertEqual(
             gr.curated_headers(has_crispr_bulge=True),
             [
                 "rank", "Chromosome", "Position", "Strand",
-                "Aligned_spacer+PAM", "Aligned_protospacer+PAM", "Mismatches", "Bulges",
+                "Aligned_spacer+PAM", "Aligned_protospacer+PAM_REF",
+                "Aligned_protospacer+PAM", "Mismatches", "Bulges",
                 "Mismatches+bulges", "Perfect_match", "CFD", "CFD_ref",
                 "CRISPR-Bulge", "CRISPR-Bulge_ref",
                 "REF/ALT_origin",

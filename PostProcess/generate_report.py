@@ -276,7 +276,8 @@ CURATED_COLUMNS = (
     ("Chromosome", "chrom"),
     ("Position", "pos"),
     ("Strand", "strand"),
-    ("Aligned_spacer+PAM", "aligned_spacer"),  # the guide/spacer side of the alignment (bulge cols as '-'); pairs with the protospacer row below to read like a pairwise alignment
+    ("Aligned_spacer+PAM", "aligned_spacer"),  # the guide/spacer side of the alignment (bulge cols as '-'); pairs with the two protospacer columns below to read like a pairwise alignment
+    ("Aligned_protospacer+PAM_REF", "aligned_ref"),  # the REFERENCE protospacer at this site (variant removed); "-" where the site exists only on the variant allele. Dropped on a run with no variant off-target, where it would only repeat the column below
     ("Aligned_protospacer+PAM", "aligned"),  # ALT with REF fallback
     ("Mismatches", "mm"),
     ("Bulges", "bulges"),
@@ -821,7 +822,11 @@ _NO_VARIANT_KINDS = ("origin", "pam_creation", "variant", "maf", "complex_region
                      # resolve from CFD_score_REF_* / CRISPR_BULGE_score_REF_*). On an
                      # assembly / reference-only export the pooled frame has no such
                      # columns, so drop them rather than emit two all-"-" columns.
-                     "cfd_ref", "crispr_bulge_ref")
+                     "cfd_ref", "crispr_bulge_ref",
+                     # same for the REF protospacer column: with no variant there is one
+                     # alignment per row, which "Aligned_protospacer+PAM" already shows
+                     # (ALT with REF fallback) -- a second column would just repeat it.
+                     "aligned_ref")
 # assembly_reconcile.LIFT_ONE_END's value, duplicated rather than imported so this
 # module stays importable without assembly_reconcile (a light-CI concern)
 LIFT_ONE_END_LABEL = "one_end"
@@ -852,9 +857,12 @@ def _active_columns():
             c for c in cols
             if c[1] not in _ANNOTATION_KINDS or c[1] in _PRESENT_ANN_KINDS
         )
-    # drop the Observed column on a reference-only run (no variant off-targets)
+    # drop the Observed column on a reference-only run (no variant off-targets), and
+    # with it the REF protospacer column: every row of such a run IS the reference, so
+    # "Aligned_protospacer+PAM" (ALT with REF fallback) already shows that one alignment
+    # and a REF column beside it would be an exact duplicate of it, on every row.
     if _HAS_VARIANTS is False:
-        cols = tuple(c for c in cols if c[1] != "observed")
+        cols = tuple(c for c in cols if c[1] not in ("observed", "aligned_ref"))
     # explicit per-run drop set (assembly-search's variant-only columns)
     if _DROP_KINDS:
         cols = tuple(c for c in cols if c[1] not in _DROP_KINDS)
@@ -1229,9 +1237,17 @@ def _curated_cell(kind, row, cols):
     elif kind == "strand":
         v = _get("strand")
     elif kind == "aligned_spacer":
-        # the aligned guide/spacer (+PAM), bulge columns as '-'; shown next to the
-        # aligned protospacer so the pair reads like a pairwise alignment
+        # the aligned guide/spacer (+PAM), bulge columns as '-'; shown above the two
+        # aligned protospacers so the three read like a pairwise alignment
         v = _get("aln_spacer")
+    elif kind == "aligned_ref":
+        # the REFERENCE protospacer of this site, its own column beside the ALT one so a
+        # reader can see WHICH base the variant changes (and order the flanking oligos
+        # for a validation assay against the right allele). "-" when the site has no
+        # reference alignment at all -- a variant-created site absent from the reference
+        # (Not_found_in_REF): there is no reference protospacer to show, and the ALT
+        # column below still carries the sequence that exists.
+        v = _get("aln_ref")
     elif kind == "aligned":
         # ALT with REF fallback
         v = row.get(cols["aln_alt"]) if "aln_alt" in cols else None
@@ -1244,17 +1260,26 @@ def _curated_cell(kind, row, cols):
     elif kind == "mmb":
         v = _get("mmb")
     elif kind == "cfd":
+        # CFD stays at 4 decimals: it is a CALIBRATED score that uses the whole 0-1 range
+        # (its own thresholds are 0.05 / 0.2 / 0.5), so 4 decimals separate every value a
+        # reader acts on. CRISPR-Bulge, below, is a ranking number whose operating point
+        # is 1.9e-4 -- hence the different format there, not an oversight here.
         num = _scored(pd.to_numeric(_get("cfd"), errors="coerce")) if "cfd" in cols else None
         return f"{num:.4f}" if num is not None else CURATED_MISSING
     elif kind == "cfd_ref":
+        # as CFD above: calibrated, 0-1, 4 decimals
         num = _scored(pd.to_numeric(_get("cfd_ref"), errors="coerce")) if "cfd_ref" in cols else None
         return f"{num:.4f}" if num is not None else CURATED_MISSING
     elif kind == "crispr_bulge":
+        # the post-analyses' own 6 significant digits (cb_operating_point.score_text), NOT
+        # 4 decimals: those printed the same "0.0002" on both sides of the sensitive
+        # operating point (1.9e-4) and "0.0000" for nearly every row of a top-1000 by
+        # CRISPR-Bulge. An unscored row keeps CURATED_MISSING; a true 0 reads "0".
         num = _scored(pd.to_numeric(_get("crispr_bulge"), errors="coerce")) if "crispr_bulge" in cols else None
-        return f"{num:.4f}" if num is not None else CURATED_MISSING
+        return cbop.score_text(num) if num is not None else CURATED_MISSING
     elif kind == "crispr_bulge_ref":
         num = _scored(pd.to_numeric(_get("crispr_bulge_ref"), errors="coerce")) if "crispr_bulge_ref" in cols else None
-        return f"{num:.4f}" if num is not None else CURATED_MISSING
+        return cbop.score_text(num) if num is not None else CURATED_MISSING
     elif kind == "origin":
         v = _get("origin")
         if not _is_na(v):
@@ -3034,7 +3059,7 @@ def _placeholder_uri(message):
 
 def _cfd_style_scatter(
     sub, score_key, ref_key, alt_key, xlabel, title,
-    score_name="CFD", maf_col=None, samp_col=None, rsid_col=None,
+    score_name="CFD", maf_col=None, samp_col=None, rsid_col=None, log_y=False,
 ):
     """The CRISPRme-paper CFD/CRISPR-Bulge scatter, adapted from
     CRISPRme_plots.py:plot_with_CFD_score (~L347).
@@ -3049,6 +3074,12 @@ def _cfd_style_scatter(
     blue ALT points, both sized by allele frequency; gray arrows connect the
     ref->alt pair for the same site; the top-ranked off-target is annotated with
     its rsID. Returns a base64 data URI.
+
+    ``log_y`` draws the score on a log10 y-axis instead of the linear 0-1 one, with the
+    sensitive operating point as a labelled line and the exact zeros on a marked floor
+    (cb_operating_point.draw_log_score_axis). It is for CRISPR-Bulge, whose operating
+    point is 1.9e-4: on the linear axis every point of a genome-wide run lies on the
+    bottom rule. CFD keeps the linear 0-1 axis -- it is calibrated and uses the range.
     """
     work = sub.reset_index(drop=True).copy()
     n = len(work)
@@ -3103,11 +3134,29 @@ def _cfd_style_scatter(
     if not (_in_range(_yr).notna().any() or _in_range(_ya).notna().any()):
         raise ValueError(f"no valid {score_name} score to plot")
 
+    # On the log axis only the real scores are drawn: the -1 not-scored sentinel is NOT a
+    # score of 0 and must not land on the zero floor (on the linear axis it simply fell
+    # outside ylim(0, 1) and was invisible). Then the exact zeros -- the model's float32
+    # output underflowing, ~4% of the rows of a genome-wide run -- are clipped UP to the
+    # axis floor so that they are drawn, inside a band the legend names as "0", instead of
+    # being dropped by the log transform without a word.
+    log_axis = log_handles = None
+    zeros = False
+    if log_y:
+        y_ref, y_alt = _in_range(_yr), _in_range(_ya)
+        zeros = bool((y_ref.fillna(1) <= 0).any() or (y_alt.fillna(1) <= 0).any())
+
     transparent_red = "#e5323280"
     transparent_blue = "#2b6cb080"
 
     plt.rcParams.update({"font.size": 8})
     fig, ax = plt.subplots(figsize=(8.0, 3.2))
+
+    if log_y:
+        log_axis, log_handles = cbop.draw_log_score_axis(
+            ax, list(y_ref.dropna()) + list(y_alt.dropna()), zeros=zeros
+        )
+        y_ref, y_alt = y_ref.clip(lower=log_axis.floor), y_alt.clip(lower=log_axis.floor)
 
     ax.scatter(
         work["_index"], y_ref, s=work["ref_AF"], c=transparent_red, zorder=1,
@@ -3119,25 +3168,45 @@ def _cfd_style_scatter(
     )
     ax.set_xscale("log")
     ax.set_xlabel(xlabel)
-    ax.set_ylabel(f"{score_name} score")
+    ax.set_ylabel(f"{score_name} score" + (" (log10)" if log_y else ""))
     ax.set_title(title)
     ax.set_xlim(0.9, max(1000, n))
-    ax.set_ylim(0, 1)
+    if not log_y:  # the log axis' limits come from draw_log_score_axis above
+        ax.set_ylim(0, 1)
 
     # ref -> alt arrows (CRISPRme_plots.py:160-177)
     for x, yr, ya in zip(work["_index"], y_ref, y_alt):
         if pd.isna(yr) or pd.isna(ya):
             continue
         z = ya - yr
-        if abs(z) < 1e-9:
+        if log_y:
+            # on a log axis a pair moved by the same RATIO is moved by the same distance:
+            # 1e-30 -> 1e-20 is ten decades, a long arrow, though ya - yr is 1e-20 and the
+            # linear rule below would have called it no movement at all
+            if abs(math.log10(ya) - math.log10(yr)) < 0.01:
+                continue
+        elif abs(z) < 1e-9:
             continue
         try:
-            ax.arrow(
-                x, yr + 0.02, 0, z - 0.04,
-                color="gray",
-                head_width=(x * (10 ** 0.005 - 10 ** (-0.005))),
-                head_length=0.02, length_includes_head=True, zorder=0, alpha=0.5,
-            )
+            if log_y:
+                # the linear form's +0.02/-0.04 trims and 0.02 head are lengths of a 0-1
+                # axis: on a log axis they would swallow every arrow below 0.02 and place
+                # the tail of the rest at a wrong score. annotate draws the head in
+                # DISPLAY space from one data point to the other, so it is the same arrow
+                # at any scale -- and a pair clipped to the floor has z == 0 and is
+                # skipped above, as an unmoved pair was.
+                ax.annotate(
+                    "", xy=(x, ya), xytext=(x, yr), zorder=0,
+                    arrowprops=dict(arrowstyle="->", color="gray", alpha=0.5, lw=0.6,
+                                    shrinkA=1.5, shrinkB=1.5),
+                )
+            else:
+                ax.arrow(
+                    x, yr + 0.02, 0, z - 0.04,
+                    color="gray",
+                    head_width=(x * (10 ** 0.005 - 10 ** (-0.005))),
+                    head_length=0.02, length_includes_head=True, zorder=0, alpha=0.5,
+                )
         except (ValueError, FloatingPointError):
             continue
 
@@ -3149,7 +3218,10 @@ def _cfd_style_scatter(
             ax.annotate(
                 f"top site: {top_rsid}",
                 xy=(1, top_y),
-                xytext=(2.2, min(0.96, top_y + 0.12)),
+                # a fixed offset in POINTS on the log axis: "+0.12 of the score" is a
+                # distance of the 0-1 axis, which on a 40-decade one is no distance at all
+                **(dict(xytext=(26, -26), textcoords="offset points") if log_y
+                   else dict(xytext=(2.2, min(0.96, top_y + 0.12)))),
                 fontsize=8,
                 arrowprops=dict(arrowstyle="->", color="#333", lw=0.7),
             )
@@ -3163,10 +3235,13 @@ def _cfd_style_scatter(
     leg1 = ax.legend(handles=handles, title="Allele frequency", ncol=3, loc="upper center", fontsize=7)
     ax.add_artist(leg1)
     ax.legend(
+        # on the log axis, the sensitive threshold's line and (when there are any) the
+        # zero band are named here: a reader must be able to tell what the band at the
+        # bottom of the axis means without the caption
         handles=[
             mpatches.Patch(color=transparent_red, label="Reference"),
             mpatches.Patch(color=transparent_blue, label="Alternative (variant)"),
-        ],
+        ] + (log_handles or []),
         loc="upper right", fontsize=7,
     )
     fig.tight_layout()
@@ -3182,6 +3257,25 @@ def _num_ok(tok):
         return True
     except ValueError:
         return False
+
+
+def _cb_log_caption(score_label):
+    """What the CRISPR-Bulge panels' log10 y-axis shows, for their caption.
+
+    Says the three things a reader cannot guess from the picture: the axis is log10,
+    the dashed line is the sensitive operating point (its value from cb_operating_point,
+    never written here), and the shaded band at the bottom holds the sites whose score
+    is exactly 0 -- they are drawn, not dropped.
+    """
+    return (
+        f"The {score_label} axis is <b>log10</b>: this score's sensitive operating point "
+        f"is {cbop.sensitive_label_html()} and most sites of a genome-wide run score far "
+        "below it, so on a linear 0-1 axis they all collapse onto the bottom rule. The "
+        "dashed line is that operating point. A log axis cannot show 0, and the model's "
+        "score underflows to exactly 0 for part of a run: those sites are drawn in the "
+        "shaded band at the bottom of the axis, one decade below the smallest non-zero "
+        "score and named in the legend, rather than dropped from the panel."
+    )
 
 
 def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False, df_cb=None):
@@ -3295,6 +3389,7 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False, df_cb=None
                 title=f"Top {n_shown_cb} candidates by {_sl} score",
                 score_name=_sl,
                 maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
+                log_y=True,  # see _cb_log_caption: the operating point is 1.9e-4
             )
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"generate-report: {_sl} scatter unavailable: {exc}\n")
@@ -3302,7 +3397,7 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False, df_cb=None
         panels.append((
             f"By {_sl} score",
             f"Independent {_sl} scoring model, ranked by {_sl} score. Included "
-            f"because {_sl} scores were computed for this run.",
+            f"because {_sl} scores were computed for this run. " + _cb_log_caption(_sl),
             uri,
         ))
 
@@ -3315,6 +3410,7 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False, df_cb=None
                     title=f"Top {n_shown_cb} by variant-induced {_sl} increase (ALT-REF)",
                     score_name=_sl,
                     maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
+                    log_y=True,
                 )
             except Exception as exc:  # noqa: BLE001
                 sys.stderr.write(
@@ -3328,7 +3424,7 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False, df_cb=None
                 f"re-ranked by the variant-induced {_sl} change (ALT-REF, "
                 "descending): the population variants that most raise the "
                 f"independent {_sl} cleavage score come first. Included because "
-                f"{_sl} scores were computed for this run.",
+                f"{_sl} scores were computed for this run. " + _cb_log_caption(_sl),
                 uri,
             ))
 
@@ -4507,7 +4603,10 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
     _raw_chrom = "Chromosome" in raw.columns
     _raw_start = "Start_coordinate_(highest_CFD)" in raw.columns
 
-    aligned_hdr = "Aligned_protospacer+PAM"
+    # the three lines of the alignment (spacer, REF protospacer, ALT protospacer) are
+    # monospaced so their columns line up with each other, cell under cell
+    aligned_hdrs = ("Aligned_spacer+PAM", "Aligned_protospacer+PAM_REF",
+                    "Aligned_protospacer+PAM")
     observed_hdr = "Observed"
     maf_hdr = "MAF"
     maf_missing_seen = False
@@ -4516,7 +4615,7 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
         cells = []
         for h in headers:
             val = row[h]
-            if h == aligned_hdr:
+            if h in aligned_hdrs:
                 cells.append(f"<code>{_esc(val)}</code>")
             elif h == maf_hdr:
                 if val == CURATED_MISSING:
@@ -8133,7 +8232,10 @@ def _render_curated_table_html(curated, datasets=""):
     which `build_table_html()` itself has no injection point for."""
     headers = list(curated.columns)
     head_html = "".join(f"<th>{_esc(h)}</th>" for h in headers)
-    aligned_hdr = "Aligned_protospacer+PAM"
+    # the three lines of the alignment (spacer, REF protospacer, ALT protospacer) are
+    # monospaced so their columns line up with each other, cell under cell
+    aligned_hdrs = ("Aligned_spacer+PAM", "Aligned_protospacer+PAM_REF",
+                    "Aligned_protospacer+PAM")
     maf_hdr = "MAF"
     maf_missing_seen = False
     body_rows = []
@@ -8141,7 +8243,7 @@ def _render_curated_table_html(curated, datasets=""):
         cells = []
         for h in headers:
             val = row[h]
-            if h == aligned_hdr:
+            if h in aligned_hdrs:
                 cells.append(f"<code>{_esc(val)}</code>")
             elif h == maf_hdr:
                 if val == CURATED_MISSING:
