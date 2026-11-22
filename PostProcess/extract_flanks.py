@@ -93,8 +93,8 @@ class FlankError(Exception):
 # list is a file you can open. Change it with --window.
 DEFAULT_WINDOW = 200
 # how many haplotypes of a site are written beside the reference. A 400 bp window over a
-# panel of thousands holds dozens of distinct haplotypes (the SBDSP1 top-1000 against
-# HGDP+1000G: a median of 23 and one site with 4264), nearly all of them differing from
+# panel of thousands holds dozens of distinct haplotypes (on the 1000-site shortlist of a
+# genome-wide HGDP+1000G run: a median of 23, and one site with 4264), nearly all differing from
 # each other far from the target. Writing them all turns a shortlist into megabytes, so
 # the most useful come first -- the sequences that HOLD the off-target, then by how many
 # haplotypes carry them -- and the rest are counted in the notes rather than written.

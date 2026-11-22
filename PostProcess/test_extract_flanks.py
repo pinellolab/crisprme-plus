@@ -55,7 +55,9 @@ sys.path.insert(0, HERE)
 import extract_flanks as F  # noqa: E402
 
 SAMPLES = ["S1", "S2", "S3", "S4", "S5"]
-TARGET = "ACTGAAATCTGTAAGCAGGCAGG"      # 23 bases: 20 spacer + NGG
+# a made-up 23-mer (20 spacer + NGG), not any real guide: this suite needs a target the
+# arithmetic can be checked against, not a biological one
+TARGET = "GTCAGTACCTGATCGGATCAAGG"
 TARGET_AT = 400                          # 0-based start on the reference below
 CONTIG_LEN = 900
 

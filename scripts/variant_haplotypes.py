@@ -2,7 +2,7 @@
 """Reading a VCF and a reference FASTA, and writing the haplotypes they describe.
 
 This is the reconstruction core that ``scripts/check_indel_rows.py`` was built on and
-hardened with (the SBDSP1 real-data investigation): its own BGZF + tabix reader, its own
+hardened with on real data: its own BGZF + tabix reader, its own
 reference FASTA reader, VCF 4.x's definition of what an ALT allele does to a haplotype,
 and the map from a haplotype's bases back to reference coordinates that makes an indel's
 shift readable. It lives in a file of its own so the checker and
