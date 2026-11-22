@@ -617,6 +617,18 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_targets_scoring -v
 
+      - name: "CRISPR-Bulge guide-PAM normalization keeps a PAM-internal DNA bulge (both scoring paths)"
+        # cbulge_rows.mask_guide_pam is the ONE normalizer the post-analysis path and the
+        # targets-scoring CLI share. The slice it replaced (crrna[:-3]+"NGG") deleted the
+        # gap of a DNA bulge that lands inside the PAM (...NG-G), so the null rules counted
+        # 0 gaps on a 1-bulge row and the model was handed a gapless 24-mer with a phantom
+        # base -- a fabricated score, always too HIGH (30,131 such rows in the external
+        # CRISPR-Bulge benchmark; a CRISPRme search anchors the PAM and makes none). This
+        # pins both the fix and its no-op half: byte-identical to the old slice wherever no
+        # gap sits in the PAM columns. Stubs the scorer; no cbulge env or TensorFlow.
+        working-directory: PostProcess
+        run: python -m unittest test_cb_pam_bulge -v
+
       - name: "CFD clean-room scorer + position-aware bulge penalty (mismatch/PAM/gap/IUPAC/T->U + DNA/RNA/terminal/PAM-proximal bulge)"
         working-directory: PostProcess
         run: python -m unittest test_cfd_score test_bulge_cfd_penalty -v
