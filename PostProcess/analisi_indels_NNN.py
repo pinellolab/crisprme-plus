@@ -1010,7 +1010,10 @@ def _overlaid_positions(path):
             if not _holds_its_indel(ln[2], int(ln[4]), idata):
                 continue  # dropped by the loop too
             _ipos, _iref, _ialt, _istart = _indel_window(idata)
-            out.update(_ref_snp_positions(_ipos, _iref, _ialt))
+            _first, _last = _isc.window_offsets(ln[2], int(ln[4]), int(idata[5]))
+            _anchor = _ipos - 1 - _istart
+            out.update(_ref_snp_positions(_ipos, _iref, _ialt, _first - _anchor,
+                                          _last - _anchor))
             amb = _isc.ambiguous_columns(ln[2])
             if not amb and _indelgt is None:
                 continue
@@ -1391,13 +1394,20 @@ def _breaking_slots(found, offsets, span, ipos, iref, ialt, istart, carriers):
     return out
 
 
-def _ref_snp_positions(ipos, iref, ialt):
+def _ref_snp_positions(ipos, iref, ialt, first=None, last=None):
     """The 1-based positions _ref_snps reads a SNP record at: the bases of REF the indel
     keeps past its own POS, or, for a window whose REF and ALT have one length (an MNV,
-    read base by base since 2.10.1), every base of its REF, its POS included."""
-    if len(iref) == len(ialt):
-        return range(ipos, ipos + len(iref))
-    return range(ipos + 1, ipos + _isc.kept_bases(iref, ialt))
+    read base by base since 2.10.1), every base of its REF, its POS included -- those a
+    target holding the bases ``first``..``last`` of the record (counted from its POS) can
+    reach, where the two are given. An MNV's REF runs to 75,266 bases on HPRC v2.1, where
+    a target holds at most its own length of it, so the bounds keep both this and the
+    dictionary positions it names (_overlaid_positions) to the target's size."""
+    if len(iref) != len(ialt):
+        return range(ipos + 1, ipos + _isc.kept_bases(iref, ialt))
+    k0, k1 = 0, len(iref) - 1
+    if first is not None:
+        k0, k1 = max(k0, first), min(k1, last)
+    return range(ipos + k0, ipos + k1 + 1)
 
 
 def _ref_snps(ipos, iref, ialt, first, last):
@@ -1426,7 +1436,7 @@ def _ref_snps(ipos, iref, ialt, first, last):
     read: an MNV window kept every carrier, whatever the slot's own alleles."""
     equal = len(iref) == len(ialt)
     out = []
-    for p in _ref_snp_positions(ipos, iref, ialt):
+    for p in _ref_snp_positions(ipos, iref, ialt, first, last):
         k = p - ipos
         if not first <= k <= last:
             continue

@@ -297,10 +297,10 @@ class TheSlotIsReadBaseByBase(unittest.TestCase):
     def test_the_mutant_reads_an_mnv_window_as_2100_did(self):
         """2.10.0 read only the bases an indel keeps past its POS, of which an MNV has
         none, so an MNV row kept every carrier whatever its own alleles."""
-        subs = [("""    if len(iref) == len(ialt):
-        return range(ipos, ipos + len(iref))
-    return range(ipos + 1, ipos + _isc.kept_bases(iref, ialt))""",
-             "    return range(ipos + 1, ipos + _isc.kept_bases(iref, ialt))")]
+        subs = [("""    if len(iref) != len(ialt):
+        return range(ipos + 1, ipos + _isc.kept_bases(iref, ialt))""",
+                 "    if True:\n        return range(ipos + 1, ipos + _isc.kept_bases("
+                 "iref, ialt))")]
         self.assertEqual(self._ref_snps(MNV_KEEPS, CHR9B, {67744566: {"C": GT}},
                                         subs=subs), [])
         self.assertEqual(self._ref_snps(MNV_CONFLICT, CHRY, {21604663: {"T": GT}},
