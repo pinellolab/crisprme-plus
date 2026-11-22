@@ -488,6 +488,25 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_reference_row_downstream -v
 
+      - name: "The reference CFD of an indel row whose reference alignment is short (2.10.0: only an insertion within one target of the end of a contig ending in sequence cuts it, and the bulge-aware scorer's precondition is two alignments of one length): 0, and one NOTE per chromosome counts the rows"
+        # alignRefFromVar slices an indel row's reference alignment from the plain reference
+        # chromosome, from the row's start, as many bases as the target holds. Since 2.10.0 a
+        # row whose first base is one an insertion adds starts at the insertion's anchor, so
+        # the slice is never empty; it is cut short only when an insertion lies within one
+        # target of the end of a contig that ends in sequence, which hg38's primary
+        # chromosomes do not (each ends in 10 kb or more of N). On a DNA-bulge row
+        # cfd_score_bulge_aware then indexed the protospacer by the crRNA's positions and
+        # raised "IndexError: string index out of range": a complete-search stops (the
+        # traceback lands in log_error.txt), and only post_analisi_indel.sh run alone is
+        # silent. The guard scores 0, there being no reference target to score, and a
+        # well-formed reference alignment still gets exactly the score it got before. The rows
+        # it scores 0 are counted, and the chromosome's notes say how many in one NOTE on
+        # stdout, also when its post-analysis runs in pieces (the merge sums the pieces'
+        # counts); the shipped analyzer (pandas + numpy; intervaltree is stubbed when absent)
+        # on a contig ending in sequence, with an insertion anchored 3 bases before its end.
+        working-directory: PostProcess
+        run: python -m unittest test_indel_ref_alignment_guard -v
+
       - name: "Tier-path SNP rows mark the REF mismatches as the dictionary path does (per-sample + population-level)"
         working-directory: PostProcess
         run: python -m unittest test_tier_ref_columns -v
