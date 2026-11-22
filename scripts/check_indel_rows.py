@@ -739,12 +739,16 @@ index holds earlier records of some (its SNP rows name them, as chr22:11337076 G
 G>T, both PASS), so which it holds cannot be read off the VCF's order; its fake-indel
 windows hold every record whose FILTER passes on a genome of CRISPRitz 2.10.0, the last such
 record on one of 2.9.1 or earlier (above).
-``--jobs N`` splits the work by region over N processes.
+``--jobs N`` splits the work by region over N processes, forked off the checker with its
+objects frozen first (gc.freeze(): fork_pool), so that they share its heap instead of each
+copying it.
 """
 
 import argparse
 import bisect
+import contextlib
 import csv
+import gc
 import glob
 import gzip
 import io
@@ -7999,6 +8003,31 @@ def refused(stats, win):
     return stats
 
 
+@contextlib.contextmanager
+def fork_pool(jobs):
+    """A pool of ``jobs`` workers forked off this process, whose heap they share
+    copy-on-write, with every object the parent holds frozen first (gc.freeze(), the
+    remedy CPython's gc documentation gives): moved to the permanent generation, which no
+    collection in a worker walks. Without it each worker's full collection writes the
+    collector's header of every object it inherited and so copies, page by page, the
+    parent's whole heap: a genome-wide check (the SBDSP1 run's, 32 workers off a 156 GiB
+    parent) took a shared node's available memory from 742 to 50 GB in its pool's last
+    minutes, back the moment the workers ended, while their RSS -- which counts shared
+    pages -- stayed flat. The objects are unfrozen when the pool ends (main can be called
+    again in one process, as the tests call it): gc.unfreeze() puts every frozen object
+    back in the oldest generation, also those the interpreter froze at its start (a Python
+    3.12 one starts with a few hundred), which changes nothing but when they are walked. No
+    logic changes: the checker holds no weak reference, finalizer or collector call that
+    the collector's timing could move."""
+    import multiprocessing as mp
+    gc.freeze()
+    try:
+        with mp.get_context("fork").Pool(jobs) as pool:
+            yield pool
+    finally:
+        gc.unfreeze()
+
+
 def default_cfd_dir():
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(os.path.dirname(here), "PostProcess")
@@ -8251,8 +8280,7 @@ def main(argv=None):
         sys.stderr.write("check_indel_rows: %d VCF(s) without a .tbi: reading each once "
                          "into an in-memory block index\n" % len(todo))
         if args.jobs > 1 and len(todo) > 1:
-            import multiprocessing as mp
-            with mp.get_context("fork").Pool(min(args.jobs, len(todo))) as pool:
+            with fork_pool(min(args.jobs, len(todo))) as pool:
                 for v, idx in zip(todo, pool.map(_blockidx_of, [v.path for v in todo])):
                     v.blockidx = idx
         else:
@@ -8621,11 +8649,10 @@ def main(argv=None):
                 pw.writerow(r)
             partial.flush()
     if args.jobs > 1 and len(units) > 1:
-        import multiprocessing as mp
-        ctx_mp = mp.get_context("fork")
         # (a unit that meets a position this checker does not model ends the run: the
-        # pool is left, and its other units stopped, at once)
-        with ctx_mp.Pool(args.jobs) as pool:
+        # pool is left, and its other units stopped, at once). The workers share the
+        # parent's heap: fork_pool freezes it first, so that they do not copy it
+        with fork_pool(args.jobs) as pool:
             for found in pool.imap_unordered(run_unit, units, chunksize=1):
                 keep(found)
                 done += 1

@@ -56,6 +56,7 @@ tabix index written by this file's own writer), and rows in the column layout of
 
 import ast
 import contextlib
+import gc
 import gzip
 import io
 import json
@@ -8573,6 +8574,35 @@ class MnvOverlapReadings(unittest.TestCase):
         self.assertIn("complex-in-deleted", C.LEFT_OUT)
         with mock.patch.dict(C.OPEN_READINGS, clear=True):
             self.assertEqual(C.overlap_kind(cx, d, cover=self.COVER), "deleted")
+
+
+class ForkPoolFreeze(Base):
+    def test_the_parents_objects_are_frozen_when_the_pool_forks(self):
+        """fork_pool: the parent's objects are in the permanent generation when the workers
+        fork (no worker's collection walks them, so none copies the parent's heap), and
+        out of it once the pool ends; the findings are those of one process. (A Python
+        3.12 interpreter starts with a few hundred objects frozen already: the count at the
+        fork is compared with the count before the run.)"""
+        import multiprocessing.context as mpc
+        seen = []
+        before = gc.get_freeze_count()
+        real = mpc.BaseContext.Pool
+
+        def pool(self_, *args, **kwargs):
+            seen.append(gc.get_freeze_count())
+            return real(self_, *args, **kwargs)
+
+        case, info = world_deletion(self.tmp)
+        write_results(case.res, [set_field(info["rows"][0], samples="S01")])
+        one = case.run(mode="both", budget=("0", "0", "0", "0"))
+        with mock.patch.object(mpc.BaseContext, "Pool", pool):
+            many = case.run(mode="both", budget=("0", "0", "0", "0"),
+                            extra=("--jobs", "3", "--tile", "20"))
+        self.assertEqual(one[0], many[0])
+        self.assertEqual(sorted(one[1]), sorted(many[1]))
+        self.assertTrue(seen and all(n > before + 1000 for n in seen), (before, seen))
+        self.assertEqual(gc.get_freeze_count(), 0)
+
 
 
 def shared_runs(a, b, k):
