@@ -1133,7 +1133,10 @@ def _store_indels(lo, hi, ipos, iref, ialt, keep=None):
     Measured over the 50 pairs (522 slots) against HPRC's pre-vcfwave originals, the
     complex record alone is 84.8 % real (98.0 % for the insertions) and catches 90.4 % of
     the real targets, where reading each record without the other is 48.5 % real with
-    12,009 false 23-mers and the indel alone 23.4 % real. Up to 2.10.1 the skip took an
+    12,009 false 23-mers and the indel alone 23.4 % real. Those shares are upper bounds
+    and the false counts lower bounds ("real" is "the 23-mer occurs somewhere in the
+    carrier's true sequence over the window", so in a tandem repeat a wrong reading can
+    still score no false listing: METHODS section 4). Up to 2.10.1 the skip took an
     indel only where both records keep an anchor, and a deletion at a complex record's
     POS was already left unread, its deleted bases lying inside those the complex record
     replaces (``gone``, _other_indels); it is the insertions that move, 35 of the 50

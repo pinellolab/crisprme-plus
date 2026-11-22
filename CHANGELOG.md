@@ -91,8 +91,10 @@ and the `release-crisprme` skill.
   `indel-row-mnv-carrier` on an indel row, and `snp-row-mnv-carrier` on a SNP row, the one class
   of the otherwise report-only SNP-row report that gates. The three shapes the decomposition
   leaves (Fixed) are read as the rules have them and checked like any other reading, so a run that
-  departs from one fails the check; the two classes that counted them apart while the readings
-  were open, `open-complex-in-deleted` and `open-snp-row-snv-mnv`, are gone. On a slot of
+  **lists** a carrier one of those readings takes off a row fails the check; the other direction,
+  a run that does not list a carrier a reading keeps, is counted, never demanded. The two classes
+  that counted them apart while the readings were open, `open-complex-in-deleted` and
+  `open-snp-row-snv-mnv`, are gone. On a slot of
   rule (c) the check reads the rows as the indel post-analysis does, and its findings there state
   the carrier gate's own convention. A target that needs an MNV and another indel-path record stays
   the two-indel limit (`limit-two-indels`). On the README guide's genome-wide searches of HPRC v2.1
@@ -192,8 +194,10 @@ and the `release-crisprme` skill.
     chr9, chr19; two of them confirmed against assemblies). An SNV whose base is neither the MNV's
     base there nor the reference base it keeps is a true third-base conflict, one slot of HPRC
     v2.1 (chrY, one copy, the records' CONFLICT field naming another sample), and that slot leaves
-    both records' rows. Base by base lists 106 false 23-mers of 12,396, where reading each record
-    without the other lists 5,106 of 20,677. The indel rows, the SNP rows and the carrier gate
+    both records' rows. Read so, with that slot listed nowhere, the rule lists 81 false 23-mers of
+    12,371, where reading each record without the other lists 5,106 of 20,677 (the measurement's
+    base-by-base column reads the conflict slot as the SNV alone and counts 106 of 12,396; its 25
+    listings there are every one false). The indel rows, the SNP rows and the carrier gate
     read it the same way, the gate away from the position of a variant the row names, where its
     own convention (a rival allele of that position) comes first, as since 2.10.0.
   - **An indel at the POS of a complex record**, one of the two keeping no anchor base (50 pairs,

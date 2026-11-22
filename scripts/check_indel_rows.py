@@ -228,18 +228,23 @@ limit (counted and listed under its own class, non-gating) or not (gating):
     (c) otherwise ('phase not known': a rival allele of the position, its convention since
     2.10.0), which changes no row this check reads; the findings on such slots say so;
   * THE SHAPES HPRC's DECOMPOSITION LEAVES (METHODS section 4, rules 1 to 3 of 2.10.1,
-    each measured against HPRC's pre-vcfwave original records over 921 slots). They were
-    open readings up to 2.10.1, read as the code read them and counted apart; they are
-    now read as the rules have it and checked like any other reading, so a run that
-    departs from one fails the check (OPEN_READINGS, left empty, says where to put the
-    next one). A complex record wholly on bases the record deletes or replaces puts bases
-    of its own among them and takes the slot off ('complex'); reading it as changing
-    nothing lists 692 false 23-mers of 4,864 and was turned down. An SNV on a base of an
-    MNV record is read base by base: one naming the base the record puts there leaves the
-    slot listed ('snv-on-mnv'), one on a base it keeps and a true third-base conflict take
-    it off ('snv-breaks-mnv'). An indel at the POS of a complex record is a displaced copy
-    of it: the complex record's rows read the slot without it, the indel's rows read the
-    complex record;
+    each measured against HPRC's pre-vcfwave original records over 921 slots; every count
+    of false 23-mers quoted here is a lower bound and every share of real an upper bound,
+    METHODS section 4). Rules 1 and 2 were open readings up to 2.10.1, read as the code
+    read them and counted apart; rule 3 had a reading METHODS specified and the code
+    contradicted (two records at one POS "stay listed", where _store_indels dropped the
+    insertion slots from both rows). All three are now read as the rules have it and
+    checked like any other reading, so a run that LISTS a carrier one of those readings
+    takes off a row fails the check; the other direction -- a run that does not list a
+    carrier a reading keeps -- is counted, never demanded (OPEN_READINGS, left empty,
+    says where to put the next open reading). A complex record wholly on bases the record
+    deletes or replaces puts bases of its own among them and takes the slot off
+    ('complex'); reading it as changing nothing lists 692 false 23-mers of 4,864 and was
+    turned down. An SNV on a base of an MNV record is read base by base: one naming the
+    base the record puts there leaves the slot listed ('snv-on-mnv'), one on a base it
+    keeps and a true third-base conflict take it off ('snv-breaks-mnv'). An indel at the
+    POS of a complex record is a displaced copy of it: the complex record's rows read the
+    slot without it, the indel's rows read the complex record;
   A disagreement no documented rule explains gates (unexplained-disagreement: a defect of
   CRISPRme or of this checker).
 
@@ -472,7 +477,9 @@ limit-snp-row-unphased; variant-shadowed and overlap-reading-agrees (a listed ca
 whose slot, read as METHODS section 4 reads a slot whose alleles overlap the record,
 holds the target: the row agrees with it) are notes. The two open readings of the 2.10.1
 branch, open-complex-in-deleted and open-snp-row-snv-mnv, are gone: their rules are
-decided and in the code (above), and a run that departs from one now fails the check.
+decided and in the code (above), and a run that now LISTS a carrier one of the three
+readings takes off a row fails the check (the other direction, a run that does not list
+a carrier a reading keeps, is counted, never demanded).
 Five non-gating classes are this
 checker's own COVERAGE GAPS, not CRISPRme limits: coverage-overlap-cap (a carrier whose
 slot's overlap zones within a target's reach of a record have more than 1024 readings:
@@ -2092,7 +2099,10 @@ GATE_RIVAL = ("the carrier gate reads such a slot as holding a rival allele of t
 #   had it change nothing; and rule 2, an SNV and an MNV on one slot, read base by base,
 #   where the reading before it kept the carrier of an MNV starting at a named SNV's
 #   position and took off every other. Both readings are now checked like any other, so a
-#   run that departs from them fails the check.
+#   run that LISTS a carrier one of them takes off a row fails the check; a run that does
+#   not list a carrier one of them keeps is counted, never demanded, like any other
+#   listing of completeness. (Rule 3 was never here: its reading was specified in METHODS
+#   and contradicted by the code, not open.)
 OPEN_READINGS = {}
 
 
@@ -2161,7 +2171,9 @@ def overlap_kind(a, al, phase_known=True, cover=None, mnv=False):
     'deleted'); and on an MNV record's rows no allele is 'deleted' (rule (b)).
 
     Three readings of 2.10.1 (METHODS section 4), each measured against HPRC's
-    pre-vcfwave original records:
+    pre-vcfwave original records ("real" there means the 23-mer occurs somewhere in the
+    carrier's true sequence over the window, so every count of false 23-mers below is a
+    lower bound and every share of real an upper bound):
       * rule 1, a complex record wholly on bases an indel record deletes or replaces: it
         puts bases of its own among them, as an insertion there does, and takes the slot
         off ('complex'). Reading it as changing nothing was turned down (692 false
@@ -2174,8 +2186,10 @@ def overlap_kind(a, al, phase_known=True, cover=None, mnv=False):
         ('snv-breaks-mnv'), the window showing the record's own base;
       * rule 3, an indel at the POS of a complex record (one of the two keeping no anchor
         base): a displaced copy of it, so the complex record's rows read the slot without
-        the indel ('artefact') while the indel's rows read the complex record ('complex'
-        or 'beside') and the slot leaves them. Two records that both keep an anchor are
+        the indel ('artefact') while the indel's rows read the complex record -- the slot
+        leaves them where it changes a base the target covers ('complex') and stays on
+        them, read without it, where it changes none ('beside', in LEFT_OUT like any
+        record beside the target). Two records that both keep an anchor are
         two alleles of one site, and two that keep none are read as overlapping
         records, as before."""
     if a.kind == "snv" and al.kind == "mnv" and a.lo >= al.lo and a.hi <= al.hi:

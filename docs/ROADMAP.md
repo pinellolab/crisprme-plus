@@ -69,9 +69,14 @@ gap the release's gates found.
   (`bcftools norm -m -any -f hg38`), which left-aligns each indel against hg38 alone and so slides
   it across the haplotype's other variants in a repeat. At the next HPRC rebuild, split and trim
   the records without left-aligning them, and measure what is left. HPRC should also be told that
-  their published `vcfbub` VCF silently drops a multi-allelic site where any one ALT has AC=0
-  (215 records missing in chr21:8-9 Mb alone), which is why the measurement had to read their raw
-  `vg deconstruct` VCF.
+  their published `vcfbub` VCF drops a whole site where any one ALT has AC=0, which is why the
+  measurement had to read their raw `vg deconstruct` VCF. Measured on chr21:8,000,000-9,000,000,
+  by taking every record of `hprc-v2.1-mc-grch38.raw.vcf.gz` that `vcfbub`'s rule keeps (LV=0 with
+  REF ≤ 100 kb, or a child of a popped parent) and looking it up by ID in
+  `hprc-v2.1-mc-grch38.vcf.gz`: of 10,431 such records 215 are missing, every one of them carrying
+  an ALT with AC=0, where not one of the 10,216 present does; 207 of the 215 are multi-allelic and
+  206 of those still carry an allele somebody has, and no record present there has lost an ALT, so
+  the site goes whole rather than the empty allele alone.
 - **The real-data check** (`scripts/check_indel_rows.py`): to check `Variant_info_spacer+PAM` (each
   variant's number in its target) and redundant alternative alignments, which it does not today
   ([`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md), step 4c); to hold less memory (one process holds
