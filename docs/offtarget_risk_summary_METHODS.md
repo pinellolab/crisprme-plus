@@ -50,6 +50,13 @@ on-target refit in §3 is inverted back — the deployment-matched map prints a 
 and the benchmark's scope beside its AUPR table, and labels the support row that counts the
 whole held-out set rather than the sensitive tier.*
 
+*On integration, same date, where the PAM-internal-bulge fix and the corrected page met in
+one tree: §3 now names §2 as the one place that defect is measured, so the 0.6131 → 0.6180
+move is one measurement the two sections share rather than two statements of it, and §2's
+refit parenthetical no longer reads as if the largest absolute move and the largest
+relative move were the same bin — they are 0.039 at score 0.387 and 21% at 0.356, both in
+the 0.2–0.5 band.*
+
 ---
 
 ## 1. What the summary reports (and what it does not)
@@ -153,8 +160,9 @@ precision–recall figures are rendered from a full-precision rescore of the ali
 and are therefore already free of this; the shipped `crispr_bulge_calibration.npz` is
 not. The fabricated scores are extra *negatives* at mid-to-high scores, so the stored map
 very slightly **under**-states risk there: refitting it on the corrected column raises
-the per-site probability by at most 0.039 absolute (21% relative, both in the 0.2–0.5
-band). On a finished genome-wide search (§7's) that moves the card's four CRISPR-Bulge
+the per-site probability by at most 0.039 absolute (at the bin at score 0.387) and by at
+most 21% relative (at a different bin, 0.356); both maxima fall in the 0.2–0.5
+band. On a finished genome-wide search (§7's) that moves the card's four CRISPR-Bulge
 rows by **+0.00 (≥0.5), +0.05 (0.2–0.5), +0.05 (≥0.2) and +0.12 (sensitive) expected true
 off-targets** — every one of them a small fraction of its own 90% interval, which the
 band overdispersions (φ = 0.63 for 0.2–0.5, 0.59 for the sensitive tier) make several
@@ -255,10 +263,11 @@ calibration artifact the headline number and the card's table come from is fitte
 report's 3-decimal CRISPR-Bulge column (0.613 trapezoid / 0.615 tie-grouped on that
 column; 0.618 / 0.622 at full precision). Same sites, same model — but the largest term in
 that 0.0090 gap is **not** score precision: it is the **PAM-internal-bulge scoring defect in
-the stored column itself** (rows whose single bulge falls inside the PAM were scored after
-the guide-PAM normalization overwrote their alignment gap, so they are inflated and cost
-precision; every affected row is a labelled negative, so no recall figure moves). On the
-trapezoid rule that defect alone accounts for **0.6131 → 0.6180**; decomposed over the full
+the stored column itself**, the one §2 documents and measures (rows whose single bulge falls
+inside the PAM were scored after the guide-PAM normalization overwrote their alignment gap,
+so they are inflated and cost precision; every affected row is a labelled negative, so no
+recall figure moves). §2's measurement of it is this gap's largest term: on the trapezoid
+rule that defect alone accounts for **0.6131 → 0.6180**, and decomposed over the full
 0.0090 gap it is **54%**, against **26%** for the figure's full-precision rescoring and
 **20%** for its tie-grouped AP rule. The gap is far inside the 0.56–0.70 CI, and the
 3-decimal fit is the one the deployed probability map is built on; refitting it on the
