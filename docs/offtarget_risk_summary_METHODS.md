@@ -224,8 +224,15 @@ read from the haplotype itself, so it is not.
 
 A sample whose genotype is unphased, has a missing allele, or whose records overlap in the
 window is **reported** rather than guessed; haplotypes are written by the same code as the
-independent indel-row check (`scripts/variant_haplotypes.py`). See README §2.2.12 for the
-flags and METHODS §7.1 for the method.
+independent indel-row check (`scripts/variant_haplotypes.py`). Note that "distinct
+observed haplotype" is a stricter rule here than in the report's `Observed` column: the
+search's enumerator (`observed_haplotypes.py`) keeps an unphased individual by collapsing
+its alts into one *putative* set, so no risk is missed, while this command writes
+sequence and so reports that individual as `unresolved` instead of choosing one. The two
+agree on a phased panel; on an unphased one the carrier lists will differ, by that rule.
+And where no VCF covers a contig the reference entry says `no-vcf-covers-this-contig`
+rather than claiming the panel is invariant there. See README §2.2.12 for the flags and
+METHODS §7.1 for the method.
 
 ## 4. Point calibration: isotonic, and why
 

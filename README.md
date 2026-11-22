@@ -2724,6 +2724,19 @@ or whose records overlap in the window (the VCF gives no sequence there) is **re
 under `unresolved`, with the reason and the records at fault. A target near a contig end
 is truncated, and says so. An input it cannot resolve is named exactly, never guessed.
 
+> **Note — "observed haplotype" here is a stricter rule than the search's.** The search's
+> own enumerator (`PostProcess/observed_haplotypes.py`, which fills the report's
+> `Observed` column) is **sensitivity-first**: an UNPHASED individual is never dropped —
+> its whole alt collection in the window is collapsed into one *putative* variant set, so
+> the site is never missed. `extract-flanks` is **sequence-first**: it writes the bases
+> you will order oligos against, and for that same individual the VCF does not say which
+> of its alleles sit on one copy, so there is no one sequence to write; it is listed
+> under `unresolved` with the records at fault. On a **phased** panel (HGDP+1000G, the
+> 1000 Genomes phased releases) the two agree. On an **unphased** one they will not: the
+> report may name carriers of a putative haplotype that the flank TSV reports as
+> unresolved, and that difference is this rule, not a bug in either. Phase your VCFs if
+> you need the sequence of such a sample.
+
 Haplotypes are written by the same code as `scripts/check_indel_rows.py`, the independent
 check of CRISPRme's indel rows (`scripts/variant_haplotypes.py`): two readers of one VCF
 that disagreed would be two different answers to "what does this individual hold here?",
@@ -2754,13 +2767,39 @@ they are often gone by then; point at them with `--vcf-dir`:
     --out flanks/top1000
   ```
 
-A worked line of the TSV reads: row `17` of the input, `chr8:127736231-127736253 (+)`,
-haplotype `hap1`, flank `chr8:127736031-127736453`, `flank_len 423`, `target_offset 200`,
+> **Note:** index your VCFs first — `tabix -p vcf <file>.vcf.gz`, one `.tbi` beside each.
+> Without an index every VCF has to be read once, end to end, to find out which contigs
+> it holds and where: on a 23-file HGDP+1000G set that is over 25 minutes and several GB
+> of memory before the first flank is written, and nothing is printed while it happens.
+> With the indexes it is a seek, and the run starts in seconds.
+
+A worked line of the TSV reads: row `17` of the input, `chr8:127736231-127736252 (+)`,
+haplotype `hap1`, flank `chr8:127736031-127736452`, `flank_len 423`, `target_offset 200`,
 `target_len 23`, `target_found yes`, `n_carriers 312`, `variants chr8_127736240_A_AT`.
 Cut 423 bases out of the FASTA record `crisprme_row17_hap1`, and the protospacer+PAM is
-bases 200–222 of it; the 200 bases on either side are where the primers go. The `ref`
-entry of the same row is the sequence every sample **without** a variant in that window
-carries.
+bases 200–222 of it; the 200 bases on either side are where the primers go.
+
+The numbers of that line are worth reading twice, because they are the miscount this
+command exists to prevent. `chr8_127736240_A_AT` is a **1 bp insertion**, inside the
+target. The flank is cut on the reference, so its interval
+(`chr8:127736031-127736452`) is 422 coordinates — but a carrier of the insertion holds
+**423** bases between them, which is what `flank_len` says for `hap1`. The 23-base
+protospacer covers only 22 reference coordinates (`127736231-127736252`), and it reads
+on that haplotype exactly (`target_found yes`, `target_len 23`). The `ref` entry of the
+same row is the same interval with `flank_len 422`, `target_len 22` and
+`target_found no`: the reference does not hold this site. Counting 23 bases from the
+reference, or taking the flank's length from its coordinates, would be off by one on
+every carrier — and by an indel's whole length on a bigger one.
+
+The `ref` entry of a row is the sequence every sample **without** a variant in that
+window carries — where there were samples to check, and its `notes` say which case it
+is. On a contig no VCF covers (chrY, an `_alt`, a `_random`, a `chrUn`: 46 of them under
+a 23-file HGDP+1000G set on one real 1,000-row shortlist) nothing was read, and the note
+is `no-vcf-covers-this-contig`; under `--reference-only` it is `reference-only`; with a
+sites-only VCF (no sample columns) it is `no-genotyped-vcf-for-this-contig`. The
+sequence is the same in all four cases; what differs is what was checked, so only
+`reference-of-every-sample-without-a-variant-here` is evidence that the site is
+invariant across the panel.
 
 ##### Input Arguments
 ---
@@ -2799,8 +2838,13 @@ carries.
   identity, flag or no flag.
 - `--include-filtered` — also write the records whose `FILTER` is outside `PASS` and `.`.
   By default they are left out, as the search left them out — so the flank matches the
-  row's own alignment — and counted in the `notes` column, so a low-quality call in your
-  amplicon window is never silently missing.
+  row's own alignment — and counted in the `notes` column
+  (`filtered-records-in-window:N`), so a low-quality call in your amplicon window is
+  never silently missing. With the flag their bases are **in** the sequence you will
+  order oligos against, so they are marked twice over: the note becomes
+  `filtered-records-written:N`, and each such record carries its `FILTER` in the
+  `variants` column, behind a `|` (`chr8_127736240_A_AT|LowQual`). A `PASS` record is
+  written as before, with no suffix.
 - `--max-rows` — stop after N rows of the table. A genome-wide integrated table has
   millions of rows; this command is meant for a shortlist.
 - `--reference-only` — read no VCF: the reference flank alone.

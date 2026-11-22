@@ -150,13 +150,22 @@ def write_samples(path, samples=SAMPLES):
     return path
 
 
-def write_targets(path, rows, curated=True, block="highest_CFD"):
-    """A results table. ``rows``: (chrom, start0, strand, aligned protospacer+PAM)."""
+def write_targets(path, rows, curated=True, block="highest_CFD", spacer=TARGET,
+                  ref_aligned="NA"):
+    """A results table. ``rows``: (chrom, start0, strand, aligned protospacer+PAM).
+
+    The curated shape is the report's top-N download down to the name it gives the
+    guide: ``Aligned_spacer+PAM``, the guide written against the row's alignment. That
+    table has no plain ``Spacer+PAM`` column at all, and it is the input of both
+    documented examples, so the fixture carries what the real file carries.
+    """
     with open(path, "w") as fh:
         if curated:
-            fh.write("rank\tChromosome\tPosition\tStrand\tAligned_protospacer+PAM\tCFD\n")
+            fh.write("rank\tChromosome\tPosition\tStrand\tAligned_spacer+PAM\t"
+                     "Aligned_protospacer+PAM\tCFD\n")
             for i, (chrom, start, strand, aligned) in enumerate(rows, 1):
-                fh.write("%d\t%s\t%d\t%s\t%s\t0.5000\n" % (i, chrom, start, strand, aligned))
+                fh.write("%d\t%s\t%d\t%s\t%s\t%s\t0.5000\n"
+                         % (i, chrom, start, strand, spacer, aligned))
         else:
             head = ["Spacer+PAM", "Chromosome"]
             for b in F.BLOCKS:
@@ -167,7 +176,7 @@ def write_targets(path, rows, curated=True, block="highest_CFD"):
             for chrom, start, strand, aligned in rows:
                 row = [TARGET, chrom]
                 for b in F.BLOCKS:
-                    row += ([str(start), strand, "NA", aligned] if b == block
+                    row += ([str(start), strand, ref_aligned, aligned] if b == block
                             else ["0", "+", "NA", "NA"])
                 fh.write("\t".join(row) + "\n")
     return path
@@ -187,13 +196,14 @@ class Case(unittest.TestCase):
         return os.path.join(self.dir, name)
 
     def go(self, rows, records=(), window=40, bgzf=False, samples=SAMPLES, chrom="chr1",
-           seq=None, curated=True, **kw):
+           seq=None, curated=True, spacer=TARGET, ref_aligned="NA", **kw):
         genome = write_fasta(self.path("ref"), chrom, REF if seq is None else seq)
         vcf = None
         if records:
             vcf = self.path("v.vcf.gz")
             (write_vcf_bgzf if bgzf else write_vcf_gzip)(vcf, records, samples, chrom)
-        table = write_targets(self.path("t.tsv"), rows, curated=curated)
+        table = write_targets(self.path("t.tsv"), rows, curated=curated, spacer=spacer,
+                              ref_aligned=ref_aligned)
         out = self.path("out")
         summary = F.run(targets=table, reference=genome, vcfs=[vcf] if vcf else [],
                         samples=[write_samples(self.path("s.txt"), samples)],
@@ -375,6 +385,85 @@ class IndelsMoveTheTarget(Case):
         self.assertEqual(ref_row["target_found"], "no")
         self.assertEqual(marked(ref_row, fasta), TARGET)
 
+    def test_a_deletion_inside_the_target_shortens_what_is_marked(self):
+        """A haplotype that does NOT read the row's protospacer still has to mark where
+        the site IS on it. A 4 bp deletion inside the target leaves 19 of its bases
+        there, so target_len is 19 and the marked bases are those 19 -- not the 23 the
+        reference span is wide, which would mark four bases PAST the site and read as
+        the protospacer to anyone cutting the FASTA by this offset and length."""
+        rec = deletion(TARGET_AT + 5, 4, {"S1": "1|0"})
+        _s, table, fasta = self.go(ROW, [rec])
+        got = entries(table)
+        hap = [r for r in got if r["haplotype"] != "ref"][0]
+        self.assertEqual(hap["target_found"], "no")
+        self.assertEqual(hap["target_len"], "19")
+        self.assertEqual(marked(hap, fasta), TARGET[:6] + TARGET[10:])
+        self.assertEqual(hap["target_sequence"], TARGET[:6] + TARGET[10:])
+        # the row's own span on the reference is unchanged: 23 coordinates
+        self.assertEqual(int(hap["target_end"]) - int(hap["target_start"]) + 1, 23)
+        self.assertEqual(got[0]["target_len"], "23")
+
+
+class ClashesAwayFromTheTarget(Case):
+    """A slot whose records overlap has no sequence WHERE THEY DO. That is a fact about
+    those bases, not about the row: the target's reference span, and so every coordinate
+    the row prints, must be the same whether or not such a pair sits elsewhere in the
+    window read around the target."""
+
+    # the row's protospacer: an A inserted after the 10th base of the target, so it is
+    # 23 bases long over 22 reference coordinates
+    PROBE = TARGET[:10] + "A" + TARGET[10:22]
+    CLASH_AT = TARGET_AT + 40        # 18 bases past the protospacer's end
+
+    def records(self, clash):
+        out = [insertion(TARGET_AT + 9, "A", {"S1": "1|0"})]
+        if clash:
+            # two records whose REF spans meet, both on S1's slot 0
+            at = self.CLASH_AT
+            out += [(at + 1, REF[at:at + 3], REF[at], {"S1": "1|0"}, "PASS"),
+                    (at + 2, REF[at + 1], "A" if REF[at + 1] != "A" else "C",
+                     {"S1": "1|0"}, "PASS")]
+        return out
+
+    def go_with(self, clash):
+        # a 10 bp window: the clash is outside the flank, and inside the wider stretch
+        # read to size the target
+        _s, table, fasta = self.go([("chr1", TARGET_AT, "+", self.PROBE)],
+                                   self.records(clash), window=10, max_haplotypes=0)
+        return table, fasta
+
+    def test_the_target_span_is_the_same_with_and_without_it(self):
+        plain, _f = self.go_with(False)
+        with_clash, _f2 = self.go_with(True)
+        keys = ("target_start", "target_end", "flank_start", "flank_end")
+        ref_plain = [r for r in entries(plain) if r["haplotype"] == "ref"][0]
+        ref_clash = [r for r in entries(with_clash) if r["haplotype"] == "ref"][0]
+        self.assertEqual([ref_plain[k] for k in keys], [ref_clash[k] for k in keys])
+        # and they are the ones the insertion gives: 22 reference coordinates
+        self.assertEqual(int(ref_plain["target_end"]) - int(ref_plain["target_start"]) + 1,
+                         22)
+        self.assertNotIn("protospacer-not-located", ref_clash["notes"])
+
+    def test_the_haplotype_that_holds_the_site_is_still_written(self):
+        table, fasta = self.go_with(True)
+        got = entries(table)
+        hap = [r for r in got if r["haplotype"] != "ref"]
+        self.assertEqual([r["target_found"] for r in hap], ["yes"])
+        self.assertEqual(hap[0]["carriers"], "S1:0")
+        self.assertEqual(marked(hap[0], fasta), self.PROBE)
+
+    def test_a_clash_the_reading_itself_crosses_is_not_read_through(self):
+        """The other side of the rule: two records that overlap INSIDE the target's own
+        span leave those bases unknown, so nothing is read there and the row says so."""
+        at = TARGET_AT + 3
+        recs = [(at + 1, REF[at:at + 3], REF[at], {"S1": "1|0"}, "PASS"),
+                (at + 2, REF[at + 1], "A" if REF[at + 1] != "A" else "C",
+                 {"S1": "1|0"}, "PASS")]
+        _s, table, _f = self.go([("chr1", TARGET_AT, "+", self.PROBE)], recs,
+                                window=10, max_haplotypes=0)
+        ref_row = [r for r in entries(table) if r["haplotype"] == "ref"][0]
+        self.assertIn("protospacer-not-located", ref_row["notes"])
+
 
 class SeveralVariantsInOneWindow(Case):
     def test_a_slot_with_both_is_its_own_sequence(self):
@@ -414,6 +503,49 @@ class ContigEnds(Case):
                          int(got[0]["flank_len"]))
 
 
+class WindowEdges(Case):
+    """A record whose REF span STRADDLES the edge of the flank. The flank is a genomic
+    interval, so what goes into it is the part of that record's edit lying INSIDE the
+    interval -- not the whole edit (the sequence would then be longer than the interval
+    it claims, and every offset past it would be wrong) and not nothing (the bases the
+    carrier holds there would read as the reference)."""
+
+    WINDOW = 40
+
+    def straddling(self, at, width=4):
+        """A ``width``-base MNV at ``at``, every base changed, so there is no shared
+        prefix or suffix to trim: its whole REF span is its edit."""
+        ref = REF[at:at + width]
+        alt = ref.translate(str.maketrans("ACGT", "CATG"))
+        self.assertEqual(len([1 for a, b in zip(ref, alt) if a == b]), 0)
+        return (at + 1, ref, alt, {"S1": "1|0"}, "PASS"), alt
+
+    def test_a_record_over_the_right_edge_puts_in_only_the_bases_inside(self):
+        fhi = TARGET_AT + len(TARGET) + self.WINDOW          # the flank's end, 0-based
+        rec, alt = self.straddling(fhi - 2)                  # 2 bases in, 2 bases out
+        _s, table, fasta = self.go(ROW, [rec], window=self.WINDOW)
+        got = entries(table)
+        hap = [r for r in got if r["haplotype"] != "ref"][0]
+        want = REF[TARGET_AT - self.WINDOW:fhi - 2] + alt[:2]
+        self.assertEqual(fasta[hap["fasta_id"]], want)
+        # the interval is 103 reference coordinates, so the sequence is 103 bases: a
+        # carrier of an MNV holds no more of them than the reference does
+        self.assertEqual(hap["flank_len"], got[0]["flank_len"])
+        self.assertEqual(int(hap["flank_len"]), len(want))
+        self.assertEqual(marked(hap, fasta), TARGET)
+
+    def test_a_record_over_the_left_edge_puts_in_only_the_bases_inside(self):
+        flo = TARGET_AT - self.WINDOW                        # the flank's start
+        rec, alt = self.straddling(flo - 2)                  # 2 bases out, 2 bases in
+        _s, table, fasta = self.go(ROW, [rec], window=self.WINDOW)
+        got = entries(table)
+        hap = [r for r in got if r["haplotype"] != "ref"][0]
+        want = alt[2:] + REF[flo + 2:TARGET_AT + len(TARGET) + self.WINDOW]
+        self.assertEqual(fasta[hap["fasta_id"]], want)
+        self.assertEqual(hap["flank_len"], got[0]["flank_len"])
+        self.assertEqual(marked(hap, fasta), TARGET)
+
+
 class UnknownGenotypes(Case):
     def test_an_unphased_heterozygous_call_writes_no_haplotype(self):
         rec = snv(*SNV_BESIDE, gts={"S1": "0/1", "S2": "1|0"})
@@ -451,6 +583,37 @@ class UnknownGenotypes(Case):
         got = entries(table)
         self.assertEqual([r["haplotype"] for r in got], ["ref"])
         self.assertEqual(got[0]["carriers"], "S1:1")
+        # ONE sample has a record in this window, on both lists: its written copy and
+        # its unresolvable one. n_samples counts samples, so it counts it once.
+        self.assertEqual(got[0]["n_samples"], "1")
+
+    def test_a_haploid_call_is_one_slot_and_is_written(self):
+        """A male chrX is coded haploid (a bare ``0`` / ``1``). Such a sample has ONE
+        copy here, and it is known: it is written, with one slot."""
+        rec = snv(*SNV_BESIDE, gts={"S1": "1", "S2": "0"})
+        _s, table, _f = self.go(ROW, [rec])
+        self.assertEqual(unresolved(table), [])
+        got = entries(table)
+        self.assertEqual([r["haplotype"] for r in got], ["ref", "hap1"])
+        self.assertEqual(got[1]["carriers"], "S1:0")
+        self.assertEqual(got[1]["n_carriers"], "1")
+
+    def test_a_sample_haploid_at_one_record_and_diploid_at_another_is_reported(self):
+        """Mixed ploidy in one window: which of its calls share a copy is not in the
+        VCF, so neither copy is written -- reading the haploid call onto BOTH slots
+        would invent a carrier, and a haplotype nobody holds."""
+        one = snv(*SNV_BESIDE, gts={"S1": "1", "S2": "1|0"})
+        two = snv(TARGET_AT - 15, "A" if REF[TARGET_AT - 15] != "A" else "C",
+                  {"S1": "1|0"})
+        _s, table, _f = self.go(ROW, [one, two])
+        bad = unresolved(table)
+        self.assertEqual([r["carriers"] for r in bad], ["S1"])
+        got = entries(table)
+        self.assertNotIn("S1", ",".join(r["carriers"] for r in got))
+        # S2's slot 0 is the only haplotype written, and the reference is the other
+        self.assertEqual([r["haplotype"] for r in got], ["ref", "hap1"])
+        self.assertEqual(got[1]["carriers"], "S2:0")
+        self.assertEqual(got[0]["n_samples"], "2")
 
 
 class Deduplication(Case):
@@ -553,6 +716,43 @@ class Formats(Case):
         self.assertEqual(len(entries(table)), 2)
         self.assertEqual(entries(table)[0]["guide"], TARGET)
 
+    def test_the_curated_download_names_the_guide_aligned_and_it_is_still_read(self):
+        """The report's top-N download -- the documented input -- has no plain
+        ``Spacer+PAM`` column: the guide is ``Aligned_spacer+PAM``, written against the
+        row's alignment, so a DNA-bulge row carries the alignment's gap in it. The gap
+        belongs to the row, not to the guide, so the column holds the same guide on
+        every line of a file and several guides' files merge on it."""
+        rec = snv(*SNV_BESIDE, gts={"S1": "1|0"})
+        _s, table, _f = self.go(ROW, [rec])
+        self.assertTrue(table)
+        for row in table:
+            self.assertEqual(row["guide"], TARGET)
+        # the same row with the alignment's gap in the guide cell
+        _s2, dashed, _f2 = self.go(ROW, [rec], spacer=TARGET[:4] + "-" + TARGET[4:])
+        self.assertEqual([r["guide"] for r in dashed], [TARGET] * len(dashed))
+
+    def test_an_integrated_row_is_read_on_its_alt_alignment(self):
+        """An integrated row carries BOTH alignments. The ALT one is the sequence the
+        site is, where a variant makes it -- 398 of the 1,000 rows of a real shortlist
+        have both -- so it is the one read; the REF one stands in only where the row
+        has no ALT alignment (a reference off-target, written NA)."""
+        added = "GGG"
+        alt_target = TARGET[:6] + added + TARGET[6:]
+        rec = insertion(TARGET_AT + 5, added, gts={"S1": "1|0"})
+        _s, table, fasta = self.go([("chr1", TARGET_AT, "+", alt_target)], [rec],
+                                   curated=False, ref_aligned=TARGET)
+        got = entries(table)
+        hap = [r for r in got if r["haplotype"] != "ref"][0]
+        self.assertEqual(hap["target_found"], "yes")        # the ALT alignment is read
+        self.assertEqual(marked(hap, fasta), alt_target)
+        self.assertEqual(got[0]["target_found"], "no")      # ...and the reference is not
+        # the other way round: no ALT alignment, so the REF one is what the row has
+        _s2, table2, fasta2 = self.go([("chr1", TARGET_AT, "+", "NA")], [rec],
+                                      curated=False, ref_aligned=TARGET)
+        ref2 = entries(table2)[0]
+        self.assertEqual(ref2["target_found"], "yes")
+        self.assertEqual(marked(ref2, fasta2), TARGET)
+
     def test_another_block_of_an_integrated_table_is_taken_by_name(self):
         genome = write_fasta(self.path("ref"))
         t = write_targets(self.path("t.tsv"), ROW, curated=False, block="fewest_mm+b")
@@ -651,11 +851,89 @@ class FilteredRecords(Case):
         self.assertEqual([r["haplotype"] for r in entries(table)], ["ref"])
         self.assertIn("filtered-records-in-window:1", entries(table)[0]["notes"])
 
-    def test_include_filtered_puts_it_back(self):
+    def test_include_filtered_puts_it_back_and_marks_it(self):
+        """With the flag ON those bases are IN the sequence the user orders oligos
+        against, which is the case that most needs saying: the note says they were
+        written (not merely nearby), and the record carries its FILTER in the variants
+        column, the one place the entry names its records."""
         rec = snv(*SNV_BESIDE, gts={"S1": "1|0"}, filt="LowQual")
         _s, table, _f = self.go(ROW, [rec], include_filtered=True)
-        self.assertEqual([r["haplotype"] for r in entries(table)], ["ref", "hap1"])
-        self.assertNotIn("filtered-records-in-window", entries(table)[0]["notes"])
+        got = entries(table)
+        self.assertEqual([r["haplotype"] for r in got], ["ref", "hap1"])
+        self.assertIn("filtered-records-written:1", got[0]["notes"])
+        self.assertNotIn("filtered-records-in-window", got[0]["notes"])
+        token = "chr1_%d_%s_%s|LowQual" % (SNV_BESIDE[0] + 1, REF[SNV_BESIDE[0]],
+                                           SNV_BESIDE[1])
+        self.assertEqual(got[1]["variants"], token)
+
+    def test_a_pass_record_carries_no_filter_in_its_token(self):
+        """The marking is for the non-PASS ones only: a PASS record reads as before,
+        so the column stays joinable with the search's own variant tokens."""
+        rec = snv(*SNV_BESIDE, gts={"S1": "1|0"})
+        _s, table, _f = self.go(ROW, [rec], include_filtered=True)
+        got = entries(table)
+        self.assertEqual(got[1]["variants"],
+                         "chr1_%d_%s_%s" % (SNV_BESIDE[0] + 1, REF[SNV_BESIDE[0]],
+                                            SNV_BESIDE[1]))
+        self.assertNotIn("filtered-records", got[0]["notes"])
+
+
+class WhatTheReferenceEntryClaims(Case):
+    """``reference-of-every-sample-without-a-variant-here`` is a claim about the panel:
+    that every one of its samples reads as the reference across this flank. It may be
+    made only where the samples were READ. Where no VCF covers the contig -- chrY, an
+    _alt, a _random, a chrUn: 46 contigs and 54 rows of one real 1,000-row shortlist --
+    or where no VCF was read at all, the sequence is the same and the claim is not."""
+
+    def two_contigs(self, **kw):
+        """A run whose table names chr1 (in the VCF) and chr2 (in no VCF)."""
+        genome = write_fasta(self.path("ref"), "chr1")
+        write_fasta(genome, "chr2")
+        vcf = write_vcf_gzip(self.path("v.vcf.gz"),
+                             [snv(*SNV_BESIDE, gts={"S1": "1|0"})])
+        table = write_targets(self.path("t.tsv"),
+                              [("chr1", TARGET_AT, "+", TARGET),
+                               ("chr2", TARGET_AT, "+", TARGET)])
+        said = []
+        F.run(targets=table, reference=genome,
+              samples=[write_samples(self.path("s.txt"))], out=self.path("out"),
+              window=40, log=said.append, vcfs=[vcf], **kw)
+        rows = {r["chrom"]: r for r in read_tsv(self.path("out.tsv"))
+                if r["haplotype"] == "ref"}
+        return rows, said
+
+    def test_a_contig_no_vcf_covers_is_not_called_invariant(self):
+        rows, said = self.two_contigs()
+        self.assertIn(F.REF_NOTE_CHECKED, rows["chr1"]["notes"])
+        self.assertIn(F.REF_NOTE_NO_CONTIG, rows["chr2"]["notes"])
+        self.assertNotIn(F.REF_NOTE_CHECKED, rows["chr2"]["notes"])
+        # the two sequences are the same; only what was checked differs
+        self.assertEqual(rows["chr1"]["flank_len"], rows["chr2"]["flank_len"])
+        self.assertEqual(rows["chr2"]["n_samples"], "0")
+        # and the contigs nobody was read for are named once, in the log
+        named = [m for m in said if F.REF_NOTE_NO_CONTIG in m]
+        self.assertEqual(len(named), 1, said)
+        self.assertIn("chr2", named[0])
+        self.assertNotIn("chr1,", named[0])
+
+    def test_reference_only_claims_nothing_about_any_sample(self):
+        rows, said = self.two_contigs(reference_only=True)
+        for chrom, row in rows.items():
+            with self.subTest(chrom=chrom):
+                self.assertIn(F.REF_NOTE_NO_VCF, row["notes"])
+                self.assertNotIn(F.REF_NOTE_CHECKED, row["notes"])
+        # no VCF was read, so no contig is "the one contig that was missing"
+        self.assertEqual([m for m in said if F.REF_NOTE_NO_CONTIG in m], [])
+
+    def test_a_contig_a_vcf_covers_with_no_variant_here_still_says_so(self):
+        """The claim itself is unchanged where it is earned: a covered contig whose
+        window holds no record is every sample's reference, and says it."""
+        far = snv(TARGET_AT - 300, "A" if REF[TARGET_AT - 300] != "A" else "G",
+                  {"S1": "1|0"})
+        _s, table, _f = self.go(ROW, [far])
+        got = entries(table)
+        self.assertEqual([r["haplotype"] for r in got], ["ref"])
+        self.assertIn(F.REF_NOTE_CHECKED, got[0]["notes"])
 
 
 # --------------------------------------------------------------------------- #
@@ -790,8 +1068,12 @@ class RunRecords(Case):
         F.run(targets=write_targets(self.path("t.tsv"), ROW), reference=genome,
               vcfs=[vcf], out=self.path("out"), window=40, log=lines.append)
         self.assertTrue(any("list no carrier" in m for m in lines))
-        self.assertEqual([r["haplotype"] for r in entries(read_tsv(self.path("out.tsv")))],
-                         ["ref"])
+        got = entries(read_tsv(self.path("out.tsv")))
+        self.assertEqual([r["haplotype"] for r in got], ["ref"])
+        # ...and the reference entry does not claim the panel either: there were no
+        # genotypes to read, so no sample was checked
+        self.assertIn(F.REF_NOTE_NO_GENOTYPES, got[0]["notes"])
+        self.assertNotIn(F.REF_NOTE_CHECKED, got[0]["notes"])
 
     def test_bad_arguments_are_refused_by_name(self):
         for kw, text in (({"out": None}, "--out"),
@@ -984,9 +1266,9 @@ class Mutants(Case):
         real_site = F.site_entries
 
         def no_dedup(refseq, chrom, row, variants, window, include_filtered,
-                     max_haplotypes=0):
+                     max_haplotypes=0, **kw):
             out, bad, facts = real_site(refseq, chrom, row, variants, window,
-                                        include_filtered, max_haplotypes)
+                                        include_filtered, max_haplotypes, **kw)
             split = [out[0]]
             for e in out[1:]:
                 for carrier in e.carriers:
@@ -1052,9 +1334,9 @@ class Mutants(Case):
         real_site = F.site_entries
 
         def quiet(refseq, chrom, row, variants, window, include_filtered,
-                  max_haplotypes=0):
+                  max_haplotypes=0, **kw):
             out, bad, facts = real_site(refseq, chrom, row, variants, window,
-                                        include_filtered, max_haplotypes)
+                                        include_filtered, max_haplotypes, **kw)
             facts["notes"] = {n for n in facts["notes"]
                               if not n.startswith("haplotypes-not-written")}
             facts["n_haplotypes"] = len(out)
@@ -1069,6 +1351,102 @@ class Mutants(Case):
                                lambda row_id, label: "row%d_%s_S1" % (row_id, label)):
             with expect_failure(self, "a sample name reaches a FASTA record name"):
                 Anonymised("test_no_sample_identity_is_written").debug()
+
+    def test_dropping_a_slot_for_a_clash_anywhere_breaks_the_target_span_rule(self):
+        """The rule before: a slot with ANY overlapping pair in the window read around
+        the target was skipped, wherever the pair was."""
+        real = F.reads_at
+
+        def blind(hap, coord, probe, al=None):
+            return [] if hap.clash else real(hap, coord, probe, al)
+        with mock.patch.object(F, "reads_at", blind):
+            with expect_failure(self, "a clash far from the target loses the reading"):
+                ClashesAwayFromTheTarget(
+                    "test_the_target_span_is_the_same_with_and_without_it").debug()
+
+    def test_a_window_that_takes_one_base_too_many_breaks_the_edge_rule(self):
+        """``min(stand, hi - edit_lo)`` + 1: a record straddling the right edge then
+        puts one base more into the flank than the interval has coordinates."""
+        def wide(self, lo, hi):
+            width = self.edit_hi - self.edit_lo
+            stand = min(width, len(self.body))
+            a = max(0, lo - self.edit_lo)
+            b = max(a, min(stand, hi - self.edit_lo + 1))
+            if len(self.body) > stand and lo <= self.edit_lo + width - 1 < hi:
+                b = len(self.body)
+            return a, b
+        with mock.patch.object(F.Allele, "window", wide):
+            with expect_failure(self, "the window takes a base from past its edge"):
+                WindowEdges(
+                    "test_a_record_over_the_right_edge_puts_in_only_the_bases_inside"
+                ).debug()
+
+    def test_a_target_len_from_the_reference_span_breaks_the_deletion_rule(self):
+        """``t_hi - t_lo`` instead of the span mapped through the haplotype: on a
+        carrier of a deletion inside the target it marks bases past the site."""
+        real = F.locate_target
+
+        def flat(hap, t_lo, t_hi, probe):
+            off, length, found = real(hap, t_lo, t_hi, probe)
+            return (off, length, found) if found else (off, t_hi - t_lo, found)
+        with mock.patch.object(F, "locate_target", flat):
+            with expect_failure(self, "the target's length is read off the reference"):
+                IndelsMoveTheTarget(
+                    "test_a_deletion_inside_the_target_shortens_what_is_marked").debug()
+
+    def test_a_haploid_call_read_onto_every_slot_breaks_the_ploidy_rule(self):
+        """``all(x == number for x in alle)`` without the ploidy guard: a haploid call
+        beside a diploid one then covers both slots, inventing a carrier."""
+        real = F.slot_of
+
+        def loose(call, number, h, ploidy):
+            alle, _phased = call
+            return "yes" if all(x == number for x in alle) else real(call, number, h,
+                                                                     ploidy)
+        with mock.patch.object(F, "slot_of", loose):
+            with expect_failure(self, "a haploid call is read onto both slots"):
+                UnknownGenotypes(
+                    "test_a_sample_haploid_at_one_record_and_diploid_at_another_is_"
+                    "reported").debug()
+
+    def test_preferring_the_ref_alignment_breaks_the_integrated_alignment_rule(self):
+        """``cell('aligned_ref') or cell('aligned')``: the row is then read on the
+        sequence the reference has, not on the one the variant makes."""
+        real = F.table_columns
+
+        def ref_first(header, block):
+            cols, shape = real(header, block)
+            if cols.get("aligned_ref") is not None:
+                cols["aligned"] = cols["aligned_ref"]
+            return cols, shape
+        with mock.patch.object(F, "table_columns", ref_first):
+            with expect_failure(self, "the REF alignment is read instead of the ALT"):
+                Formats("test_an_integrated_row_is_read_on_its_alt_alignment").debug()
+
+    def test_a_reference_entry_that_always_claims_the_panel_breaks_the_claim_rule(self):
+        """The note before: every reference entry said every sample reads as the
+        reference here, including on a contig no VCF covers."""
+        with mock.patch.object(F, "REF_NOTE_NO_CONTIG", F.REF_NOTE_CHECKED):
+            with expect_failure(self, "an unchecked contig claims the whole panel"):
+                WhatTheReferenceEntryClaims(
+                    "test_a_contig_no_vcf_covers_is_not_called_invariant").debug()
+
+    def test_counting_a_clashing_sample_twice_breaks_the_n_samples_rule(self):
+        """``len(written) + len(unresolved)``: a sample with one copy written and one
+        unresolvable is in both, and the column then runs past the panel."""
+        real_site = F.site_entries
+
+        def twice(refseq, chrom, row, variants, window, include_filtered,
+                  max_haplotypes=0, **kw):
+            out, bad, facts = real_site(refseq, chrom, row, variants, window,
+                                        include_filtered, max_haplotypes, **kw)
+            facts["n_samples"] = facts["n_samples"] + len(
+                {w.split(":")[0] for w, _r in bad})
+            return out, bad, facts
+        with mock.patch.object(F, "site_entries", twice):
+            with expect_failure(self, "a sample on both lists is counted twice"):
+                UnknownGenotypes(
+                    "test_overlapping_records_on_one_slot_have_no_sequence").debug()
 
 
 if __name__ == "__main__":

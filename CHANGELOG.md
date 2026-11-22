@@ -39,7 +39,26 @@ and the `release-crisprme` skill.
   sidecars. `--anonymise` writes no sample identity anywhere (FASTA names never carry one);
   `--max-haplotypes` (default 10) keeps the output readable without hiding anything -- the
   haplotypes that hold the off-target come first, `n_haplotypes` always gives the true
-  total and the notes count what was left out. Haplotypes are written by the SAME code the
+  total and the notes count what was left out. What each column may CLAIM is held to what
+  was read: the reference entry says `no-vcf-covers-this-contig` where VCFs were read but
+  none holds the contig (chrY, `_alt`, `_random`, `chrUn` under a typical panel: 46 contigs
+  and 54 rows of one real 1,000-row shortlist), `reference-only` where no VCF was read at
+  all and `no-genotyped-vcf-for-this-contig` for a sites-only dataset, rather than claiming
+  every sample reads as the reference there, and the contigs
+  nobody was read for are named once in the log; `n_samples` is the UNION of the samples
+  written and those unresolved, so a sample with one copy written and one unresolvable is
+  counted once (two rows of a real run printed more samples than the panel has); a slot
+  whose records overlap is set aside only where the overlap meets the target's own span,
+  so a clash elsewhere in the window no longer costs the row its protospacer and shifts
+  every coordinate it prints; `--include-filtered` marks what it writes (the note becomes
+  `filtered-records-written:N` and each non-PASS record carries its `FILTER` in the
+  `variants` column), so no low-quality base reaches an oligo unmarked; and the `guide`
+  column is filled for the report's curated download, which names the guide
+  `Aligned_spacer+PAM` (the alignment's gap taken out, so the column is the same guide on
+  every line and several guides' files merge on it). Index the VCFs (`tabix -p vcf`)
+  first -- without a `.tbi` each is read end to end once to find its contigs, which is
+  minutes per panel-sized file before the first flank is written: the README says so.
+  Haplotypes are written by the SAME code the
   independent indel-row check is built on, now in `scripts/variant_haplotypes.py` (the VCF,
   reference and haplotype readers) and `scripts/run_records.py` (a run's own sidecars),
   both moved whole out of `scripts/check_indel_rows.py` and both standard library only:

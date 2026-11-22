@@ -2410,8 +2410,11 @@ puts on that slot, each in place of its REF bases, as VCF 4.x defines it — by
 notion of a haplotype and the user's validation sequence cannot drift apart. Only records
 whose `FILTER` is `PASS` or `.` are written by default, as CRISPRitz's enricher reads them
 and therefore as the search modelled them, so the emitted protospacer matches the row's
-own alignment; records outside them are **counted in the notes**, never silently dropped,
-and `--include-filtered` writes them.
+own alignment; records outside them are **counted in the notes**, never silently dropped
+(`filtered-records-in-window:N`). `--include-filtered` writes them into the sequence, and
+then says so twice: the note becomes `filtered-records-written:N` and each such record
+carries its `FILTER` in the `variants` column (`chr8_127736240_A_AT|LowQual`), so no base
+of a low-quality call is in an ordered oligo without a mark on it.
 
 **The window.** Cut on the **reference** — the same genomic interval for every haplotype
 of a site, so the entries line up and the table can print one interval. An indel inside
@@ -2436,7 +2439,23 @@ records' REF spans meet describes those bases twice, so the VCF gives it no sequ
 Either way the sample (or the one copy at fault) is listed under `unresolved` with the
 reason and the records, and no haplotype is written for it. Two genotyped VCFs that cover
 one chromosome and name a sample in common are refused outright. An input the run's
-records name but that is not there is raised **by name**, with what to pass instead.
+records name but that is not there is raised **by name**, with what to pass instead. The
+reference entry of a row says which of four things it is: the sequence every sample
+without a variant here carries (a genotyped VCF covers this contig),
+`no-vcf-covers-this-contig` (VCFs were read, none holds this contig — chrY, `_alt`,
+`_random`, `chrUn` under a typical autosome+chrX panel), `reference-only` (no VCF was
+read at all), or `no-genotyped-vcf-for-this-contig` (a sites-only dataset). The sequence
+is the same; only the first is a statement about the panel's samples.
+
+**"Observed haplotype": two rules, deliberately.** CRISPRme's own enumerator
+(`PostProcess/observed_haplotypes.py`, behind the report's `Observed` column) is
+sensitivity-first: an unphased individual is never dropped — its whole alt collection in
+the window becomes ONE *putative* variant set, so no risk is missed. `extract-flanks` is
+sequence-first: it emits the bases a user will order oligos against, and for that
+individual the VCF does not say which alleles share a copy, so no sequence is written and
+the sample is listed under `unresolved`. On a phased panel the two agree (0 unphased
+unresolved rows in a 1,000-row HGDP+1000G shortlist); on an unphased one the report's
+carrier list for a site and the flank TSV's will differ, by this rule.
 
 **Output.** A FASTA (one record per sequence, whose names never carry a sample identity)
 and a TSV index joining back to the input by its line number and, where the table has one,

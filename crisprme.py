@@ -8656,9 +8656,12 @@ def extract_flanks_cmd():
     that shifts the site is visible rather than miscounted.
 
     A sample whose genotype is unphased, has a missing allele, or whose records overlap
-    in the window is REPORTED, never guessed. Input is the report's top-N download or an
+    in the window is REPORTED, never guessed (a stricter rule than the search's own
+    observed-haplotype enumerator, which keeps an unphased individual as one putative
+    set: README 2.2.12). Input is the report's top-N download or an
     integrated_results.tsv; with ``--results`` the reference, the VCFs and the samples
-    list are read from the run's own records.
+    list are read from the run's own records. Index the VCFs (``tabix -p vcf``) first:
+    without a .tbi each is read end to end once before the first flank is written.
     """
     if "--help" in input_args or len(input_args) < 3:
         sys.path.insert(0, script_path)

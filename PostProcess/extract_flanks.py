@@ -105,6 +105,16 @@ BLOCKS = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
 DEFAULT_BLOCK = "highest_CFD"
 _NO_VALUE = ("", "NA", "n", "-", ".")
 
+# What the REFERENCE entry's note may say, and the three different things it means. The
+# reference sequence is the same in all three; what differs is how much was CHECKED, and
+# only the first is a statement about the panel's samples. Writing it on a row nobody was
+# read for would be a positive claim no VCF was opened to make.
+REF_NOTE_CHECKED = "reference-of-every-sample-without-a-variant-here"
+REF_NOTE_NO_CONTIG = "no-vcf-covers-this-contig"   # VCFs read, none holds this contig
+REF_NOTE_NO_VCF = "reference-only"                 # no VCF was read at all
+# a VCF holds the contig but has no sample columns: there were no genotypes to check
+REF_NOTE_NO_GENOTYPES = "no-genotyped-vcf-for-this-contig"
+
 TSV_COLUMNS = (
     "row_id",            # the input row's 1-based data line number: the join key
     "rank",              # the input's own rank column, where it has one
@@ -163,6 +173,16 @@ def open_table(path):
         yield (line.rstrip("\n") for line in fh)
 
 
+# Where the guide itself is named, in the order preferred. ``Aligned_spacer+PAM`` is the
+# report's curated download -- the input of both README examples -- which has no plain
+# ``Spacer+PAM`` column at all, so without it the guide column of the primary documented
+# input is empty on every line. It is the guide written against the row's alignment, so
+# on a DNA-bulge row it carries the alignment's gap (81 of the 1,000 rows of a real
+# top-N): the gap is a property of that row, not of the guide the file is about, and
+# read_rows takes it out, so several guides' files merge into one order on this column.
+_GUIDE_COLUMNS = ("Spacer+PAM", "crRNA", "Aligned_spacer+PAM")
+
+
 def _column(head, names):
     for n in names:
         if n in head:
@@ -190,7 +210,7 @@ def table_columns(header, block):
             "aligned_ref": _column(head, ("Aligned_protospacer+PAM_REF_corrected_(%s)" % block,
                                           "Aligned_protospacer+PAM_REF_(%s)" % block)),
             "rank": _column(head, ("rank",)),
-            "guide": _column(head, ("Spacer+PAM", "crRNA")),
+            "guide": _column(head, _GUIDE_COLUMNS),
         }, "integrated (%s)" % block
     start = _column(head, ("Position", "Start_coordinate"))
     aligned = _column(head, ("Aligned_protospacer+PAM",))
@@ -205,7 +225,7 @@ def table_columns(header, block):
             % (block, ", ".join(missing)))
     return {"chrom": chrom, "start": start, "strand": strand, "aligned": aligned,
             "aligned_ref": None, "rank": _column(head, ("rank",)),
-            "guide": _column(head, ("Spacer+PAM", "crRNA"))}, "curated"
+            "guide": _column(head, _GUIDE_COLUMNS)}, "curated"
 
 
 def read_rows(path, block=DEFAULT_BLOCK, max_rows=0):
@@ -233,7 +253,10 @@ def read_rows(path, block=DEFAULT_BLOCK, max_rows=0):
                 return _row[i].strip() if i is not None and i < len(_row) else ""
 
             rec = {"chrom": cell("chrom"), "strand": cell("strand"),
-                   "rank": cell("rank"), "guide": cell("guide"), "note": ""}
+                   "rank": cell("rank"),
+                   # the guide, without the gap an aligned column writes into it
+                   # (see _GUIDE_COLUMNS): the same text on every row of one guide
+                   "guide": cell("guide").replace("-", ""), "note": ""}
             aligned = cell("aligned")
             if aligned in _NO_VALUE:
                 aligned = cell("aligned_ref")
@@ -481,12 +504,18 @@ class Variants(object):
         return use
 
     def alleles(self, chrom, beg, end, include_filtered=False):
-        """([Allele], {line id: calls}, [filtered-out records]) over [beg, end), 0-based.
+        """([Allele], {line id: calls}, [non-PASS records in the window]) over
+        [beg, end), 0-based.
 
         A record outside PASS and '.' is left out by default -- that is what CRISPRitz's
         enricher reads, so it is what the search modelled, and the flank then matches the
         row's own alignment -- but it is RETURNED in the third list, so the caller can say
         'there are also these calls in your amplicon window' rather than hide them.
+
+        The third list is the records outside PASS WHETHER OR NOT they were written:
+        with ``include_filtered`` their bases are in the sequence the user will order
+        oligos against, which is the more important of the two cases to say out loud.
+        The written ones also carry their FILTER into the variants column (token below).
         """
         out, calls, filtered = [], {}, []
         for v in self.covering(chrom):
@@ -494,12 +523,13 @@ class Variants(object):
                      for s in v.samples]
             for r in v.records(chrom, beg, end):
                 passing = r["filter"] in PASS_FILTERS
-                if not passing and not include_filtered:
+                if not passing:
                     for alt in r["alts"]:
                         if alt and alt not in (".", "*") and not set(alt) - set("ACGTN"):
                             filtered.append("%s_%d_%s_%s|%s" % (chrom, r["pos1"], r["ref"],
                                                                 alt, r["filter"]))
-                    continue
+                    if not include_filtered:
+                        continue
                 lid = len(calls)
                 here = []
                 for k, alt in enumerate(r["alts"], 1):
@@ -520,6 +550,17 @@ class Variants(object):
 # --------------------------------------------------------------------------- #
 # the haplotypes of one site
 # --------------------------------------------------------------------------- #
+def token_of(allele, chrom):
+    """The record as the TSV names it: ``chrom_POS_REF_ALT``, and its FILTER behind a
+    '|' for one outside PASS that ``--include-filtered`` wrote into the sequence.
+
+    Without the FILTER the variants column cannot tell a low-quality call from a PASS
+    one, and the bases of that call are in the sequence a user orders oligos against.
+    The same text the notes' ``filtered-records-*`` list uses, so the two agree.
+    """
+    return allele.token(chrom) + ("|%s" % allele.filtered if allele.filtered else "")
+
+
 def slot_of(call, number, h, ploidy):
     """Whether slot ``h`` of a call of ``ploidy`` copies holds allele ``number``:
     'yes' / 'no' / '?'. This is variant_haplotypes.on_slot asked about a slot that IS
@@ -606,7 +647,7 @@ def slot_sets(alleles, calls, chrom):
                     if answer == "yes":
                         mine.append(a)
                     elif answer == "?":
-                        unknown.add(a.token(chrom))
+                        unknown.add(token_of(a, chrom))
             slots.append(mine)
         if unknown:
             unresolved.append((sample, "unphased-or-missing-genotype:%s"
@@ -630,6 +671,14 @@ def target_span(refseq, chrom, row, variants, probe, include_filtered):
     reads it (a table from another reference, or a REF-fallback alignment of a site that
     exists only on an ALT haplotype) the protospacer's own length stands in, and the note
     says so: every entry of the row then also says protospacer-not-on-this-haplotype.
+
+    A slot whose records overlap has no sequence where they do (make_hap leaves the
+    reference standing in a ``clash`` and says so). Only a clash the READING ITSELF
+    crosses can make that reading a guess: this span is the row's own target, a couple of
+    dozen bases, while the window read here is wider, and a clash elsewhere in it changes
+    neither which bases the target covers nor where they are. Dropping the slot for a
+    clash anywhere cost the row its protospacer and shifted the target -- and with it
+    every flank coordinate the row prints -- by the length of an indel it does not hold.
     """
     start, n = row["start"], len(probe)
     fallback = (start, min(start + max(n, 1), len(refseq)))
@@ -644,17 +693,16 @@ def target_span(refseq, chrom, row, variants, probe, include_filtered):
     order = [[]] + [sets[k] for k in sorted(sets, key=lambda k: (-len(members[k]), k))]
     for mine in order:
         hap = make_hap(refseq, mine, lo, hi)
-        if hap.clash:
-            continue
-        here = reads_at(hap, start, probe)
-        if here:
-            c0, c1 = span_of(hap.place[here[0]:here[0] + n])
+        for i0 in reads_at(hap, start, probe):
+            c0, c1 = span_of(hap.place[i0:i0 + n])
+            if hap.clashes(c0, c1):
+                continue   # read off bases this slot may not hold: not an answer
             return (c0, min(max(c1 + 1, c0 + 1), len(refseq))), None
     return fallback, "protospacer-not-located"
 
 
 def site_entries(refseq, chrom, row, variants, window, include_filtered,
-                 max_haplotypes=0):
+                 max_haplotypes=0, ref_note=REF_NOTE_CHECKED):
     """([Entry], [(who, reason)], {facts}) for one input row.
 
     The flank is cut on the REFERENCE -- the same genomic interval for every haplotype of
@@ -664,6 +712,10 @@ def site_entries(refseq, chrom, row, variants, window, include_filtered,
 
     Only samples with a record in the flank are reconstructed: every other sample of the
     panel reads as the reference here, and listing thousands of them would say nothing.
+
+    ``ref_note`` is what the reference entry may claim (REF_NOTE_*): the caller knows
+    whether a VCF was read for this contig at all, and the default claim is about every
+    sample of the panel.
     """
     notes = set(row["note"].split(";")) if row["note"] else set()
     probe_bases = row["aligned"].replace("-", "")
@@ -683,7 +735,11 @@ def site_entries(refseq, chrom, row, variants, window, include_filtered,
 
     alleles, calls, filtered = variants.alleles(chrom, flo, fhi, include_filtered)
     if filtered:
-        notes.add("filtered-records-in-window:%d" % len(filtered))
+        # WRITTEN: their bases are in these sequences (and their tokens carry the FILTER,
+        # token_of). IN-WINDOW: they are not written, as the search did not model them,
+        # but a low-quality call in the user's amplicon is still worth a word.
+        notes.add(("filtered-records-written:%d" if include_filtered
+                   else "filtered-records-in-window:%d") % len(filtered))
     sets, members, unresolved = slot_sets(alleles, calls, chrom)
 
     def entry_of(mine):
@@ -712,7 +768,7 @@ def site_entries(refseq, chrom, row, variants, window, include_filtered,
         # an allele is listed for a flank only where it CHANGES a base of it (touches:
         # one whose REF reaches into the window while its edit lies outside writes the
         # reference here, and naming it would read as a difference that is not there)
-        here_vars = {a.token(chrom) for a in sets[key] if touches(a, flo, fhi - 1)}
+        here_vars = {token_of(a, chrom) for a in sets[key] if touches(a, flo, fhi - 1)}
         if e.carriers and e.variants != here_vars:
             # two different sets of records that spell one sequence (an indel written at
             # two anchors of a repeat, say). Deduplication is BY SEQUENCE, which is what
@@ -736,9 +792,15 @@ def site_entries(refseq, chrom, row, variants, window, include_filtered,
                   % (len(left), sum(len(e.carriers) for e in left)))
         alts = alts[:max_haplotypes]
     facts = {"t_lo": t_lo, "t_hi": t_hi, "flo": flo, "fhi": fhi, "probe": probe,
-             "notes": notes, "filtered": filtered,
-             "n_samples": len({s for v in members.values() for s, _h in v})
-                          + len({w.split(":")[0] for w, _r in unresolved}),
+             "notes": notes, "filtered": filtered, "ref_note": ref_note,
+             # the panel samples with a record here: the UNION of the two lists, because
+             # a sample can be in both -- one copy written, the other unresolvable (an
+             # overlap is reported per slot, while the sample's key stays in members).
+             # Adding the lengths counted such a sample twice, and the column then ran
+             # past the size of the panel (two rows of a 4,091-sample run printed 4,104
+             # and 4,124).
+             "n_samples": len({s for v in members.values() for s, _h in v}
+                              | {w.split(":")[0] for w, _r in unresolved}),
              "n_haplotypes": len(entries)}
     return [ref_entry] + alts, sorted(set(unresolved)), facts
 
@@ -848,12 +910,27 @@ def run(targets=None, results=None, reference=None, vcfs=(), vcf_dirs=(), sample
     by_chrom = defaultdict(list)
     for row_id, row in rows:
         by_chrom[row["chrom"]].append((row_id, row))
+    # Which contigs a VCF was actually read for. A contig no VCF holds -- chrY, an _alt,
+    # a _random, a chrUn, 46 of them under the 23-file HGDP+1000G set on one real
+    # shortlist -- is NOT a contig where every sample reads as the reference: nothing was
+    # read there at all, and the reference entry must say which of the two it is.
+    uncovered = []
     for chrom in sorted(by_chrom):
         if not reference_reader.has(chrom):
             raise FlankError(
                 "the reference %s has no contig %s, which row(s) %s name: pass the "
                 "reference the run searched"
                 % (ref_path, chrom, ",".join(str(i) for i, _ in by_chrom[chrom][:5])))
+        covering = variants.covering(chrom) if vcf_paths else []
+        if not vcf_paths:
+            ref_note = REF_NOTE_NO_VCF
+        elif not covering:
+            ref_note = REF_NOTE_NO_CONTIG
+            uncovered.append(chrom)
+        elif not any(v.samples for v in covering):
+            ref_note = REF_NOTE_NO_GENOTYPES   # a sites-only dataset: no genotype to read
+        else:
+            ref_note = REF_NOTE_CHECKED
         refseq = reference_reader.seq(chrom)
         for row_id, row in sorted(by_chrom[chrom], key=lambda x: x[0]):
             if row["start"] is None or not row["aligned"]:
@@ -867,10 +944,17 @@ def run(targets=None, results=None, reference=None, vcfs=(), vcf_dirs=(), sample
                 out_lines.append(_unreadable_line(row_id, row))
                 continue
             entries, unresolved, facts = site_entries(
-                refseq, chrom, row, variants, window, include_filtered, max_haplotypes)
+                refseq, chrom, row, variants, window, include_filtered, max_haplotypes,
+                ref_note=ref_note)
             if facts["n_haplotypes"] > 1:
                 multi += 1
             out_lines.extend(_lines_for(row_id, row, chrom, entries, unresolved, facts))
+    if uncovered:
+        say("extract-flanks: %d of the %d contig(s) the table names are in none of the "
+            "%d VCF(s) read (%s): no sample was checked on them, so their rows are the "
+            "reference sequence alone, noted %s"
+            % (len(uncovered), len(by_chrom), len(vcf_paths), ", ".join(uncovered),
+               REF_NOTE_NO_CONTIG))
     out_lines.sort(key=lambda d: (d["row_id"], d["_order"]))
     for d in out_lines:
         d.pop("_order", None)
@@ -904,7 +988,10 @@ def _lines_for(row_id, row, chrom, entries, unresolved, facts):
         if not e.found:
             notes.append("protospacer-not-on-this-haplotype")
         if e.label == "ref":
-            notes.append("reference-of-every-sample-without-a-variant-here")
+            # what the reference entry may claim: that every sample reads as the
+            # reference here is a statement about the panel, and only a contig a VCF
+            # covers was read to make it (REF_NOTE_*)
+            notes.append(facts.get("ref_note", REF_NOTE_CHECKED))
         d = {
             "row_id": row_id, "rank": row["rank"], "guide": row["guide"], "chrom": chrom,
             "target_start": facts["t_lo"] + 1, "target_end": facts["t_hi"],
@@ -961,7 +1048,10 @@ by its offset and length, so an indel that shifts it is visible rather than misc
     --out              the prefix of the two files written: <prefix>.fa and <prefix>.tsv
     --reference        the reference genome: a folder of per-chromosome FASTAs, or one
                        FASTA (default: the run's --genome, from its .command_line.txt)
-    --vcf              a bgzipped VCF the run searched (repeatable)
+    --vcf              a bgzipped VCF the run searched (repeatable). INDEX THEM FIRST
+                       (tabix -p vcf): without a .tbi each file is read end to end once
+                       to find its contigs -- minutes per file on a panel-sized VCF,
+                       and nothing is printed while it happens
     --vcf-dir          a folder of them (repeatable). Default: the dataset folder(s) the
                        run's --vcf list names, where they are still there
     --samples          a samplesID file (repeatable). Default: the run's .sampleID.txt
@@ -974,7 +1064,9 @@ by its offset and length, so an indel that shifts it is visible rather than misc
                        carry a sample identity)
     --include-filtered also write the records whose FILTER is outside PASS and '.'
                        (by default they are left out, as the search left them out, and
-                       counted in the notes column)
+                       counted in the notes: filtered-records-in-window:N). Written,
+                       they are marked: the note says filtered-records-written:N and
+                       each such record carries its FILTER in the variants column
     --max-rows         stop after N rows of the table (a genome-wide integrated table has
                        millions; this command is meant for a shortlist)
     --max-haplotypes   how many haplotypes to write per row beside the reference
