@@ -25,11 +25,13 @@ def snp_counts():
 
 def indel_counts():
     """The counts of an indel post-analysis its notes are written from: how its overlaid
-    targets were resolved, and its rows of another contig."""
+    targets were resolved, its rows of another contig, and its rows whose reference
+    alignment is shorter than their alignment (scored CFD_ref 0)."""
     return {
         "overlaid": {"targets": 0, "rows": 0, "dropped": 0, "putative": 0, "unmapped": 0,
                      "second_indel": 0, "flank": 0, "prechecked": 0},
         "foreign_rows": 0,
+        "short_ref_rows": 0,
     }
 
 
@@ -116,6 +118,12 @@ def indel_lines(chrom, counts, precheck_on=True):
                      "contig's label and were dropped; they would otherwise have been "
                      "reported against %s indels they do not belong to."
                      % (counts["foreign_rows"], chrom, chrom))
+    if counts.get("short_ref_rows"):
+        lines.append("NOTE: %d indel target row(s) of %s have a reference alignment shorter "
+                     "than their alignment: the reference ends before the target does (an "
+                     "insertion within one target of the end of a contig that ends in "
+                     "sequence). There is no reference target to score, so their CFD_ref "
+                     "is 0." % (counts["short_ref_rows"], chrom))
     if ovl["flank"]:
         lines.append("indel-snp: %d target(s) of the fake-indel windows lie in a flank and "
                      "hold no base of the indel: not indel off-targets, dropped" % ovl["flank"])

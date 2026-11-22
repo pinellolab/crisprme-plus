@@ -442,6 +442,7 @@ def _cfd_from_alignment(aligned_crrna, aligned_proto):
 def preprocess_CFD_score(target):
     # preprocess target then calculate CFD score (unified bulge-aware path -- see
     # new_simple_analysis.preprocess_CFD_score).
+    global short_ref_rows
     if do_scores:
         cfd_score = _cfd_from_alignment(target[1], target[2])
         target.append("{:.3f}".format(cfd_score))
@@ -465,13 +466,15 @@ def preprocess_CFD_score(target):
             # nothing.
             #
             # There is no reference target to score, so there is no reference CFD:
-            # report 0. The row itself is kept, with its own (ALT) CFD intact; only the
-            # reference comparison is unavailable.
+            # report 0, and count the row for the chromosome's notes (one NOTE on
+            # stdout, as for the rows of another contig). The row itself is kept, with
+            # its own (ALT) CFD intact; only the reference comparison is unavailable.
             ref_aligned_target = target[-4]
             if not isinstance(ref_aligned_target, str) or len(
                 ref_aligned_target
             ) < len(target[1]):
                 cfd_ref_score = 0.0
+                short_ref_rows += 1
             else:
                 cfd_ref_score = _cfd_from_alignment(target[1], ref_aligned_target)
             target[-3] = "{:.3f}".format(cfd_ref_score)
@@ -1589,8 +1592,10 @@ def _second_indel_rows(line, final_result, indel_data):
 
 def _note_counts():
     """The counts the notes at the end are written from (analysis_notes.indel_counts):
-    how the overlaid targets were resolved, and the rows of another contig dropped."""
-    return {"overlaid": dict(_ovl_stats), "foreign_rows": foreign_rows}
+    how the overlaid targets were resolved, the rows of another contig dropped, and the
+    rows whose reference alignment was short, which preprocess_CFD_score scored 0."""
+    return {"overlaid": dict(_ovl_stats), "foreign_rows": foreign_rows,
+            "short_ref_rows": short_ref_rows}
 
 
 def _reference_pam(final_result, ref_aligned, hap_start=None):
@@ -1843,6 +1848,10 @@ line_no = 0
 # rows carrying another contig's label (see the check in the loop); counted so the
 # run reports them instead of dropping them silently
 foreign_rows = 0
+# rows whose reference alignment is shorter than their alignment, which
+# preprocess_CFD_score scores 0 (see the guard there); counted so the run reports them
+# instead of zeroing their CFD_ref silently
+short_ref_rows = 0
 
 for line in inResult:
     # print("line in INDEL analysis", line)
@@ -1990,10 +1999,11 @@ os.system(
 )
 
 
-# the notes at the end of the chromosome: a contig's rows dropped, how the overlaid targets
-# were resolved (STDOUT only -- this pipeline treats any stderr write as a fatal stage
-# failure, `[ -s $logerror ]`). A piece of a post-analysis cut into pieces writes none: the
-# merge writes the chromosome's from the counts in its <out>.piece.json.
+# the notes at the end of the chromosome: a contig's rows dropped, the rows whose reference
+# alignment was short (CFD_ref 0), how the overlaid targets were resolved (STDOUT only --
+# this pipeline treats any stderr write as a fatal stage failure, `[ -s $logerror ]`). A
+# piece of a post-analysis cut into pieces writes none: the merge writes the chromosome's
+# from the counts in its <out>.piece.json.
 if not _PIECE:
     _notes.write(_notes.indel_lines(current_chr, _note_counts(), _PRECHECK))
 
