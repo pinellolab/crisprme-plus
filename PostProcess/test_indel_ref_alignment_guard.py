@@ -68,6 +68,9 @@ COUNTER = "short_ref_rows"
 CRRNA = "GCTGAGCT-AGGTCAACTGGNGG"
 ALT = "GCTGAGCTCAGGTCAACTGGCGG"
 REF_OK = "GCTGAGCTCAGGTCAACTGGTGG"
+# The same spacer without a bulge, where a short reference alignment raised nothing: the
+# scorer scored the bases it had, reading the last two as the PAM.
+CRRNA_NO_BULGE = "GCTGAGCTCAGGTCAACTGGNGG"
 
 SENTINEL_REF = 33   # "fill this slot with the reference alignment's CFD"
 SENTINEL_ALT = 55   # "fill this slot with the row's own CFD"
@@ -96,14 +99,14 @@ def _ns(do_scores=True):
     return ns
 
 
-def _row(ref_aligned, sentinel=SENTINEL_REF):
+def _row(ref_aligned, sentinel=SENTINEL_REF, bulge_type="RNA,DNA", crrna=CRRNA):
     """An indel cluster row as preprocess_CFD_score reads it.
 
     After the function appends the row's own CFD, the negative indices it uses are
     -1 the appended CFD, -3 the sentinel slot, -4 the reference alignment. So the
     row must end [..., ref_aligned, sentinel, filler].
     """
-    return ["RNA,DNA", CRRNA, ALT, "chr7", "159346029", "159346029", "+",
+    return [bulge_type, crrna, ALT, "chr7", "159346029", "159346029", "+",
             "4", "1", "5", "n", "n", "SAMPLE1", "n", "GUIDE", "rs1", "0.01",
             ref_aligned, sentinel, "n"]
 
@@ -128,6 +131,23 @@ class RefAlignmentGuard(unittest.TestCase):
         ns = _ns()
         out = ns["preprocess_CFD_score"](_row(REF_OK[:8]))
         self.assertEqual(out[-3], "0.000")
+
+    def test_bulge_free_short_reference_alignment_scores_zero(self):
+        """Without a DNA bulge a short alignment raised nothing: the scorer scored the
+        bases it had, the last two read as the PAM. Here the reference ends 12 bases into
+        a bulge-free target, and those 12 match the guide, so the score was 1.000, a
+        perfect reference CFD for a target the reference does not hold. Now 0, counted,
+        and the row keeps its own CFD."""
+        ns = _ns()
+        short = REF_OK[:12]
+        self.assertNotEqual("{:.3f}".format(ns["_cfd_from_alignment"](CRRNA_NO_BULGE, short)),
+                            "0.000", "the scorer must give the fixture a score, or this test "
+                            "passes without the guard")
+        out = ns["preprocess_CFD_score"](_row(short, bulge_type="X", crrna=CRRNA_NO_BULGE))
+        self.assertEqual(out[-3], "0.000")
+        self.assertEqual(out[-1], "{:.3f}".format(ns["_cfd_from_alignment"](CRRNA_NO_BULGE,
+                                                                           ALT)))
+        self.assertEqual(ns[COUNTER], 1)
 
     def test_guard_does_not_disturb_the_rows_own_cfd(self):
         """Only the reference comparison is unavailable; the row keeps its ALT CFD."""
