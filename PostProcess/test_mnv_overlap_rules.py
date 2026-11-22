@@ -451,5 +451,55 @@ class AnIndelAtAComplexRecordsPos(unittest.TestCase):
                                    (117194729, 117194745), subs=subs), [])
 
 
+class AComplexRecordInsideDeletedBases(unittest.TestCase):
+    """Rule 1 (item 23). A complex record whose REF lies wholly inside the bases a
+    deletion deletes, on one phased slot: the slot leaves both records' rows and is
+    listed nowhere, as up to 2.10.0. No code change -- this pins the reading so that a
+    later refactor cannot move it, and runs the reading that was turned down."""
+
+    SPAN = (117194729, 117194745)
+
+    def lost(self, window, others, subs=()):
+        ns = analyzer({window: GT, **{o: GT for o in others}}, CHR12, subs=subs)
+        return [key for key, gts, _overlapping
+                in ns["_other_indels"](self.SPAN[0], self.SPAN[1], *window) if gts]
+
+    def test_the_slot_is_listed_nowhere(self):
+        """chr12:117,194,730 TTTTCTTTC>T with 117,194,731 TTT>G inside its deleted
+        bases. The complex record puts its own base among the bases the deletion
+        deletes, as an insertion there does, so the slot leaves the deletion's rows;
+        the deletion deletes bases the complex record keeps, so it leaves its rows
+        too."""
+        self.assertEqual(self.lost(DEL_WITH_ANCHOR, [CPLX_IN_DELETED]),
+                         [CPLX_IN_DELETED])
+        self.assertEqual(self.lost(CPLX_IN_DELETED, [DEL_WITH_ANCHOR]),
+                         [DEL_WITH_ANCHOR])
+
+    def test_the_reading_that_was_turned_down(self):
+        """"It changes nothing", so the slot would stay on the deletion's rows: an ALT
+        base put on bases the haplotype has lost already read as changing nothing.
+        Measured over the 31 pairs (249 slots) against HPRC's pre-vcfwave originals,
+        that reading lists 4,864 23-mers of which 692 are false, in 48 slots; outside
+        the chr1:977,063 VNTR it is 676 real against 692 false. Today's reading lists
+        none of them, and no false one."""
+        subs = [("""    if len(alt) - t > c and len(alt) != len(ref):  # bases inserted between a+c-1 and a+c
+        return lo <= a + c - 1 and a + c <= hi""",
+                 """    if (len(alt) - t > c and len(alt) != len(ref)
+            and (gone is None or not gone[0] <= a + c <= gone[1] + 1)):
+        return lo <= a + c - 1 and a + c <= hi""")]
+        mut = mutant_module("indel_snp_cis", subs)
+        self.assertTrue(isc.changes_span(*CPLX_IN_DELETED, *self.SPAN,
+                                         (117194730, 117194737)))
+        self.assertFalse(mut.changes_span(*CPLX_IN_DELETED, *self.SPAN,
+                                          (117194730, 117194737)))
+        ns = analyzer({DEL_WITH_ANCHOR: GT, CPLX_IN_DELETED: GT}, CHR12, cis=mut)
+        self.assertEqual([key for key, gts, _o in ns["_other_indels"](
+            self.SPAN[0], self.SPAN[1], *DEL_WITH_ANCHOR) if gts], [])
+        # and the reading of a variant on bases the deletion deletes is untouched: a
+        # second deletion of those bases, and an MNV on them, still change nothing
+        for rec in ((117194731, "TTTT", "T"), (117194731, "TTT", "GGG")):
+            self.assertFalse(isc.changes_span(*rec, *self.SPAN, (117194730, 117194737)))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

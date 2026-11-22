@@ -1010,15 +1010,24 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   REF wholly in those bases), adds them inside the first indel's REF, as an insertion there does,
   and takes the haplotype off, whatever its bases (`indel_snp_cis.changes_span`): HPRC v2.1's
   normalised VCFs hold 31 such pairs of records on one phased slot, 249 slots in all (29 pairs, 247
-  slots, beside a first record that is a deletion), and the real-data check, which reads such a slot
-  without the second record, counts what differs as `limit-overlapping-records` up to 2.10.0 and
-  as `open-complex-in-deleted` since 2.10.1, non-gating either way (§8).
-  **Decided for 2.10.1, not yet in the code.** The PI confirmed (2026-11-20) that such a complex
-  record changes nothing, as rule (a) below reads an MNV on bases the indel deletes, and as the
-  real-data check reads it. The code does not read it so yet: until it does, 2.10.1 reads such a
-  slot as 2.10.0 did, as said here. HGDP + 1000 Genomes holds no complex record, so none of its
-  rows can move with that reading; on HPRC v2.1 it moves no row of the README guide's
-  genome-wide searches, per sample and population-level.
+  slots, beside a first record that is a deletion). The slot leaves the deletion's rows so, and the
+  deletion, which deletes bases the complex record keeps, takes it off the complex record's rows:
+  it is listed nowhere, and the target its haplotype really holds is not reported (§10).
+  **Decided for 2.10.1, and this is what the code does** (rule 1 of the three below). Reading
+  such a complex record as changing nothing, so that the slot stays on the deletion's rows, was
+  confirmed by the PI on 2026-11-20 and **withdrawn on 2026-11-22** when it was measured: against
+  HPRC's pre-vcfwave original records over all 249 slots, it lists 4,864 23-mers of which 692 are
+  false, in 48 slots of 15 pairs; outside the chr1:977,063 VNTR it is 676 real against 692 false,
+  worse than a coin toss. Today's reading lists none of them and no false one. (Those counts read
+  "real" as "the 23-mer occurs somewhere in the carrier haplotype's true sequence over the
+  window", so in a tandem repeat a wrong reading can still score no false listing: every false
+  count is a lower bound and every share of real an upper bound.) The shapes exist only because
+  the pangenome graph was decomposed into VCF records -- `vcfwave` cuts each bubble into pieces
+  and HPRC's merge joins pieces of different bubbles -- so 25 of the 31 pairs come from HPRC's own
+  steps and 6 from our normalisation; not making the collision, by splitting and trimming without
+  left-aligning, belongs to the next HPRC rebuild. HGDP + 1000 Genomes holds no such pair, so none
+  of its rows can move. The real-data check reads the slot the same way and counts what differs
+  from a run as `open-complex-in-deleted`, non-gating (§8).
   Another allele at the indel's own position, an indel or a SNP, is an alternative to it (a
   haplotype holding both would be one record), so a slot phased with both is a phasing artefact;
   since 2.10.1 so are an MNV and an indel at one POS, both ways, where the chromosome's MNV file was
@@ -3869,10 +3878,13 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   of 2.8.1's HPRC v2.0 archives, which get none) is read as 2.10.0 read it, and this item holds
   there as stated; so does a chromosome whose MNV file cannot be read (§4). An install of 2.10.0
   gets the files with `crisprme.py download --what indel-genotypes --dataset hg38_HPRC`, a dataset
-  one built with `build-index-only` of 2.10.1. One reading waits for the PI's decision (§4, marked
-  pending): an SNV and an MNV that share a base on one slot, on the SNV's SNP rows. Another is
-  decided and not yet in the code (§4): a complex record wholly inside the bases an indel deletes
-  changes nothing, and 2.10.1 reads it as 2.10.0 did until the code does.
+  one built with `build-index-only` of 2.10.1. The three readings that were open are decided and
+  in the code (§4), each measured against HPRC's pre-vcfwave original records: an SNV and an MNV
+  on one slot are read base by base, an indel at a complex record's POS is a displaced copy of it
+  and the slot is read with the complex record alone, and a complex record wholly inside the bases
+  an indel deletes leaves the slot listed nowhere, as up to 2.10.0 -- reading it as changing
+  nothing was measured at 692 false 23-mers against 4,864 listed and turned down. The targets of
+  the slots those readings leave off a row are unreported, like the rest of this item.
 - **A SNP row's carrier whose indel reaches past the store the search read.** A per-sample search
   reads the phased indel store only around its SNP targets, 500 bases on either side of each (§4),
   so a carrier whose haplotype holds an indel in the target that adds or deletes more bases than
