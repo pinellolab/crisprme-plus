@@ -65,7 +65,8 @@ and the `release-crisprme` skill.
   `download --help` and `docs/TROUBLESHOOTING.md` §15.
 
 ### Changed
-- **HPRC's Dictionaries are published again, with the MNV files.** Only
+- **HPRC's Dictionaries are published again, with the MNV files. Pending: the publish**, after
+  the release's gates and the PI's go; nothing of it is on the Hub yet. Only
   `Dictionaries/indel_genotypes_hg38_HPRC/` changes: it gains 24 `gt_mnv_<chrom>.tsv.gz` and their
   markers (about 19.3 MB). Its indel files, the registry, the indel logs, the genotype store, the
   index and its INDELS index stay byte for byte. `dictionaries-bundle_hg38_HPRC` and
@@ -74,10 +75,11 @@ and the `release-crisprme` skill.
   refuses a bundle the manifest does not name. `genotypes_hg38_HPRC` stays as it is (the same
   fingerprint). The three archives, the two companions' records and `indexes/SHA256SUMS` go up in
   one Hub commit (`publish-index --replace-companions --stage-only`, then the commands it prints).
-  No index name, index format or catalog entry changes. `docs/INDEX_PROVENANCE.md` gives the new
-  archives' sizes, SHA-256 and Hub commit (2.10.1); 2.10.0's stay in the Hub's history. CRISPRme
-  2.10.0 reads no MNV file, so it gives the same rows on the new archives. A download of HPRC in
-  flight at that commit can fail once, and works when run again (`docs/TROUBLESHOOTING.md` §15).
+  No index name, index format or catalog entry changes. At the publish, `docs/INDEX_PROVENANCE.md`
+  gets the new archives' sizes, SHA-256 and Hub commit (2.10.1), in a section of its own; until
+  then it says "2.10.1: pending". 2.10.0's stay in the Hub's history. CRISPRme 2.10.0 reads no MNV
+  file, so it gives the same rows on the new archives. A download of HPRC in flight at that
+  commit can fail once, and works when run again (`docs/TROUBLESHOOTING.md` §15).
 - **The real-data checker reads the MNVs as the search does** (`scripts/check_indel_rows.py`). A
   run of 2.10.1 says in its `log_verbose.txt`, for each chromosome whose indel log lists an MNV,
   whether it read the MNVs from the store's MNV file (Fixed). The check takes its model from those
@@ -87,19 +89,19 @@ and the `release-crisprme` skill.
   non-gating). Where the run read one, an MNV is a second record of the slot, read by the rules of
   the Fixed entry, and an MNV row's carriers are read by their phase. Such a listing then gates:
   `indel-row-mnv-carrier` on an indel row, and `snp-row-mnv-carrier` on a SNP row, the one class
-  of the otherwise report-only SNP-row report that gates. The two readings that wait for the PI's
-  decision (Fixed) are read as the code reads them, each counted under a class of its own,
-  non-gating, listed or not: `open-complex-in-deleted` (counted as `limit-overlapping-records` up
-  to 2.10.0) and `open-snp-row-snv-mnv`. On a slot of rule (c) the check reads
-  the rows as the indel post-analysis does, and its findings there state the carrier gate's own
-  convention. A target that needs an MNV and another indel-path record stays the two-indel limit
-  (`limit-two-indels`). On the README guide's genome-wide searches of HPRC v2.1 run without the MNV
-  store, per sample and population-level, the check gives the same findings as before, byte for
-  byte (7,860 and 3,873, none gating). Its two worker pools now fork after `gc.freeze()`, so
-  that a worker does not copy the objects it shares with the parent process when it reads them: on
-  the population-level search, the pool's summed private memory went from 7.43 to 2.92 GiB, with
-  the same findings. The run's peak, while it reads the tables, is the same (about 106 GiB on the
-  per-sample search).
+  of the otherwise report-only SNP-row report that gates. The two readings not in the code yet
+  (Fixed: one the PI decided, one that waits for the PI's decision) are read as the code reads them,
+  each counted under a class of its own, non-gating, listed or not: `open-complex-in-deleted`
+  (counted as `limit-overlapping-records` up to 2.10.0) and `open-snp-row-snv-mnv`. On a slot of
+  rule (c) the check reads the rows as the indel post-analysis does, and its findings there state
+  the carrier gate's own convention. A target that needs an MNV and another indel-path record stays
+  the two-indel limit (`limit-two-indels`). On the README guide's genome-wide searches of HPRC v2.1
+  run without the MNV store, per sample and population-level, the check gives the same findings in
+  soundness as before, byte for byte (7,860 and 3,873, none gating). Its two worker pools now fork
+  after `gc.freeze()`, so that a worker does not copy the objects it shares with the parent process
+  when it reads them: on the population-level search, the pool's summed private memory went from
+  7.43 to 2.92 GiB, with the same findings. The run's peak, while it reads the tables, is the same
+  (about 106 GiB on the per-sample search).
 - **The Docker image keeps no conda or pip package cache.** The Dockerfile's `micromamba clean
   --all --yes`, at the end of each RUN that installs an environment, removes the cached packages
   no environment uses, but keeps the folder of every package one uses, and in it each file the
@@ -144,8 +146,9 @@ and the `release-crisprme` skill.
   REF and ALT have one length, which no store of 2.10.0 holds.
 
   An MNV and an indel whose REFs share a base on one phased slot (33,739 pairs on HPRC v2.1,
-  245,045 slots) are read by three rules the PI confirmed (2026-11-20). METHODS section 4 gives
-  each shape of such a pair on both records' rows:
+  245,045 slots) are read by three rules the PI confirmed (2026-11-20; a fourth reading,
+  confirmed with them, is below). METHODS section 4 gives each shape of such a pair on both
+  records' rows:
   - (a) an MNV only on bases the window's deletion deletes changes nothing, as METHODS section 4
     reads any variant there;
   - (b) a deletion on bases an MNV replaces is read as the deletion's haplotype: an MNV window
@@ -156,10 +159,14 @@ and the `release-crisprme` skill.
 
   The carrier gate keeps its 2.10.0 convention at one POS: another allele at the position of a
   variant the row names makes the slot one of unknown phase (`phase not known`), where the indel
-  post-analysis lists the carrier by its phase. **Pending: the PI's decision for 2.10.1.** Two
-  readings are not set: a complex record wholly inside the bases a deletion deletes (2.10.1 reads
-  it as 2.10.0 did), and an SNV and an MNV that share a base on one slot, on the SNV's SNP rows (28
-  pairs on HPRC v2.1, 150 slots; read as an indel there is read).
+  post-analysis lists the carrier by its phase. With the three rules, the PI confirmed that a
+  complex record wholly inside the bases a deletion deletes changes nothing too, as rule (a) reads
+  an MNV there and as the real-data check reads it. **Not yet in the code:** until it is, 2.10.1
+  reads such a slot as 2.10.0 did (HGDP + 1000 Genomes holds no complex record; HPRC v2.1 has 31
+  such pairs on one slot, 249 slots, and the reading moves no row of the README guide's genome-wide
+  searches). **Pending: the PI's decision for 2.10.1.** An SNV and an MNV that share a base on one
+  slot, on the SNV's SNP rows (28 pairs on HPRC v2.1, 150 slots), have no rule yet: the MNV is read
+  there as an indel is read.
 
   A store without the MNV file (2.10.0's, and 2.8.1's HPRC v2.0 archives) is read as 2.10.0 read
   it. The run's `log_verbose.txt` says so once for each chromosome whose indel log lists an MNV,

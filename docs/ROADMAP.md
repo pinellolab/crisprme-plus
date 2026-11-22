@@ -65,10 +65,12 @@ gap the release's gates found.
 - **One rule for a complex record inside an indel's deleted bases.** CRISPRme takes a carrier off
   an indel row where its slot holds a second record, inside the first's deleted or replaced bases,
   that puts bases of its own there (METHODS §4), and the real-data check reads that slot without it
-  (31 pairs of records on one slot in HPRC v2.1, 249 slots): 2.10.1 is to decide which reading is
-  right and make the other say the same. **Pending: the PI's decision for 2.10.1**, after a
-  measurement of what each reading changes on HGDP + 1000 Genomes and HPRC. The MNVs' rules read an
-  MNV there as changing nothing (METHODS §4, rule (a)).
+  (31 pairs of records on one slot in HPRC v2.1, 249 slots). Decided for 2.10.1 (the PI,
+  2026-11-20): the check's reading, such a record changes nothing, as the MNVs' rules read an MNV
+  there (METHODS §4, rule (a)). **Not yet in the code:** 2.10.1 reads such a slot as 2.10.0 did
+  until it is. Measured: HGDP + 1000 Genomes holds no complex record, so none of its rows can move;
+  on HPRC v2.1 the reading frees 88 of the 249 slots (another record takes the other 161 off) and
+  moves no row of the README guide's genome-wide searches, per sample and population-level.
 - **The real-data check** (`scripts/check_indel_rows.py`): to check `Variant_info_spacer+PAM` (each
   variant's number in its target) and redundant alternative alignments, which it does not today
   ([`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md), step 4c); to hold less memory (one process holds

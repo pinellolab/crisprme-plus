@@ -229,15 +229,15 @@ limit (counted and listed under its own class, non-gating) or not (gating):
     2.10.0), which changes no row this check reads; the findings on such slots say so;
   * OPEN READINGS (OPEN_READINGS in the code): overlaps no rule implemented in CRISPRme's
     code covers yet are read as the 2.10.1 branch's code reads them and counted under a
-    class of their own, non-gating, listed or not, so that the decision, once taken,
-    changes one table: a complex record wholly on bases the record deletes or replaces
+    class of their own, non-gating, listed or not, so that each, once its rule is in the
+    code, changes one table: a complex record wholly on bases the record deletes or replaces
     (item 23 of the 2.10.1 backlog: METHODS section 4 and rule (a) say it changes nothing,
-    the code reads its ALT as bases inserted before its edit and takes the slot off a
-    target covering that point; the truth reads it as METHODS does:
-    open-complex-in-deleted), and, with the MNV store, an MNV on a SNP row carrier's slot
-    whose REF meets the base of an SNV the row names (the code keeps the carrier where the
-    MNV starts at that SNV's position, a phasing artefact, and takes it off where it starts
-    before it: open-snp-row-snv-mnv).
+    the reading the PI confirmed for 2.10.1 and not yet in the code, which reads its ALT as
+    bases inserted before its edit and takes the slot off a target covering that point; the
+    truth reads it as METHODS does: open-complex-in-deleted), and, with the MNV store, an
+    MNV on a SNP row carrier's slot whose REF meets the base of an SNV the row names (the
+    code keeps the carrier where the MNV starts at that SNV's position, a phasing artefact,
+    and takes it off where it starts before it: open-snp-row-snv-mnv).
   A disagreement no documented rule explains gates (unexplained-disagreement: a defect of
   CRISPRme or of this checker).
 
@@ -2027,14 +2027,15 @@ GATE_RIVAL = ("the carrier gate reads such a slot as holding a rival allele of t
 
 # OPEN READINGS: overlaps that no rule implemented in CRISPRme's code covers yet. Each is
 # read as the 2.10.1 branch's code reads it today and reported under a class of its own,
-# non-gating, so that once its rule is decided this table (with the function it names) is
-# the one place to change: an entry taken out reads the case by the rule beside it.
+# non-gating, so that once its rule is in CRISPRme's code this table (with the function it
+# names) is the one place to change: an entry taken out reads the case by the rule beside it.
 #   complex-in-deleted (item 23 of the 2.10.1 backlog): a complex record (an indel whose
 #       trimmed ALT is not empty and adds no base: TCC>G) wholly on bases the record
 #       deletes or replaces. METHODS section 4 and the 2.10.1 MNV plan's rule (a) read it
-#       as changing nothing ('deleted'); the code (indel_snp_cis.changes_span) counts its
-#       ALT as bases inserted right before its edit, so it takes the slot off a target whose
-#       covered bases hold that point (complex_in_deleted_off). The truth reads the slot
+#       as changing nothing ('deleted'), the reading the PI confirmed for 2.10.1, not yet in
+#       the code: the code (indel_snp_cis.changes_span) counts its ALT as bases inserted
+#       right before its edit, so it takes the slot off a target whose covered bases hold
+#       that point (complex_in_deleted_off). The truth reads the slot
 #       without it (LEFT_OUT), as METHODS does; the documented view reads it as the code does.
 #   snp-row-snv-mnv (with the MNV store only): an MNV on a SNP row carrier's slot whose REF
 #       meets the base of an SNV the row names. The code reads it as it reads an indel there
@@ -4810,7 +4811,8 @@ CARRIER_TEXT = {
                              "the row does not name, which the run read from the MNV store",
     "open-complex-in-deleted": "hold, on their slot of %s, a complex record wholly on bases "
                                "it deletes or replaces, which METHODS and the code read "
-                               "otherwise (an open reading, item 23)",
+                               "otherwise (an open reading, item 23: METHODS' reading "
+                               "is decided, not yet in the code)",
 }
 
 
@@ -4935,7 +4937,8 @@ def _carrier_verdict(win, ctx, tgt, sample, listed, lids):
                 "%s, while their slot holds the target read without %s, a complex record "
                 "wholly on bases %s deletes or replaces, as METHODS section 4 reads it "
                 "(changes nothing); the code counts its ALT as bases inserted before its "
-                "edit and takes the slot off (item 23 of the 2.10.1 backlog, not decided)"
+                "edit and takes the slot off (item 23 of the 2.10.1 backlog: METHODS' "
+                "reading is decided, not yet in the code)"
                 % ("listed" if listed else "not listed", ", ".join(opened),
                    tgt.main.token(win.chrom)))
         note = "; " + GATE_RIVAL if gate_rival(win, tgt, sample, tv[1]) else ""
@@ -6231,8 +6234,8 @@ def comp_record(win, ctx, rep, reported, al, carriers, guide, full, lo, hi, popm
             "it deletes or replaces (%s%s): METHODS section 4 reads the slot without it "
             "(changes nothing), the code counts its ALT as bases inserted before its edit "
             "and takes the slot off a target that covers that point (item 23 of the 2.10.1 "
-            "backlog, not decided), so its targets are counted, not demanded (%d of them "
-            "listed on a row naming the record): %s"
+            "backlog: METHODS' reading is decided, not yet in the code), so its targets "
+            "are counted, not demanded (%d of them listed on a row naming the record): %s"
             % (len(who), tok, "; ".join(how[:4]), "; ..." if len(how) > 4 else "",
                reported.on_rows(guide, who, tok), ",".join(who[:12])),
             samples=",".join(who))
@@ -7187,7 +7190,8 @@ OPEN_TEXT = {
     "complex-in-deleted": "the rows of a slot that holds a complex record wholly on bases "
                           "the record deletes or replaces, which METHODS section 4 keeps "
                           "and the code takes off (an open reading: item 23 of the 2.10.1 "
-                          "backlog, OPEN_READINGS)",
+                          "backlog, METHODS' reading decided, not yet in the code; "
+                          "OPEN_READINGS)",
     "overlap": "the rows of a slot whose alleles overlap, which no documented rule says "
                "CRISPRme writes or not (the one-record reading of a slot whose record meets "
                "a SNV at another position; a target an overlap zone of two other alleles "
