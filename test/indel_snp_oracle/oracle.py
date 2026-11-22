@@ -14,7 +14,11 @@
       add one before another reference PAM, with repeat and non-repeat
       insertions and a deletion whose PAM is judged wherever in its repeat the
       VCF writes the indel, and with complex records (a REF base replaced and
-      bases added or lost) whose PAM is judged as an indel's (2.10.0).
+      bases added or lost) whose PAM is judged as an indel's (2.10.0), and with MNVs
+      read by their phase from the phased store's MNV file, which build-index-only
+      writes (2.10.1): an MNV on a target's first bases in a repeat, an MNV row by
+      phase, an MNV at an indel's POS (a phasing artefact) and an MNV inside a SNP
+      row's target.
   oracle.py check <workdir> <PostProcess dir> <results dir> [<results dir> ...]
       Builds every sample's two haplotypes from the VCF (a brute-force truth that
       shares no code with CRISPRme's resolution) and checks every row whose variant
@@ -67,7 +71,7 @@ import zipfile
 G = "ACTGAAATCTGTAAGCAGGC"  # the guide
 COMP = str.maketrans("ACGTacgt", "TGCAtgca")
 CODES = set("RYSWKMBDHVryswkmbdhv")
-NSAMPLES = 89
+NSAMPLES = 98
 MOTIF_BASES = {"A": "A", "C": "C", "G": "G", "T": "T", "R": "AG", "Y": "CT", "S": "CG",
                "W": "AT", "K": "GT", "M": "AC", "B": "CGT", "D": "AGT", "H": "ACT",
                "V": "ACG", "N": "ACGT"}
@@ -97,7 +101,7 @@ def _snp_rows():
 # --------------------------------------------------------------------------- #
 def generate(wd):
     random.seed(7)
-    length = 22000
+    length = 23300
     seq = [random.choice("ACGT") for _ in range(length)]
     variants = []  # dicts: site, kind, pos1, ref, alt, gts{sample: 'a|b'}
     samples = ["S%02d" % i for i in range(1, NSAMPLES + 1)]
@@ -543,14 +547,58 @@ def generate(wd):
     var("QV", "cpx", 21602, "TG", "C", {"S89": "1|0"})
     expect["QV"] = {"perfect": ["S89"], "pam_creation": {"S89": "TGG"}}
 
+    # 2.10.1: the MNVs by their phase. build-index-only writes the phased store's MNV file
+    # beside its indel file (gt_mnv_<chrom>.tsv.gz), and the post-analysis reads an MNV as
+    # a second record of a slot and an MNV row's carriers by phase; up to 2.10.0 the store
+    # held no MNV, so a carrier was listed for a sequence its haplotype does not have.
+    # MF (+): a deletion restores a perfect target whose first bases (ACT) sit in a tandem
+    # repeat (ACTACT before them); on S90's slot of the deletion an MNV replaces the
+    # target's first two bases (AC>GT): that haplotype does not have the target (the plan
+    # of 2.10.1's MNVs: an MNV on a target's first base in a repeat), and the target it
+    # has needs both records, which no window holds. S91 holds the deletion alone, S92 the
+    # MNV on its other slot. (The 2.10.0 placement's shifted reading, which found such a
+    # target's bases past the MNV, needs a repeat over the whole target, 4 mismatches of
+    # this guide away: PostProcess/test_indel_snp_cis.py's toy calls pin it.)
+    mf = 22000
+    put(mf - 6, "ACTACT" + G[:10] + "C" + G[10:] + "TGG")
+    var("MF", "del", mf + 10, G[9] + "C", G[9], {"S90": "1|0", "S91": "1|0", "S92": "1|0"})
+    var("MF", "mnv", mf + 1, G[:2], "GT", {"S90": "1|0", "S92": "0|1"})
+    expect["MF"] = {"perfect": ["S91", "S92"], "never_perfect": ["S90"]}
+    # MQ (+): an MNV row by phase: an MNV (AA>TG) and a SNP the guide needs (its 13th base)
+    # make a perfect target, in cis on S95 (CONFIRMED) and in trans on S96, whose MNV
+    # haplotype has one mismatch there (CFD 0.211; a mismatch at the 16th base, rC:dT, would
+    # score 1): up to 2.10.0 the MNV's phase was unknown, S96 PUTATIVE and listed on the
+    # perfect row, the strongest target its alleles allow.
+    mq = 22300
+    m_ref = other(G[9]) + other(G[10])
+    put(mq, G[:9] + m_ref + G[11] + other(G[12]) + G[13:] + "TGG")
+    var("MQ", "mnv", mq + 10, m_ref, G[9:11], {"S95": "1|0", "S96": "1|0"})
+    var("MQ", "snp", mq + 13, other(G[12]), G[12], {"S95": "1|0", "S96": "0|1"})
+    expect["MQ"] = {"perfect": ["S95"], "never_perfect": ["S96"], "one_mm": ["S96"],
+                    "cooc": ["S95"]}
+    # MC (+): a deletion restores a perfect target; on S93's slot an MNV at the deletion's
+    # own POS (TC>GA), another allele of that position: a phasing artefact, read without
+    # the MNV (the plan's rule (c)), so S93 stays, as S94, with the deletion alone.
+    mc = 22600
+    put(mc, G[:10] + "C" + G[10:] + "TGG")
+    var("MC", "del", mc + 10, G[9] + "C", G[9], {"S93": "1|0", "S94": "1|0"})
+    var("MC", "mnv", mc + 10, G[9] + "C", "GA", {"S93": "1|0"})
+    expect["MC"] = {"perfect": ["S93", "S94"]}
+    # MS (+): a SNP target (a C>A SNP makes it perfect) and an MNV inside it (AA>TT at its
+    # 13th and 14th bases), in cis on S97, in trans on S98: S97's haplotype holding the SNP
+    # does not have the SNP row's sequence, and the per-sample SNP row lists S98 alone
+    # (snp_rows.py); up to 2.10.0 it listed S97 too.
+    ms = 22900
+    put(ms, G[:5] + "C" + G[6:] + "TGG")
+    var("MS", "snp05", ms + 6, "C", "A", {"S97": "1|0", "S98": "1|0"})
+    var("MS", "mnv", ms + 13, G[12:14], G[12:14].translate(COMP), {"S97": "1|0", "S98": "0|1"})
+    expect["MS"] = {"snp_listed": ["S98"], "snp_never": ["S97"]}
+
     # (No split multi-allelic SNP records here: CRISPRitz 2.10.0 codes every allele of
     # such a site, where up to 2.9.1 add-variants kept only the last of two records at one
     # position in the enriched genome and the dictionary. PostProcess/
     # test_indel_haplotype_resolution.py covers a position whose source knows both, and
-    # PostProcess/test_check_indel_rows.py such sites through the real-data check.
-    # No MNV carrier heterozygous for a SNP its target covers either: the phased indel
-    # store holds only records whose REF and ALT differ in length, so an MNV's phase is
-    # unknown to the post-analysis and such a carrier gets its PUTATIVE worst case.)
+    # PostProcess/test_check_indel_rows.py such sites through the real-data check.)
 
     _write(wd, seq, variants, samples, expect, G + "NNN", "20bp-NRG-SpCas9.txt",
            "NNNNNNNNNNNNNNNNNNNNNRG 3", G, ["NRG", "3p"])
@@ -844,7 +892,10 @@ class Truth(object):
                     return False
             elif len(alt) > len(ref) and None not in seg:
                 return False
-            elif len(ref) == len(alt) and pos1 - 1 not in seg:
+            elif len(ref) == len(alt) and not any(
+                    p in seg for p in range(pos1 - 1, pos1 - 1 + len(ref))):
+                # an MNV: a base of it in the occurrence (a target can start inside it, at a
+                # base it replaces past its POS: site MF's MNV row)
                 return False
         return True
 
