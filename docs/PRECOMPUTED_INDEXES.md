@@ -1125,12 +1125,14 @@ every carrier of the indel, PUTATIVE; a sequence no individual has is dropped; s
 off-target, a **CONFIRMED-cis** call (all covered variants phased on one haplotype) or
 **PUTATIVE** (unphased / can't prove cis), with the per-sample carriers and the joint
 allele frequency (`AC_cis / AN` over the VCF-genotyped panel). On a sites-only panel it
-falls back to a PUTATIVE min-AF bound with no carriers (see METHODS §4/§8). The indel
-genotype store keeps only records whose REF and ALT differ in length, so an equal-length
-multi-base record (an MNV, such as AC>TG), which the indel search covers too, has its
-carriers resolved with the phase unknown, PUTATIVE: the HGDP + 1000 Genomes index has
-none, HPRC's chr22 has 9,079 among its 195,813 indel-search records (in v2.0 of its graph,
-2.8.1's input). Since 2.10.0 a
+falls back to a PUTATIVE min-AF bound with no carriers (see METHODS §4/§8). Up to 2.10.0
+the indel genotype store kept only records whose REF and ALT differ in length, so an
+equal-length multi-base record (an MNV, such as AC>TG), which the indel search covers too,
+had its carriers resolved with the phase unknown, PUTATIVE: the HGDP + 1000 Genomes index
+has none, HPRC's chr22 has 9,079 among its 195,813 indel-search records (in v2.0 of its
+graph, 2.8.1's input). Since 2.10.1 the store holds the MNVs in a file of their own,
+`gt_mnv_<chrom>.tsv.gz`, and a search that reads it resolves their carriers by their phase
+(METHODS §4); a store without it is read as before. Since 2.10.0 a
 per-sample search also reads the store for the SNP rows: a SNP row does not list a carrier
 whose haplotype holding its SNPs also holds an indel that changes the target (METHODS §4).
 With the gate off it lists them, as up to 2.8.1.

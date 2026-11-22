@@ -230,12 +230,17 @@ Each source VCF is normalized so that variant records are directly comparable:
   rule; the indel path names the record in upper case (`indel_snp_cis.record_name`: CRISPRitz's
   indel log names each line as written), so the rows of the two fake-indel windows CRISPRitz cuts
   for it fold into one, with the carriers of both lines and the ID and frequency of each, as two
-  datasets that give one variant do. The store holds no MNV (its REF and ALT of one length), and an
-  install may have no store (an index built with `CRISPRME_INDEL_SNP=0`, or a store whose compile
-  failed, which a search notes in its `log_verbose.txt`, once per chromosome): the indel path then
-  reads a record's carriers from CRISPRitz's indel log, phase unknown, those of every line of the
-  record (each line's window lists its own; up to 2.8.1 a target with a SNP code in its window read
-  the first window's on both, so a carrier only the second line listed was on no row of it). Up to
+  datasets that give one variant do. Up to 2.10.0 the store held no MNV (its REF and ALT of one
+  length). Since 2.10.1 each chromosome's store keeps its MNVs in a file of their own beside the
+  indel file, `gt_mnv_<chrom>.tsv.gz`, and its readers read the two files alike: an MNV written on
+  two lines, in one case or in two, is one allele too (§4, MNVs in the phased store). An install
+  may have no store (an index built with `CRISPRME_INDEL_SNP=0`, or a store whose compile failed,
+  which a search notes in its `log_verbose.txt`, once per chromosome), or a store of 2.10.0, which
+  has no MNV file (a search notes that too, §4): the indel path then reads a record's carriers
+  (with a store of 2.10.0, an MNV's) from CRISPRitz's indel log, phase unknown, those of every line
+  of the record (each line's window lists its own; up to 2.8.1 a target with a SNP code in its
+  window read the first window's on both, so a carrier only the second line listed was on no row of
+  it). Up to
   2.8.1 each reader kept the later line's carriers alone, so a carrier only the earlier line listed
   lost its phased genotype and was listed on no row of the indel, or on some of its alignments only;
   two lines written in two cases (TG>T beside tg>t) were two records, the carriers of one target
@@ -621,6 +626,16 @@ store the indel post-analysis reads (§4, SNP+indel), as an indel row's second i
   window are cis by construction (they make one enumerated haplotype, not every subset of
   them, below) and an indel of his that changes the target takes him off the row, whatever
   else that haplotype holds;
+- since 2.10.1 the store's MNVs are read here too, where the chromosome's store has its MNV
+  file (§4, MNVs in the phased store). An MNV is read as an indel is. It moves no base: its
+  bases stand at the places of the bases it replaces. So one that replaces a base of the
+  target's span changes the target, and no repeat puts the bases back. An MNV at the position
+  of a SNP the row names is another allele of that base, a phasing artefact, as an indel there
+  is. **Pending: the PI's decision for 2.10.1.** An SNV and an MNV whose REFs share a base on
+  one phased slot (28 pairs on HPRC v2.1, 150 slots) have no rule of their own yet, on the SNV's
+  SNP rows. Until one is set, the MNV is read there as an indel is: at the SNV's own position it
+  is a phasing artefact and the carrier stays; over the SNV's base from another position the
+  slot holds two records of one base, its bases cannot be read, and it leaves the row;
 - a row left with no carrier is not reported. The same holds on the classic per-sample
   dictionaries. The population-level analysis (§5) is unchanged: its rows are worst-case
   composites, whose variant combinations the carrier gate checks (§5). With
@@ -903,9 +918,12 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   not carry, its ALT copies at a position counted against its call (the reference stays
   possible unless they fill its slots: two ALT copies of a diploid leave it out). The carriers
   of an equal-length multi-base record (an MNV, AC>TG),
-  which CRISPRitz puts in a fake-indel window as it does an indel, are always in this case: the
-  phased indel genotype store keeps only records whose REF and ALT differ in length (and,
-  since 2.10.0, whose FILTER is `PASS` or `.`, as the enricher reads: §8). With
+  which CRISPRitz puts in a fake-indel window as it does an indel, were always in this case up to
+  2.10.0: the phased indel genotype store kept only records whose REF and ALT differ in length
+  (and, since 2.10.0, whose FILTER is `PASS` or `.`, as the enricher reads: §8). Since 2.10.1
+  that holds only where the chromosome's store has no MNV file, as a store of 2.10.0 has none;
+  elsewhere the MNV file gives their phase, and only a carrier whose call the list above names
+  (an unphased one, say) is in this case (below, MNVs in the phased store). With
   **no genotypes at all** (a sites-only panel such as `mega`) the row
   holds that worst case over the code's alleles, keeps the carriers the indel log lists,
   and its co-occurrence is rung 3 above (PUTATIVE, min-AF bound); with no SNP genotypes
@@ -961,13 +979,16 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   unphased call cannot be tied to a haplotype, so it stays listed, PUTATIVE, as every carrier on an
   unphased panel is; this holds even when another, phased second indel on its indel haplotype
   changes the target, so such a carrier is listed for a row its indel haplotype does not have (§8,
-  residuals). An MNV is in no store the search reads (the phased indel store keeps records whose REF
-  and ALT differ in length, the SNP tiers SNVs), so a carrier whose indel haplotype also holds an
-  MNV that changes the target is listed for the target that haplotype would hold without it, a
-  sequence it does not have: a known limit of 2.10.0 (§10). On the same phased slot, an indel
-  overlapping the first at another position (one complex allele the VCF splits into overlapping
-  records, or a repeat's indel that the VCF left-aligns onto the last bases of a complex allele next
-  to it; the window keeps the reference there) takes the haplotype off the target's rows, whatever
+  residuals). Up to 2.10.0 an MNV was in no store the search reads (the phased indel store kept
+  records whose REF and ALT differ in length, the SNP tiers SNVs), so a carrier whose indel
+  haplotype also holds an MNV that changes the target was listed for the target that haplotype
+  would hold without it, a sequence it does not have: a known limit of 2.10.0 (§10), which a store
+  without its MNV file keeps. Since 2.10.1 an MNV of the store's MNV file is a second record of the
+  slot, read as a second indel is (below, MNVs in the phased store). On the same phased slot, an
+  indel overlapping the first at another position (one complex allele the VCF splits into
+  overlapping records, or a repeat's indel that the VCF left-aligns onto the last bases of a complex
+  allele next to it; the window keeps the reference there) takes the haplotype off the target's
+  rows, whatever
   its bases, when it changes the reference bases the target covers. Those are the places of the
   target's own bases and, since the target holds a base of the first indel's ALT (every indel row's
   target does), that indel's whole REF, however far inside a long ALT the target lies. The second
@@ -990,10 +1011,14 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   and takes the haplotype off, whatever its bases (`indel_snp_cis.changes_span`): HPRC v2.1's
   normalised VCFs hold 31 such pairs of records on one phased slot, 249 slots in all (29 pairs, 247
   slots, beside a first record that is a deletion), and the real-data check, which reads such a slot
-  without the second record, counts what differs as `limit-overlapping-records`, non-gating; which
-  reading is right is to be decided for 2.10.1. Another allele at the indel's own position, an indel
-  or a SNP, is an alternative to it (a haplotype holding both would be one record), so a slot phased
-  with both is a phasing artefact. And an unphased carrier of two overlapping records is a
+  without the second record, counts what differs as `limit-overlapping-records`, non-gating.
+  **Pending: the PI's decision for 2.10.1 (which reading is right).** Rule (a) below reads an MNV
+  on bases the indel deletes as changing nothing. Whether a complex record there is read so too
+  waits for that decision. Until then, 2.10.1 reads such a slot as 2.10.0 did, as said here.
+  Another allele at the indel's own position, an indel or a SNP, is an alternative to it (a
+  haplotype holding both would be one record), so a slot phased with both is a phasing artefact;
+  since 2.10.1 so are an MNV and an indel at one POS, both ways, where the chromosome's MNV file was
+  read (rule (c), below). And an unphased carrier of two overlapping records is a
   multi-allelic heterozygote, one allele per haplotype. These stay listed;
 - a target of the window that holds **no base of the indel** — none the ALT adds or replaces,
   and not the two bases on either side of the deleted ones — lies wholly in a flank and gives
@@ -1004,6 +1029,106 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   reads the same genotypes from the per-sample SNP dictionary; with `CRISPRME_INDEL_SNP=0`
   at search time every code reads as the reference base, as on a fake-indel genome built
   without the overlay.
+
+**MNVs in the phased store (2.10.1).** An MNV is a record that replaces two or more bases with as
+many (AA>GG): REF and ALT of one length above 1, not a symbolic allele
+(`build_indel_genotypes._is_mnv`). CRISPRitz cuts a fake-indel window for each MNV, as for an
+indel, so MNV targets are found. Up to 2.10.0 nothing a search read said which haplotype holds an
+MNV: the phased store kept only the records whose REF and ALT lengths differ, and the indel log
+lists an MNV's carriers with no phase. Of the published panels only HPRC has MNVs (v2.1: 702,193
+of its 49,547,631 records); HGDP + 1000 Genomes and the mega have none.
+
+Since 2.10.1 each chromosome's store has an MNV file beside its indel file,
+`Dictionaries/indel_genotypes_<vcf>/gt_mnv_<chrom>.tsv.gz` (`build_indel_genotypes.store_files`).
+It has the indel file's format and the same `.done` marker. It holds one line per MNV ALT of a
+record whose FILTER is `PASS` or `.`: `<POS>_<REF>_<ALT>`, then each carrier's genotype, read as
+"this ALT or not" (a missing allele is not this ALT, and `/` stays unphased).
+`build_indel_genotypes.compile_store` writes both files in one pass over the VCF, each only where it
+is missing or not current (`files_to_write`), so a store of 2.10.0 gains its MNV files and keeps its
+indel files byte for byte. A VCF with no MNV gets an MNV file of no record: the file says that the
+MNVs were stored. On HPRC v2.1 the MNV files hold 699,719 lines (one per MNV with a carrier, as many
+as the indel log's MNV lines) and 11,655,450 carrier entries, 19.3 MB gzipped; the indel files
+beside them take 604 MB.
+
+Each reader of the store reads the MNV file where it is there: the indel post-analysis
+(`build_indel_genotypes.IndelGenotypeReader`, whose `has_mnv` says whether it read one), the
+per-sample SNP rows (above) and the carrier gate (§5). An MNV is then one more record of the store,
+read by the rule of a second indel (above): a slot's bases are written with every record it holds,
+and the slot keeps a row only if the row's target is on those bases.
+
+- **An MNV moves no base.** Its ALT bases stand at the places of the REF bases they replace
+  (`indel_snp_cis.local_haplotype`), and it inserts none (`indel_snp_cis.changes_span`). So an MNV
+  that changes a base of the target takes the slot off the row, and no repeat puts the target
+  back. One outside the target changes nothing. Up to 2.10.0 both helpers read such a record as
+  an indel: `local_haplotype` wrote an MNV's bases after the base before it, and `changes_span`
+  counted its ALT as inserted bases. With an MNV on a target's first base in a repeat, the reading
+  from the first base on then started past the MNV, where it could find the target's bases. On
+  HPRC v2.1, 2,071 of the 699,719 MNVs with a carrier (39,819 carrier haplotypes) lie where the 20
+  bases past the MNV repeat those from a base inside it: a count of exposure, not of listings. The
+  fixes touch only the records whose REF and ALT have one length, which no store of 2.10.0 holds.
+- **An MNV row** lists its carriers by their phase. Each slot is resolved with its own SNP alleles
+  and second records, as on an indel row. A carrier whose MNV call is unphased stays PUTATIVE (on
+  HPRC v2.1 such calls are on chrY alone).
+- **An indel row** loses a carrier whose haplotype holding the row's indel also holds an MNV that
+  changes the target. The carrier stays listed through its other slot where that slot holds the
+  target.
+- **A store without its MNV file** (2.10.0's, or that of 2.8.1's HPRC v2.0 archives) is read as
+  2.10.0 read it: an MNV row's carriers come from the indel log, phase unknown, and no MNV is read
+  on another record's rows. Rule (c) below does not apply there either, so the rows are 2.10.0's.
+- **The run says which.** Once for each chromosome that has a store and whose indel log lists an
+  MNV, the indel post-analysis writes a NOTE to the run's `log_verbose.txt`: `NOTE [indel-snp]:
+  the MNVs of <dataset> on <chrom> were read from the phased indel genotype store's MNV file ...`,
+  or, for a store without it, `NOTE [indel-snp]: the phased indel genotype store of <dataset> on
+  <chrom> holds no MNV ...`, which says how to add the file. The real-data check reads these NOTEs
+  (§8).
+- CRISPRme 2.10.0 opens the indel file by name and reads no MNV file, so it reads the same rows
+  from a store of 2.10.1.
+
+**An MNV and another record on one slot.** On HPRC v2.1, 33,739 pairs of an indel and an MNV share
+a base of their REFs on one phased slot (245,045 slots); no two MNVs do. In shapes 1 and 2 below the
+haplotype has one sequence. In shapes 3 to 6, and in most of 7, it has none: one complex allele that
+`vcfwave` split into records that overlap, so any reading is a convention. Each pair has two kinds
+of rows, the indel's and the MNV's. A slot leaves a row where the row's target reaches a base that
+the other record changes and the row's record does not. The target of an indel row or of an MNV
+row takes in its record's whole REF (above). Three rules, set for 2.10.1, read the shapes where the
+two records describe the same bases:
+
+- **(a)** An MNV only on bases the row's deletion deletes changes nothing, on the deletion's rows.
+  This is the rule for any variant on those bases (above). The slot keeps the row.
+- **(b)** A deletion on bases an MNV replaces is read as the deletion's haplotype, on the MNV's
+  rows. An MNV window loses no base: its ALT bases are read at their places, so a deletion of one
+  of them changes the target. The slot leaves the MNV's rows. Up to 2.10.0 an MNV window counted
+  the bases it replaces as lost, so such a deletion changed nothing there.
+- **(c)** An MNV and an indel at one POS are two alleles of that position. A slot phased with both
+  is a phasing artefact, as for two alleles of one position (above). Each record's rows read the
+  slot without the other record. This applies only where the chromosome's MNV file was read.
+
+| Shape on one phased slot (HPRC v2.1) | Pairs | Slots | On the indel's rows | On the MNV's rows |
+|---|---|---|---|---|
+| 1. An insertion anchored on the MNV's last base | 15,768 | 108,982 | leaves: the MNV changes its anchor base | leaves where the target reaches past the MNV, into the inserted bases |
+| 1b. An insertion anchored on another base of the MNV | 2,013 | 2,642 | leaves: the MNV changes its anchor base | leaves: bases added inside the MNV |
+| 2. The MNV on the deletion's anchor base only | 9,664 | 57,805 | leaves: the MNV changes its anchor base | leaves where the target reaches the bases deleted past the MNV |
+| 3. A deletion over part of the MNV, each changing bases the other keeps | 766 | 3,960 | leaves: the MNV changes bases the deletion keeps | leaves (b) |
+| 4. The deletion's deleted bases inside the MNV | 431 | 11,706 | leaves: the MNV changes bases the deletion keeps | leaves (b) |
+| 5. The MNV only on bases the deletion deletes (exactly those bases: 317 pairs, 7,740 slots) | 4,258 | 55,075 | stays (a) | leaves (b) |
+| 6. The indel and the MNV at one POS (105 insertions, 54 deletions, 4 complex records) | 163 | 1,457 | read without the MNV (c) | read without the indel (c) |
+| 7. A complex record and an MNV | 676 | 3,418 | as in the shapes above, by where its bases lie | as in the shapes above |
+
+In shape 7, where the complex record puts its own ALT bases on bases the MNV replaces, the reading
+waits for the decision pending above (a complex record inside another record's deleted or replaced
+bases). A slot that leaves a row so holds both records, and a target that needs both is not
+generated (one record per fake-indel window, §10): such targets go unreported.
+
+The carrier gate (§5) reads shape 6 by its own convention, kept from 2.10.0, not by rule (c): an
+indel or an MNV at the position of a variant the row names is another ALT of that position on the
+slot, so the gate does not count that slot as a haplotype holding the row's variants; where only
+such slots hold a combination, its state is `phase not known`. The indel post-analysis lists such
+a carrier by its phase. The gate changes no row, so only its state can differ there.
+
+What 2.10.1 changes in HPRC's rows (the listings of §10, the MNV rows' carriers, each shape's
+slots) is to be measured by the gates. HGDP + 1000 Genomes and the mega hold no MNV, and no store
+of theirs holds a record whose REF and ALT have one length, so their rows are not to change; that
+too is to be measured by the gates.
 
 The co-occurrence companion `indel_snp_cooc.tsv` lists the SNP alts the indel
 post-analysis's rows **require** — the guide's own base at a spacer column, or a base that
@@ -2109,7 +2234,10 @@ the search without it (`--no-prioritize-observed`).
   carriers (beside a sites-only dataset the gate reads that dataset's rows, below). A row does not
   say which dataset it comes from, so the gate reads every phased store the search has: a variant is
   in a panel when the panel holds its POS, REF and ALT (a REF that differs is counted, and said, as
-  a normalization difference).
+  a normalization difference). Since 2.10.1 the gate reads the store's MNV file too, where the
+  store has one (§4, MNVs in the phased store): an MNV a row names is in the panel, its
+  haplotypes read by their phase. With a store of 2.10.0 an MNV is in no panel, as in 2.10.0, and
+  a combination that holds one is C2 (below).
 - **Tiers**, for each of a row's three alignments (highest CFD, fewest mismatches + bulges,
   highest CRISPR-Bulge):
   - **A**: two or more variants that one phased haplotype of the panel carries together — on
@@ -2122,7 +2250,12 @@ the search without it (`--no-prioritize-observed`).
     off (a phasing artefact). States: `one haplotype` when a single one does; `phase not
     known` when only samples whose genotypes cannot say which haplotype holds which variant
     carry them all (an unphased call, or two ALTs of one position on one slot, the PUTATIVE
-    rule; an indel at a variant's own position on the slot is such an ALT).
+    rule; an indel at a variant's own position on the slot is such an ALT, and since 2.10.1 so
+    is an MNV there). This is the gate's own convention, kept from 2.10.0: the indel
+    post-analysis reads a slot with an indel and an MNV at one POS without the other record,
+    and lists the carrier by its phase (§4, rule (c)). The gate changes no row, so only its
+    state can differ on such a slot. On a row of SNPs alone, an MNV that changes the target's
+    bases takes a slot off as an indel does.
 
     **A also where a haplotype reaches the alignment's CFD without every variant.** The worst case
     takes the best-matching allele in every column, and some of those alleles leave the CFD the
@@ -2154,7 +2287,8 @@ the search without it (`--no-prioritize-observed`).
     together and none of which reaches the alignment's CFD without (above); or variants (one
     or more, a single one too) every phased haplotype carrying which also holds an
     indel that takes the target's bases off it, as A reads one (state `indel in the
-    target`). A zero means something only where
+    target`; since 2.10.1 an MNV of the store counts so too, and the state keeps its
+    label). A zero means something only where
     some were expected: E, the panel haplotypes expected to carry the variants together if
     they were independent (the panel's haplotypes times the product of the variants' panel
     frequencies; linkage is not modelled), is given, and below a threshold (3 by default,
@@ -2643,11 +2777,14 @@ VCF (§2), so none of its 13,853,761 indels had one; the rebuilt mega's build in
 `AF_max` as `INFO/AF`, so each of its 13,853,753 has it; either way their per-dataset frequencies
 are in the `indel_af.tsv` companion. CRISPRitz 2.10.0 finds each record's `AF` by its key, so an
 index it builds, as every one rebuilt for CRISPRme 2.10.0, has the `AF` of each record that has
-one. The
-phased indel genotype store leaves out equal-length multi-base records (MNVs), so their carriers are
+one. Up to 2.10.0 the
+phased indel genotype store left out equal-length multi-base records (MNVs), so their carriers were
 resolved with the phase unknown, PUTATIVE (§4): the HGDP + 1000 Genomes index has none, HPRC's chr22
 has 9,079 among its 195,813 indel-search records in v2.0 of its graph (2.8.1's input), 24,656 among
-222,499 in v2.1 (2.10.0's; 699,719 among 12,361,907 genome-wide). Since 2.10.0 it holds only the
+222,499 in v2.1 (2.10.0's; 699,719 among 12,361,907 genome-wide). Since 2.10.1 each chromosome's
+store holds them in an MNV file beside its indel file (§4, MNVs in the phased store), and a run
+that reads it resolves an MNV row's carriers by their phase; a store without it, as 2.10.0's and
+the store of 2.8.1's HPRC v2.0 archives, is read as before. Since 2.10.0 it holds only the
 indels of records whose FILTER is `PASS` or `.`, the records CRISPRitz's enricher reads (no other is
 in a fake-indel window, a dictionary or a tier); up to 2.8.1 it held every indel of the VCF, so on a
 VCF with records of another FILTER a carrier was taken off an indel row, for a second indel in its
@@ -2656,10 +2793,11 @@ target, or off a SNP row, for an indel no window holds. A store written so is wr
 search that reads one says so in its `log_verbose.txt`; the panels published hold no such record.
 Since 2.10.0 a per-sample SNP row does not list a carrier whose haplotype holding its SNPs also
 holds an indel that changes the target's bases (§4); up to 2.8.1 it did, and so it does with
-`CRISPRME_INDEL_SNP=0`. What remains: an MNV inside the target, which the phased indel store does
-not hold, on a SNP row as on an indel row (§10; the HGDP + 1000 Genomes index and `hg38_mega` have
-none); a carrier whose indel call or SNP call is unphased, which stays listed, PUTATIVE; and the
-population-level analysis, whose rows are worst-case composites (the carrier gate ranks a
+`CRISPRME_INDEL_SNP=0`. What remains: an MNV inside the target where the chromosome's store has no
+MNV file (a store of 2.10.0), on a SNP row as on an indel row (§10; the HGDP + 1000 Genomes index
+and `hg38_mega` have none; with the MNV file, a per-sample SNP row and an indel row drop such a
+carrier, §4); a carrier whose indel call or SNP call is unphased, which stays listed, PUTATIVE; and
+the population-level analysis, whose rows are worst-case composites (the carrier gate ranks a
 combination no haplotype carries after the others, §5). On a row of several variants, the
 `Variant_rsID` and `Variant_MAF` lists of the results tables are in the order of its
 `Variant_info_genome`, one rsID and one AF a variant, and two variants of one frequency
@@ -2952,11 +3090,22 @@ and the complex allele, the PUTATIVE carriers of MNVs and of multi-ALT alts the 
 by §4's rule — over the dictionary's alts of one character at the position, an alt whose carriers
 hold no index but 0 and 1 settling none —, the last record of a split site) is re-implemented from
 this text only to classify a disagreement as a documented limit (counted, non-gating, a PUTATIVE tie
-included) or a failure. An MNV beside the record is in no store CRISPRme reads (§4): a target that
-needs it needs two indel-path records (the two-indel limit), and a carrier listed for the sequence
-its slot would hold without such an MNV is listed for a sequence it does not have, the known limit
-of §10, counted as `limit-indel-row-mnv` as a SNP row's carrier is as `limit-snp-row-mnv` (up to
-the real-data gates of 2.10.0 it failed). It runs two ways:
+included) or a failure. An MNV beside the record is in no store CRISPRme 2.10.0 reads (§4): a
+target that needs it needs two indel-path records (the two-indel limit), and a carrier listed for
+the sequence its slot would hold without such an MNV is listed for a sequence it does not have, the
+known limit of §10, counted as `limit-indel-row-mnv` as a SNP row's carrier is as
+`limit-snp-row-mnv` (up to the real-data gates of 2.10.0 it failed). A run of 2.10.1 says, for
+each chromosome whose indel log lists an MNV, whether it read the MNVs from the store's MNV file
+(the NOTEs of §4, in its `log_verbose.txt`). The check of 2.10.1 takes its model from those NOTEs.
+Where the run read no MNV file, it reads the run as above, as 2.10.0's. Where the run read one, an
+MNV is a second record of the slot, read by §4's rules for an MNV beside another record: (a) an MNV
+only on bases the record deletes changes nothing (the overlap §4 reads the slot without, as for any
+allele there); (b) a deletion on bases an MNV replaces is read as the deletion's haplotype; (c) an
+MNV and an indel at one POS are read each without the other. A carrier listed for a sequence its
+slot does not have through an MNV is then no limit: on an indel row it fails the check (2.10.0's
+`limit-indel-row-mnv`), and the SNP-row report, which is report-only, reports it as a carrier the
+SNP-row rule drops (2.10.0's `limit-snp-row-mnv`). A target that needs an MNV and another
+indel-path record stays the two-indel limit. It runs two ways:
 
 - **Soundness.** Every row block of the integrated results (the highest-CFD, fewest mm+b
   and highest-CRISPR-Bulge blocks) and of the alternative alignments whose variant list
@@ -3678,11 +3827,20 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   for such an MNV, whatever the slot, would also take off 92 carriers at their sites in that
   per-sample search (34 at population level) whose haplotype holding the indel does not hold the
   MNV. A fix needs the MNVs' phased genotypes in a store built with the panel's Dictionaries, which
-  the haplotype scan does not read either (it reads the stores the search reads); 2.10.1 is to build
-  that store, with HPRC's Dictionaries rebuilt and its index as it is, and to read an MNV there as a
-  second variant of the slot, which takes a carrier off a row of a sequence it does not have: a
-  target held only through an MNV and a second indel-path record stays unreported, as one held
-  through two indels does.
+  the haplotype scan does not read either (it reads the stores the search reads). 2.10.1 builds
+  that store (§4, MNVs in the phased store): HPRC's Dictionaries are built again with an MNV file
+  per chromosome, its index as it is, and a search reads an MNV there as a second record of the
+  slot, which takes a carrier off a row of a sequence it does not have. How many of the listings
+  above leave their rows is to be measured by the gates. Two things stay limits, said plainly.
+  First, a target held only through an MNV and a second indel-path record stays unreported, as one
+  held through two indels does. With the MNVs read, more targets fall there: those of the 171
+  listings above whose haplotype holds another target, now off the row, and those of the slots
+  the overlap shapes of §4 take off a row; how many is to be measured by the gates. The fix moves
+  such a carrier from a wrong row to none. Second, a store without its MNV file (2.10.0's, and that
+  of 2.8.1's HPRC v2.0 archives, which get none) is read as 2.10.0 read it, and this item holds
+  there as stated. Two readings wait for the PI's decision (§4, marked pending): a complex record
+  wholly inside the bases an indel deletes, and an SNV and an MNV that share a base on one slot, on
+  the SNV's SNP rows.
 - **A SNP row's carrier whose indel reaches past the store the search read.** A per-sample search
   reads the phased indel store only around its SNP targets, 500 bases on either side of each (§4),
   so a carrier whose haplotype holds an indel in the target that adds or deletes more bases than
@@ -3777,10 +3935,11 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
 
 Limits stated in other sections, which 2.10.0 keeps: one indel per fake-indel window, so an
 off-target that needs two indels in one protospacer is not generated as a candidate (§8, residuals;
-its scale on the release gate is in the first item above); an MNV is in no phased store, so its
-carriers are resolved PUTATIVE (§4); an indel row, and each ALT of a VCF line that lists several
-ALTs, gives the record's first ID (§8); and an index of format 1, as every archive of 2.8.1, keeps
-the limits at contig ends and `N` runs of §9 until it is built again.
+its scale on the release gate is in the first item above); an MNV is in no phased store of 2.10.0,
+so its carriers are resolved PUTATIVE (§4; from 2.10.1 a store with its MNV file gives their
+phase, and a store without it keeps this limit); an indel row, and each ALT of a VCF line that
+lists several ALTs, gives the record's first ID (§8); and an index of format 1, as every archive of
+2.8.1, keeps the limits at contig ends and `N` runs of §9 until it is built again.
 
 ## 11. Index rebuild of 2.10.0
 
