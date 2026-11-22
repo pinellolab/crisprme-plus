@@ -190,7 +190,10 @@ listed for a sequence their haplotypes do not have (S90 on MF's deletion and MNV
 and S96 on MQ's, S97 on MS's SNP row and S98 on its MNV row), and the sites' own expectations
 (MF: S90 on the perfect row; MQ: S96 there, no CONFIRMED co-occurrence of S95; MS: S97 on
 the SNP row). The real-data check finds them as its non-gating limit-indel-row-mnv and
-limit-putative-carrier there. The `cas12a` profile holds no MNV: unchanged.
+limit-putative-carrier there. With the MNV file, the check takes the run's reading from its
+NOTE (its stderr says "MNVs from the store's MNV file"), and a carrier listed through an MNV
+there gates (indel-row-mnv-carrier, snp-row-mnv-carrier): the profile's four checks find no
+gating line. The `cas12a` profile holds no MNV: unchanged.
 
 ## SNP rows (2.10.0, `snp_rows.py`)
 

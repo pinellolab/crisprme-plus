@@ -30,21 +30,39 @@ and the `release-crisprme` skill.
     byte for byte, and a VCF with no MNV gets an MNV file of no record.
   - `build-index-only` (its STEP 1c) writes, for each chromosome, whichever file of the store is
     missing or not current, a job per chromosome. The store's unfinished mark and the check for a
-    partial store cover both files. A build of 2.10.0 run again with 2.10.1 gains the MNV files.
+    partial store cover both files, and after a worker dies the jobs run again ask only for the
+    files still not current. A build of 2.10.0 run again with 2.10.1 gains the MNV files, keeps
+    its indel files and their markers byte for byte, and says how many chromosomes got their MNV
+    file alone.
   - A search that enriches a dataset itself does the same (`search_indel_snp.py store`).
   - `build_indel_genotypes.py --mnv-only <vcf> <store folder> [<samplesID>]` adds the MNV file of
     the VCF's chromosome to a store and leaves its other files as they are. A samplesID file or a
     store folder that is named but not found is an error.
   - CRISPRme 2.10.0 opens the indel file by name, so it reads the same rows from a store that has
     the MNV file.
-- **`publish-index --stage-only`.** It packs a publish's archives and their records into a folder
-  and uploads nothing. A re-pack can then go up to the Hub in one commit, with
-  `indexes/SHA256SUMS`, where `publish-index` makes one commit per file. HPRC's republish uses it
-  (Changed).
-- **A `download` step that adds HPRC's MNV store to an install of 2.10.0.** It fetches the
-  `indel_genotypes_hg38_HPRC` companion (0.61 GB), which holds the MNV files, and installs it
-  whole. A search of 2.10.1 then reads the MNVs' phase on that install, without the index being
-  downloaded again (about 32 GB). `docs/TROUBLESHOOTING.md` §15 gives the command.
+- **`publish-index --stage-only <folder>`.** It packs into `<folder>/indexes/` what the publish
+  would upload (the index's archive, each companion it would upload and that companion's record)
+  and writes `<folder>/staged.sha256`, the SHA-256 of each archive. It uploads nothing: it asks
+  for no token and makes no upload client, and its only calls to the Hub are the anonymous reads
+  of the companions' records that a publish makes, to keep a companion the repo holds already and
+  to refuse another build unless `--replace-companions`. It refuses a folder that holds a staged
+  publish already. It prints, and does not run, the commands that publish the folder in one Hub
+  commit with `indexes/SHA256SUMS`: `scripts/hf_sha256sums.py --staged`, one `hf upload` of the
+  folder, then the check that the Hub holds what was staged. `publish-index` itself makes one
+  commit per file. HPRC's republish uses it (Changed).
+- **`download --what indel-genotypes --dataset <panel>`: the MNVs for an install of 2.10.0.**
+  `crisprme.py download --what indel-genotypes --dataset hg38_HPRC` fetches the panel's
+  `indel_genotypes_hg38_HPRC` companion (0.61 GB), which holds the MNV files, and installs it whole
+  in place of the store, where it is the documented upgrade: each indel file and marker the one
+  installed, byte for byte, and a whole MNV file for each chromosome. Anything else is refused and
+  nothing installed (`DownloadIntegrityError`): an archive whose files are not what its record
+  says, indel files that differ from those installed, a chromosome left without its MNV file.
+  Where the repo's companion holds no MNV file yet (2.10.0's), it says so and installs nothing. A
+  store with every MNV file, whole, costs no call to the Hub; one with a corrupt MNV file is
+  fetched again. It writes the companion's marker, `Dictionaries/.indel_genotypes_<panel>.json`. A
+  search of 2.10.1 then reads the MNVs' phase on that install, without the index being downloaded
+  again (about 32 GB). The NOTE of a store without the MNV files names the command, as do
+  `download --help` and `docs/TROUBLESHOOTING.md` §15.
 
 ### Changed
 - **HPRC's Dictionaries are published again, with the MNV files.** Only
@@ -55,21 +73,33 @@ and the `release-crisprme` skill.
   index files are the same, but its manifest names the bundle by its fingerprint, and a download
   refuses a bundle the manifest does not name. `genotypes_hg38_HPRC` stays as it is (the same
   fingerprint). The three archives, the two companions' records and `indexes/SHA256SUMS` go up in
-  one Hub commit (`publish-index --replace-companions --stage-only`, then one upload of the staged
-  folder). No
-  index name, index format or catalog entry changes. `docs/INDEX_PROVENANCE.md` gives the new
+  one Hub commit (`publish-index --replace-companions --stage-only`, then the commands it prints).
+  No index name, index format or catalog entry changes. `docs/INDEX_PROVENANCE.md` gives the new
   archives' sizes, SHA-256 and Hub commit (2.10.1); 2.10.0's stay in the Hub's history. CRISPRme
   2.10.0 reads no MNV file, so it gives the same rows on the new archives. A download of HPRC in
   flight at that commit can fail once, and works when run again (`docs/TROUBLESHOOTING.md` §15).
 - **The real-data checker reads the MNVs as the search does** (`scripts/check_indel_rows.py`). A
   run of 2.10.1 says in its `log_verbose.txt`, for each chromosome whose indel log lists an MNV,
   whether it read the MNVs from the store's MNV file (Fixed). The check takes its model from those
-  NOTEs. Where the run read no MNV file, it reads the run as 2.10.0's: a carrier listed through an
-  MNV that changes the target is a documented limit (`limit-indel-row-mnv`, `limit-snp-row-mnv`,
+  NOTEs, by dataset and chromosome, and refuses a log that says both of one chromosome (exit 2).
+  Where the run read no MNV file, it reads the run as 2.10.0's: a carrier listed through an MNV
+  that changes the target is a documented limit (`limit-indel-row-mnv`, `limit-snp-row-mnv`,
   non-gating). Where the run read one, an MNV is a second record of the slot, read by the rules of
-  the Fixed entry, and such a listing fails the check on an indel row; the SNP-row report, which
-  is report-only, reports it. A target that needs an MNV and another indel-path record stays the
-  two-indel limit (`limit-two-indels`).
+  the Fixed entry, and an MNV row's carriers are read by their phase. Such a listing then gates:
+  `indel-row-mnv-carrier` on an indel row, and `snp-row-mnv-carrier` on a SNP row, the one class
+  of the otherwise report-only SNP-row report that gates. The two readings that wait for the PI's
+  decision (Fixed) are read as the code reads them, each counted under a class of its own,
+  non-gating, listed or not: `open-complex-in-deleted` (counted as `limit-overlapping-records` up
+  to 2.10.0) and `open-snp-row-snv-mnv`. On a slot of rule (c) the check reads
+  the rows as the indel post-analysis does, and its findings there state the carrier gate's own
+  convention. A target that needs an MNV and another indel-path record stays the two-indel limit
+  (`limit-two-indels`). On the README guide's genome-wide searches of HPRC v2.1 run without the MNV
+  store, per sample and population-level, the check gives the same findings as before, byte for
+  byte (7,860 and 3,873, none gating). Its two worker pools now fork after `gc.freeze()`, so
+  that a worker does not copy the objects it shares with the parent process when it reads them: on
+  the population-level search, the pool's summed private memory went from 7.43 to 2.92 GiB, with
+  the same findings. The run's peak, while it reads the tables, is the same (about 106 GiB on the
+  per-sample search).
 - **The Docker image keeps no conda or pip package cache.** The Dockerfile's `micromamba clean
   --all --yes`, at the end of each RUN that installs an environment, removes the cached packages
   no environment uses, but keeps the folder of every package one uses, and in it each file the
@@ -133,13 +163,23 @@ and the `release-crisprme` skill.
 
   A store without the MNV file (2.10.0's, and 2.8.1's HPRC v2.0 archives) is read as 2.10.0 read
   it. The run's `log_verbose.txt` says so once for each chromosome whose indel log lists an MNV,
-  with how to add the file; a run that read one says that too. An MNV file that cannot be read
-  costs the MNVs alone: the chromosome's indel file is still read, and the carrier gate does not
-  stop on it. What all this changes in HPRC's rows is to be measured by the gates. HGDP + 1000
-  Genomes and the mega hold no MNV, so no row of theirs is to change; that too is to be measured by
-  the gates. Two limits stay. A target held only through an MNV and another indel or MNV is still
-  not generated (a fake-indel window holds one record), so the fix moves such a carrier from a
-  wrong row to none. And a target held only through two indels stays unreported, as in 2.10.0.
+  with how to add the file (`build-index-only` of 2.10.1, or `download --what indel-genotypes` for
+  an index downloaded from Hugging Face, Added); a run that read one says that too. An MNV file
+  that cannot be read to its end (corrupt, cut short) costs the MNVs alone: the indel
+  post-analysis, the SNP rows and the carrier gate read that chromosome as with a store of 2.10.0,
+  its indel file as it is, and each says so in a NOTE that says how to write the file again; the
+  gate does not stop on it. What all this changes in HPRC's rows is to be measured by the gates.
+  HGDP + 1000 Genomes and the mega hold no MNV, so no row of theirs is to change; that too is to be
+  measured by the gates. Two limits stay. A target held only through an MNV and another indel or
+  MNV is still not generated (a fake-indel window holds one record), so the fix moves such a
+  carrier from a wrong row to none. And a target held only through two indels stays unreported, as
+  in 2.10.0. Covered by `test_indel_genotypes`, `test_indel_snp_cis`,
+  `test_indel_haplotype_resolution`, `test_indel_overlaid_rows`, `test_snp_row_indel_carriers`,
+  `test_haplotype_prioritizer`, `test_search_indel_snp`, `test_build_index_only_atomic` and
+  `test_panel_companions`, and by four MNV sites of the SNP+indel oracle (`test/indel_snp_oracle`,
+  which validate-benchmarks runs through the real CLI): an MNV on a target's first bases in a
+  tandem repeat, an MNV row resolved by phase, an MNV at a deletion's POS (rule (c)) and an MNV in a
+  SNP row's target.
 - **The docs give the measured size of 2.10.0's image once unpacked, and of its arm64
   `.sif`.** The one-line installers' comments said "~7 GB+ once unpacked", the README "about
   7 GB on Apple Silicon, and more on amd64", and the Docker Quickstart's Apptainer step a `.sif`

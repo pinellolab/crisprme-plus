@@ -619,19 +619,31 @@ rules behind them.
   HGDP + 1000 Genomes and the mega have no MNV, so their searches write none.
   - `NOTE [indel-snp]: the MNVs of <dataset> on <chrom> were read from the phased indel genotype
     store's MNV file ...`: the store holds the MNVs' phase, and the search read it. Nothing to do.
-  - `NOTE [indel-snp]: the phased indel genotype store of <dataset> on <chrom> holds no MNV ...`:
-    the store is one of 2.10.0, without the MNV files (`Dictionaries/indel_genotypes_<dataset>/`
-    holds `gt_indel_<chrom>.tsv.gz` and no `gt_mnv_<chrom>.tsv.gz`). The search read its MNVs as
-    2.10.0 did, and the item above holds for its rows. The NOTE says how to add the files.
+  - `NOTE [indel-snp]: the phased indel genotype store of <dataset> on <chrom> holds no MNV (a
+    store written before CRISPRme 2.10.1) ...`: the store is one of 2.10.0, without the MNV files
+    (`Dictionaries/indel_genotypes_<dataset>/` holds `gt_indel_<chrom>.tsv.gz` and no
+    `gt_mnv_<chrom>.tsv.gz`). The search read its MNVs as 2.10.0 did, and the item above holds for
+    its rows. The NOTE says how to add the files (below).
+  - `NOTE [indel-snp]: the phased indel genotype store of <dataset> on <chrom> holds no MNV that
+    can be read: its MNV file gt_mnv_<chrom>.tsv.gz is corrupt or cut short ...`: the search read
+    that chromosome as with a store of 2.10.0, its indel file as it is. The indel post-analysis,
+    the SNP rows and the carrier gate each write it, whether or not the indel log lists an MNV.
+    Remove the file and its marker, as the NOTE says (a corrupt file can keep its `.done` marker,
+    and `build-index-only` then takes it for current), and add the file again as below.
 
   To add them:
-  - **HPRC installed with CRISPRme 2.10.0.** Run the `download` step for HPRC's MNV store
-    (**to be filled in at integration: its command**). It fetches the `indel_genotypes_hg38_HPRC`
-    companion (0.61 GB), which holds the MNV files, and installs it whole. `download --what index`
-    alone does nothing on a complete install: it says the index `is already installed ...
-    (remove that folder to re-download)`. You can also remove
+  - **HPRC installed with CRISPRme 2.10.0.** Run
+    `crisprme.py download --what indel-genotypes --dataset hg38_HPRC`, with the `--path` of your
+    other downloads. It fetches the `indel_genotypes_hg38_HPRC` companion (0.61 GB), which holds
+    the MNV files, and installs it whole in place of the store, where it is the store installed
+    with an MNV file added for each chromosome. Anything else it refuses, and installs nothing: an
+    archive whose files are not what its record says, indel files that differ from those
+    installed, a chromosome left without its MNV file. A store that has every MNV file, whole,
+    costs no download. `download --what index` alone does nothing on a complete install: it says
+    the index `is already installed ... (remove that folder to re-download)`. You can also remove
     `genome_library/20-NRR_3_hg38+hg38_HPRC` and `genome_library/20-NRR_3_hg38+hg38_HPRC_INDELS`
-    and download the index again: about 32 GB (its archive and its Dictionaries bundle).
+    and download the index again: about 32 GB (its archive and its Dictionaries bundle). That is
+    the way where the step refuses the repo's store as another build.
   - **HPRC downloaded after CRISPRme 2.10.1's publish.** The bundle holds the MNV files already.
     CRISPRme 2.10.0 reads no MNV file, so on this install it gives the same rows as before.
   - **A dataset you built.** Run `build-index-only` of 2.10.1 again with the dataset's VCFs. It

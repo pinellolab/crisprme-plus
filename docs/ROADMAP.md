@@ -26,7 +26,7 @@ gap the release's gates found.
   - the real-data check, which reads the MNVs as the search does;
   - HPRC's Dictionaries built again with the MNV files, its index as it is, and published in one
     Hub commit (`publish-index --stage-only`); an install of 2.10.0 gets them with a 0.61 GB
-    `download` step;
+    `download` step (`download --what indel-genotypes --dataset hg38_HPRC`);
   - the gates: on HGDP + 1000 Genomes, which hold no MNV, the same tables byte for byte as
     without the MNV work; on HPRC, every row that differs explained from the VCF.
 
@@ -73,7 +73,8 @@ gap the release's gates found.
   variant's number in its target) and redundant alternative alignments, which it does not today
   ([`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md), step 4c); to hold less memory (one process holds
   the whole alternative-alignment table: 106.5 to 116.1 GiB on the release gate's largest searches
-  genome-wide, 124.6 GiB with a SNP-row report); to check a search beside the mega on chrY, which
+  genome-wide, 124.6 GiB with a SNP-row report; 2.10.1's `gc.freeze()` before its worker pools
+  cuts what the workers copy, not that peak); to check a search beside the mega on chrY, which
   only the mega's VCFs hold (it refuses the whole genome there today, so the gate checked each
   other chromosome); to check SNP rows for completeness, so that it sees a SNP row the rule takes
   off whole; to name every record a missed target needs in its completeness line, a record past a

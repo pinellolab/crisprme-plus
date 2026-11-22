@@ -1011,7 +1011,8 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   and takes the haplotype off, whatever its bases (`indel_snp_cis.changes_span`): HPRC v2.1's
   normalised VCFs hold 31 such pairs of records on one phased slot, 249 slots in all (29 pairs, 247
   slots, beside a first record that is a deletion), and the real-data check, which reads such a slot
-  without the second record, counts what differs as `limit-overlapping-records`, non-gating.
+  without the second record, counts what differs as `limit-overlapping-records` up to 2.10.0 and
+  as `open-complex-in-deleted` since 2.10.1, non-gating either way (§8).
   **Pending: the PI's decision for 2.10.1 (which reading is right).** Rule (a) below reads an MNV
   on bases the indel deletes as changing nothing. Whether a complex record there is read so too
   waits for that decision. Until then, 2.10.1 reads such a slot as 2.10.0 did, as said here.
@@ -1079,8 +1080,16 @@ and the slot keeps a row only if the row's target is on those bases.
   MNV, the indel post-analysis writes a NOTE to the run's `log_verbose.txt`: `NOTE [indel-snp]:
   the MNVs of <dataset> on <chrom> were read from the phased indel genotype store's MNV file ...`,
   or, for a store without it, `NOTE [indel-snp]: the phased indel genotype store of <dataset> on
-  <chrom> holds no MNV ...`, which says how to add the file. The real-data check reads these NOTEs
-  (§8).
+  <chrom> holds no MNV ...`, which says how to add the file: `build-index-only` of 2.10.1 with
+  the dataset's VCFs, or, for an index downloaded from Hugging Face,
+  `crisprme.py download --what indel-genotypes --dataset <dataset>`. The real-data check reads
+  these NOTEs (§8).
+- **An MNV file that cannot be read** to its end (corrupt, or cut short) costs the MNVs alone. The
+  indel post-analysis, the SNP rows and the carrier gate each read that chromosome as a store
+  without its MNV file is read, its indel file as it is, and each writes a NOTE that opens as the
+  one above (`... holds no MNV that can be read: its MNV file ... is corrupt or cut short ...`)
+  and says how to write the file again. A corrupt indel file is read as in 2.10.0: the chromosome
+  has no store, and the carrier gate stops.
 - CRISPRme 2.10.0 opens the indel file by name and reads no MNV file, so it reads the same rows
   from a store of 2.10.1.
 
@@ -2237,7 +2246,8 @@ the search without it (`--no-prioritize-observed`).
   a normalization difference). Since 2.10.1 the gate reads the store's MNV file too, where the
   store has one (§4, MNVs in the phased store): an MNV a row names is in the panel, its
   haplotypes read by their phase. With a store of 2.10.0 an MNV is in no panel, as in 2.10.0, and
-  a combination that holds one is C2 (below).
+  a combination that holds one is C2 (below); so it is on a chromosome whose MNV file cannot be
+  read, which the gate says in a NOTE and does not stop on (§4).
 - **Tiers**, for each of a row's three alignments (highest CFD, fewest mismatches + bulges,
   highest CRISPR-Bulge):
   - **A**: two or more variants that one phased haplotype of the panel carries together — on
@@ -3101,10 +3111,17 @@ Where the run read no MNV file, it reads the run as above, as 2.10.0's. Where th
 MNV is a second record of the slot, read by §4's rules for an MNV beside another record: (a) an MNV
 only on bases the record deletes changes nothing (the overlap §4 reads the slot without, as for any
 allele there); (b) a deletion on bases an MNV replaces is read as the deletion's haplotype; (c) an
-MNV and an indel at one POS are read each without the other. A carrier listed for a sequence its
-slot does not have through an MNV is then no limit: on an indel row it fails the check (2.10.0's
-`limit-indel-row-mnv`), and the SNP-row report, which is report-only, reports it as a carrier the
-SNP-row rule drops (2.10.0's `limit-snp-row-mnv`). A target that needs an MNV and another
+MNV and an indel at one POS are read each without the other. An MNV row's carriers are then read
+by their phase, and a carrier listed for a sequence its slot does not have through an MNV is no
+limit: it fails the check, as `indel-row-mnv-carrier` on an indel row (2.10.0's
+`limit-indel-row-mnv`) and as `snp-row-mnv-carrier` on a SNP row (2.10.0's `limit-snp-row-mnv`),
+the one class of the SNP-row report that gates. A log that says both NOTEs of one chromosome is
+refused (exit 2). Two readings no rule of the code covers yet (§4, pending) are read as the code
+reads them and counted under classes of their own, non-gating, listed or not:
+`open-complex-in-deleted`, a complex record wholly on bases the record deletes or replaces, and,
+where the MNV file was read, `open-snp-row-snv-mnv`, an MNV over the base of an SNV a SNP row
+names. On a slot of rule (c) the check reads the rows as the indel post-analysis does, and its
+findings there state the carrier gate's own convention (§5). A target that needs an MNV and another
 indel-path record stays the two-indel limit. It runs two ways:
 
 - **Soundness.** Every row block of the integrated results (the highest-CFD, fewest mm+b
@@ -3258,8 +3275,11 @@ cannot be tied to the slot, PUTATIVE, or where it sits at a named SNP's position
 artefact), and a slot whose bases cannot be read (an indel near it whose slot is unknown, two
 records of one base, a base whose allele its calls leave unknown) leaves the row. Listing a carrier
 the rule drops is reported (`snp-row-indel-carrier`), an MNV the store does not hold is
-`limit-snp-row-mnv`. Population-level SNP rows are a documented worst-case union and are out of
-scope.
+`limit-snp-row-mnv`. Where the run read the store's MNV file (2.10.1) its MNVs are read as its
+indels are, and listing a carrier that an MNV on its slot takes off gates (`snp-row-mnv-carrier`,
+the one class of the report that does); an MNV over the base of an SNV the row names is an open
+reading (`open-snp-row-snv-mnv`, above). Population-level SNP rows are a documented worst-case
+union and are out of scope.
 
 It does not check the `CFD_score_REF`/`_ALT`, `CFD_risk_score` and CRISPR-Bulge columns or
 which row the CRISPR-Bulge block keeps, `Variant_info_spacer+PAM`, `PAM_creation`, the seed
@@ -3838,9 +3858,11 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   the overlap shapes of §4 take off a row; how many is to be measured by the gates. The fix moves
   such a carrier from a wrong row to none. Second, a store without its MNV file (2.10.0's, and that
   of 2.8.1's HPRC v2.0 archives, which get none) is read as 2.10.0 read it, and this item holds
-  there as stated. Two readings wait for the PI's decision (§4, marked pending): a complex record
-  wholly inside the bases an indel deletes, and an SNV and an MNV that share a base on one slot, on
-  the SNV's SNP rows.
+  there as stated; so does a chromosome whose MNV file cannot be read (§4). An install of 2.10.0
+  gets the files with `crisprme.py download --what indel-genotypes --dataset hg38_HPRC`, a dataset
+  one built with `build-index-only` of 2.10.1. Two readings wait for the PI's decision (§4, marked
+  pending): a complex record wholly inside the bases an indel deletes, and an SNV and an MNV that
+  share a base on one slot, on the SNV's SNP rows.
 - **A SNP row's carrier whose indel reaches past the store the search read.** A per-sample search
   reads the phased indel store only around its SNP targets, 500 bases on either side of each (§4),
   so a carrier whose haplotype holds an indel in the target that adds or deletes more bases than

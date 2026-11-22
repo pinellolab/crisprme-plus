@@ -86,8 +86,10 @@ Dictionaries/indel_genotypes_<dataset>/
   search refuses it.
 - A store of CRISPRme 2.10.0 has no `gt_mnv_*` files. CRISPRme 2.10.1 reads it as 2.10.0 did and
   says so in the run's `log_verbose.txt`; [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15 says how to
-  add the files. CRISPRme 2.10.0 reads the `gt_indel_*` files alone, so the `gt_mnv_*` files change
-  nothing for it.
+  add the files (`build-index-only`, or `download --what indel-genotypes` for a downloaded index).
+  A `gt_mnv_*` file that cannot be read to its end is read the same way, and the run says so too.
+  CRISPRme 2.10.0 reads the `gt_indel_*` files alone, so the `gt_mnv_*` files change nothing for
+  it.
 
 ## What a search reads vs. what it writes
 
