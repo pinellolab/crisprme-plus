@@ -119,6 +119,17 @@ and the `release-crisprme` skill.
 - **The report generator's version is 2.5** (`REPORT_GENERATOR_VERSION`, which the report's
   footer prints). It had been 2.4 since CRISPRme+ 2.4.0, through the generator's changes of
   2.10.0. The website's example report, 2.10.0's, keeps its "report generator v2.4".
+- **A search lists the reference genome's chromosomes without a `basename` process per FASTA
+  file** (PR 107, Tim Barry). `submit_job_automated_new_multiple_vcfs.sh` named each chromosome
+  after its file with `$(basename $file_chr)`, once per variant dataset of a search: on hg38 with
+  its alternative contigs (455 files) that took 0.96 s in the 2.10.0 image, and now, with
+  `${file_chr##*/}`, 0.008 s. Every name of letters, digits, `_`, `.` and `-` in a folder whose
+  path holds no space lists as before (hg38's 455 byte for byte, in the image's bash and the
+  host's). The old form, its path unquoted, also split a path holding a space, and expanded a
+  name that is a pattern matching another file's (`chr[8].fa` beside `chr8.fa` listed `chr8`
+  twice); those now list as named.
+  PR 107's other fix, the package specs after the channels in `scorer-env create`'s command, was
+  made the same way in 2.8.1.
 
 ### Fixed
 - **Where the phased store holds the MNVs, a search reads them by their phase.** Up to 2.10.0 an
@@ -187,6 +198,24 @@ and the `release-crisprme` skill.
   which validate-benchmarks runs through the real CLI): an MNV on a target's first bases in a
   tandem repeat, an MNV row resolved by phase, an MNV at a deletion's POS (rule (c)) and an MNV in a
   SNP row's target.
+- **An indel row whose reference alignment is shorter than its alignment gets a reference CFD of
+  0, and each chromosome's notes count such rows.** The indel post-analysis reads a row's
+  reference alignment from the plain reference, from the row's start, as many bases as its target
+  holds. Since 2.10.0 a row whose first base is one an insertion adds starts at the insertion's
+  anchor, so the reference holds at least that base; it holds fewer than the target only where an
+  insertion lies within one target of the end of a contig that ends in sequence, which hg38's
+  primary chromosomes do not (each ends in 10 kb or more of `N`). The bulge-aware CFD scorer takes
+  two alignments of one length: on a row with a DNA bulge it raised `IndexError: string index out
+  of range` and the search stopped (the traceback in `log_error.txt`; `post_analisi_indel.sh` run
+  alone went on silently), and on a row without one it scored the bases it had, up to a perfect
+  1.000 for a target the reference does not hold. Such a row now gets a `CFD_ref` of 0, there
+  being no reference target to score, and keeps its own CFD; one NOTE per chromosome, on stdout
+  (`log_verbose.txt`), says how many, also when the chromosome's post-analysis runs in pieces. A
+  row whose reference alignment is whole is scored as before. On hg38 nothing changes: every
+  indel record of the HGDP + 1000 Genomes, mega and HPRC panels ends at least 10,001 bases before
+  its chromosome's end, and the release gate's searches B1, B2, B6, B7 and B8, run again on
+  2.10.0, hold no indel row with a short reference alignment. Found, diagnosed and fixed by Ann
+  Cirincione (anncir1), PR 113.
 - **The docs give the measured size of 2.10.0's image once unpacked, and of its arm64
   `.sif`.** The one-line installers' comments said "~7 GB+ once unpacked", the README "about
   7 GB on Apple Silicon, and more on amd64", and the Docker Quickstart's Apptainer step a `.sif`
