@@ -89,10 +89,10 @@ and the `release-crisprme` skill.
   non-gating). Where the run read one, an MNV is a second record of the slot, read by the rules of
   the Fixed entry, and an MNV row's carriers are read by their phase. Such a listing then gates:
   `indel-row-mnv-carrier` on an indel row, and `snp-row-mnv-carrier` on a SNP row, the one class
-  of the otherwise report-only SNP-row report that gates. The two readings not in the code yet
-  (Fixed: one the PI decided, one that waits for the PI's decision) are read as the code reads them,
-  each counted under a class of its own, non-gating, listed or not: `open-complex-in-deleted`
-  (counted as `limit-overlapping-records` up to 2.10.0) and `open-snp-row-snv-mnv`. On a slot of
+  of the otherwise report-only SNP-row report that gates. The three shapes the decomposition
+  leaves (Fixed) are read as the rules have them and checked like any other reading, so a run that
+  departs from one fails the check; the two classes that counted them apart while the readings
+  were open, `open-complex-in-deleted` and `open-snp-row-snv-mnv`, are gone. On a slot of
   rule (c) the check reads the rows as the indel post-analysis does, and its findings there state
   the carrier gate's own convention. A target that needs an MNV and another indel-path record stays
   the two-indel limit (`limit-two-indels`). On the README guide's genome-wide searches of HPRC v2.1
@@ -170,14 +170,41 @@ and the `release-crisprme` skill.
 
   The carrier gate keeps its 2.10.0 convention at one POS: another allele at the position of a
   variant the row names makes the slot one of unknown phase (`phase not known`), where the indel
-  post-analysis lists the carrier by its phase. With the three rules, the PI confirmed that a
-  complex record wholly inside the bases a deletion deletes changes nothing too, as rule (a) reads
-  an MNV there and as the real-data check reads it. **Not yet in the code:** until it is, 2.10.1
-  reads such a slot as 2.10.0 did (HGDP + 1000 Genomes holds no complex record; HPRC v2.1 has 31
-  such pairs on one slot, 249 slots, and the reading moves no row of the README guide's genome-wide
-  searches). **Pending: the PI's decision for 2.10.1.** An SNV and an MNV that share a base on one
-  slot, on the SNV's SNP rows (28 pairs on HPRC v2.1, 150 slots), have no rule yet: the MNV is read
-  there as an indel is read.
+  post-analysis lists the carrier by its phase.
+
+  **Three more shapes, decided on the measured evidence (2026-11-22).** They are artefacts of
+  turning the pangenome graph into VCF records: `vcfwave` cuts each bubble into pieces, HPRC's
+  merge joins pieces of different bubbles at one POS, and CRISPRme's own `bcftools norm -m -any -f
+  hg38` left-aligns each indel against hg38 alone, so in a repeat it slides across the haplotype's
+  other variants. Each reading was measured against HPRC's pre-vcfwave original records (the raw
+  `vg deconstruct` VCF read with `vcfbub`'s rule) over all 921 slots, 16 of the recovered
+  haplotypes confirmed character for character against the carriers' release-2 assemblies. "Real"
+  there means the 23-mer occurs somewhere in the carrier's true sequence over the window, so every
+  false count is a lower bound and every share of real an upper bound.
+  - **A complex record wholly inside the bases a deletion deletes** (31 pairs, 249 slots): the
+    slot leaves both records' rows and is listed nowhere, as up to 2.10.0 — no code change. The
+    reading the PI had confirmed on 2026-11-20, that it changes nothing, was withdrawn when
+    measured: it lists 4,864 23-mers of which 692 are false, and outside the chr1:977,063 VNTR it
+    is 676 real against 692 false.
+  - **An SNV and an MNV on one slot** (28 pairs, 150 slots): read base by base. The MNV's bases
+    stand where it replaces them, and on a base it keeps the SNV's base wins — the originals
+    decide 16 of the 20 slots where the two differ and name the SNV's base in all 16 (chr6 ×14,
+    chr9, chr19; two of them confirmed against assemblies). An SNV whose base is neither the MNV's
+    base there nor the reference base it keeps is a true third-base conflict, one slot of HPRC
+    v2.1 (chrY, one copy, the records' CONFLICT field naming another sample), and that slot leaves
+    both records' rows. Base by base lists 106 false 23-mers of 12,396, where reading each record
+    without the other lists 5,106 of 20,677. The indel rows, the SNP rows and the carrier gate
+    read it the same way.
+  - **An indel at the POS of a complex record**, one of the two keeping no anchor base (50 pairs,
+    522 slots): the slot is read with the complex record alone, 84.8 % real (98.0 % for the
+    insertions), catching 90.4 % of the real targets, where reading each record without the other
+    is 48.5 % real with 12,009 false 23-mers and the indel alone is 23.4 % real. The deletions
+    were already read so; the 35 insertion pairs move, their slots having left both rows. 79 % of
+    the false listings left come from one locus, chr1:108,452,980, where no reading is right.
+    A pair whose records both keep an anchor base, and one whose records keep none, are unchanged.
+
+  Not making the collision — splitting and trimming without left-aligning — belongs to the next
+  HPRC rebuild, not to 2.10.1.
 
   A store without the MNV file (2.10.0's, and 2.8.1's HPRC v2.0 archives) is read as 2.10.0 read
   it. The run's `log_verbose.txt` says so once for each chromosome whose indel log lists an MNV,
@@ -191,7 +218,8 @@ and the `release-crisprme` skill.
   measured by the gates. Two limits stay. A target held only through an MNV and another indel or
   MNV is still not generated (a fake-indel window holds one record), so the fix moves such a
   carrier from a wrong row to none. And a target held only through two indels stays unreported, as
-  in 2.10.0. Covered by `test_indel_genotypes`, `test_indel_snp_cis`,
+  in 2.10.0. Covered by `test_mnv_overlap_rules` (the three shapes above, on the real records,
+  each against a mutant of the shipped code), `test_indel_genotypes`, `test_indel_snp_cis`,
   `test_indel_haplotype_resolution`, `test_indel_overlaid_rows`, `test_snp_row_indel_carriers`,
   `test_haplotype_prioritizer`, `test_search_indel_snp`, `test_build_index_only_atomic` and
   `test_panel_companions`, and by four MNV sites of the SNP+indel oracle (`test/indel_snp_oracle`,

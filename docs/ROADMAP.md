@@ -34,9 +34,9 @@ gap the release's gates found.
   two indels does (below). In 171 of the 1,163 listings the haplotype holds another target within
   the search's budget there (METHODS §10); each such target, held through the indel and the MNV,
   goes unreported too, and so do the targets of the slots the overlap rules take off a row. How
-  many is to be measured by the gates. **Pending: the PI's decision for 2.10.1.** An SNV and an MNV
-  that share a base on one phased slot (28 pairs on HPRC v2.1, 150 slots) have no rule of their own
-  yet on the SNV's SNP rows (METHODS §4).
+  many is to be measured by the gates. An SNV and an MNV that share a base on one phased slot (28
+  pairs on HPRC v2.1, 150 slots) are read base by base, on the indel rows, the SNP rows and in the
+  carrier gate (METHODS §4, rule 2).
 - **The haplotype scan.** In the dense regions of a variant genome that codes every allele (the
   immunoglobulin loci above all), a search above 1 DNA + 1 RNA bulge expands so many IUPAC
   combinations that it runs for hours or out of memory, and 2.10.0 warns of it
@@ -62,15 +62,16 @@ gap the release's gates found.
   left off beside an indel that adds or deletes more than the 500 bases the store is read around a
   target, less the target's length (one carrier on two rows of the release gate's HPRC search), the
   store to be read as far as a haplotype's own indels need.
-- **One rule for a complex record inside an indel's deleted bases.** CRISPRme takes a carrier off
-  an indel row where its slot holds a second record, inside the first's deleted or replaced bases,
-  that puts bases of its own there (METHODS §4), and the real-data check reads that slot without it
-  (31 pairs of records on one slot in HPRC v2.1, 249 slots). Decided for 2.10.1 (the PI,
-  2026-11-20): the check's reading, such a record changes nothing, as the MNVs' rules read an MNV
-  there (METHODS §4, rule (a)). **Not yet in the code:** 2.10.1 reads such a slot as 2.10.0 did
-  until it is. Measured: HGDP + 1000 Genomes holds no complex record, so none of its rows can move;
-  on HPRC v2.1 the reading frees 88 of the 249 slots (another record takes the other 161 off) and
-  moves no row of the README guide's genome-wide searches, per sample and population-level.
+- **Do not make the collisions the overlap rules read** (METHODS §4, rules 1 to 3). The three
+  shapes those rules read — a complex record inside an indel's deleted bases, an SNV and an MNV on
+  one slot, an indel at a complex record's POS — are artefacts of turning the pangenome graph into
+  VCF records, and 45 of rule 3's 50 pairs come from CRISPRme's own preparation of the panel
+  (`bcftools norm -m -any -f hg38`), which left-aligns each indel against hg38 alone and so slides
+  it across the haplotype's other variants in a repeat. At the next HPRC rebuild, split and trim
+  the records without left-aligning them, and measure what is left. HPRC should also be told that
+  their published `vcfbub` VCF silently drops a multi-allelic site where any one ALT has AC=0
+  (215 records missing in chr21:8-9 Mb alone), which is why the measurement had to read their raw
+  `vg deconstruct` VCF.
 - **The real-data check** (`scripts/check_indel_rows.py`): to check `Variant_info_spacer+PAM` (each
   variant's number in its target) and redundant alternative alignments, which it does not today
   ([`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md), step 4c); to hold less memory (one process holds

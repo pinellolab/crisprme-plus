@@ -629,13 +629,12 @@ store the indel post-analysis reads (§4, SNP+indel), as an indel row's second i
 - since 2.10.1 the store's MNVs are read here too, where the chromosome's store has its MNV
   file (§4, MNVs in the phased store). An MNV is read as an indel is. It moves no base: its
   bases stand at the places of the bases it replaces. So one that replaces a base of the
-  target's span changes the target, and no repeat puts the bases back. An MNV at the position
-  of a SNP the row names is another allele of that base, a phasing artefact, as an indel there
-  is. **Pending: the PI's decision for 2.10.1.** An SNV and an MNV whose REFs share a base on
-  one phased slot (28 pairs on HPRC v2.1, 150 slots) have no rule of their own yet, on the SNV's
-  SNP rows. Until one is set, the MNV is read there as an indel is: at the SNV's own position it
-  is a phasing artefact and the carrier stays; over the SNV's base from another position the
-  slot holds two records of one base, its bases cannot be read, and it leaves the row;
+  target's span changes the target, and no repeat puts the bases back. An MNV whose REF holds
+  the base of a SNP the row names is **read base by base** (rule 2 below), its own position
+  included, where an indel there stays a phasing artefact that keeps the carrier: on a base the
+  MNV keeps the row's SNP is the slot's base, on one it replaces the MNV's base is, and a true
+  third-base conflict leaves the slot with no sequence there, so it leaves the row. The carrier
+  keeps the row only where no base the combined reading changes falls inside the target;
 - a row left with no carrier is not reported. The same holds on the classic per-sample
   dictionaries. The population-level analysis (§5) is unchanged: its rows are worst-case
   composites, whose variant combinations the carrier gate checks (§5). With
@@ -1026,13 +1025,19 @@ therefore resolves each such target **per carrier haplotype** (`indel_snp_cis.re
   and HPRC's merge joins pieces of different bubbles -- so 25 of the 31 pairs come from HPRC's own
   steps and 6 from our normalisation; not making the collision, by splitting and trimming without
   left-aligning, belongs to the next HPRC rebuild. HGDP + 1000 Genomes holds no such pair, so none
-  of its rows can move. The real-data check reads the slot the same way and counts what differs
-  from a run as `open-complex-in-deleted`, non-gating (§8).
+  of its rows can move. The real-data check reads the slot the same way, and a run that departs
+  from that reading fails it (§8).
   Another allele at the indel's own position, an indel or a SNP, is an alternative to it (a
   haplotype holding both would be one record), so a slot phased with both is a phasing artefact;
   since 2.10.1 so are an MNV and an indel at one POS, both ways, where the chromosome's MNV file was
   read (rule (c), below). And an unphased carrier of two overlapping records is a
-  multi-allelic heterozygote, one allele per haplotype. These stay listed;
+  multi-allelic heterozygote, one allele per haplotype. These stay listed. **Since 2.10.1 one
+  pairing at a record's own POS is read otherwise** (rule 3 below): where one of the two records
+  keeps no anchor base — a complex record, whose ALT differs from its REF at the first base —
+  the two describe the same bases, and the slot is read with the complex record alone. The
+  complex record's rows read it without the indel, a displaced copy of it; the indel's rows read
+  the complex record, which changes the bases the target covers, and the slot leaves them. Two
+  records that both keep an anchor base, and two that both keep none, are read as before;
 - a target of the window that holds **no base of the indel** — none the ALT adds or replaces,
   and not the two bases on either side of the deleted ones — lies wholly in a flank and gives
   **no indel row**, with or without a code: its sequence is reference (or SNP) sequence, which
@@ -1141,8 +1146,7 @@ In shape 7 the complex record is read as the indel it is, by where its bases lie
 rows, a complex record that puts its own ALT bases on bases the MNV replaces changes them (rule
 (b): an MNV window loses no base), and the slot leaves. On the complex record's rows, an MNV only
 on bases the complex record deletes or replaces changes nothing (rule (a), the rule for any
-variant on those bases), and the slot keeps the row. The reading decided above and not yet in the
-code (a complex record wholly inside the bases an indel deletes) involves no MNV. A slot that
+variant on those bases), and the slot keeps the row. A slot that
 leaves a row so holds both records, and a target that needs both is not generated (one record per
 fake-indel window, §10): such targets go unreported.
 
@@ -1150,7 +1154,59 @@ The carrier gate (§5) reads shape 6 by its own convention, kept from 2.10.0, no
 indel or an MNV at the position of a variant the row names is another ALT of that position on the
 slot, so the gate does not count that slot as a haplotype holding the row's variants; where only
 such slots hold a combination, its state is `phase not known`. The indel post-analysis lists such
-a carrier by its phase. The gate changes no row, so only its state can differ there.
+a carrier by its phase. The gate changes no row, so only its state can differ there. It reads an
+SNV and an MNV on one slot by rule 2 below, as the post-analysis does
+(`haplotype_prioritizer.breakers_of`, `holds_target`).
+
+**Three shapes the decomposition leaves, and how 2.10.1 reads them.** Three more pairings put two
+records of one slot where no haplotype has them. They are artefacts of turning a pangenome graph
+into VCF records, not configurations of a genome: `vcfwave` cuts each bubble of the graph into
+pieces, HPRC's merge joins pieces of different bubbles at one POS, and CRISPRme's own preparation
+of the panel (`bcftools norm -m -any -f hg38`) left-aligns each indel against hg38 alone, ignoring
+the haplotype's other variants, so in a repeat it slides across them (45 of the 50 pairs of rule 3
+come from that, moved 5 to 1,013 bp; of rule 1's 31 pairs, 25 come from HPRC's steps and 6 from
+ours; rule 2's 28 are all HPRC's). Not making the collision — splitting and trimming without
+left-aligning — belongs to the next HPRC rebuild, not to 2.10.1.
+
+Each reading was measured against HPRC's pre-vcfwave original records
+(`hprc-v2.1-mc-grch38.raw.vcf.gz`, read with `vcfbub`'s rule), over all 921 slots of the three
+shapes, with 16 of the recovered haplotypes confirmed character for character against the
+carriers' release-2 assemblies. **In the tables below "real" means the 23-mer occurs somewhere in
+the carrier haplotype's true sequence over the window**, so in a tandem repeat a demonstrably
+wrong reading can still score no false listing: every false count is a lower bound and every
+share of real an upper bound.
+
+- **Rule 1 — a complex record wholly inside the bases a deletion deletes** (31 pairs, 249 slots).
+  The slot leaves both records' rows and is listed nowhere, as up to 2.10.0 (above). Reading the
+  complex record as changing nothing, so that the slot stays on the deletion's rows, lists 4,864
+  23-mers of which 692 are false, in 48 slots of 15 pairs; outside the chr1:977,063 VNTR it is 676
+  real against 692 false. Today's reading lists none of them and no false one, at the cost of
+  14,737 real 23-mers no row reports.
+- **Rule 2 — an SNV and an MNV on one phased slot** (28 pairs, 150 slots). The slot is read base
+  by base: the MNV's bases stand where it replaces them, and on a base it keeps — its ALT base is
+  the reference base there, or the base lies in the bases REF and ALT share at either end — the
+  SNV's base wins. The originals decide 16 of the 20 slots where the two differ on a base the MNV
+  keeps, and name the SNV's base in all 16 (chr6 ×14, chr9, chr19; the chr6 and chr19 windows, 257
+  and 326 bp, confirmed against the carriers' assemblies). In 21 of the 28 pairs the SNV names the
+  base the MNV puts there and the two readings agree. An SNV whose base is neither the MNV's base
+  there nor the reference base it keeps is a **true third-base conflict**: one slot of HPRC v2.1
+  (chrY:21,604,661 AAC>CAG with 21,604,663 C>T, a sample with one chrY copy, the records'
+  `CONFLICT` field naming another sample, the assembly reading `CAGATACACC`, which is neither
+  reading), and that slot leaves both records' rows. Base by base lists 12,396 23-mers of which
+  106 are false; reading each record without the other, as 2.10.0 does, lists 20,677 with 5,106
+  false.
+- **Rule 3 — an indel at the POS of a complex record**, one of the two keeping no anchor base (50
+  pairs, 522 slots: 35 insertions, 15 deletions). The slot is read with the complex record alone
+  (above). That is 84.8 % real (98.0 % for the insertions) and catches 90.4 % of the real targets;
+  reading each record without the other, which METHODS gave up to 2.10.1, is 48.5 % real with
+  12,009 false 23-mers, and the indel alone is 23.4 % real. 79 % of the false listings this
+  reading leaves come from one locus, chr1:108,452,980, where no reading of our records is right.
+  Up to 2.10.1 the deletions were already read so — their deleted bases lie inside those the
+  complex record replaces, so the deletion changed nothing on its rows — and it is the 35
+  insertion pairs that move: their slots left both rows.
+
+A slot any of the three readings takes off a row holds a target no row of the search reports (one
+record per fake-indel window, §10).
 
 What 2.10.1 changes in HPRC's rows (the listings of §10, the MNV rows' carriers, each shape's
 slots) is to be measured by the gates. HGDP + 1000 Genomes and the mega hold no MNV, and no store
@@ -3134,11 +3190,11 @@ by their phase, and a carrier listed for a sequence its slot does not have throu
 limit: it fails the check, as `indel-row-mnv-carrier` on an indel row (2.10.0's
 `limit-indel-row-mnv`) and as `snp-row-mnv-carrier` on a SNP row (2.10.0's `limit-snp-row-mnv`),
 the one class of the SNP-row report that gates. A log that says both NOTEs of one chromosome is
-refused (exit 2). Two readings no rule of the code covers yet are read as the code reads them and
-counted under classes of their own, non-gating, listed or not: `open-complex-in-deleted`, a complex
-record wholly on bases the record deletes or replaces (§4: decided, not yet in the code), and, where
-the MNV file was read, `open-snp-row-snv-mnv`, an MNV over the base of an SNV a SNP row names (§4,
-pending). On a slot of rule (c) the check reads the rows as the indel post-analysis does, and its
+refused (exit 2). The three readings of the shapes HPRC's decomposition leaves (§4, rules 1 to 3)
+are read as the rules have them and checked like any other reading, so a run that departs from one
+fails the check; the two classes that counted them apart while they were open,
+`open-complex-in-deleted` and `open-snp-row-snv-mnv`, are gone with the readings they stood for.
+On a slot of rule (c) the check reads the rows as the indel post-analysis does, and its
 findings there state the carrier gate's own convention (§5). A target that needs an MNV and another
 indel-path record stays the two-indel limit. It runs two ways:
 
@@ -3295,9 +3351,9 @@ records of one base, a base whose allele its calls leave unknown) leaves the row
 the rule drops is reported (`snp-row-indel-carrier`), an MNV the store does not hold is
 `limit-snp-row-mnv`. Where the run read the store's MNV file (2.10.1) its MNVs are read as its
 indels are, and listing a carrier that an MNV on its slot takes off gates (`snp-row-mnv-carrier`,
-the one class of the report that does); an MNV over the base of an SNV the row names is an open
-reading (`open-snp-row-snv-mnv`, above). Population-level SNP rows are a documented worst-case
-union and are out of scope.
+the one class of the report that does); an MNV over the base of an SNV the row names is read base
+by base (§4, rule 2), its own position included, where an indel there stays a phasing artefact.
+Population-level SNP rows are a documented worst-case union and are out of scope.
 
 It does not check the `CFD_score_REF`/`_ALT`, `CFD_risk_score` and CRISPR-Bulge columns or
 which row the CRISPR-Bulge block keeps, `Variant_info_spacer+PAM`, `PAM_creation`, the seed
