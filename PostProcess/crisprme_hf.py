@@ -38,6 +38,7 @@ import io
 import json
 import gzip
 import re
+import shlex
 import shutil
 import subprocess
 import tarfile
@@ -3043,6 +3044,75 @@ def _window_notes(local_dir, workdir, install_name, vcf_name):
     return notes
 
 
+# The script that writes a repo folder's SHA256SUMS from the Hub's own record of each
+# archive's SHA-256, with the lines of archives about to be uploaded (--staged)
+SHA256SUMS_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "scripts", "hf_sha256sums.py")
+
+
+def _sha256_file(path: str) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for blk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(blk)
+    return h.hexdigest()
+
+
+def stage_commands(stage_dir: str, repo: str, title: str) -> List[str]:
+    """The commands that publish the folder publish-index --stage-only packed
+    (publish_index's stage_dir) in ONE commit of ``repo``, in order: indexes/SHA256SUMS
+    written from the Hub's list with the staged archives' lines in place of theirs
+    (scripts/hf_sha256sums.py --staged), the folder uploaded in one commit (``hf upload`` of
+    a folder makes one commit of every file in it), and the check that the Hub holds what was
+    staged (an empty diff). None is run here; the upload takes a write token from HF_TOKEN in
+    the environment, never from the command line."""
+    q = shlex.quote
+    script = (SHA256SUMS_SCRIPT if os.path.isfile(SHA256SUMS_SCRIPT)
+              else "scripts/hf_sha256sums.py")
+    folder = os.path.join(stage_dir, "indexes")
+    sums = os.path.join(folder, "SHA256SUMS")
+    return [
+        f"python3 {q(script)} {q(repo)} --staged {q(os.path.join(stage_dir, 'staged.sha256'))}"
+        f" > {q(sums)}",
+        f"hf upload {q(repo)} {q(folder)} indexes --repo-type dataset --commit-message "
+        f"{q(title)}",
+        f"python3 {q(script)} {q(repo)} | diff - {q(sums)}",
+    ]
+
+
+def _finish_stage(stage_dir: str, repo: str, staged: List[str]) -> None:
+    """Write ``<stage_dir>/staged.sha256`` (the SHA-256 of each archive staged, sha256sum's
+    format, by name) and print what was staged and the commands that publish it in one
+    commit (stage_commands), which it does not run."""
+    title = ("Publish " + ", ".join(os.path.basename(r)[:-len(".tar.gz")] for r in staged
+                                    if r.endswith(".tar.gz"))
+             + " with indexes/SHA256SUMS, in one commit (publish-index --stage-only)")
+    lines = {}
+    for remote in sorted(r for r in staged if r.endswith(".tar.gz")):
+        sys.stdout.write(f"Hashing {remote} (SHA-256)...\n")
+        sys.stdout.flush()
+        lines[os.path.basename(remote)] = _sha256_file(os.path.join(stage_dir, remote))
+    with open(os.path.join(stage_dir, "staged.sha256"), "w") as fh:
+        fh.writelines(f"{lines[n]}  {n}\n" for n in sorted(lines))
+    said = [f"\nStaged in {stage_dir}; NOTHING was uploaded to {repo}:"]
+    for remote in sorted(staged):
+        size = os.path.getsize(os.path.join(stage_dir, remote))
+        said.append(f"  {remote}  ({size:,} bytes)")
+    said.append(f"  staged.sha256: the SHA-256 of each archive staged, the lines "
+                f"indexes/SHA256SUMS takes from them")
+    said.append(f"\nTo publish them in ONE commit of {repo}, with indexes/SHA256SUMS, run, "
+                f"with a write token of the repo in HF_TOKEN (exported in the environment, "
+                f"never on the command line; in the release image as "
+                f"seq_script/rebuild/README.md's publish says):")
+    cmds = stage_commands(stage_dir, repo, title)
+    said += [f"  {cmds[0]}", f"  {cmds[1]}",
+             "Then check that the Hub holds what was staged (the diff must be empty):",
+             f"  {cmds[2]}"]
+    sys.stdout.write("\n".join(said) + "\n")
+    sys.stdout.flush()
+
+
 def publish_index(
     index_dir: str,
     repo: Optional[str] = None,
@@ -3050,6 +3120,7 @@ def publish_index(
     display_name: Optional[str] = None,
     dictless: bool = False,
     replace_companions: bool = False,
+    stage_dir: Optional[str] = None,
 ) -> str:
     """Tar a locally built genome_library index and upload it to HF.
 
@@ -3092,9 +3163,22 @@ def publish_index(
     one in place), before anything is uploaded. An index of format 1 is published as up to
     2.8.1 (its Dictionaries in its own archive, which 2.8.1's download installs).
 
+    ``stage_dir`` (publish-index --stage-only, 2.10.1): pack everything the publish would
+    upload into ``<stage_dir>/indexes/`` (the archives, the companions' records) and upload
+    NOTHING: no token is asked for, the only calls to the Hub are anonymous reads of the
+    companions' records (indexes/<name>.json, as the publish reads them, to keep a
+    companion the repo holds already, the same, and to refuse one it holds in another build
+    unless ``replace_companions``), and ``<stage_dir>/staged.sha256`` gets the SHA-256 of
+    each archive staged, the lines indexes/SHA256SUMS takes from it. It then prints the
+    commands that publish the folder in ONE commit of the repo, with indexes/SHA256SUMS
+    (stage_commands), and runs none of them. publish-index otherwise uploads each file as
+    it packs it, one commit each, the companions first, so a download that fetches the
+    index's archive before the companions' commit and its bundle after it meets two builds
+    (the plan of 2.10.1's MNVs, section 4: HPRC's republish).
+
     Returns:
         The remote path (``indexes/<index_name>.tar.gz``) the main index was
-        uploaded to.
+        uploaded to (staged at, under ``stage_dir``).
     """
     index_dir = os.path.abspath(index_dir.rstrip("/"))
     if not os.path.isdir(index_dir):
@@ -3136,12 +3220,28 @@ def publish_index(
             f"aborts on: it is not published in {repo}, which they read (decision C2). "
             f"Publish it in {FORMAT2_HF_REPO} (the default for it), or in a repo of your own "
             f"(--hf-repo).")
-    token = resolve_token(token)
-    if not token:
-        raise ValueError(
-            "An HF write token is required to publish an index. Provide --token "
-            "or set HF_TOKEN (never commit it)."
-        )
+    staged: List[str] = []  # (stage_dir) the files staged, as their paths in the repo
+    if stage_dir:
+        stage_dir = os.path.abspath(stage_dir)
+        _staged_at = os.path.join(stage_dir, "indexes")
+        if os.path.isdir(_staged_at) and os.listdir(_staged_at):
+            raise ValueError(
+                f"{_staged_at} holds files already: stage into a new, empty folder, so that "
+                f"the folder uploaded holds what this publish packs and nothing else. Nothing "
+                f"was staged.")
+        if os.path.exists(os.path.join(stage_dir, "staged.sha256")):
+            raise ValueError(
+                f"{os.path.join(stage_dir, 'staged.sha256')} is there already: stage into a "
+                f"new, empty folder. Nothing was staged.")
+        # (reads alone, of public records: anonymous unless a token is given by name)
+        token = token or False
+    else:
+        token = resolve_token(token)
+        if not token:
+            raise ValueError(
+                "An HF write token is required to publish an index. Provide --token "
+                "or set HF_TOKEN (never commit it)."
+            )
     hf = _require_hf()
     # self-describing provenance travels inside the tarball (adopted from the
     # #141 design): PAM / bulge / genome parsed from the folder name
@@ -3301,7 +3401,25 @@ def publish_index(
     manifest["dictless"] = bool(dictless and vcf_name)
     manifest["has_genotypes"] = genotypes_dir is not None
     manifest["has_samplesids"] = bool(samplesid_files)
-    api = hf.HfApi()
+    # (stage_dir: no HfApi at all, so nothing can be uploaded)
+    api = None if stage_dir else hf.HfApi()
+
+    def _packed_at(name):
+        # where an archive or a record is packed: beside the index, uploaded and removed;
+        # staged: in the stage folder, kept
+        return (os.path.join(stage_dir, "indexes", name) if stage_dir
+                else os.path.join(os.path.dirname(index_dir), name))
+
+    def _put(local, remote):
+        if stage_dir:
+            staged.append(remote)
+            return
+        api.upload_file(path_or_fileobj=local, path_in_repo=remote, repo_id=repo,
+                        repo_type="dataset", token=token)
+        os.remove(local)
+
+    if stage_dir:
+        os.makedirs(os.path.join(stage_dir, "indexes"), exist_ok=True)
     indel_gt_dir = (os.path.join(os.path.dirname(genotypes_dir), f"indel_genotypes_{vcf_name}")
                     if genotypes_dir is not None else None)
     if vcf_name and index_format == 2:
@@ -3357,72 +3475,54 @@ def publish_index(
                                  f"(fingerprint {record['fingerprint'][:12]}): not uploaded "
                                  f"again\n")
                 continue
-            ctar = os.path.join(os.path.dirname(index_dir), f"{name}.tar.gz")
-            crec = os.path.join(os.path.dirname(index_dir), f"{name}.json")
+            ctar = _packed_at(f"{name}.tar.gz")
+            crec = _packed_at(f"{name}.json")
             _make_companion_tarball(ctar, members, record)
             with open(crec, "w") as fh:
                 json.dump(record, fh, indent=1, sort_keys=True)
                 fh.write("\n")
             for local, remote_name in ((ctar, f"{name}.tar.gz"), (crec, f"{name}.json")):
-                api.upload_file(path_or_fileobj=local,
-                                path_in_repo=f"indexes/{remote_name}", repo_id=repo,
-                                repo_type="dataset", token=token)
-                os.remove(local)
-            sys.stdout.write(f"Published the {what} {name} to {repo}:indexes/{name}.tar.gz\n")
+                _put(local, f"indexes/{remote_name}")
+            sys.stdout.write(f"{'Staged' if stage_dir else 'Published'} the {what} {name} "
+                             f"{'for' if stage_dir else 'to'} {repo}:indexes/{name}.tar.gz\n")
         dict_dirs, samplesid_files = [], []  # in the bundle, not in the index's archive
-    tarball = f"{index_dir}.tar.gz"
+    tarball = _packed_at(f"{index_name}.tar.gz")
     _make_index_tarball(
         tarball, index_dir, index_name, indels_dir, manifest, dict_dirs,
         samplesid_files=samplesid_files,
     )
     remote_path = f"indexes/{index_name}.tar.gz"
-    api.upload_file(
-        path_or_fileobj=tarball,
-        path_in_repo=remote_path,
-        repo_id=repo,
-        repo_type="dataset",
-        token=token,
-    )
-    os.remove(tarball)
-    sys.stdout.write(f"Published index to {repo}:{remote_path}\n")
+    _put(tarball, remote_path)
+    sys.stdout.write(f"{'Staged' if stage_dir else 'Published'} index "
+                     f"{'for' if stage_dir else 'to'} {repo}:{remote_path}\n")
     if vcf_name and index_format == 2:
+        if stage_dir:
+            _finish_stage(stage_dir, repo, staged)
         return remote_path
     # SEPARATE upload of the big Tier-1 genotype store (only when it exists), to
     # the SAME repo + indexes/ prefix as the main tarball, named after the vcf so
     # download can find it deterministically from the index name.
     if genotypes_dir is not None:
-        gt_tarball = os.path.join(os.path.dirname(index_dir),
-                                  f"genotypes_{vcf_name}.tar.gz")
+        gt_tarball = _packed_at(f"genotypes_{vcf_name}.tar.gz")
         _make_genotypes_tarball(gt_tarball, genotypes_dir)
         gt_remote = f"indexes/genotypes_{vcf_name}.tar.gz"
-        api.upload_file(
-            path_or_fileobj=gt_tarball,
-            path_in_repo=gt_remote,
-            repo_id=repo,
-            repo_type="dataset",
-            token=token,
-        )
-        os.remove(gt_tarball)
+        _put(gt_tarball, gt_remote)
         sys.stdout.write(
-            f"Published Tier-1 genotype store to {repo}:{gt_remote}\n"
+            f"{'Staged' if stage_dir else 'Published'} Tier-1 genotype store "
+            f"{'for' if stage_dir else 'to'} {repo}:{gt_remote}\n"
         )
         # and the phased indel genotypes on their own too (they are in the main archive
         # as well): with the genotypes, the genotype oracle a sites-only search's rows are
         # checked against (download --what genotype-oracle), without the index
         if os.path.isdir(indel_gt_dir) and os.listdir(indel_gt_dir):
-            ig_tarball = os.path.join(os.path.dirname(index_dir),
-                                      f"indel_genotypes_{vcf_name}.tar.gz")
+            ig_tarball = _packed_at(f"indel_genotypes_{vcf_name}.tar.gz")
             _make_genotypes_tarball(ig_tarball, indel_gt_dir)
             ig_remote = f"indexes/indel_genotypes_{vcf_name}.tar.gz"
-            api.upload_file(
-                path_or_fileobj=ig_tarball,
-                path_in_repo=ig_remote,
-                repo_id=repo,
-                repo_type="dataset",
-                token=token,
-            )
-            os.remove(ig_tarball)
+            _put(ig_tarball, ig_remote)
             sys.stdout.write(
-                f"Published the phased indel genotypes to {repo}:{ig_remote}\n"
+                f"{'Staged' if stage_dir else 'Published'} the phased indel genotypes "
+                f"{'for' if stage_dir else 'to'} {repo}:{ig_remote}\n"
             )
+    if stage_dir:
+        _finish_stage(stage_dir, repo, staged)
     return remote_path

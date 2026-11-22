@@ -594,6 +594,170 @@ class _NoNetwork(object):
         return False
 
 
+class StageOnlyPublish(_Base):
+    """publish-index --stage-only (2.10.1, the one-commit publish of the plan of 2.10.1's
+    MNVs, section 4): everything the publish would upload is packed into a folder, the
+    index's archive, each companion it would upload and its record, with the SHA-256 lines
+    of the archives, and NOTHING is uploaded: no write token is asked for, no HfApi is made,
+    no network is reached; the only calls to the hub are anonymous reads of the companions'
+    records (token False, whatever HF_TOKEN says), to keep a companion the repo holds the
+    same and refuse one it holds in another build. It prints the commands that publish the
+    folder in one commit with indexes/SHA256SUMS, which it does not run. Here the panel's
+    store gains its MNV files after 2.10.0's publish, as HPRC's does: the bundle and the
+    phased indel genotypes are staged with them, the genotype store (the same) is not."""
+
+    def setUp(self):
+        super().setUp()
+        self.work = make_panel(os.path.join(self.tmp, "work"), [NRR])
+        self.index = os.path.join(self.work, "genome_library", NRR)
+        self.publish(self.index, dictless=True)  # (2.10.0's publish)
+        self.before = hub_files(self.hub, FMT2)
+        add_mnv_files(self.work)
+        self.stage = os.path.join(self.tmp, "stage")
+
+    def stage_it(self, hub=None, **kw):
+        out = io.StringIO()
+        with mock.patch.object(hf, "_require_hf", return_value=hub or self.hub), \
+                mock.patch("sys.stdout", out), mock.patch("sys.stderr", io.StringIO()), \
+                _NoNetwork():
+            hf.publish_index(self.index, stage_dir=self.stage, **kw)
+        return out.getvalue()
+
+    def staged(self):
+        return sorted(os.listdir(os.path.join(self.stage, "indexes")))
+
+    def test_it_packs_what_the_publish_uploads_and_uploads_nothing(self):
+        mark = len(self.hub.calls)
+        said = self.stage_it(dictless=True, replace_companions=True)
+        calls = self.hub.calls[mark:]
+        self.assertEqual(sorted(c[:3] for c in calls), sorted(
+            ("hf_hub_download", FMT2, f"indexes/{n}.json")
+            for n in (f"dictionaries-bundle_{VCF}", f"genotypes_{VCF}", f"indel_genotypes_{VCF}")))
+        self.assertEqual(self.hub.uploads(mark), [])
+        self.assertEqual(hub_files(self.hub, FMT2), self.before)
+        self.assertEqual(self.staged(), sorted([
+            f"{NRR}.tar.gz", f"dictionaries-bundle_{VCF}.json",
+            f"dictionaries-bundle_{VCF}.tar.gz", f"indel_genotypes_{VCF}.json",
+            f"indel_genotypes_{VCF}.tar.gz"]))
+        at = lambda n: os.path.join(self.stage, "indexes", n)  # noqa: E731
+        # the SHA-256 lines of the archives staged, sha256sum's format, by name
+        with open(os.path.join(self.stage, "staged.sha256")) as fh:
+            lines = fh.read().splitlines()
+        self.assertEqual(lines, [f"{hf._sha256_file(at(n))}  {n}" for n in sorted(
+            n for n in self.staged() if n.endswith(".tar.gz"))])
+        # the companions with their MNV files, their records what they hold; the index's
+        # manifest names the new bundle, and the genotype store the hub's (kept)
+        d = os.path.join(self.work, "Dictionaries")
+        ig = _json(at(f"indel_genotypes_{VCF}.json"))
+        self.assertEqual(ig["fingerprint"], hf.companion_fingerprint(
+            [(f"Dictionaries/indel_genotypes_{VCF}", os.path.join(d, f"indel_genotypes_{VCF}"))]
+        )["fingerprint"])
+        with tarfile.open(at(f"indel_genotypes_{VCF}.tar.gz")) as tf:
+            self.assertIn(f"Dictionaries/indel_genotypes_{VCF}/gt_mnv_chr22.tsv.gz", tf.getnames())
+        with tarfile.open(at(f"{NRR}.tar.gz")) as tf:
+            manifest = json.load(tf.extractfile("manifest.json"))
+        bundle = _json(at(f"dictionaries-bundle_{VCF}.json"))
+        self.assertEqual(manifest["dictionaries_bundle"]["fingerprint"], bundle["fingerprint"])
+        self.assertNotEqual(bundle["fingerprint"], json.loads(
+            self.before[f"indexes/dictionaries-bundle_{VCF}.json"])["fingerprint"])
+        self.assertEqual(manifest["genotypes"]["fingerprint"], json.loads(
+            self.before[f"indexes/genotypes_{VCF}.json"])["fingerprint"])
+        # the commands, printed and not run
+        title = (f"Publish dictionaries-bundle_{VCF}, indel_genotypes_{VCF}, {NRR} with "
+                 "indexes/SHA256SUMS, in one commit (publish-index --stage-only)")
+        cmds = hf.stage_commands(self.stage, FMT2, title)
+        self.assertEqual(cmds[1], f"hf upload {FMT2} {self.stage}/indexes indexes --repo-type "
+                                  f"dataset --commit-message '{title}'")
+        self.assertTrue(cmds[0].startswith("python3 ") and cmds[0].endswith(
+            f" {FMT2} --staged {self.stage}/staged.sha256 > {self.stage}/indexes/SHA256SUMS"))
+        self.assertTrue(cmds[2].endswith(f" {FMT2} | diff - {self.stage}/indexes/SHA256SUMS"))
+        for cmd in cmds:
+            self.assertIn(f"  {cmd}\n", said)
+        self.assertIn(f"Staged in {self.stage}; NOTHING was uploaded to {FMT2}", said)
+        self.assertNotIn("Published", said)
+
+    def test_no_token_no_hfapi_and_anonymous_reads(self):
+        """With HF_TOKEN set, the reads are anonymous all the same (token False), and no
+        HfApi, the hub's writer, is made; the socket layer is never reached (_NoNetwork)."""
+        tokens = []
+
+        class Hub(FakeHub):
+            def hf_hub_download(hub, repo_id, filename, repo_type=None, token=None, **k):
+                tokens.append(token)
+                return FakeHub.hf_hub_download(hub, repo_id, filename, repo_type, token, **k)
+
+        hub = Hub(self.hub.root)
+
+        class NoWriter(object):
+            def __init__(self, *a, **k):
+                raise AssertionError("an HfApi was made: the publish could upload")
+
+        hub.HfApi = NoWriter
+        with mock.patch.dict(os.environ, {"HF_TOKEN": "hf_not_to_be_sent"}):
+            self.stage_it(hub=hub, dictless=True, replace_companions=True)
+        self.assertEqual(tokens, [False, False, False])
+        self.assertEqual(hub_files(self.hub, FMT2), self.before)
+
+    def test_the_folder_in_one_commit_is_what_a_download_installs(self):
+        """The staged folder copied into the repo whole (what `hf upload` of it does, in one
+        commit): a fresh download of the index installs the bundle with the MNV files, and
+        an install of 2.10.0 gains them by the download step."""
+        old = os.path.join(self.tmp, "old")
+        os.makedirs(old)
+        self.download(old, NRR)  # an install of 2.10.0's publish
+        self.stage_it(dictless=True, replace_companions=True)
+        for n in self.staged():
+            shutil.copyfile(os.path.join(self.stage, "indexes", n),
+                            self.remote(FMT2, f"indexes/{n}"))
+        new = os.path.join(self.tmp, "new")
+        os.makedirs(new)
+        self.download(new, NRR)
+        mnv = f"Dictionaries/indel_genotypes_{VCF}/gt_mnv_chr22.tsv.gz"
+        self.assertTrue(os.path.isfile(os.path.join(new, mnv)))
+        self.assertFalse(os.path.isfile(os.path.join(old, mnv)))
+        out = io.StringIO()
+        with mock.patch.object(hf, "_require_hf", return_value=self.hub), \
+                mock.patch("sys.stdout", out), _NoNetwork():
+            hf.download_indel_genotypes(old, VCF)
+        with open(os.path.join(old, mnv), "rb") as a, open(os.path.join(new, mnv), "rb") as b:
+            self.assertEqual(a.read(), b.read())
+
+    def test_a_folder_that_holds_files_is_refused(self):
+        os.makedirs(os.path.join(self.stage, "indexes"))
+        _write(os.path.join(self.stage, "indexes", "leftover.tar.gz"))
+        with self.assertRaises(ValueError) as caught:
+            self.stage_it(dictless=True, replace_companions=True)
+        self.assertIn("stage into a new, empty folder", str(caught.exception))
+        self.assertEqual(os.listdir(os.path.join(self.stage, "indexes")), ["leftover.tar.gz"])
+
+    def test_another_build_is_refused_unless_replaced_and_nothing_staged(self):
+        with self.assertRaises(ValueError) as caught:
+            self.stage_it(dictless=True)
+        self.assertIn("Nothing was uploaded", str(caught.exception))
+        self.assertEqual(self.staged(), [])
+        self.assertFalse(os.path.exists(os.path.join(self.stage, "staged.sha256")))
+
+    def test_the_command_line(self):
+        """crisprme.py publish-index --stage-only <folder> passes the folder (made absolute),
+        and asks for one."""
+        import test_bulge_cap as tbc
+        crisprme = tbc.crisprme
+        self.addCleanup(setattr, crisprme, "input_args", crisprme.input_args)
+        got = []
+        with mock.patch.object(crisprme, "publish_index",
+                               side_effect=lambda *a, **k: got.append(k["stage_dir"])):
+            crisprme.input_args = ["crisprme.py", "publish-index", "--index", self.index,
+                                   "--dictless", "--stage-only", "rel/stage"]
+            crisprme.publish_index_cmd()
+            self.assertEqual(got, [os.path.abspath("rel/stage")])
+            crisprme.input_args = ["crisprme.py", "publish-index", "--index", self.index,
+                                   "--stage-only"]
+            with mock.patch("sys.stderr", io.StringIO()) as err, self.assertRaises(SystemExit):
+                crisprme.publish_index_cmd()
+            self.assertIn("--stage-only needs the folder", err.getvalue())
+        self.assertEqual(got, [os.path.abspath("rel/stage")])
+
+
 class TheMnvDownloadStep(_Base):
     """download --what indel-genotypes --dataset <vcf> (2.10.1, the plan of 2.10.1's MNVs,
     question 1, option A): an install of 2.10.0, whose phased indel genotype store has no MNV

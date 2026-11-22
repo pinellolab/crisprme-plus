@@ -7177,7 +7177,8 @@ def print_help_publish_index() -> None:
         "build-index-only) to a HuggingFace dataset repository as a single "
         "compressed archive, so it can later be fetched with "
         "'crisprme.py download --what index'. An HF write token is required "
-        "(provide --token or set HF_TOKEN; never commit it).\n"
+        "(provide --token or set HF_TOKEN; never commit it), but with --stage-only, which "
+        "uploads nothing.\n"
     )
     sys.stderr.write(
         "Options:\n"
@@ -7197,6 +7198,17 @@ def print_help_publish_index() -> None:
         "\t--replace-companions, for an index of format 2: replace a panel companion "
         "(its Dictionaries bundle or genotype store) the repo holds in another build "
         "[OPTIONAL, default: refused]\n"
+        "\t--stage-only <folder>, pack everything the publish would upload into "
+        "<folder>/indexes/ (the index's archive, each companion it would upload and its "
+        "record), with <folder>/staged.sha256 (the SHA-256 of each archive staged, the lines "
+        "indexes/SHA256SUMS takes from it), and upload NOTHING: no token is needed, the "
+        "repo's companion records are read anonymously, as the publish reads them, and it "
+        "prints the commands that publish the folder in ONE commit of the repo with "
+        "indexes/SHA256SUMS (scripts/hf_sha256sums.py --staged, then hf upload of the "
+        "folder), which it does not run. publish-index otherwise uploads each file in a commit "
+        "of its own, so a download in between can meet an index of one build and a bundle of "
+        "another (CRISPRme 2.10.1's republish of HPRC goes up so). The folder must be new or "
+        "empty [OPTIONAL]\n"
     )
     sys.stderr.write(
         "Where it goes (since 2.10.0): an index of index format 2 (CRISPRitz 2.10.0), or "
@@ -7226,11 +7238,20 @@ def publish_index_cmd() -> None:
     # ADDITIVE: --dictless drops the 152GB per-sample SNP dicts from the main
     # tarball (tiers replace them); default off => byte-for-byte-unchanged publish.
     dictless = "--dictless" in args
+    # --stage-only <folder>: pack into the folder, upload nothing (2.10.1)
+    stage = None
+    if "--stage-only" in args:
+        at = args.index("--stage-only") + 1
+        stage = args[at] if at < len(args) else ""
+        if not stage or stage.startswith("--"):
+            error("--stage-only needs the folder to pack into, e.g. --stage-only "
+                  "/scratch/stage_hg38_HPRC (a new or empty folder)")
+        stage = os.path.abspath(stage)
     try:
         # (it says where each archive went, the repo it was routed to included)
         publish_index(
             index_dir, repo=repo, token=token, display_name=name, dictless=dictless,
-            replace_companions="--replace-companions" in args,
+            replace_companions="--replace-companions" in args, stage_dir=stage,
         )
     except (ValueError, ImportError) as e:
         error(str(e))
