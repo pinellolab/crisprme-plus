@@ -137,6 +137,35 @@ only on guides held out of its training and on ≤1-gap sites (287 positives / 4
 bulge split 240 + 47; CFD's support is all 359, bulge split 297 + 62), so its table is on
 a different support than CFD's and is footnoted as such.
 
+**Known defect in the benchmark's CRISPR-Bulge column (does not affect a CRISPRme
+search).** The stored CRISPR-Bulge column was produced before the guide-PAM
+normalization preserved bulge gaps (`cbulge_rows.mask_guide_pam`). 30,131 of the
+2,940,588 benchmark rows (1.0%) place their single DNA bulge *inside* the PAM, so the
+aligned guide spans four PAM columns (`…NG-G`); the normalization then overwrote the gap
+and the model was handed a gapless 24-mer that is not that site's alignment. The
+fabricated score is always the higher one. At the column's three decimals it changes
+**132 rows, every one of them a labelled negative**: no validated positive is touched and
+no recall figure in this document moves. 20 of the 132 sit in the held-out support's
+≥0.2 band and 1 in ≥0.5, so the held-out ≥0.2 operating point reads **434 sites at
+precision 0.4217** on the stored column against **414 at 0.4420** once they are rescored
+(full precision: 413 at 0.4431), and the AUPR of §3 reads 0.6131 against 0.6180. The two
+precision–recall figures are rendered from a full-precision rescore of the aligned pairs
+and are therefore already free of this; the shipped `crispr_bulge_calibration.npz` is
+not. The fabricated scores are extra *negatives* at mid-to-high scores, so the stored map
+very slightly **under**-states risk there: refitting it on the corrected column raises
+the per-site probability by at most 0.039 absolute (21% relative, both in the 0.2–0.5
+band). On a finished genome-wide search (§7's) that moves the card's four CRISPR-Bulge
+rows by **+0.00 (≥0.5), +0.05 (0.2–0.5), +0.05 (≥0.2) and +0.12 (sensitive) expected true
+off-targets** — every one of them a small fraction of its own 90% interval, which the
+band overdispersions (φ = 0.63 for 0.2–0.5, 0.59 for the sensitive tier) make several
+sites wide. The refit is a backlog item, not a correction this release needs; until it
+lands, read the ≥0.2 expected counts as a slight under-estimate.
+**A CRISPRme search cannot produce such a row**: the search anchors the PAM exactly, so a
+bulge never lands in it — 0 occurrences in 52.2 M aligned spacer+PAM strings across the
+finished 2.10.0 runs. The exposure is externally supplied site lists
+(`crisprme.py targets-scoring`, which is how this benchmark was scored), and it is fixed
+from 2.10.1 on.
+
 ## 3. Discrimination (precision–recall)
 
 AUPR is primary (imbalance-appropriate). On the external benchmark, with
