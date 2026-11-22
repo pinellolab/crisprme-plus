@@ -3060,6 +3060,7 @@ def _placeholder_uri(message):
 def _cfd_style_scatter(
     sub, score_key, ref_key, alt_key, xlabel, title,
     score_name="CFD", maf_col=None, samp_col=None, rsid_col=None, log_y=False,
+    drawn=None,
 ):
     """The CRISPRme-paper CFD/CRISPR-Bulge scatter, adapted from
     CRISPRme_plots.py:plot_with_CFD_score (~L347).
@@ -3080,6 +3081,10 @@ def _cfd_style_scatter(
     (cb_operating_point.draw_log_score_axis). It is for CRISPR-Bulge, whose operating
     point is 1.9e-4: on the linear axis every point of a genome-wide run lies on the
     bottom rule. CFD keeps the linear 0-1 axis -- it is calibrated and uses the range.
+
+    ``drawn``, when a dict is passed, is filled with what the figure ACTUALLY shows --
+    ``{"zeros": bool}``, whether this panel has a shaded "= 0" band -- so the caller's
+    caption describes this panel rather than every panel (see _cb_log_caption).
     """
     work = sub.reset_index(drop=True).copy()
     n = len(work)
@@ -3145,6 +3150,10 @@ def _cfd_style_scatter(
     if log_y:
         y_ref, y_alt = _in_range(_yr), _in_range(_ya)
         zeros = bool((y_ref.fillna(1) <= 0).any() or (y_alt.fillna(1) <= 0).any())
+    # what this panel shows, for the caller's caption: the band is drawn only when there
+    # is a zero to put in it, so only then may the caption promise one
+    if drawn is not None:
+        drawn["zeros"] = zeros
 
     transparent_red = "#e5323280"
     transparent_blue = "#2b6cb080"
@@ -3259,22 +3268,37 @@ def _num_ok(tok):
         return False
 
 
-def _cb_log_caption(score_label):
+def _cb_log_caption(score_label, zeros=True):
     """What the CRISPR-Bulge panels' log10 y-axis shows, for their caption.
 
-    Says the three things a reader cannot guess from the picture: the axis is log10,
-    the dashed line is the sensitive operating point (its value from cb_operating_point,
-    never written here), and the shaded band at the bottom holds the sites whose score
-    is exactly 0 -- they are drawn, not dropped.
+    Says the things a reader cannot guess from the picture: the axis is log10, and the
+    dashed line is the sensitive operating point (its value from cb_operating_point,
+    never written here).
+
+    ``zeros`` is whether THIS panel drew a site whose score is exactly 0 -- the flag
+    _cfd_style_scatter hands back in its ``drawn`` dict, i.e. the one that decided
+    whether draw_log_score_axis shaded the band and named it in the legend. Only then
+    does the caption describe the band: a caption that promises a shaded band on a panel
+    that has none sends the reader of a pre-IND report hunting for a feature of the
+    figure that is not there.
     """
-    return (
+    caption = (
         f"The {score_label} axis is <b>log10</b>: this score's sensitive operating point "
         f"is {cbop.sensitive_label_html()} and most sites of a genome-wide run score far "
         "below it, so on a linear 0-1 axis they all collapse onto the bottom rule. The "
-        "dashed line is that operating point. A log axis cannot show 0, and the model's "
-        "score underflows to exactly 0 for part of a run: those sites are drawn in the "
-        "shaded band at the bottom of the axis, one decade below the smallest non-zero "
-        "score and named in the legend, rather than dropped from the panel."
+        "dashed line is that operating point. "
+    )
+    if zeros:
+        return caption + (
+            "A log axis cannot show 0, and the model's score underflows to exactly 0 for "
+            "part of a run: those sites are drawn in the shaded band at the bottom of the "
+            "axis, one decade below the smallest non-zero score and named in the legend, "
+            "rather than dropped from the panel."
+        )
+    return caption + (
+        "No site drawn here scored exactly 0, so this panel has no zero band at the "
+        "bottom of the axis: every point is at its own score, and the axis starts one "
+        "decade below the smallest of them."
     )
 
 
@@ -3382,6 +3406,9 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False, df_cb=None
 
         # (c) by the ML scorer (CRISPR-Bulge)
         _sl = scorer_label()
+        # what the panel drew, for its caption: an unmade panel (the except below) has
+        # no band either, so the empty dict's False is the right answer there too
+        drawn = {}
         try:
             uri = _cfd_style_scatter(
                 _score_sorted(cr_score, base_cb), cr_score, cr_ref, cr_alt,
@@ -3390,6 +3417,7 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False, df_cb=None
                 score_name=_sl,
                 maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
                 log_y=True,  # see _cb_log_caption: the operating point is 1.9e-4
+                drawn=drawn,
             )
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"generate-report: {_sl} scatter unavailable: {exc}\n")
@@ -3397,12 +3425,14 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False, df_cb=None
         panels.append((
             f"By {_sl} score",
             f"Independent {_sl} scoring model, ranked by {_sl} score. Included "
-            f"because {_sl} scores were computed for this run. " + _cb_log_caption(_sl),
+            f"because {_sl} scores were computed for this run. "
+            + _cb_log_caption(_sl, zeros=bool(drawn.get("zeros"))),
             uri,
         ))
 
         # (d) by ML-scorer DELTA -- only when the REF/ALT columns exist
         if "crispr_bulge_ref" in cols and "crispr_bulge_alt" in cols:
+            drawn = {}
             try:
                 uri = _cfd_style_scatter(
                     _delta_sorted(cr_alt, cr_ref, base_cb), cr_score, cr_ref, cr_alt,
@@ -3411,6 +3441,7 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False, df_cb=None
                     score_name=_sl,
                     maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
                     log_y=True,
+                    drawn=drawn,
                 )
             except Exception as exc:  # noqa: BLE001
                 sys.stderr.write(
@@ -3424,7 +3455,8 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False, df_cb=None
                 f"re-ranked by the variant-induced {_sl} change (ALT-REF, "
                 "descending): the population variants that most raise the "
                 f"independent {_sl} cleavage score come first. Included because "
-                f"{_sl} scores were computed for this run. " + _cb_log_caption(_sl),
+                f"{_sl} scores were computed for this run. "
+                + _cb_log_caption(_sl, zeros=bool(drawn.get("zeros"))),
                 uri,
             ))
 

@@ -417,6 +417,59 @@ class TestScorePanels(unittest.TestCase):
         for word in ("0", "shaded band", "smallest non-zero"):
             self.assertIn(word, caption)
 
+        # ...and a panel WITHOUT a zero is not captioned with a band it does not draw:
+        # draw_log_score_axis shades the band and names it in the legend only when
+        # there is a zero to put in it, so the caption follows the same flag. A pre-IND
+        # report that promises a shaded band sends its reader looking for one.
+        no_zeros = gr._cb_log_caption("CRISPR-Bulge", zeros=False)
+        self.assertIn("log10", no_zeros)
+        self.assertIn(cbop.sensitive_label_html(), no_zeros)
+        self.assertNotIn("shaded band", no_zeros)
+        self.assertIn("no zero band", no_zeros)
+
+    def test_the_caption_follows_the_panel_that_was_drawn(self):
+        """The flag the caption keys on is the one the axis used: _cfd_style_scatter
+        hands back what it drew, and plot_scatter_panels captions THAT panel."""
+        scored = pd.DataFrame({"cb": [0.9, 1e-6, 1e-12], "cb_ref": [0.9, 1e-6, 1e-12],
+                               "cb_alt": [0.9, 1e-6, 1e-12]})
+        drawn = {}
+        ax, fig = self._panel(scored, log_y=True, drawn=drawn)
+        self.addCleanup(plt.close, fig)
+        labels = [t.get_text() for leg in ax.findobj(match=plt.matplotlib.legend.Legend)
+                  for t in leg.get_texts()]
+        self.assertFalse([l for l in labels if l.startswith("score 0")], labels)
+        self.assertIs(drawn["zeros"], False)      # no band drawn -> none promised
+        # and the same panel WITH a zero reports one
+        with_zero = scored.copy()
+        with_zero.loc[with_zero.index[-1], ["cb", "cb_ref", "cb_alt"]] = 0.0
+        drawn_z = {}
+        ax2, fig2 = self._panel(with_zero, log_y=True, drawn=drawn_z)
+        self.addCleanup(plt.close, fig2)
+        self.assertIs(drawn_z["zeros"], True)
+
+        # end to end: the caption of the drawn panel, through plot_scatter_panels
+        def captions(cb_values):
+            df = _frame([
+                {"Chromosome": "chr5",
+                 "Start_coordinate_(highest_CFD)": str(400 + 10 * i),
+                 "Mismatches+bulges_(highest_CRISPR_BULGE)": "3",
+                 "CRISPR_BULGE_score_(highest_CRISPR_BULGE)": repr(v),
+                 "CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)": repr(v),
+                 "CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)": repr(v)}
+                for i, v in enumerate(cb_values)
+            ])
+            cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+            return [c for _t, c, _u in
+                    gr.plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=True)
+                    if "log10" in c]
+
+        for values, band in (([0.9, 1e-6, 1e-12], False), ([0.9, 1e-6, 0.0], True)):
+            with self.subTest(zeros=band):
+                caps = captions(values)
+                self.assertTrue(caps)
+                for cap in caps:
+                    self.assertEqual("shaded band" in cap, band, cap)
+
 
 @unittest.skipUnless(_HAVE_DEPS, _SKIP_REASON)
 class TestTopPlotScripts(unittest.TestCase):
@@ -498,6 +551,46 @@ class TestTopPlotScripts(unittest.TestCase):
                 ref_points = seen["points"][0]
                 self.assertEqual(len(ref_points), len(table))
                 self.assertEqual(sum(1 for p in ref_points if p[1] == axis.floor), 3)
+
+    def test_the_not_scored_sentinel_is_not_drawn_as_a_zero(self):
+        """The mirror, for the two top plots, of TestScorePanels' sentinel test.
+
+        -1 is "the model did not score this row" (cbulge_rows writes it for every row it
+        cannot score -- >=2 bulges, out of the model's domain -- and for every row of a
+        run with no model at all), not a score of 0. On the linear axis it fell outside
+        ylim(0, 1) and was simply not drawn; on the log one it must not be clipped onto
+        the zero floor, where it would sit inside the band the legend names "score 0
+        (underflow)". Unscored rows do reach these plots: the delta sort ranks by
+        |ALT-REF|, which is 0.0, not NaN, for a row scored -1 on both sides.
+        """
+        import CRISPRme_plots as plots
+        import CRISPRme_plots_personal as personal
+
+        cb = ("CRISPR_BULGE_score_(highest_CRISPR_BULGE)",
+              "CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)",
+              "CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)")
+        df = self._sites()
+        df.loc[df.index[10:20], list(cb)] = -1.0          # 10 not-scored rows
+        n_sentinel, n_zero = 10, int((df[cb[0]] == 0).sum())
+        self.assertGreater(n_zero, 0)                      # and real zeros to tell apart
+        axis = cbop.log_axis(df[list(cb)].to_numpy().ravel().tolist())
+        for name, plot, table in (
+            ("CRISPRme_plots", plots.plot_with_CRISPR_BULGE_score,
+             plots.filter_table(df, "crispr_bulge").copy()),
+            ("CRISPRme_plots_personal", personal.plot_with_CRISPR_BULGE_score, df.copy()),
+        ):
+            with self.subTest(script=name):
+                seen = self._drawn_axis(plot, table, "GUIDE")
+                for which, points in zip(("REF", "ALT"), seen["points"][:2]):
+                    with self.subTest(points=which):
+                        ys = [p[1] for p in points]
+                        self.assertEqual(len(ys), len(table))   # no row is dropped
+                        # a masked offset (NaN y) is a point drawn nowhere: None here
+                        self.assertEqual(sum(1 for y in ys if y is None), n_sentinel)
+                        # ...and only the true zeros are in the "= 0" band
+                        self.assertEqual(
+                            sum(1 for y in ys if y is not None and y <= axis.band_top),
+                            n_zero)
 
     def test_the_cfd_plots_of_both_scripts_are_unchanged(self):
         import CRISPRme_plots as plots

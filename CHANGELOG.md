@@ -53,7 +53,9 @@ and the `release-crisprme` skill.
   floor is set one full decade below the smallest non-zero score the panel has to show, the
   zeros are drawn ON it inside a shaded band that the legend and the caption name as "0", and
   the axis always reaches down far enough for the threshold line — so no point is dropped and
-  none is mistaken for a real small score. The -1 the pipeline writes for a row it does not
+  none is mistaken for a real small score. A panel whose own sites all scored above 0 — a
+  top-N ranked BY the score, typically — has no such band, and its caption says so instead of
+  promising one. The -1 the pipeline writes for a row it does not
   score is not a zero and is drawn nowhere, as it fell outside the 0-1 window before. The
   ref->alt arrows are drawn from one data point to the other (the old +0.02/-0.04 trims were
   lengths of a 0-1 axis), the allele-frequency sizing and the perfect-match stars are unchanged,
