@@ -178,6 +178,24 @@ CHRY = Reference(21604660, "AACACACACA")
 MNV_CONFLICT = (21604661, "AAC", "CAG")
 SNV_CONFLICT = (21604663, "C", "T")
 
+# chr9:18,267,773-18,267,794, an A run. The complex record 18,267,781 C>AAAA and the
+# insertion C>CA at its POS: 94 slots, the largest of the 35 same-POS insertion pairs.
+CHR9A = Reference(18267772, "AACAAAAACAAAAACAAAAAAA")
+CPLX_INS = (18267781, "C", "AAAA")
+INS_AT_ITS_POS = (18267781, "C", "CA")
+
+# chr12:117,194,726-117,194,795, a CTTT repeat. Three records of one locus:
+#   the deletion 117,194,730 TTTTCTTTC>T, which keeps its anchor;
+#   the complex record at its POS, 117,194,730 TTTTCTTTCTTT>GCTTG, which keeps none
+#     (33 slots, one of the 15 same-POS deletion pairs);
+#   the complex record 117,194,731 TTT>G, whose REF lies wholly inside the bases the
+#     deletion deletes (20 slots, one of the 31 pairs of that shape).
+CHR12 = Reference(117194725, "CTTTTTTTCTTTCTTTCTTTCTTTCTTTCTTTCTTTCTTTCTTTCTTTCTTTCTTTCTTT"
+                             "CTTTCCTTCT")
+DEL_WITH_ANCHOR = (117194730, "TTTTCTTTC", "T")
+CPLX_DEL = (117194730, "TTTTCTTTCTTT", "GCTTG")
+CPLX_IN_DELETED = (117194731, "TTT", "G")
+
 
 class TheSlotIsReadBaseByBase(unittest.TestCase):
     """Rule 2. An SNV and an MNV on one phased slot: the MNV's bases stand where it
@@ -373,6 +391,64 @@ class TheSlotIsReadBaseByBase(unittest.TestCase):
                                           67744565, 67744565, subs=subs))
         self.assertFalse(self._gate_breaks(CHR13, SNV_SAME_AT_POS, MNV_SAME,
                                            29389332, 29389340, subs=subs))
+
+
+class AnIndelAtAComplexRecordsPos(unittest.TestCase):
+    """Rule 3. One of the two keeps no anchor base, so the two describe the same bases:
+    the slot is read with the complex record alone, on whose rows the indel is not read,
+    while the indel's rows read the complex record and the slot leaves them."""
+
+    def lost(self, window, others, reference, span, subs=()):
+        """The carriers the window's rows lose to ``others`` over the target's span
+        (_window_breakers: the records _other_indels gives, with their carriers)."""
+        ns = analyzer({window: GT, **{o: GT for o in others}}, reference, subs=subs)
+        return [key for key, gts, _overlapping
+                in ns["_other_indels"](span[0], span[1], *window) if gts]
+
+    def test_an_insertion_at_a_complex_records_pos(self):
+        """chr9:18,267,781 C>AAAA with C>CA at its POS. The complex record's rows keep
+        the slot, the insertion's rows lose it. Before the rule the slot left both."""
+        span = (18267778, 18267790)
+        self.assertEqual(self.lost(CPLX_INS, [INS_AT_ITS_POS], CHR9A, span), [])
+        self.assertEqual(self.lost(INS_AT_ITS_POS, [CPLX_INS], CHR9A, span), [CPLX_INS])
+
+    def test_a_deletion_at_a_complex_records_pos_is_unchanged(self):
+        """chr12:117,194,730 TTTTCTTTCTTT>GCTTG with TTTTCTTTC>T at its POS: the
+        deletion deletes bases the complex record replaces, so the complex record's rows
+        already kept the slot, and its own rows already lost it."""
+        span = (117194729, 117194745)
+        self.assertEqual(self.lost(CPLX_DEL, [DEL_WITH_ANCHOR], CHR12, span), [])
+        self.assertEqual(self.lost(DEL_WITH_ANCHOR, [CPLX_DEL], CHR12, span), [CPLX_DEL])
+
+    def test_two_records_that_both_keep_their_anchor_are_unchanged(self):
+        """Two alleles of one site (an insertion and a deletion at one POS): neither is
+        read on the other's rows, as since 2.8.1."""
+        span = (18267778, 18267790)
+        deletion = (18267781, "CA", "C")
+        self.assertEqual(self.lost(INS_AT_ITS_POS, [deletion], CHR9A, span), [])
+        self.assertEqual(self.lost(deletion, [INS_AT_ITS_POS], CHR9A, span), [])
+
+    def test_two_records_that_both_keep_none_are_unchanged(self):
+        """chrX:35,966,203 has the only pairs of two complex records at one POS (3
+        slots): neither is a displaced copy of the other, so each is read on the other's
+        rows and the slot leaves both."""
+        span = (18267778, 18267790)
+        other = (18267781, "C", "TTTT")
+        self.assertEqual(self.lost(CPLX_INS, [other], CHR9A, span), [other])
+        self.assertEqual(self.lost(other, [CPLX_INS], CHR9A, span), [CPLX_INS])
+
+    def test_the_mutant_reads_the_insertion_on_the_complex_records_rows(self):
+        """The skip before the rule, which needed both records to keep an anchor: the
+        insertion is read, the slot leaves the complex record's rows too, and the pair's
+        targets go unreported (the reading measured at 48.5 % real)."""
+        subs = [("""        if p == ipos and _isc.kept_bases(r, a) and (kept or len(iref) != len(ialt)):""",
+                 "        if p == ipos and kept and _isc.kept_bases(r, a):")]
+        span = (18267778, 18267790)
+        self.assertEqual(self.lost(CPLX_INS, [INS_AT_ITS_POS], CHR9A, span, subs=subs),
+                         [INS_AT_ITS_POS])
+        # and the deletion, which the rule does not move, is read the same way
+        self.assertEqual(self.lost(CPLX_DEL, [DEL_WITH_ANCHOR], CHR12,
+                                   (117194729, 117194745), subs=subs), [])
 
 
 if __name__ == "__main__":

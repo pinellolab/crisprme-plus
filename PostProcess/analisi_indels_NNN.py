@@ -1121,6 +1121,22 @@ def _store_indels(lo, hi, ipos, iref, ialt, keep=None):
     anchor. One haplotype cannot hold both, so a slot phased with both is a phasing
     artefact, not a complex allele. Carriers are read only for the indels taken.
 
+    An indel at the POS of a complex record -- one that keeps no anchor base, its ALT
+    differing from its REF at the first base -- is a displaced copy of it (2.10.1): the
+    two describe the same bases, and HPRC v2.1's normalisation left-aligned the indel
+    across the haplotype's other variants until it landed there. So the complex record's
+    rows read the slot with the complex record alone, which this skip now also covers,
+    while the indel's rows still read the complex record and the slot leaves them.
+    Measured over the 50 pairs (522 slots) against HPRC's pre-vcfwave originals, the
+    complex record alone is 84.8 % real (98.0 % for the insertions) and catches 90.4 % of
+    the real targets, where reading each record without the other is 48.5 % real with
+    12,009 false 23-mers and the indel alone 23.4 % real. Up to 2.10.1 the skip took an
+    indel only where both records keep an anchor, and a deletion at a complex record's
+    POS was already left unread, its deleted bases lying inside those the complex record
+    replaces (``gone``, _other_indels); it is the insertions that move, 35 of the 50
+    pairs, whose slots left both rows. A pair whose records both keep an anchor, and one
+    whose records both keep none, are read as before.
+
     The store's MNVs are records of it too where it has an MNV file (2.10.1:
     IndelGenotypeReader.has_mnv), read as a second indel is. An MNV and an indel at one POS
     are other alleles of that position too (question 2c of the MNV plan, both ways: an MNV
@@ -1144,8 +1160,9 @@ def _store_indels(lo, hi, ipos, iref, ialt, keep=None):
         k += 1
         if (p, r, a) == (ipos, iref, ialt) or p - 1 + len(r) <= lo:
             continue
-        if p == ipos and kept and _isc.kept_bases(r, a):
-            continue  # another allele of the same anchor
+        if p == ipos and _isc.kept_bases(r, a) and (kept or len(iref) != len(ialt)):
+            continue  # another allele of the same anchor, or an indel at a complex
+            # record's POS: a displaced copy, so the complex record is read alone
         if p == ipos and (len(r) == len(a)) != mnv and _indelgt.has_mnv:
             continue  # an MNV and an indel at one POS: other alleles of that position
         overlapping = p - 1 < i1 and i0 < p - 1 + len(r)
