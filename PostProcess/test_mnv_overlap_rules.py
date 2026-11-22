@@ -281,6 +281,12 @@ class TheSlotIsReadBaseByBase(unittest.TestCase):
 
     def test_an_mnv_row_loses_the_carrier_of_a_true_third_base_conflict(self):
         self.assertEqual(self._ref_snps(MNV_CONFLICT, CHRY, {21604663: {"T": GT}}), [GT])
+        # at the record's own POS too: an MNV is read from its POS on, where an indel row
+        # reads only the bases it keeps past it (a SNP at an indel's POS is another allele
+        # of that base). HPRC v2.1 holds no third base at an MNV's POS -- its one conflict
+        # is at a later base, above -- so this pins the half of rule 2 its records do not:
+        # reading the MNV from its second base on would keep this carrier.
+        self.assertEqual(self._ref_snps(MNV_SAME, CHR13, {29389333: {"C": GT}}), [GT])
 
     def test_an_mnv_row_keeps_a_carrier_whose_snv_lies_outside_the_target(self):
         ns = analyzer({MNV_KEEPS: GT}, CHR9B, snps={67744566: {"C": GT}})

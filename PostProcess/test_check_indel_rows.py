@@ -4677,6 +4677,29 @@ class Pieces(unittest.TestCase):
         hap = C.make_hap(seq, [al(5, "A", "AT"), al(6, "C", "T")], 0, 12)
         self.assertEqual(hap.clash, [])  # side by side, not overlapping
 
+    def test_an_mnv_and_the_snvs_on_its_bases_are_merged_base_by_base(self):
+        """Rule 2 (base_by_base, METHODS section 4), the truth every row of that shape is
+        compared against. HPRC v2.1's chr9:67,744,565 TTTC>ATAA with 67,744,566 T>C, its
+        hg38 window (chr9:67,744,557-67,744,573) written from 0: the MNV replaces three of
+        its four bases and keeps the second (its ALT base there is the reference T), so
+        the SNV's C stands there and the MNV's own bases stand where it replaces them --
+        CCTCACAACTTT, not the MNV's own CCTCATAACTTT, and not a clash. The carriers'
+        pre-vcfwave originals name the SNV's base on every such base they decide."""
+        seq = "TGTTCCTCTTTCCTTTT"
+        m, s = al(9, "TTTC", "ATAA"), al(10, "T", "C")   # 0-based 8..11 and 9
+        hap = C.make_hap(seq, [m, s], 4, 16)
+        self.assertEqual(seq[4:16], "CCTCTTTCCTTT")      # the reference there
+        self.assertEqual(hap.seq, "CCTCACAACTTT")
+        self.assertEqual(hap.clash, [])
+        # whose base each is: the SNV owns the base the MNV keeps, the MNV the other three
+        self.assertEqual(hap.src[4:8], [m, s, m, m])
+        self.assertEqual(hap.place[4:8], [(8, 0), (9, 0), (10, 0), (11, 0)])
+        self.assertEqual(C.snvs_held(hap, 4, 4), frozenset([s.key]))
+        # a true third-base conflict (on a base the MNV replaces, the SNV naming neither
+        # its base nor the reference one) has no sequence: the slot leaves both rows
+        hap = C.make_hap(seq, [m, al(11, "T", "G")], 4, 16)
+        self.assertEqual((hap.seq, len(hap.clash)), (seq[4:16], 1))
+
     def test_the_junction_rule(self):
         seq = "ACGTACGTACGTACGTACGT"
         d = al(6, "CG", "C")     # deletes the G at 0-based 6
