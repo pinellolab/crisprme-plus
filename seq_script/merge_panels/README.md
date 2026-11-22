@@ -59,7 +59,8 @@ against the source VCF read on its own.
 Validated on chr22 and chr14 (METHODS section 2), and on chr21, chr18, chr10 and chr5, four of
 the seven chromosomes whose merged VCF holds a record written in lower case (chr3, chr4, chr5,
 chr10, chr12, chr18 and chr21), which the recipe reads in upper case as CRISPRitz 2.10.0 does;
-not run genome-wide before the release's readiness audit. Usage: `mega_rebuild.sh <install_dir>
+and run genome-wide for 2.10.0's `20-NRR_3_hg38+hg38_mega`, `verify_mega_chrom.py` passing on all
+24 chromosomes (`docs/INDEX_PROVENANCE.md`, Gate A). Usage: `mega_rebuild.sh <install_dir>
 <merged_vcf_dir> [chrom ...]` (its header has the environment it reads), in a working directory
 that holds none of the dataset (it refuses one that holds its VCFs or a part it builds, before
 it makes anything there); to put the kit it built in a data folder in place of the dataset's,

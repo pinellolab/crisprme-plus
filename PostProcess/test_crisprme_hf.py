@@ -1327,6 +1327,29 @@ class TestMountPointInstallFolder(unittest.TestCase):
             self._download("genome", ref="hg38")
 
 
+class TestTheVcfRefusalSaysWhichHprcVcfsBuiltTheIndex(unittest.TestCase):
+    """A download of a VCF dataset the repo lacks is refused with the datasets the default repo
+    hosts, which it called "the source VCFs of its prebuilt variant indexes", hg38_HPRC among
+    them: the default repo's hg38_HPRC is HPRC graph v2.0, the input of 2.8.1's archives, and
+    2.10.0's HPRC index was built from v2.1's normalised VCFs, which the format-2 repo holds
+    under build-inputs/hg38_HPRC/."""
+
+    def test_it_says_where_the_vcfs_of_2_10_0_s_hprc_index_are(self):
+        with tempfile.TemporaryDirectory() as work, \
+             mock.patch.dict(os.environ, {}, clear=False), \
+             mock.patch.object(hf, "_hf_snapshot", lambda *a, **k: None):
+            os.environ.pop("CRISPRME_HF_REPO", None)
+            with self.assertRaises(ValueError) as caught:
+                hf.download_component("vcf", work, dataset="hg38_1000G")
+        message = " ".join(str(caught.exception).split())
+        self.assertIn(f"No raw VCF dataset 'hg38_1000G' found in HuggingFace repo "
+                      f"'{hf.DEFAULT_HF_REPO}'", message)
+        self.assertIn("but its hg38_HPRC is HPRC graph v2.0, the input of 2.8.1's archives; "
+                      "2.10.0's HPRC index was built from v2.1's normalised VCFs, in "
+                      f"{hf.FORMAT2_HF_REPO} under build-inputs/hg38_HPRC/.", message)
+        self.assertNotIn("source VCFs of its prebuilt variant indexes", message)
+
+
 class TestStructuralCheckWhenSizesEmpty(unittest.TestCase):
     """(2.8.1 piece C) when the HF size API fails (_remote_sizes -> {}), the
     download must STILL run the BGZF/gzip structural checks — only the size

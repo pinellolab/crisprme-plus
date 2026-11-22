@@ -442,7 +442,7 @@ interchangeable).
 #    Pull from inside this folder: `crisprme.sif` below is a relative path, so every
 #    later command must run from the same place.
 mkdir -p /path/to/crisprme && cd /path/to/crisprme
-# a ~4-5 GB .sif file (amd64; ~1.8 GB on Apple Silicon); no admin rights needed
+# a ~4-5 GB .sif file (amd64; ~1.7 GB on Apple Silicon); no admin rights needed
 apptainer pull crisprme.sif docker://pinellolab/crisprme:latest
 
 # 2. download data + a prebuilt index (still in that same folder)

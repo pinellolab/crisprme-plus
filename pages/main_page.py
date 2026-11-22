@@ -2901,6 +2901,14 @@ def _dataset_refusals(genome: str, pam: str, panel: str,
     return [why for why in found if why]
 
 
+# How long the first build of a reference index takes, as the bulge note says it: the times of
+# 2.10.0's rebuild of the hg38 reference indexes, on 16 threads (docs/INDEX_PROVENANCE.md, Each
+# archive), where a web search builds on 4 (the thread count change_url passes submit_job).
+_REF_INDEX_BUILD_TIME = ("once: for hg38 with NRR, the default PAM, 47 minutes on 16 threads in "
+                         "2.10.0's rebuild, and longer on the 4 threads a web search uses; NGG "
+                         "11 and NRG 22 minutes on 16")
+
+
 # The note under the Advanced bulge caps: how many bulges this genome, PAM and variant
 # panel allow, and what a search with the bulges selected builds first, if anything.
 @app.callback(
@@ -2991,14 +2999,13 @@ def update_bulge_note(genome, pam, variant_choice, dna, rna, active_tab=None) ->
     if not _index_installed(genome, pam):
         note += (
             " No reference index for this PAM is installed, so the search first builds "
-            "one from the installed genome (once: about 20 to 35 minutes for a human "
-            "genome), then reuses it."
+            f"one from the installed genome ({_REF_INDEX_BUILD_TIME}), then reuses it."
         )
     elif need > ref_installed:
         note += (
             f" The installed reference index supports {ref_installed} bulge(s), so a "
             f"search with {need} first builds a deeper one from the installed genome "
-            "(once: about 20 to 35 minutes for a human genome), then reuses it."
+            f"({_REF_INDEX_BUILD_TIME}), then reuses it."
         )
     return note
 

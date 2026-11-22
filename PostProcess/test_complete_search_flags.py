@@ -363,6 +363,40 @@ class TestTheComputeBackendHelpSaysWhatAMissingScorerEnvDoes(unittest.TestCase):
         self.assertIn('os.environ.get("CRISPRME_SKIP_SCORER_ENV", "0") == "1"', body)
 
 
+def _help_entry(function, flag):
+    """The text of ``flag``'s entry in the help ``function`` prints, from the source: its
+    string lines joined (an f-string's {name} left as written)."""
+    block = "\n".join(_block(_source_lines(), f"def {function}"))
+    text = "".join(re.findall(r'^\s*f?"(.*)"\s*$', block, flags=re.M))
+    start = text.index(f"\\t{flag},")
+    return text[start:text.index("\\n", start)]
+
+
+class TestTheHelpSaysWhat2100Measured(unittest.TestCase):
+    """Two help entries 2.10.0's docs had left behind. complete-search's --population-level
+    said the population-level analysis can be the faster "on a small panel such as HPRC, or
+    beside mega": beside mega only before the sites-only density guard, and with the guard the
+    release gate's per-sample search there took 1,003 to 1,043 s against 2,307 to 2,378 s
+    population-level (METHODS section 5). download's --dataset called hg38_HPRC one of "the
+    SOURCE VCFs that built a shipped index": the default repo's is HPRC graph v2.0, 2.8.1's
+    input, and 2.10.0's HPRC index was built from v2.1's normalised VCFs, in the format-2 repo
+    under build-inputs/hg38_HPRC/."""
+
+    def test_per_sample_is_the_faster_beside_mega(self):
+        entry = _help_entry("print_help_complete_search", "--population-level")
+        self.assertIn("and beside mega too, whose densest windows the sites-only density guard "
+                      "withholds; on a small panel such as HPRC the population-level one can be",
+                      entry)
+        self.assertNotIn("or beside mega, the population-level one can be", entry)
+
+    def test_the_default_repo_s_hprc_vcfs_are_not_the_index_s(self):
+        entry = _help_entry("print_help_download", "--dataset")
+        self.assertIn("but its hg38_HPRC is HPRC graph v2.0, the input of 2.8.1's archives; "
+                      "2.10.0's HPRC index was built from v2.1's normalised VCFs", entry)
+        self.assertIn("{FORMAT2_HF_REPO} under build-inputs/hg38_HPRC/", entry)
+        self.assertNotIn("the SOURCE VCFs that built a shipped index", entry)
+
+
 # Needs crisprme.py to be importable: these run it as a subprocess, and it imports
 # Bio.Seq at module scope. The static checks above parse the source instead and must
 # stay unguarded -- gating them on a dependency they do not use is how the --bmax
