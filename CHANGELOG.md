@@ -194,7 +194,8 @@ and the `release-crisprme` skill.
     v2.1 (chrY, one copy, the records' CONFLICT field naming another sample), and that slot leaves
     both records' rows. Base by base lists 106 false 23-mers of 12,396, where reading each record
     without the other lists 5,106 of 20,677. The indel rows, the SNP rows and the carrier gate
-    read it the same way.
+    read it the same way, the gate away from the position of a variant the row names, where its
+    own convention (a rival allele of that position) comes first, as since 2.10.0.
   - **An indel at the POS of a complex record**, one of the two keeping no anchor base (50 pairs,
     522 slots): the slot is read with the complex record alone, 84.8 % real (98.0 % for the
     insertions), catching 90.4 % of the real targets, where reading each record without the other

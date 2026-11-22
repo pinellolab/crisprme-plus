@@ -1172,7 +1172,7 @@ left-aligning — belongs to the next HPRC rebuild, not to 2.10.1.
 Each reading was measured against HPRC's pre-vcfwave original records
 (`hprc-v2.1-mc-grch38.raw.vcf.gz`, read with `vcfbub`'s rule), over all 921 slots of the three
 shapes, with 16 of the recovered haplotypes confirmed character for character against the
-carriers' release-2 assemblies. **In the tables below "real" means the 23-mer occurs somewhere in
+carriers' release-2 assemblies. **In the counts below "real" means the 23-mer occurs somewhere in
 the carrier haplotype's true sequence over the window**, so in a tandem repeat a demonstrably
 wrong reading can still score no false listing: every false count is a lower bound and every
 share of real an upper bound.
@@ -1194,8 +1194,8 @@ share of real an upper bound.
   (chrY:21,604,661 AAC>CAG with 21,604,663 C>T, a sample with one chrY copy, the records'
   `CONFLICT` field naming another sample, the assembly reading `CAGATACACC`, which is neither
   reading), and that slot leaves both records' rows. Base by base lists 12,396 23-mers of which
-  106 are false; reading each record without the other, as 2.10.0 does, lists 20,677 with 5,106
-  false.
+  106 are false; reading each record without the other, as 2.10.0 reads them (an MNV being in no
+  store it reads), lists 20,677 with 5,106 false.
 - **Rule 3 — an indel at the POS of a complex record**, one of the two keeping no anchor base (50
   pairs, 522 slots: 35 insertions, 15 deletions). The slot is read with the complex record alone
   (above). That is 84.8 % real (98.0 % for the insertions) and catches 90.4 % of the real targets;
