@@ -597,6 +597,12 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_index_fit -v
 
+      - name: "FASTA listing (the search script names each chromosome from its file without a basename process, for names with dots, dashes, spaces or pattern characters)"
+        # PR 107 (Tim Barry): the loop that fills real_chroms, run verbatim in bash, with a
+        # basename on PATH that fails.
+        working-directory: PostProcess
+        run: python -m unittest test_fasta_listing -v
+
       - name: "Index format 2 (CRISPRitz 2.10.0's indexes: whole-tree check, site rule by the index's own format, an empty index's record, the scan's preference, .index_meta.json)"
         # CRISPRme 2.8.1 called every format-2 .bin "not a tree", applied format 1's site rule
         # to any index (passing a lost .bin off as a contig with no target), read no guide

@@ -31,6 +31,17 @@ and the `release-crisprme` skill.
 - **The report generator's version is 2.5** (`REPORT_GENERATOR_VERSION`, which the report's
   footer prints). It had been 2.4 since CRISPRme+ 2.4.0, through the generator's changes of
   2.10.0. The website's example report, 2.10.0's, keeps its "report generator v2.4".
+- **A search lists the reference genome's chromosomes without a `basename` process per FASTA
+  file** (PR 107, Tim Barry). `submit_job_automated_new_multiple_vcfs.sh` named each chromosome
+  after its file with `$(basename $file_chr)`, once per variant dataset of a search: on hg38 with
+  its alternative contigs (455 files) that took 0.96 s in the 2.10.0 image, and now, with
+  `${file_chr##*/}`, 0.008 s. Every name of letters, digits, `_`, `.` and `-` in a folder whose
+  path holds no space lists as before (hg38's 455 byte for byte, in the image's bash and the
+  host's). The old form, its path unquoted, also split a path holding a space, and expanded a
+  name that is a pattern matching another file's (`chr[8].fa` beside `chr8.fa` listed `chr8`
+  twice); those now list as named.
+  PR 107's other fix, the package specs after the channels in `scorer-env create`'s command, was
+  made the same way in 2.8.1.
 
 ### Fixed
 - **The docs give the measured size of 2.10.0's image once unpacked, and of its arm64
