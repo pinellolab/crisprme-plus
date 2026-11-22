@@ -2769,7 +2769,11 @@ A **preset** is a name for a set of these flags, so that an assay with its own g
 is a line of configuration rather than a change to CRISPRme. `extract-flanks --help`
 lists the presets this install has; they come from `PostProcess/flank_presets.conf`,
 then `$CRISPRME_FLANK_PRESETS`, then each `--preset-file` (the later overriding the
-earlier by name), and a flag on the command line always beats the preset:
+earlier by name), and a flag on the command line always beats the preset — **including
+the preset's other form of the window**, since the two forms are one window: a preset's
+`window = 200` is 200 beyond each end, so `--preset my-assay --window 200` is 200 at both
+ends and `--preset amplicon --upstream 5` is 5 and 200. Only one *source* saying both
+things at once is refused — both forms on the command line, or both in one section:
 
   ```ini
   # PostProcess/flank_presets.conf, or your own file passed with --preset-file
@@ -2885,6 +2889,30 @@ unless you ask — `--alt-list` adds one more column holding them, `|`-delimited
 `--max-haplotypes` left out, so pass `--max-haplotypes 0` to have every one in the
 cell). The primary ALT is `hap1`: the first in the order the command already uses — the
 sequences that **hold** the off-target first, then by how many haplotypes carry them.
+The list is **positional**: element *k* is `hapK` of `<prefix>.tsv` and the first
+element is `flank_alt`.
+
+> **A haplotype can delete the whole window.** At a 32-mer it happens (one entry of
+> 4,017 on a 1,000-row shortlist; none of the 10,354 of that shortlist at `--window
+> 200`, because a 423 bp window does not fit inside those deletions): that genome holds
+> *no bases* between the flank's two coordinates. Such an entry keeps its TSV line —
+> `flank_len 0`, its carriers, and the note `window-deleted-on-this-haplotype` — but it
+> writes **no FASTA record** (a header with no bases is not a sequence, and it shifts
+> every record after it for anyone pairing names with sequences by position), its
+> `fasta_id` is blank, and in the `--alt-list` cell its element is the placeholder
+> `(window-deleted)` so that element *k* is still `hapK`. `flank_alt` carries the same
+> placeholder if the *primary* ALT is the deleted one, so an empty `flank_alt` keeps its
+> one meaning: this row has no ALT entry at all. The row's `flank_notes` names the
+> haplotypes affected.
+
+Your table comes back **line for line**, and the join key is the input's own data line
+number. CRISPRme reads a results table as plain tab-separated text, one row per physical
+line: a double quote in a cell is a double quote, not a quoting character. (A table
+exported from a spreadsheet with a line break inside a cell is therefore not a table —
+the stray line comes back as a row of its own, noted, and every real row keeps its own
+sequence. If the reader and the writer ever disagreed on how many data lines the file
+has, the annotated table is refused rather than written, because a sequence on the wrong
+row looks exactly like a sequence on the right one.)
 
 `--filter` chooses which rows get flanks at all, as an expression over **the table's own
 columns**. A name with a character a Python name cannot hold is written with underscores
@@ -2906,10 +2934,15 @@ the pair only where **both** the ALT and the REF alignment score at or above it:
   ```
 
 One rule, so there is nothing subtle to get wrong: a row is kept when the expression is
-true **and** every cell it actually read had a value. A **missing** cell (blank, `NA`,
+true **and** every cell it read **as a number** had one. A **missing** cell (blank, `NA`,
 `-`, `.`) is not zero, and a row selected on a number nobody measured is a site put into
 an assay for no reason — a negated test would otherwise let exactly those rows through.
-How many such rows there were is printed rather than left to be noticed. Evaluation
+How many such rows there were is printed rather than left to be noticed. Compared with a
+**string**, though, a cell is its own text, because the same characters are data in
+another column: `Strand == "-"` selects the minus-strand rows, `Strand in ("+", "-")` is
+true on every row, and `Gene_region == "-"` the intergenic ones — none of those is a
+missing value, while `CRISPR_Bulge >= CB_SENSITIVE` still skips (and counts) the rows
+whose score column holds `-`. Evaluation
 short-circuits, so `has("CRISPR-Bulge")` asks about presence without reading the value:
 `not has("X") or X > 1` keeps a row with no `X`. A row the filter did not keep still
 **keeps its line** in the annotated table, with the added cells empty and `flank_notes
@@ -2958,13 +2991,16 @@ so a fixed total fixes the reference interval, not every carrier's base count.
 - `--window` — the symmetric form: the same as `--upstream W --downstream W`. `200` is
   a 423 bp interval for a 23 bp protospacer+PAM: it covers a 250–300 bp NGS amplicon
   with room to place primers 50–150 bp away from the cut, and the short end of a
-  400–700 bp Sanger/TIDE amplicon. Giving it **with** `--upstream`/`--downstream` is
-  refused, not resolved. The flank is cut on the **reference**, so every haplotype of a
+  400–700 bp Sanger/TIDE amplicon. Giving both forms in **one place** — both on the
+  command line, or both in one preset section — is refused, not resolved. The flank is
+  cut on the **reference**, so every haplotype of a
   site covers one genomic interval and the entries line up; an indel inside the window
   then makes one haplotype's flank longer or shorter, which is what that genome really
   holds (`flank_len` says so).
 - `--preset` — a named window configuration; `--help` lists the ones this install has.
-  A flag given on the command line always wins over the preset.
+  A flag given on the command line always wins over the preset, including over the
+  preset's other form of the window (`--preset my-assay --window 200`,
+  `--preset amplicon --upstream 5`).
 - `--preset-file` — an INI file of presets (repeatable), also read from
   `$CRISPRME_FLANK_PRESETS`. A section `[name]` with any of `upstream`, `downstream`,
   `window`, `length_policy`, `orientation`, `max_haplotypes`, `filter`, `description`.
@@ -2982,9 +3018,13 @@ so a fixed total fixes the reference interval, not every carrier's base count.
 - `--alt-list` — add one more column holding the row's ALT sequences, `|`-delimited.
   It holds the ones **written**: `flank_alt_count` is always the true total and
   `flank_notes` says how many `--max-haplotypes` left out, so pass
-  `--max-haplotypes 0` to have every one in the cell.
+  `--max-haplotypes 0` to have every one in the cell. Element *k* is `hapK`; a
+  haplotype that deletes the whole window is the placeholder `(window-deleted)`, never
+  an empty element.
 - `--filter` — an expression over the table's own columns; only the rows it keeps get
-  flanks. `CB_SENSITIVE` is the CRISPR-Bulge sensitive operating point by name.
+  flanks. `CB_SENSITIVE` is the CRISPR-Bulge sensitive operating point by name. A cell
+  read as a number is *missing* where it holds `NA`, `-`, `.` or nothing; compared with
+  a string it is its own text, so `Strand == "-"` is a selection and not a gap.
 - `--filter-drop` — leave the rows the filter did not keep **out** of
   `--annotate-table`.
 - `--pam-file` — the CRISPRme PAM file the search used; its signed length carries the

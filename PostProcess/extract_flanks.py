@@ -265,6 +265,15 @@ TSV_COLUMNS = (
 # much and why.
 NOTE_FOOTPRINT = "target-span-not-nominal"
 NOTE_LENGTH_ADJUSTED = "padding-moved-to-hold-the-total"
+# A haplotype that DELETES the whole window has no sequence at all -- a real case at a
+# short window (one entry of 4,017 on a 1,000-row shortlist at 3/6, none of 10,354 of the
+# same shortlist at --window 200, because a 32 bp window fits inside a deletion that a
+# 423 bp one does not). It is a fact about that genome, so the line stays and says this;
+# but a FASTA record with no bases, or an empty element in a '|'-delimited cell, is how a
+# reader ends up pairing every later sequence with the wrong haplotype, so the record is
+# left out and the cell says SEQ_DELETED where the sequence would be.
+NOTE_WINDOW_DELETED = "window-deleted-on-this-haplotype"
+SEQ_DELETED = "(window-deleted)"
 
 
 # --------------------------------------------------------------------------- #
@@ -294,6 +303,24 @@ def open_table(path):
         # carriage return on the end of its last column, in the notes of every line
         # and in the middle of a line the column mode writes back out
         yield (line.rstrip("\r\n") for line in fh)
+
+
+def table_reader(lines):
+    """The one way this module parses a results table: tab-separated fields, ONE ROW PER
+    PHYSICAL LINE.
+
+    QUOTE_NONE, and that is the point. A TSV is not a CSV: a results table has no quoting
+    convention, a double quote in a cell is a double quote, and csv's default dialect
+    would instead swallow it and -- where a cell opens a quote that closes on a later line
+    (Excel's tab-delimited export writes exactly that for a cell holding a newline) --
+    JOIN several lines into one row. The row number this returns is the key every output
+    joins on (``flank_row_id``, the FASTA name) and the key ``write_annotated_table``
+    reads off the raw text of the same file, so a reader that counted lines differently
+    from the writer would put one site's sequence on another site's row, silently, with
+    the right-looking number of columns. write_annotated_table refuses if the two ever
+    disagree; this is why they cannot.
+    """
+    return csv.reader(lines, delimiter="\t", quoting=csv.QUOTE_NONE)
 
 
 # Where the guide itself is named, in the order preferred. ``Aligned_spacer+PAM`` is the
@@ -374,7 +401,7 @@ def read_rows(path, block=DEFAULT_BLOCK, max_rows=0, row_filter=None):
     counts = {"read": 0, "kept": 0, "filtered_out": 0, "filter_missing": 0,
               "truncated": False, "last_line": 0}
     with open_table(path) as lines:
-        reader = csv.reader(lines, delimiter="\t")
+        reader = table_reader(lines)
         try:
             header = next(reader)
         except StopIteration:
@@ -699,7 +726,7 @@ class Geometry(object):
 # selecting rows: a general expression over the table's own columns
 # --------------------------------------------------------------------------- #
 class _Missing(object):
-    """A cell the table does not fill (blank, NA, '-', '.'): not zero, not a string to
+    """A cell with no value where the expression wanted one: not zero, not a string to
     compare against. Any comparison it takes part in is False, and the row is counted."""
 
     __slots__ = ()
@@ -709,7 +736,77 @@ class _Missing(object):
 
 
 MISSING = _Missing()
+# What a CRISPRme table writes where a number was not measured. '-' and '.' are on this
+# list and are ALSO ordinary values: '-' is the minus strand, an intergenic Gene_region,
+# a PAM_creation that did not happen; '.' is a VCF's own empty field. Nothing in the file
+# says which a given cell is, so _Cell lets the EXPRESSION say: read as a number, one of
+# these is missing; compared with a string, a cell is its own text.
 _MISSING_CELLS = frozenset(("", "NA", "N/A", "-", ".", "NaN", "nan", "None", "null"))
+
+
+class _Cell(object):
+    """One cell as read, before the expression says how to read it.
+
+    ``CFD > 0.5`` and ``Strand == "-"`` ask different questions of the same characters.
+    A score column's '-' means "not measured" and a row chosen on it would be a site put
+    into an assay for no reason; a Strand column's '-' is half the table. So the cell
+    carries both readings and the comparison picks one: against a string (or a list of
+    them, for ``in``) the cell is its TEXT, and anywhere a number is wanted -- a numeric
+    comparison, arithmetic, a function -- it is its number, or MISSING where it holds one
+    of the markers above. Only that second case counts as a missing value, so
+    ``Strand == "-"`` selects the minus-strand rows and reports nothing missing, while
+    ``CRISPR_Bulge >= CB_SENSITIVE`` still skips the rows nobody measured and says how
+    many there were.
+    """
+
+    __slots__ = ("text", "number")
+
+    def __init__(self, text):
+        self.text = text
+        try:
+            self.number = float(text)
+        except ValueError:
+            self.number = None
+
+    def __repr__(self):                      # pragma: no cover - debugging only
+        return "<cell %r>" % self.text
+
+    def as_text(self):
+        return self.text
+
+    def as_value(self, state):
+        """The cell where a value is wanted and no string says otherwise: its number,
+        else MISSING where it holds a marker, else the word itself (which ``_compare``
+        then refuses against a number, naming both)."""
+        if self.number is not None:
+            return self.number
+        if self.text in _MISSING_CELLS:
+            state["missing"] = True
+            return MISSING
+        return self.text
+
+
+def _is_text(value):
+    """Does this side of a comparison make it a comparison of TEXT? A string, or a
+    list/tuple of them -- the right-hand side of ``Strand in ("+", "-")``."""
+    if isinstance(value, str):
+        return True
+    if isinstance(value, (list, tuple)):
+        return bool(value) and all(isinstance(v, str) for v in value)
+    return False
+
+
+def _read_pair(left, right, state):
+    """The two sides of one comparison, each read in the light of the other."""
+    if isinstance(left, _Cell) and not isinstance(right, _Cell) and _is_text(right):
+        return left.as_text(), right
+    if isinstance(right, _Cell) and not isinstance(left, _Cell) and _is_text(left):
+        return left, right.as_text()
+    return _read_value(left, state), _read_value(right, state)
+
+
+def _read_value(value, state):
+    return value.as_value(state) if isinstance(value, _Cell) else value
 
 
 def column_alias(name):
@@ -844,28 +941,24 @@ class RowFilter(object):
         """(keep it?, was a value missing?)
 
         ONE rule, so there is nothing subtle to get wrong: a row is kept when the
-        expression is true AND every cell the expression actually read had a value. A
+        expression is true AND every cell the expression read AS A NUMBER had one. A
         cell the table does not fill is not zero and not an empty string, and a row
         selected on a value nobody measured is a site put into an assay for no reason;
-        a negated test would otherwise let exactly those rows through. Evaluation
+        a negated test would otherwise let exactly those rows through. A cell compared
+        with a STRING is a different question -- ``Strand == "-"`` asks for the text,
+        and the minus-strand rows are not rows with no strand -- so there the cell is
+        its own characters and nothing is missing (see _Cell). Evaluation
         short-circuits, so ``has("CRISPR-Bulge")`` is the way to ask about presence
         without reading the value: ``not has("X") or X > 1`` keeps a row with no X.
         """
         state = {"missing": False}
-        value = self._eval(self.tree.body, row, state)
+        value = _read_value(self._eval(self.tree.body, row, state), state)
         if state["missing"]:
             return False, True
         return bool(value) and value is not MISSING, False
 
     def _cell(self, i, row, state):
-        text = row[i].strip() if i < len(row) else ""
-        if text in _MISSING_CELLS:
-            state["missing"] = True
-            return MISSING
-        try:
-            return float(text)
-        except ValueError:
-            return text
+        return _Cell(row[i].strip() if i < len(row) else "")
 
     def _eval(self, node, row, state):
         if isinstance(node, ast.Constant):
@@ -884,29 +977,32 @@ class RowFilter(object):
             if name == "col":
                 return self._cell(self.exact[node.args[0].value], row, state)
             if name == "has":
+                # "does this cell hold a measured value": the markers are absence here
+                # whatever the column, because that is the question has() is for. To
+                # ask about the characters instead, compare with them: Strand == "-"
                 i = self.exact[node.args[0].value]
                 text = row[i].strip() if i < len(row) else ""
                 return text not in _MISSING_CELLS
-            args = [self._eval(a, row, state) for a in node.args]
+            args = [_read_value(self._eval(a, row, state), state) for a in node.args]
             if any(a is MISSING for a in args):
                 return MISSING
             return self.FUNCTIONS[name](*args)
         if isinstance(node, (ast.Tuple, ast.List)):
-            return [self._eval(e, row, state) for e in node.elts]
+            return [_read_value(self._eval(e, row, state), state) for e in node.elts]
         if isinstance(node, ast.BoolOp):
             if isinstance(node.op, ast.And):
                 for sub in node.values:
-                    v = self._eval(sub, row, state)
+                    v = _read_value(self._eval(sub, row, state), state)
                     if v is MISSING or not v:
                         return False
                 return True
             for sub in node.values:
-                v = self._eval(sub, row, state)
+                v = _read_value(self._eval(sub, row, state), state)
                 if v is not MISSING and v:
                     return True
             return False
         if isinstance(node, ast.UnaryOp):
-            v = self._eval(node.operand, row, state)
+            v = _read_value(self._eval(node.operand, row, state), state)
             if isinstance(node.op, ast.Not):
                 return v is MISSING or not v
             if v is MISSING:
@@ -914,6 +1010,7 @@ class RowFilter(object):
             return -v if isinstance(node.op, ast.USub) else +v
         if isinstance(node, ast.BinOp):
             a, b = self._eval(node.left, row, state), self._eval(node.right, row, state)
+            a, b = _read_value(a, state), _read_value(b, state)
             if a is MISSING or b is MISSING:
                 return MISSING
             return self._arith(node.op, a, b)
@@ -921,12 +1018,15 @@ class RowFilter(object):
             left = self._eval(node.left, row, state)
             for op, right_node in zip(node.ops, node.comparators):
                 right = self._eval(right_node, row, state)
-                # a cell the table does not fill is not zero and not a string: a row
-                # whose value is missing does not pass, and is counted so the user is
-                # told how many there were rather than left to wonder
-                if left is MISSING or right is MISSING:
+                # each side read in the light of the other (_read_pair): against a
+                # string a cell is its own text, so Strand == "-" works; where a number
+                # is wanted a cell the table does not fill is not zero and not a string,
+                # so the row does not pass and is counted, and the user is told how many
+                # there were rather than left to wonder
+                a, b = _read_pair(left, right, state)
+                if a is MISSING or b is MISSING:
                     return False
-                if not self._compare(op, left, right):
+                if not self._compare(op, a, b):
                     return False
                 left = right
             return True
@@ -1545,14 +1645,30 @@ def wrap(seq, width=60):
     return [seq[i:i + width] for i in range(0, len(seq), width)] or [""]
 
 
+def has_sequence(line):
+    """Does this output line have bases for a FASTA record? An unresolved sample has no
+    sequence by definition, and nor has a haplotype whose window is wholly deleted."""
+    return line["haplotype"] != "unresolved" and bool(line.get("_seq"))
+
+
 def write_outputs(results, out_prefix, anonymise):
-    """Write <out_prefix>.fa and <out_prefix>.tsv. Returns (sequences, rows)."""
+    """Write <out_prefix>.fa and <out_prefix>.tsv. Returns (sequences, rows).
+
+    EVERY FASTA RECORD HOLDS BASES. A line with no sequence -- an unresolved sample, or
+    a haplotype that deletes the whole window (NOTE_WINDOW_DELETED) -- keeps its TSV
+    line, which is where that fact belongs, and writes no record: a header followed by a
+    blank line is not a sequence, and the only thing it can do is shift every record
+    after it by one for a reader pairing names with sequences. Such a line's ``fasta_id``
+    is blank, so nothing in the TSV points at a record that is not there.
+    """
     fa_path, tsv_path = out_prefix + ".fa", out_prefix + ".tsv"
     n_seq = 0
     with open(fa_path, "w") as fa, open(tsv_path, "w") as tsv:
         tsv.write("\t".join(TSV_COLUMNS) + "\n")
         for line in results:
-            if line["haplotype"] != "unresolved":
+            write_it = has_sequence(line)
+            seq = line.pop("_seq", "")
+            if write_it:
                 n_seq += 1
                 fa.write(">%s %s\n" % (line["fasta_id"], " ".join(
                     "%s=%s" % (k, line[k]) for k in
@@ -1562,10 +1678,8 @@ def write_outputs(results, out_prefix, anonymise):
                      # the FASTA is used on its own, so it must not need the TSV to be
                      # read right
                      "orientation", "emitted_strand", "window_spec"))))
-                for piece in wrap(line.pop("_seq")):
+                for piece in wrap(seq):
                     fa.write(piece + "\n")
-            else:
-                line.pop("_seq", None)
             if anonymise:
                 line["carriers"] = ""
             tsv.write("\t".join(str(line.get(c, "")) for c in TSV_COLUMNS) + "\n")
@@ -1589,7 +1703,7 @@ ANNOTATE_COLUMNS = (
     "flank_ref_len",
     "flank_ref_offset",      # 0-based offset of the target inside flank_ref
     "flank_ref_target_len",  # bases of flank_ref the target covers
-    "flank_alt",             # the PRIMARY ALT sequence (see primary_alt)
+    "flank_alt",             # the PRIMARY ALT sequence (see primary_alt), or SEQ_DELETED
     "flank_alt_len",
     "flank_alt_offset",
     "flank_alt_target_len",
@@ -1614,6 +1728,14 @@ def annotation_rows(out_lines):
     rest of the command already uses -- the sequences that HOLD the off-target first,
     then by how many haplotypes carry them, then by the sequence itself. That is the one
     a validation assay wants if it only has room for one.
+
+    ``flank_alt_all`` is hap1, hap2, ... in that order, one element per ALT entry
+    written: element k IS hapK of ``<prefix>.tsv``, and the first element IS
+    ``flank_alt``. A haplotype that deletes the whole window has no sequence, and its
+    element is SEQ_DELETED rather than nothing, so that correspondence survives reading
+    the cell -- an empty element would be dropped by the obvious split and every later
+    sequence would then be read as the wrong haplotype. For the same reason an empty
+    ``flank_alt`` means "this row has no ALT entry" and nothing else.
     """
     by_row = defaultdict(list)
     for line in out_lines:
@@ -1632,6 +1754,12 @@ def annotation_rows(out_lines):
         total = 0
         if ref is not None and str(ref.get("n_haplotypes", "")).isdigit():
             total = max(0, int(ref["n_haplotypes"]) - 1)
+        # a haplotype whose window is wholly deleted: named here too, because the cells
+        # below are the only part of the output some readers ever see
+        gone = [d["haplotype"] for d in alts if not d.get("_seq")]
+        if gone:
+            notes = ";".join(filter(None, [notes, "%s:%s" % (NOTE_WINDOW_DELETED,
+                                                             ",".join(gone))]))
         cells = {
             "flank_row_id": row_id,
             "flank_window": (ref or first or {}).get("window_spec", ""),
@@ -1641,21 +1769,23 @@ def annotation_rows(out_lines):
             "flank_ref_len": (ref or {}).get("flank_len", ""),
             "flank_ref_offset": (ref or {}).get("target_offset", ""),
             "flank_ref_target_len": (ref or {}).get("target_len", ""),
-            "flank_alt": (first or {}).get("_seq", ""),
+            "flank_alt": ((first or {}).get("_seq", "") or
+                          (SEQ_DELETED if first is not None else "")),
             "flank_alt_len": (first or {}).get("flank_len", ""),
             "flank_alt_offset": (first or {}).get("target_offset", ""),
             "flank_alt_target_len": (first or {}).get("target_len", ""),
             "flank_alt_count": total,
             "flank_alt_carriers": (first or {}).get("n_carriers", ""),
             "flank_notes": notes,
-            ANNOTATE_ALT_LIST: ALT_LIST_SEP.join(d["_seq"] for d in alts),
+            ANNOTATE_ALT_LIST: ALT_LIST_SEP.join(d["_seq"] or SEQ_DELETED
+                                                 for d in alts),
         }
         out[row_id] = cells
     return out
 
 
 def write_annotated_table(table, path, annot, header, alt_list=False,
-                          filter_drop=False, filtered=False, last_read=0):
+                          filter_drop=False, filtered=False, counts=None):
     """Write the input table back out with the sequence columns added, line for line.
 
     Every original column is copied VERBATIM, in its own order: the user's table comes
@@ -1664,6 +1794,13 @@ def write_annotated_table(table, path, annot, header, alt_list=False,
     be read -- keeps its line with the added cells empty and ``flank_notes`` saying
     which, so the table never comes back shorter than it went in (``--filter-drop``
     asks for the shortened form).
+
+    ``counts`` is read_rows' own tally. The join key is the data line's number, counted
+    here off the RAW TEXT and there off ``table_reader``, so the two must see the same
+    number of data lines; if they ever do not, no table is left behind and the run
+    stops, because the failure it would otherwise commit -- one site's sequence on
+    another site's row, with every column present and every number plausible -- is not
+    one a user can see.
     """
     columns = annotate_columns(alt_list)
     clash = [c for c in columns if c in header]
@@ -1673,6 +1810,8 @@ def write_annotated_table(table, path, annot, header, alt_list=False,
             "overwrite them: rename them, or write the companion .tsv instead"
             % ", ".join(clash))
     op = gzip.open if path.endswith(".gz") else open
+    counts = counts or {}
+    last_read = counts.get("last_line", 0)
     written = kept = 0
     with open_table(table) as lines, op(path, "wt") as fh:
         # the ORIGINAL text, not a csv round trip: a cell holding a quote character
@@ -1702,6 +1841,21 @@ def write_annotated_table(table, path, annot, header, alt_list=False,
             # the line as it was read, then the added columns on the end
             fh.write(raw + "\t" + "\t".join(str(cells.get(c, "")) for c in columns)
                      + "\n")
+    expected = counts.get("read")
+    if expected is not None and not counts.get("truncated") and written != expected:
+        # the join key has gone out of step with the file: every cell added below would
+        # be on the wrong line, and nothing in the output would look wrong
+        try:
+            os.remove(path)
+        except OSError:                      # pragma: no cover - whatever left it there
+            pass
+        raise FlankError(
+            "%s has %d data line(s) but was read as %d row(s), so the line number the "
+            "sequences are joined on no longer means the same line in both: the "
+            "annotated table is NOT written, because every sequence in it could be on "
+            "another site's row. Check the table for a stray quote character or an "
+            "embedded newline (export it as plain tab-separated text), and report this."
+            % (table, written, expected))
     return {"path": path, "rows_in": written, "rows_out": kept, "columns": columns}
 
 
@@ -1711,10 +1865,18 @@ def write_annotated_table(table, path, annot, header, alt_list=False,
 def resolve_window(upstream, downstream, window, preset, presets):
     """(upstream, downstream, symmetric?) from what the user gave and the preset chosen.
 
-    Precedence, highest first: the flag itself, the preset, the built-in default. The
-    symmetric ``--window W`` is exactly ``--upstream W --downstream W`` -- one window,
-    two ways of saying it -- so the two forms can never drift apart; giving both is
-    refused rather than resolved, because which the user meant is not ours to decide.
+    Precedence, highest first: the flag itself, the preset, the built-in default -- the
+    rule the --help, the README and flank_presets.conf all state, and it holds between
+    the two FORMS of a window as well as within one. ``--window W`` IS ``--upstream W
+    --downstream W``, so a preset's ``window = 200`` is 200 at both ends and
+    ``--preset amplicon --upstream 5`` is 5 and 200: the flag replaces the end it names
+    and nothing else. ``--preset <anything> --window W`` is W at both ends.
+
+    The two forms are refused only where they come from the SAME source and so say two
+    different things at once: both on the command line, or both in one preset. Refusing
+    the combination of a preset with a flag would make the one preset a user is told to
+    write (upstream/downstream, as in flank_presets.conf) unusable with the one flag the
+    documentation says always wins.
     """
     body = {}
     if preset:
@@ -1725,9 +1887,7 @@ def resolve_window(upstream, downstream, window, preset, presets):
                                 ", ".join(PRESET_KEYS)))
         body = presets[preset]
 
-    def of(key, given):
-        if given is not None:
-            return given
+    def of(key):
         if body.get(key):
             try:
                 return int(body[key])
@@ -1736,22 +1896,35 @@ def resolve_window(upstream, downstream, window, preset, presets):
                                  "number of bases" % (preset, key, body[key]))
         return None
 
-    up, down, win = of("upstream", upstream), of("downstream", downstream), \
-        of("window", window)
-    if win is not None and (up is not None or down is not None):
+    if window is not None and (upstream is not None or downstream is not None):
         raise FlankError(
             "--window %d and --upstream/--downstream say two different things about one "
             "window: --window W IS --upstream W --downstream W, so give one form or the "
-            "other." % win)
-    if win is not None:
-        if win < 0:
+            "other." % window)
+    p_up, p_down, p_win = of("upstream"), of("downstream"), of("window")
+    if p_win is not None and (p_up is not None or p_down is not None):
+        raise FlankError(
+            "preset [%s] gives window = %d AND upstream/downstream: they are two ways of "
+            "writing one window (window W IS upstream W and downstream W), so the preset "
+            "must give one form or the other." % (preset, p_win))
+    if p_win is not None:
+        # the symmetric form of a preset, read as the two ends it is: a flag can then
+        # replace one of them without the preset having to be rewritten
+        p_up = p_down = p_win
+    if window is not None:
+        if window < 0:
             raise FlankError("--window must be 0 or more")
-        return win, win, True
+        return window, window, True
+    # the symmetric LABEL belongs to a window written in the symmetric form, not to one
+    # that happens to have equal ends: a flag naming an end makes it the anchored form
+    symmetric = p_win is not None and upstream is None and downstream is None
+    up = upstream if upstream is not None else p_up
+    down = downstream if downstream is not None else p_down
     up = DEFAULT_UPSTREAM if up is None else up
     down = DEFAULT_DOWNSTREAM if down is None else down
     if up < 0 or down < 0:
         raise FlankError("--upstream and --downstream must be 0 or more")
-    return up, down, False
+    return up, down, symmetric
 
 
 def run(targets=None, results=None, reference=None, vcfs=(), vcf_dirs=(), samples=(),
@@ -1824,7 +1997,7 @@ def run(targets=None, results=None, reference=None, vcfs=(), vcf_dirs=(), sample
         # single site is reconstructed rather than an empty output an hour later
         with open_table(table) as lines:
             try:
-                header = next(csv.reader(lines, delimiter="\t"))
+                header = next(table_reader(lines))
             except StopIteration:
                 raise FlankError("%s is empty" % table)
         selector = RowFilter(row_filter, header)
@@ -1906,6 +2079,14 @@ def run(targets=None, results=None, reference=None, vcfs=(), vcf_dirs=(), sample
     alt_counts = {}
     by_chrom = defaultdict(list)
     for row_id, row in rows:
+        if not row["chrom"]:
+            # a line with no chromosome at all is not a site, and it must not be read as
+            # a contig the reference is then blamed for lacking: it comes back as a line
+            # saying so, like any other row this cannot place (a table exported with a
+            # newline inside a cell leaves exactly such a line behind)
+            row["note"] = ((row["note"] + ";" if row["note"] else "") + "no-chromosome")
+            out_lines.append(_unreadable_line(row_id, row))
+            continue
         by_chrom[row["chrom"]].append((row_id, row))
     # Which contigs a VCF was actually read for. A contig no VCF holds -- chrY, an _alt,
     # a _random, a chrUn, 46 of them under the 23-file HGDP+1000G set on one real
@@ -1963,24 +2144,32 @@ def run(targets=None, results=None, reference=None, vcfs=(), vcf_dirs=(), sample
     # read off the lines BEFORE they are written: write_outputs takes the sequences out
     # of them as it writes the FASTA, and the column mode needs the same bytes
     annot = annotation_rows(out_lines) if annotate_table else None
+    # entries with a line but no bases: a deletion covers their whole window. Said here
+    # because it is why the FASTA holds fewer records than the TSV has entry lines
+    deleted = sum(1 for d in out_lines
+                  if d["haplotype"] != "unresolved" and not d.get("_seq"))
     n_seq, n_lines = write_outputs(out_lines, out, anonymise)
     multi_alt = sum(1 for n in alt_counts.values() if n > 1)
     say("extract-flanks: %d sequence(s) for %d row(s); %d row(s) have more than one "
         "distinct haplotype (the reference counted), %d have more than one distinct "
         "ALT sequence, AT THE %s WINDOW"
         % (n_seq, len(rows), multi, multi_alt, geometry.spec))
+    if deleted:
+        say("extract-flanks: %d haplotype(s) have a deletion over the WHOLE window and "
+            "so no sequence: their line says %s, and no FASTA record is written for "
+            "them" % (deleted, NOTE_WINDOW_DELETED))
     say("extract-flanks: wrote %s.fa and %s.tsv" % (out, out))
     annotated = None
     if annotate_table:
         annotated = write_annotated_table(
             table, annotate_table, annot, header, alt_list=alt_list,
-            filter_drop=filter_drop, filtered=(selector is not None),
-            last_read=counts.get("last_line", 0))
+            filter_drop=filter_drop, filtered=(selector is not None), counts=counts)
         say("extract-flanks: wrote %s: the %d line(s) of the input table with %d column(s) "
             "added (%s)" % (annotate_table, annotated["rows_out"],
                             len(annotated["columns"]),
                             ", ".join(annotated["columns"])))
     return {"rows": len(rows), "sequences": n_seq, "lines": n_lines,
+            "window_deleted": deleted,
             "multi_haplotype_rows": multi, "multi_alt_rows": multi_alt,
             "alt_counts": alt_counts, "window": geometry.spec,
             "upstream": up, "downstream": down, "length_policy": policy,
@@ -2047,6 +2236,11 @@ def _lines_for(row_id, row, chrom, entries, unresolved, facts,
         notes = sorted(set(notes_site) | e.notes)
         if not e.found:
             notes.append("protospacer-not-on-this-haplotype")
+        if not seq:
+            # this genome holds NOTHING between the flank's two coordinates: a deletion
+            # covers the whole window. flank_len 0 is the only other sign of it, and a
+            # length is read as a length, not as a warning
+            notes.append(NOTE_WINDOW_DELETED)
         if e.label == "ref":
             # what the reference entry may claim: that every sample reads as the
             # reference here is a statement about the panel, and only a contig a VCF
@@ -2056,7 +2250,9 @@ def _lines_for(row_id, row, chrom, entries, unresolved, facts,
             "row_id": row_id, "rank": row["rank"], "guide": row["guide"], "chrom": chrom,
             "target_start": facts["t_lo"] + 1, "target_end": facts["t_hi"],
             "target_strand": row["strand"], "haplotype": e.label,
-            "fasta_id": fasta_id(row_id, e.label),
+            # blank where no record is written for it (see write_outputs): a name that
+            # points at nothing is worse than no name
+            "fasta_id": fasta_id(row_id, e.label) if seq else "",
             "flank_start": facts["flo"] + 1, "flank_end": facts["fhi"],
             "flank_len": len(seq), "target_offset": offset, "target_len": e.length,
             "target_found": "yes" if e.found else "no", "target_sequence": target,
@@ -2130,9 +2326,13 @@ amplicon-scale context use --window 200 (which IS --upstream 200 --downstream 20
     --upstream         bases beyond the protospacer's outer end (default 3)
     --downstream       bases beyond the PAM's outer end (default 6)
     --window           the symmetric form: the same as --upstream W --downstream W.
-                       Giving it with --upstream/--downstream is refused, not resolved
+                       Giving both forms in one place -- both on the command line, or
+                       both in one preset -- is refused, not resolved
     --preset           a named window configuration (below). A flag given on the command
-                       line always wins over the preset
+                       line always wins over the preset, including over its other form
+                       of the window: a preset's window W IS upstream W + downstream W,
+                       so --preset <name> --window 200 is 200 at both ends and
+                       --preset <name> --upstream 5 replaces that end alone
     --length-policy    what to do where the target's genomic footprint is not the
                        nominal spacer+PAM length -- which is what a bulge means (a DNA
                        bulge is one genomic base MORE, an RNA bulge one LESS):
@@ -2159,7 +2359,9 @@ amplicon-scale context use --window 200 (which IS --upstream 200 --downstream 20
                        '|'-delimited, for a user who wants a single file. It holds the
                        ones WRITTEN: flank_alt_count is always the true total and
                        flank_notes says how many --max-haplotypes left out, so pass
-                       --max-haplotypes 0 to have every one in the cell
+                       --max-haplotypes 0 to have every one in the cell. Element k IS
+                       hapK of <prefix>.tsv; a haplotype that deletes the whole window
+                       has no sequence and its element is %s, never empty
     --filter           an expression over the TABLE'S OWN columns; only the rows it
                        keeps get flanks. Column names with a character a Python name
                        cannot hold are written with underscores (CRISPR-Bulge is
@@ -2170,11 +2372,17 @@ amplicon-scale context use --window 200 (which IS --upstream 200 --downstream 20
                        both the ALT and the REF alignment above it:
                          --filter 'CRISPR_Bulge >= CB_SENSITIVE and
                                    CRISPR_Bulge_ref >= CB_SENSITIVE'
-                       A row whose value for a column the expression READ is missing
-                       (blank, NA, '-', '.') is NOT kept, whichever way round the test
-                       is written, and how many there were is said. Evaluation
-                       short-circuits, so has("col") asks about presence without
-                       reading the value: not has("X") or X > 1 keeps a row with no X
+                       A row whose value for a column the expression read AS A NUMBER
+                       is missing (blank, NA, '-', '.') is NOT kept, whichever way
+                       round the test is written, and how many there were is said.
+                       Compared with a STRING a cell is its own text, because the same
+                       characters are data in another column: Strand == "-" selects the
+                       minus-strand rows, Gene_region == "-" the intergenic ones, and
+                       neither is a missing value. Evaluation short-circuits, so
+                       has("col") asks about presence without reading the value:
+                       not has("X") or X > 1 keeps a row with no X. has() reads the
+                       markers as absence in every column, which is the question it is
+                       for; to ask about the characters, compare with them
     --filter-drop      leave the rows the filter did not keep OUT of --annotate-table
                        (by default they keep their line, with the added cells empty and
                        flank_notes filtered-out, so your table comes back whole)
@@ -2221,7 +2429,7 @@ amplicon-scale context use --window 200 (which IS --upstream 200 --downstream 20
 
 PRESETS (--preset <name>):
 %s
-""" % (PRESET_ENV, "\n                       ".join(
+""" % (SEQ_DELETED, PRESET_ENV, "\n                       ".join(
     __import__("textwrap").wrap(", ".join(PRESET_KEYS), 55)), "%s")
 
 

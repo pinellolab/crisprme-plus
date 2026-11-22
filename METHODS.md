@@ -2509,6 +2509,27 @@ count and sequence. `--filter` chooses which rows are done at all, as an express
 the table's own columns, with the CRISPR-Bulge sensitive operating point (§3.5)
 available by name rather than copied as a number.
 
+**Three places where a wrong answer would look exactly like a right one, and what
+prevents each.** (i) *The join.* Every output is keyed on the input's own data line
+number, so the reader and the `--annotate-table` writer must count lines identically: the
+table is parsed as plain tab-separated text, one row per **physical line**, with no
+quoting convention (a double quote in a cell is a double quote), and the writer refuses
+to produce a table at all if its count of the data lines ever differs from the reader's.
+A sequence written on the neighbouring row carries the right number of columns and a
+plausible value in each. (ii) *A haplotype that deletes the whole window.* It holds no
+bases between the flank's two coordinates — real at a 32-mer, absent at 200 bp, because a
+423 bp window does not fit inside those deletions — so the entry keeps its line
+(`flank_len 0`, its carriers, the note `window-deleted-on-this-haplotype`) but writes no
+FASTA record and takes a placeholder in the `--alt-list` cell: an empty record or an
+empty element silently renumbers every sequence after it for a reader pairing them by
+position. (iii) *A cell that is both a value and a marker.* `-` is "not measured" in a
+CFD or CRISPR-Bulge column and is the **value** of `Strand`, of an intergenic
+`Gene_region`, of a `PAM_creation` that did not happen; nothing in the file says which,
+so the expression decides — a cell read as a number is missing where it holds `NA`, `-`,
+`.` or nothing (and the rows are counted), while a cell compared with a string is its own
+text. `Strand == "-"` therefore selects the minus-strand rows rather than reporting them
+as unmeasured, and a threshold on a score column still skips the rows nobody measured.
+
 **How many distinct ALT sequences a site has depends on the window, strongly, so every
 such figure must be labelled with the window it belongs to.** On the 1,000-site
 shortlist of one genome-wide HGDP + 1000 Genomes run (4,091 samples):

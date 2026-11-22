@@ -483,6 +483,19 @@ jobs:
         # footprint assumed nominal, the ALT column filled from the reference, the ALT
         # count taken from what was written, a missing value read as a number, the
         # threshold frozen as a literal, and a preset that beats the flag.
+        # And the five rules a wrong answer would be SILENT in: the table is read one
+        # row per PHYSICAL LINE (a quote character cannot move one row's sequence onto
+        # another's, and the reader and the --annotate-table writer refuse if they ever
+        # count lines differently); a haplotype that DELETES the whole window says so,
+        # writes no empty FASTA record and keeps its place in the '|' list by a
+        # placeholder; a '-' is the VALUE of a Strand or a Gene_region and still
+        # MISSING in a score column; a flag on the command line overrides the preset's
+        # other form of the window (both forms are refused only from one source); and
+        # the PAM side read off the table WITH the motif's length known -- the branch a
+        # results folder copied without its PAMs/ takes -- puts the paddings on the
+        # right genomic sides. A mutant each, including the two the suite missed
+        # before: the ALT list written backwards and its carriers taken from the
+        # reference entry.
         working-directory: PostProcess
         run: python -m unittest test_extract_flanks -v
 

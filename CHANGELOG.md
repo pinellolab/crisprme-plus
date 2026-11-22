@@ -77,11 +77,15 @@ and the `release-crisprme` skill.
   default because it is the general one (its meaning does not depend on the target's
   length) and because a short oligo read straight off the site has no primer slack to
   absorb a padding error; the symmetric form is `--window W`, which IS
-  `--upstream W --downstream W` (giving both is refused, not resolved), and
+  `--upstream W --downstream W` (giving both forms in ONE PLACE -- both on the command
+  line, or both in one preset section -- is refused, not resolved), and
   `--preset amplicon` is the former 200. A `--preset` is a NAME for a set of these
   flags, read from `PostProcess/flank_presets.conf`, `$CRISPRME_FLANK_PRESETS` and
-  `--preset-file`, listed by `--help`, and always beaten by a flag on the command line:
-  an assay with its own geometry is a line of configuration, not a change to CRISPRme.
+  `--preset-file`, listed by `--help`, and always beaten by a flag on the command line
+  -- including by the other FORM of the window, since a preset's `window = 200` is 200
+  beyond each end, so `--preset my-assay --window 200` is 200 at both ends and
+  `--preset amplicon --upstream 5` replaces that one end: an assay with its own
+  geometry is a line of configuration, not a change to CRISPRme.
   STRAND AND PAM SIDE ARE READ, NEVER ASSUMED: on a minus-strand row the bases beyond
   the PAM are at the genomic left, and on a 5' PAM (Cas12a TTTV, PAM then protospacer)
   the target's two ends swap, so the same two numbers land on the OPPOSITE genomic
@@ -112,18 +116,33 @@ and the `release-crisprme` skill.
   `flank_row_id` to join -- on the report's top-N download and on an
   `integrated_results.tsv` alike. A row with several distinct ALTs keeps every one of
   them in the companion FASTA/TSV: none is dropped, and none is crammed into a cell
-  unless `--alt-list` asks. `--filter` selects rows by an expression over the TABLE'S
+  unless `--alt-list` asks -- and that cell is POSITIONAL, element k being `hapK` and
+  the first element `flank_alt`. A haplotype that DELETES the whole window (one entry
+  of 4,017 at the 32-mer on that shortlist, none of its 10,354 at `--window 200`) holds
+  no bases at all there: it keeps its TSV line with `flank_len 0`, its carriers and the
+  note `window-deleted-on-this-haplotype`, writes NO FASTA record (a header with no
+  bases shifts every record after it for a reader pairing them by position) with a
+  blank `fasta_id`, and takes the placeholder `(window-deleted)` in the list cell and
+  in `flank_alt`, so an empty `flank_alt` keeps its one meaning: no ALT entry at all.
+  The input table is read as plain tab-separated text, ONE ROW PER PHYSICAL LINE -- a
+  double quote in a cell is a double quote -- and `--annotate-table` refuses to write
+  anything if its own count of the data lines ever differs from the reader's, because
+  one row's sequence on another row's line looks exactly like a right answer.
+  `--filter` selects rows by an expression over the TABLE'S
   OWN columns (a name Python cannot hold is written with underscores, `CRISPR-Bulge` as
   `CRISPR_Bulge`, or as `col("...")`), with the CRISPR-Bulge sensitive operating point
   available BY NAME as `CB_SENSITIVE` from `cb_operating_point` rather than copied as a
   number, so a filter written today still means "the sensitive threshold" after a
   re-fit: both alignments above it is
   `--filter 'CRISPR_Bulge >= CB_SENSITIVE and CRISPR_Bulge_ref >= CB_SENSITIVE'`. A row
-  is kept when the expression is true AND every cell it read had a value -- a missing
-  cell is not zero, and a negated test would otherwise select exactly the rows nobody
-  measured; `has("col")` asks about presence without reading the value, and the count
-  of such rows is printed. A row the filter dropped still
-  keeps its line in the annotated table (`flank_notes filtered-out`) unless
+  is kept when the expression is true AND every cell it read AS A NUMBER had one -- a
+  missing cell is not zero, and a negated test would otherwise select exactly the rows
+  nobody measured; `has("col")` asks about presence without reading the value, and the
+  count of such rows is printed. Compared with a STRING a cell is its own text, because
+  the same characters are data in another column: `Strand == "-"` selects the
+  minus-strand rows and `Gene_region == "-"` the intergenic ones, while `-` in a score
+  column is still missing. A row the filter dropped still keeps its line in the
+  annotated table (`flank_notes filtered-out`) unless
   `--filter-drop`. THE WINDOW DOMINATES HOW MANY ALT SEQUENCES A SITE HAS, which is what
   an assay sizes its extra targets from, so every such figure is now labelled with the
   window it belongs to: on the 1,000-site shortlist of a genome-wide HGDP+1000G run
@@ -136,7 +155,7 @@ and the `release-crisprme` skill.
   accounting and what each column may claim are unchanged (at `--window 200
   --orientation genome` the output is byte-identical to the previous behaviour over all
   10,354 sequences of that run); the expanded CI suite
-  (`PostProcess/test_extract_flanks.py`, 129 tests) carries a mutant for each new rule.
+  (`PostProcess/test_extract_flanks.py`, 156 tests) carries a mutant for each new rule.
 
 ### Changed
 - **The Docker image keeps no conda or pip package cache.** The Dockerfile's `micromamba clean
