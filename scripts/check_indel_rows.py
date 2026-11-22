@@ -227,17 +227,19 @@ limit (counted and listed under its own class, non-gating) or not (gating):
     as indel-row-mnv-carrier (snp-row-mnv-carrier). The carrier gate reads a slot of rule
     (c) otherwise ('phase not known': a rival allele of the position, its convention since
     2.10.0), which changes no row this check reads; the findings on such slots say so;
-  * OPEN READINGS (OPEN_READINGS in the code): overlaps no rule implemented in CRISPRme's
-    code covers yet are read as the 2.10.1 branch's code reads them and counted under a
-    class of their own, non-gating, listed or not, so that each, once its rule is in the
-    code, changes one table: a complex record wholly on bases the record deletes or replaces
-    (item 23 of the 2.10.1 backlog: METHODS section 4 and rule (a) say it changes nothing,
-    the reading the PI confirmed for 2.10.1 and not yet in the code, which reads its ALT as
-    bases inserted before its edit and takes the slot off a target covering that point; the
-    truth reads it as METHODS does: open-complex-in-deleted), and, with the MNV store, an
-    MNV on a SNP row carrier's slot whose REF meets the base of an SNV the row names (the
-    code keeps the carrier where the MNV starts at that SNV's position, a phasing artefact,
-    and takes it off where it starts before it: open-snp-row-snv-mnv).
+  * THE SHAPES HPRC's DECOMPOSITION LEAVES (METHODS section 4, rules 1 to 3 of 2.10.1,
+    each measured against HPRC's pre-vcfwave original records over 921 slots). They were
+    open readings up to 2.10.1, read as the code read them and counted apart; they are
+    now read as the rules have it and checked like any other reading, so a run that
+    departs from one fails the check (OPEN_READINGS, left empty, says where to put the
+    next one). A complex record wholly on bases the record deletes or replaces puts bases
+    of its own among them and takes the slot off ('complex'); reading it as changing
+    nothing lists 692 false 23-mers of 4,864 and was turned down. An SNV on a base of an
+    MNV record is read base by base: one naming the base the record puts there leaves the
+    slot listed ('snv-on-mnv'), one on a base it keeps and a true third-base conflict take
+    it off ('snv-breaks-mnv'). An indel at the POS of a complex record is a displaced copy
+    of it: the complex record's rows read the slot without it, the indel's rows read the
+    complex record;
   A disagreement no documented rule explains gates (unexplained-disagreement: a defect of
   CRISPRme or of this checker).
 
@@ -468,10 +470,10 @@ phased indel store CRISPRme reads a SNP row's carriers against holds no MNV; whe
 read the MNV store it does, and such a listing gates, snp-row-mnv-carrier, above) and
 limit-snp-row-unphased; variant-shadowed and overlap-reading-agrees (a listed carrier
 whose slot, read as METHODS section 4 reads a slot whose alleles overlap the record,
-holds the target: the row agrees with it) are notes. Two non-gating classes are OPEN
-READINGS (above), cases no rule implemented in the code covers yet, read as the code reads
-them: open-complex-in-deleted (in soundness and completeness) and open-snp-row-snv-mnv (in
-the SNP-row report, with the MNV store). Five non-gating classes are this
+holds the target: the row agrees with it) are notes. The two open readings of the 2.10.1
+branch, open-complex-in-deleted and open-snp-row-snv-mnv, are gone: their rules are
+decided and in the code (above), and a run that departs from one now fails the check.
+Five non-gating classes are this
 checker's own COVERAGE GAPS, not CRISPRme limits: coverage-overlap-cap (a carrier whose
 slot's overlap zones within a target's reach of a record have more than 1024 readings:
 only each of their alleles alone is read for the targets only such readings hold, which
@@ -543,8 +545,10 @@ does not stop it) leaves the row. Listing a carrier the rule drops is reported
 (snp-row-indel-carrier); an MNV the store does not hold, limit-snp-row-mnv. Where the run
 read the store's MNV file (2.10.1: MNV RULES) its MNVs are read as its indels are, and
 listing a carrier an MNV on its slot takes off gates (snp-row-mnv-carrier: the one class of
-the report that gates); an MNV on the base of a named SNV is an open reading
-(open-snp-row-snv-mnv). Population-level SNP rows are a documented
+the report that gates); an MNV on the base of a named SNV is read base by base (rule 2:
+the row's SNP wins on a base the MNV keeps, the MNV's base on one it replaces, and a true
+third-base conflict leaves the slot with no sequence), the MNV's own POS included, where
+an indel there stays a phasing artefact. Population-level SNP rows are a documented
 worst-case union and are out of scope, as are a sites-only dataset's SNP rows, which are
 population-level whatever the search's mode (one limit-no-genotypes line each). Without
 --max-total-edits the cap is the run's own
@@ -1883,11 +1887,54 @@ class Hap(object):
         return [z for z in self.clash if z[0] <= b and z[1] - 1 >= a]
 
 
+def base_by_base(members, refseq):
+    """[(place, base, the allele whose base it is)] of one overlap run of a slot's
+    alleles that does have one sequence, read base by base (2.10.1, METHODS section 4):
+    a record whose REF and ALT have one length (an MNV) and the SNVs on bases of its REF.
+    Its ALT bases stand where it replaces them, and on a base it keeps -- its ALT base is
+    the reference base there, or the base lies in the bases REF and ALT share at either
+    end -- the SNV's base wins. HPRC's pre-vcfwave original records name the SNV's base
+    on every such base they decide (16 of 20 slots, 2 of them confirmed against the
+    carriers' assemblies).
+
+    None where the run is anything else -- two records that describe a stretch twice, so
+    the VCF gives it no sequence -- or where an SNV is a true third-base conflict: its
+    base neither the MNV's base there nor the reference base the MNV keeps (one slot of
+    HPRC v2.1, a decomposition artefact, which leaves both records' rows)."""
+    mnvs = [a for a in members if a.kind == "mnv"]
+    snvs = [a for a in members if a.kind == "snv"]
+    if len(mnvs) != 1 or len(mnvs) + len(snvs) != len(members):
+        return None
+    al = mnvs[0]
+    at = {}
+    for s in snvs:
+        if s.lo in at or not al.lo <= s.lo < al.hi:
+            return None  # two alts of one base, or an SNV past the record's REF
+        at[s.lo] = s
+        if al.edit_lo <= s.lo < al.edit_hi:
+            mine = al.body[s.lo - al.edit_lo].upper()
+            if mine != refseq[s.lo].upper() and mine != s.body.upper():
+                return None  # a true third-base conflict
+    out = []
+    for q in range(al.lo, al.hi):
+        s = at.get(q)
+        if al.edit_lo <= q < al.edit_hi:
+            mine = al.body[q - al.edit_lo]
+            keeps = mine.upper() == refseq[q].upper()
+            out.append(((q, 0), s.body if (s is not None and keeps) else mine,
+                        s if (s is not None and keeps) else al))
+        else:  # a base REF and ALT share: the record keeps it, so the SNV's base wins
+            out.append(((q, 0), s.body if s is not None else refseq[q], s))
+    return out
+
+
 def make_hap(refseq, alleles, lo, hi):
     """[lo, hi) of the haplotype that holds ``alleles``. Alleles whose REF spans meet
-    describe one stretch twice: none of them is written and the stretch is in ``clash``.
-    Only the window is written: an allele reaching into it from either side puts in the
-    bases of its edit that stand (or are added after a base) inside it."""
+    describe one stretch twice: none of them is written and the stretch is in ``clash``,
+    unless they are an MNV and the SNVs on bases of its REF, which have one sequence read
+    base by base (base_by_base, 2.10.1). Only the window is written: an allele reaching
+    into it from either side puts in the bases of its edit that stand (or are added after
+    a base) inside it."""
     hi = min(hi, len(refseq))
     use = sorted((a for a in alleles if a.hi > lo and a.lo < hi), key=lambda a: (a.lo, a.hi))
     runs = []
@@ -1910,7 +1957,17 @@ def make_hap(refseq, alleles, lo, hi):
 
     for members, end in runs:
         if len(members) > 1:
-            clash.append((members[0].lo, end, tuple(members)))
+            merged = base_by_base(members, refseq)
+            if merged is None:
+                clash.append((members[0].lo, end, tuple(members)))
+                continue
+            p = ref_upto(merged[0][0][0])
+            for pl, b, who in merged:
+                if lo <= pl[0] < hi:
+                    seq.append(b)
+                    place.append(pl)
+                    src.append(who)
+            p = max(p, end)
             continue
         a = members[0]
         p = ref_upto(a.edit_lo)
@@ -1980,14 +2037,14 @@ def meets_ref(a, al):
 # record stays listed): another allele at its own position (a phasing artefact, or the
 # other allele of a multi-allelic heterozygote), an allele only on bases it deletes or
 # replaces, an MNV where the run read no MNV store (in no store CRISPRme reads beside the
-# record: 2.10.0's reading, MNV_RULES), and an indel at another position that changes none
-# of the reference bases a target covers ('beside': only for that target, covered_span);
-# and a complex record wholly on bases the record deletes or replaces, an open reading
-# (OPEN_READINGS) that the truth reads as METHODS does
-LEFT_OUT = frozenset(("artefact", "deleted", "mnv", "beside", "complex-in-deleted"))
+# record: 2.10.0's reading, MNV_RULES), an indel at another position that changes none
+# of the reference bases a target covers ('beside': only for that target, covered_span),
+# and an SNV on a base of an MNV record that names the base the record puts there (2.10.1,
+# rule 2: the slot, read base by base, has the window's base)
+LEFT_OUT = frozenset(("artefact", "deleted", "mnv", "beside", "snv-on-mnv"))
 # the documented causes an overlap gives (the 'mnv' overlap gives none: it is not read)
 OVERLAP_CAUSES = frozenset(("artefact", "deleted", "complex", "undocumented", "beside",
-                            "complex-in-deleted"))
+                            "snv-on-mnv", "snv-breaks-mnv"))
 
 # MNV_RULES (CRISPRme 2.10.1, where the run's log says it read the dataset's MNVs from the
 # phased store's MNV file: Semantics.mnv_store). An MNV is then one more record of the
@@ -2029,22 +2086,14 @@ GATE_RIVAL = ("the carrier gate reads such a slot as holding a rival allele of t
 # read as the 2.10.1 branch's code reads it today and reported under a class of its own,
 # non-gating, so that once its rule is in CRISPRme's code this table (with the function it
 # names) is the one place to change: an entry taken out reads the case by the rule beside it.
-#   complex-in-deleted (item 23 of the 2.10.1 backlog): a complex record (an indel whose
-#       trimmed ALT is not empty and adds no base: TCC>G) wholly on bases the record
-#       deletes or replaces. METHODS section 4 and the 2.10.1 MNV plan's rule (a) read it
-#       as changing nothing ('deleted'), the reading the PI confirmed for 2.10.1, not yet in
-#       the code: the code (indel_snp_cis.changes_span) counts its ALT as bases inserted
-#       right before its edit, so it takes the slot off a target whose covered bases hold
-#       that point (complex_in_deleted_off). The truth reads the slot
-#       without it (LEFT_OUT), as METHODS does; the documented view reads it as the code does.
-#   snp-row-snv-mnv (with the MNV store only): an MNV on a SNP row carrier's slot whose REF
-#       meets the base of an SNV the row names. The code reads it as it reads an indel there
-#       (new_simple_analysis._snp_slot_verdict, snp_row_keeps): another allele of that base,
-#       a phasing artefact that keeps the carrier, where the MNV starts at the SNV's
-#       position; a record the slot cannot be written with (an SNP alt on its REF), which
-#       takes the carrier off, where it starts before it (snv_mnv_on_slot).
-OPEN_READINGS = {"complex-in-deleted": "open-complex-in-deleted",
-                 "snp-row-snv-mnv": "open-snp-row-snv-mnv"}
+#   Both entries were taken out on 2026-11-22, their readings decided and in the code
+#   (METHODS section 4, overlap_kind): rule 1, a complex record wholly on bases the record
+#   deletes or replaces, which takes the slot off, where the reading that was turned down
+#   had it change nothing; and rule 2, an SNV and an MNV on one slot, read base by base,
+#   where the reading before it kept the carrier of an MNV starting at a named SNV's
+#   position and took off every other. Both readings are now checked like any other, so a
+#   run that departs from them fails the check.
+OPEN_READINGS = {}
 
 
 def covered_span(place, al):
@@ -2088,42 +2137,65 @@ def complex_takes_off(a, al, cover, mnv=False):
     return bool(a.body) and a.kind != "mnv" and lo < a.edit_lo <= hi
 
 
-def complex_in_deleted_off(a, al, cover):
-    """The code's reading of an open 'complex-in-deleted' overlap (OPEN_READINGS) for a
-    target covering ``cover``: whether it takes the slot off. Its edit lies in bases the
-    record lost already, so only its ALT, counted as bases inserted right before its edit
-    (indel_snp_cis.changes_span), can: where that point lies between two covered bases
-    (complex_takes_off)."""
-    return complex_takes_off(a, al, cover)
-
-
 def overlap_kind(a, al, phase_known=True, cover=None, mnv=False):
     """How METHODS section 4 reads allele ``a``, on record ``al``'s slot, where its REF
     meets the record's: 'artefact' (another allele at the record's own position -- an
     alternative to it, so a slot phased with both is a phasing artefact -- or, its phase
     unknown, the other allele of a multi-allelic heterozygote, one allele per haplotype),
     'deleted' (only on bases the record, an indel, deletes or replaces: they are not in
-    the fake-indel window, so it changes nothing), 'complex-in-deleted' (such an allele
-    that is a complex record: an open reading, OPEN_READINGS), 'mnv' (an MNV, in no store
+    the fake-indel window, so it changes nothing), 'mnv' (an MNV, in no store
     CRISPRme reads beside the record: not read), 'complex' (an indel at another position --
     one complex allele split into overlapping records, or a repeat's indel left-aligned
     onto the record's last bases -- that changes the reference bases the target covers:
     the slot is taken off the target's rows whatever its bases; with no target given
     (``cover`` None), every such indel), 'beside' (one that changes none of the bases a
-    target covering ``cover`` holds: complex_takes_off) or 'undocumented' (a SNV at
-    another position, which METHODS does not cover: read as taking the slot off). All but
-    'complex' and 'undocumented' leave the record's slot listed, read without them.
+    target covering ``cover`` holds: complex_takes_off), 'snv-on-mnv' / 'snv-breaks-mnv'
+    (an SNV on a base of an MNV record, read base by base) or 'undocumented' (a SNV at
+    another position of an indel record's REF, which METHODS does not cover: read as
+    taking the slot off). All but 'complex', 'snv-breaks-mnv' and 'undocumented' leave
+    the record's slot listed, read without them (LEFT_OUT).
 
     ``mnv``: the run read the MNV store (MNV_RULES). An MNV is then read as an indel at
     another position is ('complex' or 'beside', never 'mnv'), save at the record's own
     position (rule (c): 'artefact') and on bases an indel record deletes (rule (a)(i):
-    'deleted'); and on an MNV record's rows no allele is 'deleted' (rule (b))."""
+    'deleted'); and on an MNV record's rows no allele is 'deleted' (rule (b)).
+
+    Three readings of 2.10.1 (METHODS section 4), each measured against HPRC's
+    pre-vcfwave original records:
+      * rule 1, a complex record wholly on bases an indel record deletes or replaces: it
+        puts bases of its own among them, as an insertion there does, and takes the slot
+        off ('complex'). Reading it as changing nothing was turned down (692 false
+        23-mers of 4,864 listed);
+      * rule 2, an SNV on a base of an MNV record: the slot is read base by base. One
+        that names the base the record puts there leaves the slot listed ('snv-on-mnv',
+        21 of HPRC v2.1's 28 pairs, the record's own POS included); one on a base the
+        record keeps -- its ALT base is the reference base there, or the base lies in the
+        bases REF and ALT share -- and a true third-base conflict take it off
+        ('snv-breaks-mnv'), the window showing the record's own base;
+      * rule 3, an indel at the POS of a complex record (one of the two keeping no anchor
+        base): a displaced copy of it, so the complex record's rows read the slot without
+        the indel ('artefact') while the indel's rows read the complex record ('complex'
+        or 'beside') and the slot leaves them. Two records that both keep an anchor are
+        two alleles of one site, and two that keep none are read as overlapping
+        records, as before."""
+    if a.kind == "snv" and al.kind == "mnv" and a.lo >= al.lo and a.hi <= al.hi:
+        if not phase_known:
+            return "artefact"   # a multi-allelic heterozygote: one allele per haplotype
+        k = a.lo - al.edit_lo
+        mine = al.body[k] if 0 <= k < len(al.body) else None  # None: a base it shares
+        return "snv-on-mnv" if (mine is not None and mine.upper() == a.body.upper()) \
+            else "snv-breaks-mnv"
     if a.key[0] == al.key[0]:
-        return "artefact"
+        if a.kind != "snv" and mnv and (a.kind == "mnv") != (al.kind == "mnv"):
+            return "artefact"   # rule (c): an MNV and an indel at one POS
+        if a.kind == "snv" or (a.edit_lo > a.lo
+                               and (al.edit_lo > al.lo or al.kind != "mnv")):
+            return "artefact"   # another allele of the record's own anchor base
+        # rule 3: one of the two keeps no anchor base, so they describe the same bases.
+        # On a complex record's rows the indel is the one left out, above
     if (not al.body or al.kind == "indel") and not a.adds() \
-            and a.lo >= al.edit_lo and a.hi <= al.edit_hi:
-        if a.kind == "indel" and a.body and "complex-in-deleted" in OPEN_READINGS:
-            return "complex-in-deleted"
+            and a.lo >= al.edit_lo and a.hi <= al.edit_hi \
+            and not (a.kind == "indel" and a.body):
         return "deleted"
     if not phase_known:
         return "artefact"
@@ -4546,7 +4618,8 @@ def documented(win, ctx, tgt, sample, lids):
     rule leaves the choice open), causes a set naming what decided it. MNVs are read as
     the run read them (MNV_RULES): from the phased store's MNV file (2.10.1), an MNV
     record's carriers by their phase and an MNV beside the record a second record; else as
-    2.10.0 read them. An open reading (OPEN_READINGS) is read as the code reads it."""
+    2.10.0 read them. The shapes HPRC's decomposition leaves are read by rules 1 to 3 of
+    2.10.1 (overlap_kind), as the code reads them."""
     main_al, call = main_call(win, tgt.main.key, sample)
     if main_al is None:
         return "off", {"no-record"}
@@ -4595,24 +4668,22 @@ def documented(win, ctx, tgt, sample, lids):
                 if meets_ref(a, main_al):
                     # overlap_kind: an allele at the record's own position (or, its phase
                     # unknown, a multi-allelic heterozygote), one only on bases it deletes
-                    # or replaces and an indel at another position that changes none of the
-                    # bases the target covers stay out of the reading; an MNV is not read
+                    # or replaces, an indel at another position that changes none of the
+                    # bases the target covers and an SNV naming the base an MNV record
+                    # puts there (rule 2) stay out of the reading; an MNV is not read
                     # (2.10.0) or read as such an indel (the MNV store: MNV_RULES); an
                     # indel at another position that changes one of them takes the slot off
-                    # whatever its bases, and so (undocumented) does a SNV; a complex record
-                    # wholly on bases the record deletes is read as the code reads it
-                    # (OPEN_READINGS): off where its ALT, read as inserted bases, falls
-                    # between two covered bases
+                    # whatever its bases, and so do a SNV on a base an MNV record keeps or
+                    # one of a true third-base conflict (rule 2), a complex record wholly
+                    # on bases the record deletes or replaces (rule 1: its ALT bases go in
+                    # among them) and (undocumented) a SNV at another position of an indel
+                    # record's REF
                     ok = overlap_kind(a, main_al, phase_known=(r != "?"), cover=cover,
                                       mnv=mnv)
                     if ok == "complex":
                         off = "complex"
-                    elif ok == "undocumented":
-                        off = off or "undocumented"
-                    elif ok == "complex-in-deleted":
-                        causes.add(ok)
-                        if complex_in_deleted_off(a, main_al, cover):
-                            off = off or ok
+                    elif ok in ("undocumented", "snv-breaks-mnv"):
+                        off = off or ok
                     elif ok != "mnv":
                         causes.add(ok)
                     continue
@@ -4751,6 +4822,8 @@ LIMIT_OF = (("last-alt-wins", "limit-last-alt-wins"),
             ("putative", "limit-putative-carrier"),
             ("complex", "limit-overlapping-records"),
             ("undocumented", "limit-overlapping-records"),
+            ("snv-breaks-mnv", "limit-overlapping-records"),
+            ("snv-on-mnv", "limit-overlapping-records"),
             ("artefact", "limit-overlapping-records"),
             ("deleted", "limit-overlapping-records"),
             ("beside", "limit-overlapping-records"))
@@ -4809,10 +4882,6 @@ CARRIER_TEXT = {
                            "row does not name, which CRISPRme does not read",
     "indel-row-mnv-carrier": "listed, and their slot of %s holds an MNV inside the target "
                              "the row does not name, which the run read from the MNV store",
-    "open-complex-in-deleted": "hold, on their slot of %s, a complex record wholly on bases "
-                               "it deletes or replaces, which METHODS and the code read "
-                               "otherwise (an open reading, item 23: METHODS' reading "
-                               "is decided, not yet in the code)",
 }
 
 
@@ -4855,29 +4924,6 @@ def carrier_verdict(win, ctx, tgt, sample, listed, lids):
     if old is not None and old[1] == "limit-indel-row-mnv":
         return True, "indel-row-mnv-carrier", MNV_READ
     return v
-
-
-def open_off(win, tgt, sample, info):
-    """The open 'complex-in-deleted' records (OPEN_READINGS) that the code reads as taking
-    off every slot of the sample that holds the target read without its overlapping
-    alleles (``info``: truth()'s per-slot records of a 'resolved' verdict): their tokens,
-    or [] where such a slot holds no such record (the code keeps the carrier there)."""
-    if "complex-in-deleted" not in OPEN_READINGS:
-        return []
-    main_al = main_call(win, tgt.main.key, sample)[0]
-    cover = covered_span(tgt.place, main_al)
-    mnv = win.mnv_read(main_al)
-    out = set()
-    for x in info:
-        if not x["holds"] or x["unknown"] or x["clash"]:
-            continue
-        off = [a for a in x["left"]
-               if overlap_kind(a, main_al, cover=cover, mnv=mnv) == "complex-in-deleted"
-               and complex_in_deleted_off(a, main_al, cover)]
-        if not off:
-            return []
-        out.update(a.token(win.chrom) for a in off)
-    return sorted(out)
 
 
 def gate_rival(win, tgt, sample, info):
@@ -4929,18 +4975,6 @@ def _carrier_verdict(win, ctx, tgt, sample, listed, lids):
         # the record's slot holds an allele that overlaps it, which METHODS section 4
         # reads the slot without (it stays listed); read so, the slot holds the target
         left = sorted({a.token(win.chrom) for x in tv[1] for a in x["left"]})
-        opened = open_off(win, tgt, sample, tv[1])
-        if opened:
-            # an open reading decides it (OPEN_READINGS): METHODS keeps the carrier, the
-            # code takes every such slot off; counted under its own class, either way
-            return False, OPEN_READINGS["complex-in-deleted"], (
-                "%s, while their slot holds the target read without %s, a complex record "
-                "wholly on bases %s deletes or replaces, as METHODS section 4 reads it "
-                "(changes nothing); the code counts its ALT as bases inserted before its "
-                "edit and takes the slot off (item 23 of the 2.10.1 backlog: METHODS' "
-                "reading is decided, not yet in the code)"
-                % ("listed" if listed else "not listed", ", ".join(opened),
-                   tgt.main.token(win.chrom)))
         note = "; " + GATE_RIVAL if gate_rival(win, tgt, sample, tv[1]) else ""
         if listed:
             # the row agrees with the slot as METHODS reads it: a note of its own, apart
@@ -5119,10 +5153,9 @@ def check_row(row, win, ctx, rep, gating=True):
         rep.add(g and gating, cls, row, detail, samples=",".join(who))
 
 
-# the reasons a listed carrier of a SNP row lacks its target, a documented limit first (then
-# an open reading, OPEN_READINGS, then a defect)
-SNP_ROW_ORDER = ("limit-snp-row-unphased", "limit-snp-row-mnv",
-                 OPEN_READINGS.get("snp-row-snv-mnv"), "limit-overlapping-records",
+# the reasons a listed carrier of a SNP row lacks its target, a documented limit first
+# (then a defect)
+SNP_ROW_ORDER = ("limit-snp-row-unphased", "limit-snp-row-mnv", "limit-overlapping-records",
                  "limit-last-alt-wins", "snp-row-mnv-carrier", "snp-row-indel-carrier")
 # the SNP-row report is report-only, but for one class: where the run read the MNV store
 # (MNV_RULES), a carrier listed for a sequence an MNV on its slot changes -- 2.10.0's
@@ -5188,6 +5221,24 @@ def snp_slot_on(win, a, sample, h, missing=None):
     return None
 
 
+def snp_breaks(a, q, base, ref_base):
+    """Whether the haplotype's own allele ``base`` at the reference position ``q``, inside
+    record ``a``'s REF, leaves it with no one sequence there, so that the record cannot be
+    written on it (indel_snp_cis.allele_breaks_record). Of an indel or a complex record
+    any allele but the reference base does: a VCF writes a haplotype holding both as one
+    record. Of an MNV, read base by base since 2.10.1 (rule 2), only a true third-base
+    conflict -- the allele neither the MNV's base there nor the reference base it keeps;
+    on a base it keeps the SNV's base wins, and on one it replaces an SNV naming that same
+    base agrees with it. An allele the genotypes leave unknown (None) always breaks it."""
+    if base is None:
+        return True
+    if a.kind != "mnv":
+        return base.upper() != ref_base.upper()
+    k = q - a.edit_lo
+    mine = a.body[k].upper() if 0 <= k < len(a.body) else ref_base.upper()
+    return mine != ref_base.upper() and base.upper() not in (mine, ref_base.upper())
+
+
 def snp_row_keeps(win, sample, h, start, probe, named, lids, mnv=False):
     """Whether CRISPRme keeps slot h of the sample on a per-sample SNP row whose target is
     ``probe`` (+ reading) at ``start`` and names the SNPs ``named``, by the rule METHODS
@@ -5220,8 +5271,12 @@ def snp_row_keeps(win, sample, h, start, probe, named, lids, mnv=False):
     kinds = ("indel", "mnv") if mnv else ("indel",)
 
     def indels_in(a, b):
+        # an indel at a named SNP's position is another allele of that base, a phasing
+        # artefact; an MNV there is not (2.10.1, rule 2: it replaces that base and as many
+        # after it, and the slot is read base by base)
         return [x for lid in win.lines_in(max(0, a), b + 1) for x in win.line_alleles[lid]
-                if x is not None and x.kind in kinds and x.lo not in row]
+                if x is not None and x.kind in kinds
+                and not (x.lo in row and x.kind != "mnv")]
     mine = [a for a in indels_in(lo - 1, hi + 1)
             if touches(a, lo, hi) and snp_slot_on(win, a, sample, h, False)]
     if not mine:
@@ -5264,10 +5319,11 @@ def snp_row_keeps(win, sample, h, start, probe, named, lids, mnv=False):
             elif o:
                 held.append(a)
         # the indels the slot cannot be written with: a SNP allele (or an unknown one) on a
-        # base of the REF, and two records of one base (REFs that share a base, or two
-        # insertions at one point)
-        bad.extend(a for a in held
-                   if any(value(q) != win.refseq[q] for q in range(a.lo, a.hi)))
+        # base of the REF -- of an MNV, only a true third-base conflict (snp_breaks) --
+        # and two records of one base (REFs that share a base, or two insertions at one
+        # point)
+        bad.extend(a for a in held if any(snp_breaks(a, q, value(q), win.refseq[q])
+                                          for q in range(a.lo, a.hi)))
         spans = sorted(held, key=lambda a: (a.lo, a.hi))
         for i, x in enumerate(spans):
             for y in spans[i + 1:]:
@@ -5300,6 +5356,9 @@ def snp_row_keeps(win, sample, h, start, probe, named, lids, mnv=False):
             pl, src = places[k], hap.src[a0 + k]
             base = hap.seq[a0 + k] if src is not None else (
                 value(pl[0]) if pl[1] == 0 else None)
+            if (src is not None and src.kind == "mnv" and pl[1] == 0
+                    and base.upper() == win.refseq[pl[0]].upper()):
+                base = value(pl[0])   # a base it keeps: the slot's own allele is its base
             if base is None or base.upper() != probe[k].upper():
                 good = False
                 break
@@ -5342,19 +5401,6 @@ def snp_merged_on(win, ctx, sample, h, keys, row, cp, lo, hi, lids, mnv=False):
     return False
 
 
-def snv_mnv_on_slot(win, keys, named):
-    """The open 'snp-row-snv-mnv' overlap (OPEN_READINGS) of a SNP row's carrier slot
-    holding the alleles ``keys``: its MNVs whose REF meets the base of an SNV the row names
-    (``named``) -- none where the open reading is taken out. The code reads one that starts
-    at that SNV's position as another allele of the base, a phasing artefact that keeps the
-    carrier (snp_row_keeps leaves it out), and one that starts before it as a record the
-    slot cannot be written with, which takes the carrier off."""
-    if "snp-row-snv-mnv" not in OPEN_READINGS:
-        return []
-    at = {a.lo for a in named if a.kind == "snv"}
-    return [a for a in keys if a.kind == "mnv" and any(a.lo <= q < a.hi for q in at)]
-
-
 def snp_slot_reads(hap, start, probe, want):
     """Whether a slot's haplotype ``hap`` has a SNP row's target as CRISPRme reads a SNP
     row's carrier since 2.10.0 (METHODS section 4): the slot's bases read from the
@@ -5390,8 +5436,9 @@ def check_snp_row(row, win, ctx, rep, snp_listed=None):
     Where the run read the store's MNV file (MNV_RULES, 2.10.1) its MNVs are read as its
     indels are, and listing a carrier for a sequence an MNV on its slot changes, which
     2.10.0's reading makes limit-snp-row-mnv, gates (snp-row-mnv-carrier, SNP_ROW_GATING);
-    an MNV whose REF meets the base of an SNV the row names is an open reading
-    (OPEN_READINGS: open-snp-row-snv-mnv), listed or not. A
+    an MNV whose REF meets the base of an SNV the row names is read base by base (rule 2:
+    snp_breaks, snp_row_keeps), its own POS included, where an indel there is a phasing
+    artefact that keeps the carrier. A
     row that lists no carrier and names only records a sites-only VCF holds is a
     sites-only dataset's, whose SNP post-analysis is the population-level one whatever
     the search's mode (CHANGELOG 2.8.1): a worst-case union, out of scope, so one line
@@ -5438,7 +5485,6 @@ def check_snp_row(row, win, ctx, rep, snp_listed=None):
     cp = cluster_of(row["start"], row["strand"], n, len(row["spacer_col"]),
                     ctx.pam_5prime)
     inside = [a for a in named if a.key in want]
-    open_cls = OPEN_READINGS.get("snp-row-snv-mnv")
     for s in samples_of(row):
         if ctx.panel is not None and s not in ctx.panel:
             out["carrier-not-in-panel"].append(s)
@@ -5463,7 +5509,6 @@ def check_snp_row(row, win, ctx, rep, snp_listed=None):
                 continue
             hh = make_hap(win.refseq, keys, lo, hi)
             hv = make_hap(win.refseq, [a for a in keys if a.kind == "snv"], lo, hi)
-            opened = snv_mnv_on_slot(win, keys, inside) if mnv else []
             if snp_slot_reads(hv, row["start"], probe, want):
                 # the slot's SNP alleles give the target (the haplotype SNP rows list a
                 # carrier for); since 2.10.0 CRISPRme reads the slot against the phased
@@ -5478,12 +5523,8 @@ def check_snp_row(row, win, ctx, rep, snp_listed=None):
                     if snp_slot_reads(hh, row["start"], probe, want):
                         ok = True
                         break
-                    if opened:
-                        # an MNV at a named SNV's position: the code keeps the carrier,
-                        # and no rule says so yet (OPEN_READINGS)
-                        whys.add(open_cls)
-                    elif not mnv and any(a.kind == "mnv" and touches(a, span[0], span[1])
-                                         for a in keys):
+                    if not mnv and any(a.kind == "mnv" and touches(a, span[0], span[1])
+                                       for a in keys):
                         whys.add("limit-snp-row-mnv")
                     elif any(touches(a, span[0], span[1]) for a in zone_alleles(hh)):
                         # two records of one base (an indel at a named SNP's position: a
@@ -5496,11 +5537,7 @@ def check_snp_row(row, win, ctx, rep, snp_listed=None):
                 if snp_merged_on(win, ctx, s, h, keys, row, cp, lo, hi, lids, mnv):
                     ok = True   # listed through another alignment of the site (below)
                     break
-                if opened:
-                    # an MNV meeting a named SNV's base from before it: the code takes the
-                    # carrier off, and no rule says so yet (OPEN_READINGS)
-                    whys.add(open_cls)
-                elif mnv and snp_row_keeps(win, s, h, row["start"], probe, inside, lids):
+                if mnv and snp_row_keeps(win, s, h, row["start"], probe, inside, lids):
                     # read without its MNVs (2.10.0's reading) the rule keeps the slot: an
                     # MNV of the store takes it off, the listing 2.10.0 made
                     # limit-snp-row-mnv, which the store was read to remove (MNV_READ)
@@ -5533,7 +5570,6 @@ def check_snp_row(row, win, ctx, rep, snp_listed=None):
         for x in win.by_key.get(a.key, ()):
             pool.update(win.carriers(x))
     pool -= set(samples_of(row)) | set(site)
-    left_open = []   # carriers left out whose slot holds an open reading (OPEN_READINGS)
     for s in sorted(pool):
         calls = {lid: win.calls[lid][s] for lid in lids if s in win.calls[lid]}
         if not calls or snp_unphased(win, calls, span):
@@ -5551,13 +5587,6 @@ def check_snp_row(row, win, ctx, rep, snp_listed=None):
             if not snp_slot_reads(make_hap(win.refseq, snvs, lo, hi), row["start"], probe,
                                   want):
                 continue
-            if mnv and snv_mnv_on_slot(win, [a for lid in touching
-                                             for a in win.line_alleles[lid]
-                                             if a is not None and len(calls[lid][0]) > h
-                                             and calls[lid][0][h] == a.number], inside):
-                # an MNV on the base of one of these SNVs: an open reading, counted
-                left_open.append(s)
-                break
             # CRISPRme (2.10.0) drops a carrier whose slot holds an indel of the phased
             # store that changes the target, as METHODS section 4 reads the slot (and, with
             # the MNV store, an MNV: MNV_RULES)
@@ -5578,11 +5607,6 @@ def check_snp_row(row, win, ctx, rep, snp_listed=None):
                                    "store's MNV file (2.10.1), which takes such a carrier "
                                    "off a per-sample SNP row: a listing 2.10.0's reading "
                                    "made limit-snp-row-mnv (gating)",
-            open_cls: "hold, on the slot of the row's SNPs, an MNV whose REF meets the base "
-                      "of an SNV the row names: the code keeps such a carrier where the MNV "
-                      "starts at that SNV's position (a phasing artefact) and takes it off "
-                      "where it starts before it (a record the slot cannot be written with), "
-                      "and no rule says either yet (an open reading)",
             "carrier-missing": "are not listed, nor on another row of this site naming "
                                "these SNPs, and their phased slot holds exactly these SNPs "
                                "inside the target, which it reads, with no indel that "
@@ -5603,15 +5627,6 @@ def check_snp_row(row, win, ctx, rep, snp_listed=None):
         rep.add(cls in SNP_ROW_GATING, cls, row, "%d %ssample(s) %s: %s"
                 % (len(who), "" if cls == "carrier-missing" else "listed ", text[cls],
                    ",".join(who[:12])), samples=",".join(who))
-    if left_open:
-        rep.add(False, open_cls, row,
-                "%d sample(s) are not listed, nor on another row of this site naming these "
-                "SNPs, and their phased slot holds exactly these SNPs inside the target, "
-                "which they read, and an MNV whose REF meets the base of one of them: the "
-                "code keeps such a carrier where the MNV starts at that SNV's position (a "
-                "phasing artefact) and takes it off where it starts before it, and no rule "
-                "says either yet (an open reading): %s"
-                % (len(left_open), ",".join(left_open[:12])), samples=",".join(left_open))
 
 
 # --------------------------------------------------------------------------- #
@@ -6002,8 +6017,6 @@ def record_demands(win, ctx, al, carriers, full, lo, hi, reach):
     demand_of = {}
     clash_who = set()
     clash_how = set()
-    open_who = set()      # carriers of a slot holding an open 'complex-in-deleted' record
-    open_how = set()      # (OPEN_READINGS), counted apart
     clash_cps = set()     # rows CRISPRme writes for a slot read without its overlaps
     open_cps = defaultdict(set)   # rows it may write or not -> why (OPEN_CLASS)
     capped = set()
@@ -6110,25 +6123,14 @@ def record_demands(win, ctx, al, carriers, full, lo, hi, reach):
                 # unknown phase (resolved PUTATIVE) or an overlap zone is a row it may
                 # write or not, one that needs a second indel-path record none
                 resolved_unknown = resolved_unknown or in_reach
-                # a complex record wholly on bases the record deletes, an open reading
-                # (OPEN_READINGS): METHODS reads the slot so, the code takes it off a
-                # target whose covered bases hold the point its ALT is read inserted at,
-                # which is a row CRISPRme may write or not (counted apart, its own class)
-                opened = [a for a in left if overlap_kind(a, main_al, mnv=mnv)
-                          == "complex-in-deleted"]
                 if got:
-                    (open_who if opened else clash_who).update(members)
-                    (open_how if opened else clash_how).update(clash_text(win, make_hap(
+                    clash_who.update(members)
+                    clash_how.update(clash_text(win, make_hap(
                         win.refseq, [main_al] + present, lo, hi).clashes(
                             main_al.lo, main_al.hi - 1)))
-                for kind, c, x in got:
+                for kind, c, _x in got:
                     if kind in ("exact", "window"):
-                        if opened and any(complex_in_deleted_off(
-                                a, main_al, covered_span(x[0].place, main_al))
-                                for a in opened):
-                            open_cps[c].add("complex-in-deleted")
-                        else:
-                            clash_cps.add(c)
+                        clash_cps.add(c)
                     elif kind in ("putative", "zone"):
                         open_cps[c].add("overlap")
                 continue
@@ -6187,7 +6189,7 @@ def record_demands(win, ctx, al, carriers, full, lo, hi, reach):
                 else:
                     cps.add(c)
     return {"demands": demands, "demand_of": demand_of, "clash_who": clash_who,
-            "clash_how": clash_how, "open_who": open_who, "open_how": open_how,
+            "clash_how": clash_how,
             "capped": capped, "zone_capped": zone_capped,
             "skipped": skipped, "lids": lids, "cps": frozenset(cps), "cut": cut,
             "cps_open": {c: frozenset(w) for c, w in open_cps.items() if c not in cps}}
@@ -6221,21 +6223,6 @@ def comp_record(win, ctx, rep, reported, al, carriers, guide, full, lo, hi, popm
             "reads (one in budget reads there with the overlapping alleles left out), so "
             "the VCF gives no one sequence there and they are not demanded (overlapping "
             "on one slot: %s%s; %d of them listed on a row naming the record): %s"
-            % (len(who), tok, "; ".join(how[:4]), "; ..." if len(how) > 4 else "",
-               reported.on_rows(guide, who, tok), ",".join(who[:12])),
-            samples=",".join(who))
-    if e.get("open_who"):
-        # an open reading (OPEN_READINGS): counted under its own class, never demanded
-        who = sorted(e["open_who"])
-        how = sorted(e["open_how"])
-        rep.add(False, OPEN_READINGS["complex-in-deleted"], {
-            "table": "completeness", "chrom": chrom, "start": al.lo, "var": tok},
-            "%d sample(s) hold %s on a slot that also holds a complex record wholly on bases "
-            "it deletes or replaces (%s%s): METHODS section 4 reads the slot without it "
-            "(changes nothing), the code counts its ALT as bases inserted before its edit "
-            "and takes the slot off a target that covers that point (item 23 of the 2.10.1 "
-            "backlog: METHODS' reading is decided, not yet in the code), so its targets "
-            "are counted, not demanded (%d of them listed on a row naming the record): %s"
             % (len(who), tok, "; ".join(how[:4]), "; ..." if len(how) > 4 else "",
                reported.on_rows(guide, who, tok), ",".join(who[:12])),
             samples=",".join(who))
@@ -7175,9 +7162,7 @@ def record_cps(win, ctx, guide, al, e=None):
 # settles; a target through an earlier record of a split site, or an untied multi-ALT alt,
 # which its stores read otherwise; a per-sample run's capped window, whose greedy
 # worst-case row only the classic dictionary path writes (METHODS section 5, known limit)
-OPEN_CLASS = (("complex-in-deleted", OPEN_READINGS.get("complex-in-deleted",
-                                                     "limit-overlapping-records")),
-              ("overlap", "limit-overlapping-records"),
+OPEN_CLASS = (("overlap", "limit-overlapping-records"),
               ("last-alt-wins", "limit-last-alt-wins"),
               ("putative-untied", "limit-putative-carrier"),
               ("capped", "limit-capped-window"),
@@ -7187,11 +7172,6 @@ OPEN_CLASS = (("complex-in-deleted", OPEN_READINGS.get("complex-in-deleted",
               ("snp-row-indel", "coverage-snp-row-indel"),
               ("insertion-site", "limit-insertion-site"))
 OPEN_TEXT = {
-    "complex-in-deleted": "the rows of a slot that holds a complex record wholly on bases "
-                          "the record deletes or replaces, which METHODS section 4 keeps "
-                          "and the code takes off (an open reading: item 23 of the 2.10.1 "
-                          "backlog, METHODS' reading decided, not yet in the code; "
-                          "OPEN_READINGS)",
     "overlap": "the rows of a slot whose alleles overlap, which no documented rule says "
                "CRISPRme writes or not (the one-record reading of a slot whose record meets "
                "a SNV at another position; a target an overlap zone of two other alleles "

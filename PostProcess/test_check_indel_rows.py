@@ -3249,9 +3249,9 @@ class ReviewRound7(Base):
     def test_the_rows_of_an_overlap_are_written_left_open_or_none(self):
         """R7-F2: the Cluster Positions a record gives the chain from a slot whose alleles
         overlap it: those of the slot read without a phasing artefact (CRISPRme writes
-        them), none for a complex allele (it takes the slot off), and those of the
-        one-record reading where nothing documents the overlap (a SNV on an MNV's second
-        base) as rows CRISPRme may write or not."""
+        them) and none for a complex allele (it takes the slot off). An SNV on an MNV's
+        second base naming the base the MNV puts there is no overlap at all since 2.10.1
+        (rule 2, the slot read base by base): its rows are the slot's own."""
         g = "AGGAGGAGGAGGAGGAGGAG"
         for r2, cps, maybe in ((None, {0, 3}, {}), ("complex", {0}, {}),
                                ("pos", {0, 3}, {})):
@@ -3276,8 +3276,7 @@ class ReviewRound7(Base):
         r = win.by_key[recs[0][:3]][0]
         e = C.record_demands(win, ctx, r, {"S01"}, ctx.full(GUIDE), 0, len(info["seq"]),
                              (r.edit_lo - 26, r.edit_hi + 26))
-        self.assertEqual((e["cps"], e["cps_open"]),
-                         (frozenset(), {info["start"]: frozenset({"overlap"})}), e)
+        self.assertEqual((e["cps"], e["cps_open"]), (frozenset({info["start"]}), {}), e)
 
     def test_a_target_through_an_snv_the_stores_read_otherwise_is_an_open_row(self):
         """R7-F2's sweep: S01's target holds the earlier record of a split SNV site, which
@@ -8323,10 +8322,14 @@ class MnvStoreRows(Base):
     # --- rule (c): an MNV and an indel at one POS ---------------------------------- #
     def test_rule_c_an_mnv_and_an_indel_at_one_pos_on_both_records_rows(self):
         """Rule (c): an MNV and an indel at one POS are other alleles of that position, a
-        phasing artefact: on the deletion's row S01's slot is read without the MNV, on the
-        MNV's row S03's without the insertion, and both listings agree, in every run. With
-        the MNV store the finding says that the carrier gate reads such a slot otherwise
-        (GATE_RIVAL: 'phase not known'); without it, it does not."""
+        phasing artefact, where the run read the MNV store: on the deletion's row S01's
+        slot is read without the MNV, on the MNV's row S03's without the insertion, and
+        both listings agree. The finding then says that the carrier gate reads such a slot
+        otherwise (GATE_RIVAL: 'phase not known'). Without the store the rule does not
+        apply: the MNV beside the deletion is in no store CRISPRme reads (the listing
+        agrees all the same), and an indel at an MNV row's POS is read as an overlapping
+        record, as _store_indels reads it there -- the slot has no one sequence and its
+        rows are counted, not demanded."""
         seq = PRE + GUIDE[:10] + "C" + GUIDE[10:] + "TGG" + POST
         p = len(PRE) + 10
         dele = (p, GUIDE[9] + "C", GUIDE[9], {"S01": "1|0", "S02": "0|1"})
@@ -8344,8 +8347,9 @@ class MnvStoreRows(Base):
             who = "S01" if tag == "del_" else "S03"
             for case, store in zip(mnv_runs(self, *world, tag=tag), (False, False, True)):
                 rc, found = case.run()
-                self.assertEqual((rc, pairs(found)), (0, {("overlap-reading-agrees", who)}),
-                                 (tag, store, found))
+                cls = ("overlap-reading-agrees" if store or tag == "del_"
+                       else "limit-overlapping-records")
+                self.assertEqual((rc, pairs(found)), (0, {(cls, who)}), (tag, store, found))
                 self.assertEqual("phase not known" in found[0][2], store, (tag, found))
 
     # --- carrier_verdict's PUTATIVE-truth branch (the MNV review's MNV-R1) -------- #
@@ -8402,7 +8406,8 @@ class MnvStoreSnpRows(Base):
     """2.10.1, --snp-rows report: with the MNV store a SNP row's carrier whose slot holds an
     MNV that changes the target is taken off, as for an indel; listing one gates
     (snp-row-mnv-carrier, 2.10.0's limit-snp-row-mnv). An MNV on the base of a named SNV is
-    an open reading (open-snp-row-snv-mnv), listed or not."""
+    read base by base (rule 2): it is no phasing artefact, and the carrier leaves the row
+    wherever the MNV changes a base of the target the row's SNPs do not name."""
 
     def _world(self, listed, mnvs=True):
         """A SNP row: the SNV at guide base 6 (1-based) restores the guide. S01 holds it and
@@ -8427,9 +8432,10 @@ class MnvStoreSnpRows(Base):
 
     def test_a_snp_rows_carrier_with_an_mnv_in_the_target(self):
         """Without the MNV store: S01 is 2.10.0's limit-snp-row-mnv, S03 and S04 too (the
-        MNV is read by no store). With it: listing S01 gates (snp-row-mnv-carrier), and S03
-        and S04 are the open reading -- the code keeps S03 (an MNV at a named SNV's
-        position, a phasing artefact) and takes S04 off."""
+        MNV is read by no store). With it, listing any of the three gates
+        (snp-row-mnv-carrier): read base by base (rule 2), each MNV changes a base of the
+        target the row's SNP does not name -- S03's the base after the named SNV's, S04's
+        the base before it -- so CRISPRme takes all three off the row."""
         old, nomnv, store = mnv_runs(self, *self._world("S01,S02,S03,S04"))
         for case in (old, nomnv):
             rc, found = case.run(extra=("--snp-rows", "report"))
@@ -8437,23 +8443,42 @@ class MnvStoreSnpRows(Base):
             self.assertEqual(pairs(found), {("limit-snp-row-mnv", "S01,S03,S04")}, found)
         rc, found = store.run(extra=("--snp-rows", "report"))
         self.assertEqual(rc, 1, found)
-        self.assertEqual(pairs(found, True), {("snp-row-mnv-carrier", "S01")}, found)
-        self.assertEqual(pairs(found), {("snp-row-mnv-carrier", "S01"),
-                                        ("open-snp-row-snv-mnv", "S03,S04")}, found)
+        self.assertEqual(pairs(found, True), {("snp-row-mnv-carrier", "S01,S03,S04")},
+                         found)
+        self.assertEqual(pairs(found), {("snp-row-mnv-carrier", "S01,S03,S04")}, found)
 
     def test_the_carriers_a_snp_row_leaves_out_with_the_store(self):
         """The row listing S02 alone: without the store S01, S03 and S04 hold the target
-        as 2.10.0's rule reads it (no MNV) and are missing (report-only); with it S01 is
-        rightly off (its MNV changes the target), and S03 and S04, left off, are the open
-        reading."""
+        as 2.10.0's rule reads it (no MNV) and are missing (report-only); with it all
+        three are rightly off, their MNV changing a base of the target (rule 2 for S03's
+        and S04's, which meet the named SNV's base), and the row raises nothing."""
         old, nomnv, store = mnv_runs(self, *self._world("S02"))
         for case in (old, nomnv):
             rc, found = case.run(extra=("--snp-rows", "report"))
             self.assertEqual((rc, pairs(found)), (0, {("carrier-missing", "S01,S03,S04")}),
                              found)
         rc, found = store.run(extra=("--snp-rows", "report"))
-        self.assertEqual((rc, pairs(found)), (0, {("open-snp-row-snv-mnv", "S03,S04")}),
-                         found)
+        self.assertEqual((rc, pairs(found)), (0, set()), found)
+
+    def test_an_mnv_that_names_the_rows_own_snp_base_keeps_the_carrier(self):
+        """Rule 2, the other side: an MNV at the named SNV's position that puts the row's
+        own alt there and changes no other base of the target leaves the carrier listed
+        (21 of HPRC v2.1's 28 SNV-MNV pairs name the base the MNV puts there). Up to this
+        rule the slot was read with the MNV's bases over the row's SNP, and the carrier
+        was dropped."""
+        seq = PRE + GUIDE[:5] + "C" + GUIDE[6:] + "TGG" + POST
+        q = len(PRE) + 5
+        snp = (q + 1, "C", GUIDE[5], {"S02": "0|1", "S05": "1|0"})
+        # an MNV on the named SNV's base and the one before it, naming the row's own alt
+        # there and the reference base before it: base by base it changes nothing
+        recs = [snp, (q, seq[q - 1:q + 1], seq[q - 1] + GUIDE[5], {"S05": "1|0"})]
+        s0 = len(PRE)
+        rows = [row_fields("chr21", s0, "+", GUIDE + "NNN", seq[s0:s0 + 23],
+                           GUIDE + "TGG", "TGG", 0, 0, "X", tok("chr21", snp),
+                           "S02,S05")]
+        _old, _nomnv, store = mnv_runs(self, seq, recs, rows, tag="keeps_")
+        rc, found = store.run(extra=("--snp-rows", "report"))
+        self.assertEqual((rc, pairs(found)), (0, set()), found)
 
 
     def test_a_per_sample_cluster_chain_drops_a_slots_mnv_with_the_store(self):
@@ -8477,12 +8502,14 @@ class MnvStoreSnpRows(Base):
             self.assertEqual(drops, mnvs if store else set(), store)
 
 
-class OpenComplexInDeleted(Base):
-    """Item 23 of the 2.10.1 backlog, an open reading (OPEN_READINGS): a complex record
-    wholly on bases the row's deletion deletes. METHODS section 4 keeps the carrier; the
-    code (changes_span) reads its ALT as inserted bases and takes the slot off. Read as the
-    code reads it, counted under its own class whether the row lists the carrier or not,
-    in soundness and in completeness, never gating."""
+class AComplexRecordInsideDeletedBases(Base):
+    """Rule 1 (item 23, decided 2026-11-22): a complex record wholly on bases the row's
+    deletion deletes. It puts bases of its own among them, as an insertion there does, so
+    the slot leaves the row and is listed nowhere -- the reading the code has had since
+    2.10.0, which the measurement against HPRC's pre-vcfwave originals kept (reading it
+    as changing nothing lists 692 false 23-mers of 4,864). A row that does not list the
+    carrier raises nothing that gates (its targets are counted, not demanded); one that
+    lists it is listed against the documented rules."""
 
     def _world(self, listed):
         seq = PRE + GUIDE[:10] + "CAGTA" + GUIDE[10:] + "TGG" + POST
@@ -8493,17 +8520,21 @@ class OpenComplexInDeleted(Base):
                          "TGG", 0, 0, "X", tok("chr21", dele), listed)
         return Case(self.tmp, seq, [dele, cx], [row])
 
-    def test_listed_or_not_it_is_its_own_class(self):
-        rc, found = self._world("S01,S02").run()
-        self.assertEqual((rc, pairs(found)), (0, {("open-complex-in-deleted", "S01")}), found)
-        self.assertIn("listed, while", found[0][2])
-        self.assertIn("item 23", found[0][2])
+    def test_the_slot_is_listed_nowhere(self):
+        # not listed, as the code reads it: counted, non-gating, in soundness
         rc, found = self._world("S02").run()
-        self.assertEqual((rc, pairs(found)), (0, {("open-complex-in-deleted", "S01")}), found)
-        self.assertIn("not listed", found[0][2])
+        self.assertEqual((rc, pairs(found)), (0, {("limit-overlapping-records", "S01")}),
+                         found)
+        self.assertIn("no one sequence in the VCF there", found[0][2])
+        # and in completeness, where its targets are counted, never demanded
         rc, found = self._world("S02").run(mode="completeness", budget=("0", "0", "0", "0"))
         self.assertEqual((rc, gating(found)), (0, []), found)
-        self.assertEqual(pairs(found), {("open-complex-in-deleted", "S01")}, found)
+        self.assertEqual(pairs(found), {("limit-overlapping-records", "S01")}, found)
+        # listed: against the documented rules, so a later refactor that starts listing
+        # such a slot fails the check
+        rc, found = self._world("S01,S02").run()
+        self.assertEqual((rc, pairs(found, True)), (1, {("carrier-off-by-rule", "S01")}),
+                         found)
 
 
 class MnvOverlapReadings(unittest.TestCase):
@@ -8542,11 +8573,65 @@ class MnvOverlapReadings(unittest.TestCase):
         self.assertEqual(self.kinds(m, d), ("mnv", "complex"))
 
     def test_rule_c_one_pos(self):
+        """With the MNV store an MNV and an indel at one POS are other alleles of that
+        position, both ways. Without it the MNV is in no store CRISPRme reads ('mnv'), and
+        an indel at an MNV row's POS is read as an overlapping record: the MNV keeps no
+        anchor base, so _store_indels does not skip the indel there."""
         d = al(10, "AC", "A")
         m = al(10, "AC", "GT")
         i = al(10, "A", "AT")
-        for a, b in ((m, d), (d, m), (m, i), (i, m)):
-            self.assertEqual(self.kinds(a, b), ("artefact", "artefact"))
+        for a, b in ((m, d), (m, i)):
+            self.assertEqual(self.kinds(a, b), ("mnv", "artefact"))
+        self.assertEqual(self.kinds(i, m), ("complex", "artefact"))
+        # at the MNV's POS rule (c) comes first with the store; without it, the deletion
+        # deletes a base the MNV replaces, which an MNV window counts as lost ('beside')
+        self.assertEqual(self.kinds(d, m), ("beside", "artefact"))
+
+    def test_rule_3_an_indel_at_a_complex_records_pos(self):
+        """2.10.1, rule 3: one of the two keeps no anchor base, so they describe the same
+        bases (HPRC v2.1's normalisation left-aligned the indel onto the complex record's
+        POS). The complex record's rows read the slot without the indel, a displaced copy
+        of it; the indel's rows read the complex record, and the slot leaves them. Two
+        records that both keep an anchor are two alleles of one site, and two that keep
+        none are read as overlapping records, as before."""
+        cx = al(10, "AC", "TGG")     # keeps no anchor base
+        ins = al(10, "A", "AT")      # an insertion at its POS, keeping one
+        dele = al(10, "ACG", "A")    # a deletion there, keeping one
+        for a in (ins, dele):
+            self.assertEqual(self.kinds(a, cx), ("artefact", "artefact"), a.key)
+            self.assertEqual(self.kinds(cx, a), ("complex", "complex"), a.key)
+        # both keep an anchor: two alleles of one site, as since 2.8.1
+        self.assertEqual(self.kinds(ins, dele), ("artefact", "artefact"))
+        self.assertEqual(self.kinds(dele, ins), ("artefact", "artefact"))
+        # both keep none (chrX:35,966,203's 3 slots): each is read on the other's rows
+        cx2 = al(10, "AC", "GGT")
+        self.assertEqual(self.kinds(cx2, cx), ("complex", "complex"))
+        self.assertEqual(self.kinds(cx, cx2), ("complex", "complex"))
+
+    def test_rule_2_an_snv_on_a_base_of_an_mnv_record(self):
+        """2.10.1, rule 2: the slot is read base by base. An SNV naming the base the MNV
+        puts there leaves the slot listed, at the record's own POS and later; one on a
+        base it keeps, and a true third-base conflict, take it off. An unphased call is
+        the other allele of a multi-allelic heterozygote, as before."""
+        m = al(10, "AAC", "CAG")     # keeps its middle base (chrY:21,604,661's shape)
+        for snv, want in (((10, "A", "C"), "snv-on-mnv"),      # its own POS, same base
+                          ((12, "C", "G"), "snv-on-mnv"),      # a later base, same base
+                          ((11, "A", "T"), "snv-breaks-mnv"),  # a base it keeps
+                          ((12, "C", "T"), "snv-breaks-mnv")):  # a third-base conflict
+            a = al(*snv)
+            self.assertEqual(self.kinds(a, m), (want, want), snv)
+            self.assertEqual(C.overlap_kind(a, m, phase_known=False, cover=self.COVER),
+                             "artefact", snv)
+        # an SNV on a base an MNV record shares with its REF: the SNV's base wins
+        m2 = al(10, "ACT", "ACA")
+        self.assertEqual(self.kinds(al(11, "C", "G"), m2), ("snv-breaks-mnv",) * 2)
+        # on an indel record's rows a SNV at another position of its REF is undocumented
+        # (here a record left unnormalized, ACG>AC, which keeps the C at 11), and one on a
+        # base it deletes changes nothing
+        self.assertEqual(self.kinds(al(11, "C", "G"), al(10, "ACG", "AC")),
+                         ("undocumented",) * 2)
+        self.assertEqual(self.kinds(al(11, "C", "G"), al(10, "AC", "A")),
+                         ("deleted",) * 2)
 
     def test_shapes_one_and_two(self):
         m = al(10, "AC", "GT")     # 9, 10
@@ -8560,20 +8645,22 @@ class MnvOverlapReadings(unittest.TestCase):
         self.assertEqual(self.kinds(dele, m), ("complex", "complex"))
         self.assertEqual(self.kinds(dele, m, cover=(0, 10)), ("beside", "beside"))
 
-    def test_the_open_reading_of_item_23(self):
+    def test_rule_1_a_complex_record_inside_the_deleted_bases(self):
+        """2.10.1, rule 1 (item 23): it puts bases of its own among the bases the record
+        deletes, as an insertion there does, and takes the slot off. Reading it as
+        changing nothing was turned down (692 false 23-mers of 4,864 listed)."""
         d = al(10, "ACGTA", "A")   # deletes CGTA, 10..13
         cx = al(12, "GTA", "C")    # a complex record wholly on them, 11..13
-        self.assertEqual(self.kinds(cx, d), ("complex-in-deleted", "complex-in-deleted"))
-        self.assertTrue(C.complex_in_deleted_off(cx, d, self.COVER))
+        self.assertEqual(self.kinds(cx, d), ("complex", "complex"))
+        self.assertTrue(C.complex_takes_off(cx, d, self.COVER))
         # its edit starting on the target's first covered base: the point its ALT is read
         # inserted at is no place between two covered bases
-        self.assertFalse(C.complex_in_deleted_off(cx, d, (11, 40)))
-        # a pure deletion, an SNV or an MNV there is 'deleted', as METHODS reads it
+        self.assertEqual(C.overlap_kind(cx, d, cover=(11, 40)), "beside")
+        self.assertFalse(C.complex_takes_off(cx, d, (11, 40)))
+        # a pure deletion, an SNV or an MNV there is 'deleted': it changes nothing
         for a in (al(12, "GT", "G"), al(12, "G", "T"), al(12, "GT", "AA")):
             self.assertEqual(C.overlap_kind(a, d, cover=self.COVER), "deleted", a.key)
-        self.assertIn("complex-in-deleted", C.LEFT_OUT)
-        with mock.patch.dict(C.OPEN_READINGS, clear=True):
-            self.assertEqual(C.overlap_kind(cx, d, cover=self.COVER), "deleted")
+        self.assertNotIn("complex", C.LEFT_OUT)
 
 
 class ForkPoolFreeze(Base):
