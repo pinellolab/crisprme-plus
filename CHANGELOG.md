@@ -14,6 +14,51 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Changed
+- **The report's curated tables write a CRISPR-Bulge score with 6 significant digits, not 4
+  decimals.** The in-report top-1000 table and every download (`top1000.tsv`,
+  `top1000_crispr_bulge.tsv`, `panel_top100.tsv`, the per-tier TSVs) printed the score with
+  `"{:.4f}"`, whose floor is 5e-5: the sensitive operating point, 1.9e-4 at the default
+  95% recall, printed `0.0002` and so did every score from 1.5e-4 to 2.5e-4, on either side of
+  it, while everything below 5e-5 — nearly every row of a top 1,000 ranked BY CRISPR-Bulge —
+  printed `0.0000`. A reader could not tell from the column which side of the threshold a site
+  was on. The cells now carry `cb_operating_point.score_text`, `"{:.6g}"`: the same text the
+  post-analyses have written into the search's own tables since 2.8.0 (`cbulge_rows`,
+  `targets_scoring`), so the report re-formats the value it reads rather than rounding it a
+  second time, and the format lives beside the threshold it has to make readable. Six
+  SIGNIFICANT digits keep a plain decimal where one is legible (`0.00019`) and turn to
+  scientific notation only below 1e-4 (`2.35e-39`), and are inside the precision of the model's
+  float32 output (~7 digits), so no digit printed is noise. A row the model does not score
+  keeps its `-`, and a true zero reads `0`. **CFD is unchanged, at 4 decimals**: it is
+  calibrated, uses the whole 0-1 range, and its thresholds (0.05 / 0.2 / 0.5) are far from any
+  display floor. **The search's result tables are not touched.**
+- **The report's curated tables carry both alignments of a site.** They had one protospacer
+  column, `Aligned_protospacer+PAM`, which holds the variant (ALT) sequence and falls back to
+  the reference one on a row no variant creates — so the table never showed what the variant
+  changed, and a collaborator designing a validation assay had to go back to the raw results
+  for the reference sequence. A column of its own, `Aligned_protospacer+PAM_REF`, now sits
+  between `Aligned_spacer+PAM` and it, so the three read top to bottom as the alignment of the
+  site. The other column is unchanged, fallback included. A variant-created site that is absent
+  from the reference has no reference alignment and shows `-` there; a run with no variant
+  off-target (a reference-only search, an `assembly-search` combined report) drops the new
+  column instead of repeating the other one on every row, as it drops `Observed`. The in-report
+  table shows all three in a monospace cell, so their columns line up.
+- **The report's CRISPR-Bulge score panels are log10, with the operating point drawn on them.**
+  Panels (c) and (d) of Section 2, and the results page's and Personal Risk Card's top plots
+  (`CRISPRme_plots.py`, `CRISPRme_plots_personal.py`), drew this score on a linear 0-1 y-axis:
+  with the sensitive operating point at 1.9e-4 and a genome-wide run's sites orders of magnitude
+  below it, every point lay on the bottom rule and the threshold could not be drawn at all. The
+  axis is now log10, with that operating point (from `cb_operating_point`, never a number
+  written in the plot) as a labelled dashed line. A log axis cannot show 0 and the model's
+  float32 output underflows to exactly 0 for a few percent of the rows of a genome-wide run: a
+  floor is set one full decade below the smallest non-zero score the panel has to show, the
+  zeros are drawn ON it inside a shaded band that the legend and the caption name as "0", and
+  the axis always reaches down far enough for the threshold line — so no point is dropped and
+  none is mistaken for a real small score. The -1 the pipeline writes for a row it does not
+  score is not a zero and is drawn nowhere, as it fell outside the 0-1 window before. The
+  ref->alt arrows are drawn from one data point to the other (the old +0.02/-0.04 trims were
+  lengths of a 0-1 axis), the allele-frequency sizing and the perfect-match stars are unchanged,
+  and a panel with no valid score still raises for its labelled placeholder. **CFD's panels keep
+  the linear 0-1 axis**, and the search's result tables are not touched.
 - **The Docker image keeps no conda or pip package cache.** The Dockerfile's `micromamba clean
   --all --yes`, at the end of each RUN that installs an environment, removes the cached packages
   no environment uses, but keeps the folder of every package one uses, and in it each file the
