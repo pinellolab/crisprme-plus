@@ -2728,9 +2728,14 @@ class WhatTheDocsPromiseAboutTheHaplotypeCap(unittest.TestCase):
             return fh.read()
 
     def test_no_surface_promises_that_every_alt_sequence_is_always_written(self):
+        # assertNotIn would print the whole file -- a megabyte of README around the one
+        # phrase -- and bury its own message, so this asserts on the boolean
         for name in self.SURFACES:
             with self.subTest(surface=name):
-                self.assertNotIn("none is dropped", self.text(name).lower())
+                self.assertFalse(
+                    "none is dropped" in self.text(name).lower(),
+                    f"{name} still promises that no ALT sequence is dropped; the "
+                    f"default --max-haplotypes {F.DEFAULT_MAX_HAPLOTYPES} drops them")
 
     def test_every_surface_names_the_cap_and_how_to_turn_it_off(self):
         self.assertEqual(F.DEFAULT_MAX_HAPLOTYPES, 10)
