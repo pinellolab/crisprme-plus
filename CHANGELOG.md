@@ -343,10 +343,10 @@ and the `release-crisprme` skill.
   byte-identical to the old slice wherever no gap sits in them, both paths share it so they
   cannot drift, and where the PAM length does not match the mask's width the old slice is kept,
   so a non-SpCas9 PAM still nulls as it did. **No result a CRISPRme search has produced moves**:
-  a search anchors the PAM, so the aligner never puts a gap inside it -- over a genome-wide run,
-  a second genome-wide run and seven release-gate baselines, 52,153,776 aligned spacer+PAM
-  strings across three alignment views, the old mask and the new one differ on none, and a gap
-  never comes closer than 3 columns to the 3' end. What was exposed is an externally supplied
+  a search anchors the PAM, so the aligner never puts a gap inside it -- over a genome-wide run
+  and seven release-gate baselines, 52,153,776 aligned spacer+PAM strings across three
+  alignment views, the old mask and the new one differ on none, and a gap never comes closer
+  than 3 columns to the 3' end. What was exposed is an externally supplied
   list scored through `crisprme.py targets-scoring`, which is how the calibration benchmark was
   scored: 1.0% of its 2,940,588 rows carry the shape. 9 tests
   (`PostProcess/test_cb_pam_bulge.py`, the scorer stubbed, no TensorFlow) and a disclosure in
@@ -409,8 +409,9 @@ and the `release-crisprme` skill.
   above, 26% the figure's full-precision rescoring, 20% its tie-grouped AP rule -- and no
   longer to score precision and the AP rule alone, which named the two minority terms and
   contradicted the same document's account of that defect; CFD's bulge=1 AP of about 0.01 is no
-  longer called "essentially the prevalence floor" (it is about 160x a 5.75e-5 floor, where the
-  same page calls 1,379x "far above" one) but set against CRISPR-Bulge's 0.285 as section 3.5
+  longer called "essentially the prevalence floor" (it is about 160x a 5.75e-5 floor, while the
+  same page calls CFD's own 0.168 "far above" its 1.22e-4 no-skill baseline, a 1,379x gap) but
+  set against CRISPR-Bulge's 0.285 as section 3.5
   does; the refit without the on-target rows is said to LOWER the CFD >=0.5 expected total by
   about 8% (x0.92), the direction having read backwards; and the modal carries the benchmark's
   scope and its assay-detection floor, which only the document had.
