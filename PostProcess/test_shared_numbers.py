@@ -168,6 +168,19 @@ class _Surfaces(unittest.TestCase):
             with self.subTest(surface=name, value=value):
                 self.assertNotIn(value, text, f"{name} still states {value!r}")
 
+    def assertNumberOnEvery(self, value, *names, places=(1, 2)):
+        """The same NUMBER on each surface, whatever precision that surface writes it to.
+
+        A docstring table that prints 22.3 and a document that prints 22.26 agree; a
+        document that prints 21 does not. Holding every surface to one rounding would
+        make the test enforce typography, and it would be the thing that drifts.
+        """
+        wanted = [f"{value:.{p}f}" for p in places]
+        for name, text in self.surfaces(*names):
+            with self.subTest(surface=name, value=wanted):
+                self.assertTrue(any(w in text for w in wanted),
+                                f"{name} states none of {wanted}")
+
 
 # --------------------------------------------------------------------------- #
 # 1. The operating points and their labels
@@ -393,8 +406,7 @@ class TestValidationListSizes(_Surfaces):
         listed = tp + fp
         self.assertEqual((tp, fp, listed), (273, 5803, 6076))
         self.assertOnEvery(f"{listed:,}", "doc", "modal", "changelog")
-        self.assertOnEvery(f"{listed / tp:.1f}", "doc", "cbop_doc")
-        self.assertOnEvery(f"{listed / tp:.2f}", "doc")
+        self.assertNumberOnEvery(listed / tp, "doc", "cbop_doc")
         self.assertIn(f"{tp} of {int(self.d['cb_pos'])}", self.doc)
 
     def test_the_ninety_nine_percent_ratio_is_sixteen_fold_on_every_surface(self):

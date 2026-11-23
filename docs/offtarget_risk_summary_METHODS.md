@@ -376,14 +376,17 @@ measured benefit.
 
 **Recall vs. validation size.** Recall above ~95% is reachable but the list grows **steeply**,
 because the last few percent of true off-targets sit in the noise floor shared with the
-negatives. On the benchmark the trade is ≈**9.0 sites per true off-target at 90% recall, ≈22.3
-at 95%, ≈349 at 99%**, ≈786 at 100%. In list sizes on the 40 held-out guides, the 99%-recall list
+negatives. At the **exact recall quantiles** on the 40 held-out guides the trade is ≈**9.05 sites
+per true off-target at 90% recall, ≈22.15 at 95%, ≈348.79 at 99%**, ≈786.08 at 100% — one
+definition for all four, so they are comparable. At the **shipped, rounded** 1.9×10⁻⁴ the 95%
+figure is **22.26** (6,076 listed, 273 of the 287 found), and that is the ratio the report's own
+sensitive tier produces. In list sizes, the 99%-recall list
 is **≈16× the 95% one — 6,076 sites against 99,477** at the shipped thresholds (16.4× at the
 exact recall quantiles, 6,048 → 99,406). Earlier drafts said "≈6×" here; that figure is the
 ACTGA/NRG worked example's ratio, not the benchmark's. They also gave the per-true-OT column as
-"≈9 / ≈21 / ≈354 / ≈790", whose 95% and 99% entries are not what the curve data holds: the
-measured values are 9.05 / 22.15 / 348.79 / 786.08 at the exact recall quantiles and 22.26 at the
-shipped 1.9×10⁻⁴ (the 22.3 above). `PostProcess/cb_operating_point.py`'s docstring carried
+"≈9 / ≈21 / ≈354 / ≈790", of which the 95%, 99% and 100% entries are not what the curve data
+holds, and quoted it to a precision the rounding does not support.
+`PostProcess/cb_operating_point.py`'s docstring carried
 a third version of the claim, "~6x … 206 → 1,286 loci"; it now gives the benchmark's 16.4× and
 the same list column as this paragraph, and leaves the worked example below as the one place it
 is stated. Both are re-derived from `PostProcess/calibration/pr_figure_data.npz` by
