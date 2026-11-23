@@ -1693,9 +1693,11 @@ def write_outputs(results, out_prefix, anonymise):
 # --------------------------------------------------------------------------- #
 # The REF and the primary ALT sequence ON THE ROW, which is what turns a results table
 # into an oligo order without a join. A row can have SEVERAL distinct ALT sequences, and
-# a column is one cell wide: so the count is a column of its own and the full set stays
-# in the companion .fa/.tsv, reachable by flank_row_id. Nothing is dropped silently, and
-# nothing is crammed into a cell unless --alt-list asks for it.
+# a column is one cell wide: so the count is a column of its own and the sequences stay
+# in the companion .fa/.tsv, reachable by flank_row_id -- the --max-haplotypes most useful
+# (default 10) of them, every one at --max-haplotypes 0, with flank_alt_count the true
+# total either way. Nothing is dropped silently, and nothing is crammed into a cell unless
+# --alt-list asks for it.
 ANNOTATE_COLUMNS = (
     "flank_row_id",          # the join key into <out>.tsv and <out>.fa
     "flank_window",          # up3+down6 / window200: the geometry these cells were cut with
@@ -2305,8 +2307,11 @@ HELP_TEMPLATE = """crisprme.py extract-flanks --targets <table> | --results <fol
 
 Writes the genomic sequence around each off-target site -- the REFERENCE flank and one
 flank per distinct observed haplotype, with the samples that carry each -- so a site on a
-shortlist can be turned into an oligo order. The protospacer+PAM is marked in every flank
-by its offset and length, so an indel that shifts it is visible rather than miscounted.
+shortlist can be turned into an oligo order. By default the ten most useful haplotypes of
+a row are written and the rest are counted in the notes (--max-haplotypes, default 10;
+--max-haplotypes 0 writes every one, and n_haplotypes is always the true total). The
+protospacer+PAM is marked in every flank by its offset and length, so an indel that
+shifts it is visible rather than miscounted.
 
 THE WINDOW is the target plus a padding at each of its two ends, named for what each
 sits beside: --upstream beyond the PROTOSPACER's outer end, --downstream beyond the

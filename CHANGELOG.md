@@ -480,12 +480,15 @@ and the `release-crisprme` skill.
   of a value on the surface it touches, so what is demonstrated is that a value cannot
   silently LEAVE a surface; a quantity a surface states twice is held by the two helpers
   that count spellings and occurrences, not by the plain assertion.
-- **`extract-flanks`: three surfaces said the companion FASTA/TSV keep every ALT sequence
+- **`extract-flanks`: five surfaces said the companion FASTA/TSV keep every ALT sequence
   of a row; the default cap keeps ten.** `README.md`, this changelog's `--annotate-table`
   entry above and `PostProcess/extract_flanks.py`'s own docstring each said a row with
   several distinct ALTs "keeps every one of them in the companion FASTA/TSV: none is
   dropped", and mentioned `--max-haplotypes` only as something that trims the `--alt-list`
-  CELL. It trims the files: `site_entries` truncates the haplotype list to
+  CELL. The two surfaces a user meets FIRST made the same promise and named no cap at all:
+  the opening summary of `extract-flanks --help`, and the subcommand's description in
+  `crisprme.py`, both of which said the tool writes "one flank per DISTINCT observed
+  haplotype" while listing `[--max-haplotypes 10]` in the usage line above it. It trims the files: `site_entries` truncates the haplotype list to
   `--max-haplotypes` (default 10) before anything is written, which the tool's own
   `test_the_cap_keeps_the_count_and_says_what_it_left_out` asserts -- three sequences
   written of six at `--max-haplotypes 2`. On the 1,000-row shortlist those surfaces quote,
@@ -495,7 +498,10 @@ and the `release-crisprme` skill.
   column is headed "sequences written", was the one surface that already had it right. All
   three now say that the cap is on those two files, that `--max-haplotypes 0` writes every
   one, and that `flank_alt_count` / `n_haplotypes` is the true total either way;
-  `PostProcess/test_extract_flanks.py` holds all three to it (3 tests, 159 in the suite).
+  `PostProcess/test_extract_flanks.py` holds all of them to it (4 tests, 160 in the suite),
+  including that the paragraph of `--help` which makes the promise is the one that carries
+  the qualification -- the flag being named in the usage block a few lines above is not the
+  same thing, and an earlier version of the check was satisfied by exactly that.
 - **Two assertions of the shared-number suite could not fail, and one guard missed the
   occurrence it was written for.** `test_the_ninety_nine_percent_ratio_is_sixteen_fold_on_
   every_surface` ended in `assertIn(f"{round(ratio)}", surface)` -- the two characters "16",

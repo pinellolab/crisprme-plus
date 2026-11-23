@@ -8660,7 +8660,11 @@ def extract_flanks_cmd():
     and one flank per DISTINCT observed haplotype -- deduplicated by sequence, each
     with the samples (and the haplotype side, where the VCF is phased) that carry it --
     with the protospacer+PAM's offset and length marked inside every flank, so an indel
-    that shifts the site is visible rather than miscounted.
+    that shifts the site is visible rather than miscounted. ``--max-haplotypes`` caps
+    how many of a row's haplotypes are WRITTEN, in the companion files as well as in
+    the optional list column: default 10, the ones that hold the off-target first;
+    ``--max-haplotypes 0`` writes every one, and ``n_haplotypes`` /
+    ``flank_alt_count`` always gives the row's true total.
 
     The window is anchored on the target's two ends: ``--upstream`` beyond the
     protospacer, ``--downstream`` beyond the PAM, in the GUIDE's orientation (3 and 6

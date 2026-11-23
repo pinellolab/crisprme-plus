@@ -41,6 +41,7 @@ import gzip
 import io
 import os
 import random
+import re
 import shutil
 import struct
 import subprocess
@@ -1657,8 +1658,9 @@ class ColumnMode(Case):
 
     def test_several_alts_are_counted_and_kept_not_dropped(self):
         """A row with more than one distinct ALT sequence: the columns carry the
-        primary one and the COUNT, and every one of them is still in the companion
-        files, reachable by flank_row_id. Nothing is dropped, nothing is crammed in."""
+        primary one and the COUNT, and the sequences are in the companion files,
+        reachable by flank_row_id -- all of them here, two being under the default cap
+        of ten; nothing is crammed into a cell."""
         recs = [snv(TARGET_AT - 2, "A" if REF[TARGET_AT - 2] != "A" else "C",
                     {"S1": "1|0"}),
                 snv(TARGET_AT + 25, "A" if REF[TARGET_AT + 25] != "A" else "C",
@@ -2720,8 +2722,12 @@ class WhatTheDocsPromiseAboutTheHaplotypeCap(unittest.TestCase):
     column "sequences written", was the one surface that already had it right.
     """
 
+    # the five places a reader can meet the claim: the README, the changelog entry, the
+    # module's own docstring, the subcommand's help in crisprme.py, and the text the
+    # tool prints for `extract-flanks --help`
     SURFACES = ("README.md", "CHANGELOG.md", os.path.join("PostProcess",
-                                                          "extract_flanks.py"))
+                                                          "extract_flanks.py"),
+                "crisprme.py")
 
     def text(self, name):
         with open(os.path.join(REPO, name), encoding="utf-8") as fh:
@@ -2746,6 +2752,23 @@ class WhatTheDocsPromiseAboutTheHaplotypeCap(unittest.TestCase):
                               f"{name} does not say how to write every haplotype")
                 self.assertIn(f"default {F.DEFAULT_MAX_HAPLOTYPES}", body.lower(),
                               f"{name} does not give the cap's default")
+
+    def test_the_help_a_user_reads_first_says_the_cap_applies(self):
+        """`extract-flanks --help` is where most people meet this. Its opening summary
+        said "one flank per distinct observed haplotype" with the cap mentioned only
+        further down, among the flags."""
+        help_text = F.help_text()
+        self.assertIn("--max-haplotypes 0", help_text)
+        self.assertIn(f"default {F.DEFAULT_MAX_HAPLOTYPES}", help_text.lower())
+        # the PARAGRAPH that makes the promise has to carry the qualification -- the
+        # usage block names the flag a few lines above, which is not the same thing
+        paras = [p for p in re.split(r"\n\s*\n", help_text)
+                 if "distinct observed haplotype" in p]
+        self.assertEqual(len(paras), 1, "the promise is made in more than one place")
+        self.assertIn(
+            "--max-haplotypes 0", paras[0],
+            "the paragraph promising one flank per distinct haplotype does not say "
+            "that only --max-haplotypes of them are written")
 
     def test_the_cap_really_does_reach_the_two_companion_files(self):
         """The claim above is only worth making because the code behaves this way: if
