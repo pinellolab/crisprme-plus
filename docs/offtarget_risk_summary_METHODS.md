@@ -61,7 +61,7 @@ the 0.2–0.5 band.*
 numbers was read together rather than one at a time. Three §3.5 quantities moved, each
 because another surface already disagreed with it: the sites-per-true-off-target column was
 "≈9 / ≈21 / ≈354 / ≈790" where the curve data gives **9.05 / 22.15 / 348.79 / 786.08** (and
-22.26 at the shipped threshold, 22.3 as `cb_operating_point`'s table rounds it); the
+22.26 at the shipped threshold, which `cb_operating_point`'s table rounds); the
 3-decimal-rounding cost was given as "~7%", which is the **total** miss at a 5×10⁻⁴ floor
 (267 of 287) and not the part the rounding causes (**6 sites, 2.1 points**); and
 `PostProcess/cb_operating_point.py`'s docstring, which this document used to point at as

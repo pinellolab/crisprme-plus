@@ -177,9 +177,14 @@ class _Surfaces(unittest.TestCase):
         """
         wanted = [f"{value:.{p}f}" for p in places]
         for name, text in self.surfaces(*names):
+            present = [w for w in wanted if w in text]
             with self.subTest(surface=name, value=wanted):
-                self.assertTrue(any(w in text for w in wanted),
-                                f"{name} states none of {wanted}")
+                self.assertTrue(present, f"{name} states none of {wanted}")
+                # and only one of them: a surface that writes the same number two ways
+                # is where the next divergence starts, and it defeats this check -- one
+                # spelling can then drift while the other keeps the test green
+                self.assertEqual(len(present), 1,
+                                 f"{name} writes the same number two ways: {present}")
 
 
 # --------------------------------------------------------------------------- #
