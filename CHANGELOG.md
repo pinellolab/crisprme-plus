@@ -233,6 +233,27 @@ and the `release-crisprme` skill.
   twice); those now list as named.
   PR 107's other fix, the package specs after the channels in `scorer-env create`'s command, was
   made the same way in 2.8.1.
+- **"95% recall" now says which population it is measured over, and every document gives the
+  deployment-matched figure beside it. The threshold itself is unchanged.** The sensitive
+  operating point is a quantile of the held-out benchmark's 287 validated positives — and 40 of
+  those 287 are each guide's own **on-target**, perfect 0-mismatch matches, while the ranked list
+  a reader acts on excludes perfect matches. So the published 95.12% is recall over a population
+  the deployed ranking does not contain. Re-measured on the same benchmark: over off-targets only
+  (247 positives) `CB ≥ 1.9e-4` recovers 233 of 247, **94.33%** (guide-cluster 95% CI [0.902,
+  0.994]), and under the best-CRISPR-Bulge alignment the report's own tables are ranked by, 241 of
+  247, **97.57%**. The value **stays at 1.9e-4**: recomputing the quantile on off-targets only
+  moves it to 3.8e-5 (5.1× lower) on the assay's alignment but to 1.1e-3 (5.7× higher) under the
+  best-alignment view, and higher again weighting each guide equally, so the correction has no
+  determinate sign; the two candidate points lie inside each other's bootstrap intervals (p =
+  0.375 / 0.447), 0.705 decades apart in an interval 2.72 decades wide; the 40 on-targets buy
+  **two** permitted misses at the 95% target, not forty (`ceil(0.95×287) = 273` permits 14,
+  `ceil(0.95×247) = 235` permits 12); and the 99%-recall point, 1.5e-8, is the *same number* on
+  both populations, so the question does not reach that target at all. Dropping the on-targets is
+  also not the noisier estimate it was described as: the off-target-only 95% interval is narrower
+  than the published one, and re-running the bootstrap over the full 40-guide frame (15 guides
+  contribute no off-target positive) returns a bitwise identical interval.
+  `PostProcess/cb_operating_point.py`'s docstring, `docs/offtarget_risk_summary_METHODS.md` §3.5,
+  `METHODS.md` §8 and the README feature list now all carry the population with the number.
 
 ### Fixed
 - **The website's example report is this branch's report, not the one the defective figures

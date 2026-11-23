@@ -318,8 +318,9 @@ neither do the negatives: **99.9% of them sit in a tiny noise floor below ≈1.9
 literal `>0` cutoff would list essentially the whole genome, and the earlier report (which
 rounded CRISPR-Bulge to 3 decimals) was in effect thresholding at the rounding floor, 5×10⁻⁴.
 The sensitive operating point is instead a **principled, documented threshold**: the
-CRISPR-Bulge score that recovers **~95% of the assay-detected off-targets** on the 40-guide
-held-out benchmark —
+CRISPR-Bulge score that recovers **~95% of the assay-detected positives** on the 40-guide
+held-out benchmark (a population that includes each guide's own on-target — see *Which
+population that 95% is measured on*, below) —
 
 > **CRISPR-Bulge ≥ 1.9×10⁻⁴ (the 95%-recall operating point)**
 
@@ -327,12 +328,60 @@ held-out benchmark —
 via `CRISPRME_CB_RECALL_TARGET`, single source of truth `PostProcess/cb_operating_point.py`). The
 threshold is applied to **full-precision** CRISPR-Bulge scores — the report now writes `{:.6g}`,
 not 3 decimals, so the sub-5×10⁻⁴ operating point is representable. 3-decimal rounding would have
-floored it at 5×10⁻⁴, where the sensitive tier holds **267 of the 287** validated off-targets —
+floored it at 5×10⁻⁴, where the sensitive tier holds **267 of the 287** validated positives —
 93.0% recall, a 7.0% total miss. Earlier drafts gave that 7.0% as the cost *of the rounding*,
 which it is not: **the rounding itself costs 6 of them, 273 → 267, 2.1 percentage points** on top
 of the 4.9% already missed at 1.9×10⁻⁴ (20 held-out positives round to 0.000, and 14 of those are
-missed at full precision too). The
-practical default panel is a **union**, not a single cutoff:
+missed at full precision too).
+
+**Which population that 95% is measured on, and what the threshold does on the deployed one.**
+The 287 held-out positives include each guide's own **on-target** — 40 perfect (0-mismatch,
+0-gap) rows, exactly one per guide, the same inclusion §3 discloses for the AUPRs — while the
+ranked list a reader acts on excludes perfect matches (`generate_report` builds every
+CRISPR-Bulge array as "off-targets (exclude perfect)"). The shipped point is therefore the 95%
+quantile of a population 40 of whose members it is never applied to. Both populations,
+re-measured on the same benchmark, and also under the best-CRISPR-Bulge alignment the report's
+ranked tables use (the published quantile is computed on the single alignment the assay assigns
+each site):
+
+| population / alignment | recall of 1.9×10⁻⁴ | 95% quantile of that population |
+|---|---|---|
+| 287 positives, assay alignment (as published) | 273/287 = **95.12%** [0.913, 0.996] | 1.9×10⁻⁴ — the shipped point |
+| 247 off-targets only, assay alignment | 233/247 = **94.33%** [0.902, 0.994] | 3.8×10⁻⁵ (**5.1× lower**) |
+| 247 off-targets only, best-CRISPR-Bulge alignment | 241/247 = **97.57%** [0.957, 1.000] | 1.1×10⁻³ (**5.7× higher**) |
+
+Four things make this a disclosure rather than a pending correction, and **the shipped value is
+kept at 1.9×10⁻⁴**:
+
+- **The on-targets buy two permitted misses, not forty.** `ceil(0.95×287) = 273` permits 14
+  misses and `ceil(0.95×247) = 235` permits 12; the difference across the three targets is 4
+  (90%), 2 (95%) and 0 (99%). The 40 free true positives shift the index, not the regime.
+- **The 99%-recall point is the same number on both populations**, 1.5×10⁻⁸, because each
+  permits 2 misses and the on-targets occupy the top of the ranking, so the index shifts by 40
+  and lands on the same score. The population question does not reach that row at all.
+- **The correction has no determinate sign.** It is 5.1× down on the assay alignment, 5.7× up
+  under the best-CRISPR-Bulge alignment the ranked tables are ordered by, and higher again if
+  each guide is weighted equally instead of each site. Two of the four defensible framings move
+  it up and two move it down.
+- **The two candidate points sit inside each other's intervals.** P(resampled 287-population
+  point ≤ 3.8×10⁻⁵) = 0.375 and P(resampled 247-population point ≥ 1.9×10⁻⁴) = 0.447: they are
+  0.705 decades apart inside an interval 2.72 decades wide. The interval's own upper end is
+  resampling-fragile by about as much as the population change moves it — across bootstrap
+  streams it lands on 3.06×10⁻³ (the modal, published value) or 3.51×10⁻³, while dropping the
+  on-targets takes it to 2.70×10⁻³.
+
+Dropping the on-targets is **not** a noisier estimate on a thinner base, which is the first
+objection to raise against it: measured, the off-target-only 95% interval is *narrower* than the
+published one ([5.8×10⁻⁶, 2.7×10⁻³] against [5.8×10⁻⁶, 3.1×10⁻³]), as it is at 99%, and
+re-running the bootstrap over the full 40-guide frame — 15 of the 40 guides contribute no
+off-target positive at all — returns a bitwise identical interval at B = 20,000 (two seeds) and
+B = 200,000. Only at the 90% target is it marginally wider (1.69 against 1.61 decades). The thin
+base is real as a qualitative caveat (3 guides carry 57% of the 247 off-target positives) but it
+is not a measured loss of precision, and it is not the reason the value is kept. The
+`CRISPRME_CB_RECALL_TARGET=99` point is available to anyone who wants the population question to
+be moot.
+
+The practical default panel is a **union**, not a single cutoff:
 
 > **Default panel = (CRISPR-Bulge ≥ 1.9×10⁻⁴, 95%-recall) ∪ (CFD ≥ 0.2 on 0-bulge sites) ∪ (CFD ≥ 0.5 on single-bulge sites) ∪ must-includes**
 

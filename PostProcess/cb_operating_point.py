@@ -6,7 +6,8 @@ value returned here, so they can never drift apart.
 
 Default = the **95%-recall** threshold on the 40-guide held-out external benchmark
 (Tsai 2015 + Refined-TrueOT + Chen 2017 + Listgarten 2018; 287 validated
-off-targets, CRISPR-Bulge held-out). Point estimates per recall target, each with
+positives, CRISPR-Bulge held-out; see WHICH POPULATION below -- 40 of those 287 are
+on-targets). Point estimates per recall target, each with
 the guide-cluster bootstrap 95% CI:
 
     recall  CB threshold   guide-bootstrap 95% CI         list   sites/true-OT
@@ -23,6 +24,31 @@ re-derived from the committed curve data (``calibration/pr_figure_data.npz``) by
 risk-card modal to the same values, so this table cannot drift from them -- except
 99,477, which that data BOUNDS rather than gives (it is an interior point of a run the
 stored polyline decimates).
+
+WHICH POPULATION THIS RECALL IS AGAINST. The 287 are the held-out validated POSITIVES,
+and they include each guide's own ON-TARGET: 40 perfect (0-mismatch, 0-gap) rows, one
+per guide. The deployed ranking never contains one -- the report builds every
+CRISPR-Bulge array as "off-targets (exclude perfect)" -- so the default above is a
+quantile over a population 40 of whose members it is never applied to. Measured both
+ways on the same benchmark, and under the best-alignment view the report's own ranked
+tables use:
+
+    population / alignment              recall of this default   its own 95% point
+    287 positives, assay alignment      273/287 = 95.1%          1.9e-4 (the default)
+    247 off-targets, assay alignment    233/247 = 94.3%          3.8e-5 (5.1x lower)
+    247 off-targets, best-CB alignment  241/247 = 97.6%          1.1e-3 (5.7x higher)
+
+(guide-cluster 95% CI on that 94.3%: 0.902 to 0.994.) The 99% row of the table above is
+the SAME number on both populations: ceil(0.99*287) and ceil(0.99*247) each permit 2
+misses and the on-targets occupy the top of the ranking, so the index shifts by 40 and
+lands on the same score. At the 95% target the on-targets buy TWO permitted misses, not
+forty -- 14 against 12. The default STAYS at 1.9e-4: the correction has no determinate
+sign (5.1x down on the assay alignment, 5.7x up on the best-alignment view, and higher
+again if each guide is weighted equally instead of each site), and each candidate point
+lies well inside the other's bootstrap interval -- P(resampled 287-point <= 3.8e-5) =
+0.375, P(resampled 247-point >= 1.9e-4) = 0.447, the two being 0.705 decades apart
+inside an interval 2.72 decades wide. Written out for a reader in
+``docs/offtarget_risk_summary_METHODS.md`` section 3.5.
 
 The tail quantile is intrinsically noisy (wide CI), so this is the documented
 default operating point, not a hard physical constant. Higher recall buys recall
