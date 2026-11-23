@@ -17,10 +17,12 @@ the guide-cluster bootstrap 95% CI:
 The last two columns are the list each threshold produces on that benchmark and how
 many sites it lists per validated off-target it finds, both at the EXACT recall
 quantiles. At the rounded thresholds printed here the 95% list is 6,076 (273 of the
-287, 22.3 listed per true one) and the 99% list 99,477. Every one of these numbers
-is re-derived from the committed curve data (``calibration/pr_figure_data.npz``) by
-``PostProcess/test_shared_numbers.py``, which also holds the methods document and
-the risk-card modal to the same values, so this table cannot drift from them.
+287, 22.3 listed per true one) and the 99% list 99,477. Every number here is
+re-derived from the committed curve data (``calibration/pr_figure_data.npz``) by
+``PostProcess/test_shared_numbers.py``, which also holds the methods document and the
+risk-card modal to the same values, so this table cannot drift from them -- except
+99,477, which that data BOUNDS rather than gives (it is an interior point of a run the
+stored polyline decimates).
 
 The tail quantile is intrinsically noisy (wide CI), so this is the documented
 default operating point, not a hard physical constant. Higher recall buys recall

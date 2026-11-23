@@ -61,7 +61,7 @@ the 0.2–0.5 band.*
 numbers was read together rather than one at a time. Three §3.5 quantities moved, each
 because another surface already disagreed with it: the sites-per-true-off-target column was
 "≈9 / ≈21 / ≈354 / ≈790" where the curve data gives **9.05 / 22.15 / 348.79 / 786.08** (and
-22.26 at the shipped threshold, which is the ratio every other surface gives); the
+22.26 at the shipped threshold, 22.3 as `cb_operating_point`'s table rounds it); the
 3-decimal-rounding cost was given as "~7%", which is the **total** miss at a 5×10⁻⁴ floor
 (267 of 287) and not the part the rounding causes (**6 sites, 2.1 points**); and
 `PostProcess/cb_operating_point.py`'s docstring, which this document used to point at as
@@ -390,7 +390,10 @@ holds, and quoted it to a precision the rounding does not support.
 a third version of the claim, "~6x … 206 → 1,286 loci"; it now gives the benchmark's 16.4× and
 the same list column as this paragraph, and leaves the worked example below as the one place it
 is stated. Both are re-derived from `PostProcess/calibration/pr_figure_data.npz` by
-`PostProcess/test_shared_numbers.py`, so neither can drift from the figures again.
+`PostProcess/test_shared_numbers.py`, so neither can drift from the figures again. The one
+figure that data cannot give back is 99,477, the list at the *rounded* 1.5×10⁻⁸: it is an
+interior point of a run the stored polyline decimates, so the test bounds it (99,406 ≤
+99,477 ≤ 184,058) and checks its ratio instead of pinning it.
 For the ACTGA/NRG worked example (189,957
 candidate loci) the 95% threshold yields **162 off-target validation loci** (90% → 58; 99% → 1,158; the shipped crispr_bulge_gt_0.tsv tier; +2 perfect-match candidate on-targets), measured
 directly on the regenerated full-precision report (not the per-true-OT ratios above, which are
