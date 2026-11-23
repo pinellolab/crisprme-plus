@@ -204,6 +204,26 @@ and the `release-crisprme` skill.
   lengths of a 0-1 axis), the allele-frequency sizing and the perfect-match stars are unchanged,
   and a panel with no valid score still raises for its labelled placeholder. **CFD's panels keep
   the linear 0-1 axis**, and the search's result tables are not touched.
+- **A score panel's legends go below the panel, not on top of its points.** Both boxes — the
+  allele-frequency size key and the colours — sat inside the axes, at "upper center" and "upper
+  right". On the linear 0-1 CFD axis that was survivable, because a top-1000 CFD curve falls away
+  from the top-right corner; on the CRISPR-Bulge log10 axis it is the opposite, since the axis
+  reaches down tens of decades to the zero floor and so presses every well-scoring site into the
+  top band of the panel, right under the two boxes — and the threshold and "= 0" entries the log
+  axis adds had made the colour box taller still. On a real genome-wide run's top 1000 (axis
+  1e-31 to 1) the colour box alone covered 1,481 of the 2,000 drawn points, scores 1.5e-9 to
+  1.1e-3, i.e. the whole neighbourhood of the sensitive operating point the panel exists to show;
+  both boxes together covered 79% of the points. They are now drawn in one row BELOW the axes —
+  size key left, colours right — by `cb_operating_point.legend_below`, which every panel of all
+  three drawing paths (the report's Section-2 panels, `CRISPRme_plots.py`,
+  `CRISPRme_plots_personal.py`) calls, so they cannot drift apart. Below rather than beside: the
+  panels are wide and short and the Personal Risk Card prints two side by side, so a right-hand
+  column cost 32% of the data area's width against ~0.4 in of height for a row underneath. Every
+  entry and its wording are unchanged, and the data area keeps the size it had — the figure grows
+  by the height of the row (8.0x3.2 to 8.0x3.57 in; 7.5x2.25 to 7.5x2.62 in) instead of the axes
+  shrinking to pay for it. The plot scripts now save with `bbox_inches="tight"` so a legend
+  outside the axes is not cut off, and the size key is no longer clipped to the axes box, which
+  kept it out of the saved area.
 - **The Docker image keeps no conda or pip package cache.** The Dockerfile's `micromamba clean
   --all --yes`, at the end of each RUN that installs an environment, removes the cached packages
   no environment uses, but keeps the folder of every package one uses, and in it each file the

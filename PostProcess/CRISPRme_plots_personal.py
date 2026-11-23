@@ -248,23 +248,20 @@ def plot_with_MMvBUL(df, out_folder, guide):
         )
         # +/- to avoid overlap of arrow w/ points, head_width calculated to remain constant despite log scale of x-axis
 
-    # Size legend
-    plt.gca().add_artist(
-        plt.legend(handles=[s1, s01, s001], title="Allele frequency", ncol=3, loc=9)
-    )
-
     # Perfect matches: starred at their (ALT) count, 0
     star = mark_perfect_matches(
         plt.gca(), df, "Mismatches+bulges_(fewest_mm+b)", "Mismatches+bulges_ALT_(fewest_mm+b)"
     )
-    # Color legend
+    # Size + colour legends, BELOW the axes -- the one placement of every score panel
+    # (cb_operating_point.legend_below); it lays the figure out, so no tight_layout here.
     red = mpatches.Patch(color=transparent_red, label="Reference")
     blue = mpatches.Patch(color=transparent_blue, label="Alternative")
-    plt.legend(handles=[red, blue] + ([star] if star else []))
+    cbop.legend_below(plt.gca(), size_handles=[s1, s01, s001],
+                      series_handles=[red, blue] + ([star] if star else []))
 
-    # Save
-    plt.tight_layout()
-    plt.savefig(out_folder + f"CRISPRme_fewest_top_1000_log_for_main_text_{guide}.png")
+    # Save (bbox_inches="tight": the legends are outside the axes and must not be cut)
+    plt.savefig(out_folder + f"CRISPRme_fewest_top_1000_log_for_main_text_{guide}.png",
+                bbox_inches="tight")
     plt.clf()
 
 
@@ -425,25 +422,27 @@ def plot_with_CRISPR_BULGE_score(df, out_folder, guide):
                             shrinkA=1.5, shrinkB=1.5),
         )
 
-    # Size legend
-    plt.gca().add_artist(
-        plt.legend(handles=[s1, s01, s001], title="Allele frequency", ncol=3, loc=9)
-    )
-
     # Perfect matches: starred at their best score (the plotted column, so a perfect
     # match whose score underflowed to 0 is starred on the floor, not dropped)
     star = mark_perfect_matches(
         plt.gca(), df, "Mismatches+bulges_(highest_CRISPR_BULGE)",
         _PLOT + score_col,
     )
-    # Color legend
+    # Size + colour legends, BELOW the axes: on the log axis the well-scoring sites are
+    # pressed into the top band of the panel, where these boxes used to sit (see
+    # cb_operating_point.legend_below). It lays the figure out, so no tight_layout here.
+    # The Personal Risk Card prints two of these side by side, so the row goes below, not
+    # beside: the width is the half of a page each panel already has.
     red = mpatches.Patch(color=transparent_red, label="Reference")
     blue = mpatches.Patch(color=transparent_blue, label="Alternative")
-    plt.legend(handles=[red, blue] + ([star] if star else []) + log_handles, fontsize=5)
+    cbop.legend_below(
+        plt.gca(), size_handles=[s1, s01, s001],
+        series_handles=[red, blue] + ([star] if star else []) + log_handles,
+    )
 
-    # Save
-    plt.tight_layout()
-    plt.savefig(out_folder + f"CRISPRme_CRISPR_BULGE_top_1000_log_for_main_text_{guide}.png")
+    # Save (bbox_inches="tight": the legends are outside the axes and must not be cut)
+    plt.savefig(out_folder + f"CRISPRme_CRISPR_BULGE_top_1000_log_for_main_text_{guide}.png",
+                bbox_inches="tight")
     plt.clf()
 
 
@@ -590,23 +589,21 @@ def plot_with_CFD_score(df, out_folder, guide):
         )
         # +/- to avoid overlap of arrow w/ points, head_width calculated to remain constant despite log scale of x-axis
 
-    # Size legend
-    plt.gca().add_artist(
-        plt.legend(handles=[s1, s01, s001], title="Allele frequency", ncol=3, loc=9)
-    )
-
     # Perfect matches: starred at their best score
     star = mark_perfect_matches(
         plt.gca(), df, "Mismatches+bulges_(highest_CFD)", "CFD_score_(highest_CFD)"
     )
-    # Color legend
+    # Size + colour legends, BELOW the axes -- the one placement of every score panel
+    # (cb_operating_point.legend_below), so the card's CFD and CRISPR-Bulge panels, read
+    # side by side, are laid out the same way.
     red = mpatches.Patch(color=transparent_red, label="Reference")
     blue = mpatches.Patch(color=transparent_blue, label="Alternative")
-    plt.legend(handles=[red, blue] + ([star] if star else []))
+    cbop.legend_below(plt.gca(), size_handles=[s1, s01, s001],
+                      series_handles=[red, blue] + ([star] if star else []))
 
-    # Save
-    plt.tight_layout()
-    plt.savefig(out_folder + f"CRISPRme_CFD_top_1000_log_for_main_text_{guide}.png")
+    # Save (bbox_inches="tight": the legends are outside the axes and must not be cut)
+    plt.savefig(out_folder + f"CRISPRme_CFD_top_1000_log_for_main_text_{guide}.png",
+                bbox_inches="tight")
     plt.clf()
 
 

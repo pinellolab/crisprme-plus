@@ -108,6 +108,49 @@ def _hlines(ax):
             if len(set(line.get_ydata())) == 1 and len(line.get_ydata()) == 2]
 
 
+def _geometry(fig, ax):
+    """Where this panel's legends ended up, in INCHES, and what they cover.
+
+    Everything the placement tests need, measured while the figure is still alive (the
+    plot scripts clear theirs right after savefig): the axes' box, the box
+    ``savefig(bbox_inches="tight")`` would keep, each legend's box and entries, and how
+    many of the drawn points fall under a legend -- the thing the reader complained
+    about.
+    """
+    rend = cbop._renderer(fig)
+    to_in = fig.dpi_scale_trans.inverted()
+
+    def box(artist):
+        return tuple(artist.get_window_extent(rend).transformed(to_in).extents)
+
+    points = []
+    for coll in ax.collections:
+        for x, y in np.ma.filled(coll.get_offsets(), np.nan).tolist():
+            if np.isfinite(x) and np.isfinite(y):
+                points.append((x, y))
+    disp = (ax.transData.transform(np.array(points)) if points
+            else np.empty((0, 2)))
+    legends, covered = [], np.zeros(len(points), dtype=bool)
+    for leg in [a for a in ax.get_children()
+                if isinstance(a, plt.matplotlib.legend.Legend)]:
+        win = leg.get_window_extent(rend)
+        covered |= ((disp[:, 0] >= win.x0) & (disp[:, 0] <= win.x1) &
+                    (disp[:, 1] >= win.y0) & (disp[:, 1] <= win.y1))
+        legends.append({
+            "labels": [t.get_text() for t in leg.get_texts()],
+            "title": leg.get_title().get_text(),
+            "box": box(leg),
+        })
+    return {
+        "legends": legends,
+        "axes": box(ax),
+        "saved": tuple(fig.get_tightbbox(rend).extents),   # inches, what tight keeps
+        "figure": tuple(fig.get_size_inches()),
+        "n_points": len(points),
+        "n_covered": int(covered.sum()),
+    }
+
+
 @unittest.skipUnless(_HAVE_DEPS, _SKIP_REASON)
 class TestScoreText(unittest.TestCase):
     """cb_operating_point.score_text: the ONE text of a CRISPR-Bulge score."""
@@ -608,6 +651,256 @@ class TestTopPlotScripts(unittest.TestCase):
                 self.assertEqual(seen["ylim"], (0.0, 1.0))
                 self.assertNotIn(cbop.sensitive_threshold(), seen["hlines"])
                 self.assertNotIn(cbop.sensitive_plot_label(), seen["legend"])
+
+
+def _script_geometry(plot, df, *args):
+    """Run one of the plot scripts' functions and measure the figure it saves.
+
+    Measured INSIDE the savefig call: the scripts clear the figure immediately after,
+    so afterwards there is nothing left to measure. Also records the ``bbox_inches`` the
+    script saved with -- a legend outside the axes needs the tight save to survive.
+    """
+    seen = {}
+
+    def _capture(path, *a, **kwargs):
+        if str(path).endswith(".pdf") or seen:
+            return
+        seen.update(_geometry(plt.gcf(), plt.gca()))
+        seen["bbox_inches"] = kwargs.get("bbox_inches")
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as out, \
+            mock.patch.object(plt, "savefig", _capture):
+        plot(df, out + os.sep, *args)
+    return seen
+
+
+@unittest.skipUnless(_HAVE_DEPS, _SKIP_REASON)
+class TestLegendPlacement(unittest.TestCase):
+    """WHERE a score panel's legends go: outside the data, whole, and nothing lost.
+
+    Both legends used to sit INSIDE the axes -- the allele-frequency size key at "upper
+    center", the colours at "upper right". That was survivable while the score was CFD on
+    a linear 0-1 axis, whose top-1000 curve falls away from the top-right corner. The
+    CRISPR-Bulge log10 axis reaches down tens of decades to the zero floor, so every
+    well-scoring site is pressed into the top band of the panel -- exactly under those two
+    boxes. Measured on a real genome-wide run's top 1000 (axis 1e-31..1): the colour
+    legend covered 1481 of the 2000 drawn points, scores 1.5e-9 to 1.1e-3, i.e. the whole
+    neighbourhood of the sensitive operating point the panel exists to show; both boxes
+    together covered 79% of the points. The threshold and "= 0" entries the log axis adds
+    had made the box taller still.
+
+    Both legends now go BELOW the axes (cb_operating_point.legend_below), for every panel
+    of all three drawing paths. This holds them there: outside the data, every entry
+    still named, nothing cut off by the save, and the data area not shrunk to pay for it.
+    """
+
+    TOL = 0.02  # inches
+
+    @staticmethod
+    def _scores(n):
+        """A top-1000 as a real genome-wide run ranks one by CRISPR-Bulge: from ~0.85
+        down through the operating point into a 1e-29 tail, with a few sites whose
+        float32 score underflowed to exactly 0. On the log axis (floor 1e-30) that packs
+        nearly every point into the top of the panel -- where the legends used to be."""
+        rng = np.random.default_rng(3)
+        s = np.sort(10.0 ** rng.uniform(-7.0, -3.0, n))[::-1]
+        s[:4] = [0.85, 0.31, 0.02, 1e-3]
+        s[-10:-5] = 1e-29
+        s[-5:] = 0.0
+        return s
+
+    @classmethod
+    def _panel_frame(cls, n=300):
+        cb = cls._scores(n)
+        return pd.DataFrame({
+            "cb": cb, "cb_ref": cb, "cb_alt": np.clip(cb * 10.0, 0.0, 1.0),
+            "maf": ["0.01"] * n, "samples": ["S1,S2"] * n, "rsid": ["rs1"] * n,
+        })
+
+    @classmethod
+    def _script_frame(cls, n=90):
+        """The same distribution, in the wide table the two plot scripts read (under
+        100 rows: the Personal Risk Card's plots keep the first 100, and the sites that
+        underflowed to 0 -- the band the legend has to explain -- are the last ones)."""
+        df = TestTopPlotScripts._sites(n)
+        cb = cls._scores(n)
+        df["CRISPR_BULGE_score_(highest_CRISPR_BULGE)"] = cb
+        df["CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)"] = cb
+        df["CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)"] = np.clip(cb * 10.0, 0.0, 1.0)
+        return df
+
+    def _panel(self, log_y=True, **kwargs):
+        sub = kwargs.pop("sub", None)
+        sub = self._panel_frame() if sub is None else sub
+        ax, fig = _axes_of(
+            sub=sub, score_key="cb", ref_key="cb_ref", alt_key="cb_alt",
+            xlabel="x", title="t", score_name="CRISPR-Bulge" if log_y else "CFD",
+            maf_col="maf", samp_col="samples", rsid_col="rsid", log_y=log_y, **kwargs,
+        )
+        self.addCleanup(plt.close, fig)
+        return _geometry(fig, ax)
+
+    # ---- the three things a placement has to get right ------------------------
+    def _assert_outside_the_data(self, geom, where=""):
+        """No legend box touches the data area, and no drawn point is under one."""
+        self.assertTrue(geom["legends"], f"{where}: the panel drew no legend at all")
+        ax_x0, ax_y0, ax_x1, ax_y1 = geom["axes"]
+        for leg in geom["legends"]:
+            x0, y0, x1, y1 = leg["box"]
+            overlaps = (x0 < ax_x1 - self.TOL and x1 > ax_x0 + self.TOL and
+                        y0 < ax_y1 - self.TOL and y1 > ax_y0 + self.TOL)
+            self.assertFalse(overlaps, f"{where}: legend {leg['labels']} is inside the "
+                                       f"axes ({leg['box']} vs {geom['axes']})")
+        self.assertGreater(geom["n_points"], 0, where)
+        self.assertEqual(geom["n_covered"], 0,
+                         f"{where}: {geom['n_covered']} of {geom['n_points']} drawn "
+                         "points are under a legend box")
+
+    def _assert_nothing_clipped(self, geom, where=""):
+        """Every legend is inside what savefig(bbox_inches='tight') keeps."""
+        sx0, sy0, sx1, sy1 = geom["saved"]
+        for leg in geom["legends"]:
+            x0, y0, x1, y1 = leg["box"]
+            self.assertTrue(
+                x0 >= sx0 - self.TOL and x1 <= sx1 + self.TOL and
+                y0 >= sy0 - self.TOL and y1 <= sy1 + self.TOL,
+                f"{where}: legend {leg['labels']} ({leg['box']}) falls outside the saved "
+                f"area {geom['saved']} -- a tight save would cut it off")
+
+    def _assert_entries(self, geom, expected, where=""):
+        labels = {lab for leg in geom["legends"] for lab in leg["labels"]}
+        self.assertEqual(labels, set(expected), where)
+        self.assertIn("Allele frequency", [leg["title"] for leg in geom["legends"]],
+                      f"{where}: the size key lost its title, so its markers no longer "
+                      "say what they measure")
+
+    # ---- the report's own panels ----------------------------------------------
+    def test_the_report_panel_keeps_its_legends_off_the_data(self):
+        floor = cbop.log_axis(self._scores(300).tolist()).floor
+        geom = self._panel(log_y=True)
+        self._assert_outside_the_data(geom, "report CRISPR-Bulge panel")
+        self._assert_nothing_clipped(geom, "report CRISPR-Bulge panel")
+        self._assert_entries(geom, [
+            "Reference", "Alternative (variant)",
+            cbop.sensitive_plot_label(), cbop.zero_band_label(floor),
+            "1", "0.1", "0.01",
+        ], "report CRISPR-Bulge panel")
+
+    def test_the_report_cfd_panel_is_laid_out_the_same_way(self):
+        """CFD's linear 0-1 axis happens to leave its top-right corner empty on most
+        runs, which is why nobody noticed -- but the two panels are read side by side in
+        one report, and a run whose top CFD scores stay near 1 covers it too."""
+        geom = self._panel(log_y=False)
+        self._assert_outside_the_data(geom, "report CFD panel")
+        self._assert_nothing_clipped(geom, "report CFD panel")
+        self._assert_entries(geom, ["Reference", "Alternative (variant)",
+                                    "1", "0.1", "0.01"], "report CFD panel")
+
+    def test_the_legends_cost_page_height_not_data(self):
+        """The figure GROWS to hold the row; the axes keep the box they had. Squeezing
+        them instead would pay for the move out of the data it was meant to free (a
+        plain tight_layout gives the legends a quarter of the panel's height)."""
+        plain = {}
+
+        def _no_legend(ax, **kwargs):
+            ax.figure.tight_layout()          # the layout with no legend at all
+            plain["axes"] = tuple(ax.get_window_extent(cbop._renderer(ax.figure))
+                                  .transformed(ax.figure.dpi_scale_trans.inverted())
+                                  .extents)
+            plain["figure"] = tuple(ax.figure.get_size_inches())
+            return []
+
+        with mock.patch.object(cbop, "legend_below", _no_legend):
+            self._panel(log_y=True)
+        geom = self._panel(log_y=True)
+        bare_w = plain["axes"][2] - plain["axes"][0]
+        bare_h = plain["axes"][3] - plain["axes"][1]
+        with_w = geom["axes"][2] - geom["axes"][0]
+        with_h = geom["axes"][3] - geom["axes"][1]
+        self.assertAlmostEqual(with_w, bare_w, delta=self.TOL)   # no width lost
+        self.assertAlmostEqual(with_h, bare_h, delta=self.TOL)   # no height lost
+        # ...and the figure is taller by what the legend row needs, not by much more
+        grew = geom["figure"][1] - plain["figure"][1]
+        self.assertGreater(grew, 0.0)
+        self.assertLess(grew, 0.25 * plain["figure"][1])
+
+    # ---- the results page's and the Personal Risk Card's panels ----------------
+    def test_both_plot_scripts_place_every_panel_the_same_way(self):
+        import CRISPRme_plots as plots
+        import CRISPRme_plots_personal as personal
+
+        df = self._script_frame()
+        floor = cbop.log_axis(
+            df["CRISPR_BULGE_score_(highest_CRISPR_BULGE)"].tolist()).floor
+        common = ["Reference", "Alternative", plots.PERFECT_MATCH_LABEL,
+                  "1", "0.1", "0.01"]
+        cb_entries = common + [cbop.sensitive_plot_label(),
+                               cbop.zero_band_label(floor)]
+        for script, module in (("CRISPRme_plots", plots),
+                               ("CRISPRme_plots_personal", personal)):
+            for name, plot, term, entries in (
+                ("CRISPR-Bulge", module.plot_with_CRISPR_BULGE_score, "crispr_bulge",
+                 cb_entries),
+                ("CFD", module.plot_with_CFD_score, "cfd", common),
+                ("mismatches+bulges", module.plot_with_MMvBUL, "mm+b", common),
+            ):
+                with self.subTest(script=script, panel=name):
+                    table = (plots.filter_table(df.copy(), term).copy()
+                             if module is plots else df.copy())
+                    geom = _script_geometry(plot, table, "GUIDE")
+                    where = f"{script} {name}"
+                    self._assert_outside_the_data(geom, where)
+                    self._assert_nothing_clipped(geom, where)
+                    self._assert_entries(geom, entries, where)
+                    # a legend outside the axes only survives a tight save
+                    self.assertEqual(geom["bbox_inches"], "tight", where)
+
+    # ---- the mutants -----------------------------------------------------------
+    def test_putting_the_legends_back_inside_fails_these_tests(self):
+        """The mutant: the pre-2.10.1 placement, both boxes inside the axes. If this
+        passes, the tests above are not holding anything."""
+        def _inside(ax, size_handles=(), series_handles=(),
+                    size_title="Allele frequency", fontsize=None, series_ncol=2):
+            leg1 = ax.legend(handles=list(size_handles), title=size_title, ncol=3,
+                             loc="upper center", fontsize=fontsize)
+            ax.add_artist(leg1)
+            leg2 = ax.legend(handles=list(series_handles), loc="upper right",
+                             fontsize=fontsize)
+            ax.figure.tight_layout()
+            return [leg1, leg2]
+
+        with mock.patch.object(cbop, "legend_below", _inside):
+            geom = self._panel(log_y=True)
+        # it still names everything -- the entries were never the problem
+        self._assert_entries(geom, [
+            "Reference", "Alternative (variant)", cbop.sensitive_plot_label(),
+            cbop.zero_band_label(cbop.log_axis(self._scores(300).tolist()).floor),
+            "1", "0.1", "0.01"])
+        with self.assertRaises(AssertionError):
+            self._assert_outside_the_data(geom, "mutant: legends inside")
+        # and it covers a quarter of the panel's points on this distribution
+        self.assertGreater(geom["n_covered"], 0.25 * geom["n_points"])
+
+    def test_a_legend_clipped_to_the_axes_fails_these_tests(self):
+        """The other mutant, and a bug this nearly shipped: Axes.add_artist clips what
+        it adds to the axes, which keeps the size key out of the figure's tight bounding
+        box -- so a tight save cuts it off the bottom of the image even though it was
+        drawn. legend_below turns that clipping off; here it is turned back on."""
+        real = cbop.legend_below
+
+        def _clipped(ax, **kwargs):
+            legends = real(ax, **kwargs)
+            legends[0].set_clip_on(True)
+            legends[0].set_clip_path(ax.patch)
+            return legends
+
+        with mock.patch.object(cbop, "legend_below", _clipped):
+            geom = self._panel(log_y=False)   # 2 series entries: the size key hangs lower
+        self._assert_outside_the_data(geom, "mutant: clipped size key")
+        with self.assertRaises(AssertionError):
+            self._assert_nothing_clipped(geom, "mutant: clipped size key")
 
 
 if __name__ == "__main__":

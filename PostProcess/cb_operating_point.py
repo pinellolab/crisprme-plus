@@ -64,7 +64,8 @@ NOTE: the default threshold (1.9e-4) is BELOW the legacy 3-decimal display floor
 (5e-4), so CRISPR-Bulge scores must be written at full precision ("{:.6g}") for
 this operating point to be representable (see new_simple_analysis.preprocess_
 CRISPR_BULGE_score / analisi_indels_NNN) -- ``score_text`` below -- and SHOWN on a
-log10 axis -- ``log_axis`` / ``draw_log_score_axis`` below.
+log10 axis -- ``log_axis`` / ``draw_log_score_axis`` below. That axis is also why a score
+panel's legends go underneath it instead of in it -- ``legend_below`` below.
 """
 import math
 import os
@@ -240,3 +241,117 @@ def draw_log_score_axis(ax, values, zeros=False):
         handles.append(mpatches.Patch(color=ZERO_BAND_COLOR, alpha=0.22,
                                       label=zero_band_label(axis.floor)))
     return axis, handles
+
+
+# --------------------------------------------------------------------------- #
+# Where a panel's legends GO
+# --------------------------------------------------------------------------- #
+# Both legends of a score panel used to sit INSIDE the axes ("upper center" for the
+# allele-frequency size key, "upper right" for the colours), which worked while the score
+# was CFD on a linear 0-1 axis: a top-1000 CFD curve falls away from the top-right corner,
+# so the boxes landed on empty paper. On the CRISPR-Bulge log10 axis it is the other way
+# round -- the axis reaches down tens of decades to the floor, so every well-scoring site
+# is pressed into the top band of the panel, exactly under those two boxes. Measured on a
+# real genome-wide run's top 1000 (axis 1e-31..1): the colour legend alone covered 1481 of
+# the 2000 drawn points, scores 1.5e-9 to 1.1e-3 -- the whole neighbourhood of the
+# sensitive operating point, the one thing the panel exists to show. Adding the threshold
+# and "= 0" entries to that box had made it taller still.
+#
+# So the legends go BELOW the axes, in one row: the size key on the left (it needs its own
+# title and its markers read as a scale), the colours/lines on the right. Below, not
+# beside: the panels are wide and short (8.0 x 3.2 in in the report, 7.5 x 2.25 in in the
+# plot scripts) and the personal report puts two of them side by side in one row, so
+# horizontal room is what the data is shortest of -- a right-hand column cost 32% of the
+# data area's width (7.08 -> 4.79 in), against 0.37 in of figure height for a row
+# underneath, and the longest entry ("sensitive threshold ... (95% recall)") -- one of the
+# two the log axis added -- is what sets that column's width.
+# The row is placed under the x-label and the FIGURE IS GROWN to fit it, so the data area
+# keeps the size it had: nothing is traded for the move except page height.
+PANEL_LEGEND_GAP = 0.12     # inches between the x-label and the legend row
+PANEL_LEGEND_MARGIN = 0.04  # inches of figure left below the legend row
+
+
+def _renderer(fig):
+    """A renderer to measure artists with, without forcing a full raster draw."""
+    try:
+        return fig.canvas.get_renderer()
+    except AttributeError:  # pragma: no cover - non-Agg canvas
+        fig.canvas.draw()
+        return fig.canvas.get_renderer()
+
+
+def _axes_box_inches(ax, fig):
+    """The axes' box as (x0, y0, w, h) in inches from the figure's bottom-left."""
+    pos = ax.get_position()
+    w, h = fig.get_size_inches()
+    return pos.x0 * w, pos.y0 * h, pos.width * w, pos.height * h
+
+
+def legend_below(ax, size_handles=(), series_handles=(), size_title="Allele frequency",
+                 fontsize=None, series_ncol=2):
+    """Draw this score panel's legends BELOW the axes, out of the data.
+
+    The ONE placement of every score panel the report and the results page draw
+    (generate_report._cfd_style_scatter, CRISPRme_plots and CRISPRme_plots_personal's
+    plot_with_* functions), so the panels of one report cannot drift apart and no future
+    panel re-learns why "upper right" does not work on a log axis.
+
+    ``size_handles`` is the allele-frequency marker-size key (it keeps its own box and its
+    ``size_title``: its markers are a scale, not a series); ``series_handles`` is
+    everything else the panel names -- Reference, Alternative (variant), any perfect-match
+    star, and on the log axis the sensitive-threshold line and the "= 0" underflow band
+    (draw_log_score_axis's handles). Either may be empty.
+
+    Lays the axes out first (``tight_layout``, so the caller must NOT call it again),
+    places the legends just under the x-label, then GROWS the figure by what they need and
+    moves the axes up by the same amount, so the data area keeps the size it had and the
+    legends cannot be clipped -- including by a ``savefig`` without ``bbox_inches="tight"``.
+    That last step moves ``ax`` alone, so the figure is expected to hold just this panel,
+    which is what every score panel is.
+
+    Returns the Legend artists, in the order drawn.
+    """
+    fig = ax.figure
+    fig.tight_layout()  # the axes' final box, with its title/labels and NO legend in it
+    rend = _renderer(fig)
+    box = _axes_box_inches(ax, fig)
+    # top of the legend row, in axes coordinates: under everything the axes already draw
+    # below themselves (tick labels, x-label), which is where the axes' tight box ends
+    axbb = ax.get_window_extent(rend)
+    below = (ax.get_tightbbox(rend).y0 - axbb.y0) / axbb.height
+    y = below - PANEL_LEGEND_GAP * fig.dpi / axbb.height
+    common = dict(fontsize=fontsize, frameon=False, borderaxespad=0.0)
+    legends = []
+    if len(size_handles):
+        legends.append(ax.legend(handles=list(size_handles), title=size_title,
+                                 ncol=len(size_handles), loc="upper left",
+                                 bbox_to_anchor=(0.0, y), **common))
+        # add_artist is how an axes keeps a SECOND legend -- and it clips what it adds to
+        # the axes' own patch, which makes matplotlib skip the artist in every layout
+        # calculation: the figure's tight bounding box then stops at the axes and
+        # ``savefig(bbox_inches="tight")`` cuts this legend off the bottom of the image
+        # (it did: the CFD panel's size key lost its markers, which hung lower than the
+        # two-entry colour legend). It is deliberately outside the axes, so it is
+        # deliberately not clipped to them.
+        ax.add_artist(legends[-1])
+        legends[-1].set_clip_on(False)
+        legends[-1].set_clip_path(None)
+    if len(series_handles):
+        # right of the size key when there is one, centred when the panel has only this
+        legends.append(ax.legend(
+            handles=list(series_handles), ncol=series_ncol,
+            loc="upper right" if len(size_handles) else "upper center",
+            bbox_to_anchor=(1.0 if len(size_handles) else 0.5, y), **common))
+    if not legends:
+        return legends
+    # room for the row: grow the figure DOWNWARD and keep the axes' box in inches, so the
+    # data area is not squeezed to pay for the legends (the panels are only ~3 in tall)
+    low = min(leg.get_window_extent(rend).y0 for leg in legends) / fig.dpi
+    deficit = PANEL_LEGEND_MARGIN - low
+    if deficit > 0:
+        w, h = fig.get_size_inches()
+        new_h = h + deficit
+        fig.set_size_inches(w, new_h, forward=False)
+        x0, y0, bw, bh = box
+        ax.set_position([x0 / w, (y0 + deficit) / new_h, bw / w, bh / new_h])
+    return legends

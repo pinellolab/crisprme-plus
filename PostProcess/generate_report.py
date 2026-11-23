@@ -3241,19 +3241,22 @@ def _cfd_style_scatter(
                       markersize=math.sqrt(math.sqrt((v + 0.001) * 1000)), label=lab)
         for v, lab in ((1.0, "1"), (0.1, "0.1"), (0.01, "0.01"))
     ]
-    leg1 = ax.legend(handles=handles, title="Allele frequency", ncol=3, loc="upper center", fontsize=7)
-    ax.add_artist(leg1)
-    ax.legend(
-        # on the log axis, the sensitive threshold's line and (when there are any) the
-        # zero band are named here: a reader must be able to tell what the band at the
-        # bottom of the axis means without the caption
-        handles=[
+    # BELOW the axes, both of them (cb_operating_point.legend_below, the one placement of
+    # every score panel): on the log axis the well-scoring sites are pressed into the top
+    # band of the panel, which is where these two boxes used to sit. The entries are
+    # unchanged -- on the log axis the sensitive threshold's line and (when there are any)
+    # the zero band are named here too, so a reader can tell what the band at the bottom
+    # of the axis means without the caption. legend_below lays the figure out itself
+    # (tight_layout + room for the row), so nothing else may call tight_layout after it.
+    cbop.legend_below(
+        ax,
+        size_handles=handles,
+        series_handles=[
             mpatches.Patch(color=transparent_red, label="Reference"),
             mpatches.Patch(color=transparent_blue, label="Alternative (variant)"),
         ] + (log_handles or []),
-        loc="upper right", fontsize=7,
+        fontsize=7,
     )
-    fig.tight_layout()
     return _fig_to_data_uri(fig)
 
 

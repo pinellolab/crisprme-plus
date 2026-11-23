@@ -2332,8 +2332,11 @@ a labelled line: on a linear 0–1 axis every point of a genome-wide run lies on
 rule. A log axis cannot show 0 and the model's float32 output underflows to exactly 0 for a
 few percent of the rows of such a run, so those sites are clipped onto a floor one decade
 below the smallest non-zero score, inside a shaded band the legend and the caption name as
-"0" — they are shown as zeros, never dropped in silence. **None of this changes the search's
-result tables**: it is display, applied to the report's own tables and panels.
+"0" — they are shown as zeros, never dropped in silence. A panel's **legends are drawn in a
+row below the axes**, never over the points: on the log axis the well-scoring sites are
+pressed into the top of the panel, which is where an in-plot legend sits. **None of this
+changes the search's result tables**: it is display, applied to the report's own tables and
+panels.
 
 The report and all of its tables are built from the **best alignment per locus**
 (`bestMerge`). The exhaustive **alternative-alignments** file
