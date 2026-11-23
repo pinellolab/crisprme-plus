@@ -215,7 +215,8 @@ and the `release-crisprme` skill.
   measures its own (`docs/RELEASE_CHECKLIST.md`, D).
 - **The report generator's version is 2.5** (`REPORT_GENERATOR_VERSION`, which the report's
   footer prints). It had been 2.4 since CRISPRme+ 2.4.0, through the generator's changes of
-  2.10.0. The website's example report, 2.10.0's, keeps its "report generator v2.4".
+  2.10.0. The website's example report, rebuilt here from the same search (Fixed, below),
+  prints it: its footer said "report generator v2.4" and now says v2.5.
 - **A search lists the reference genome's chromosomes without a `basename` process per FASTA
   file** (PR 107, Tim Barry). `submit_job_automated_new_multiple_vcfs.sh` named each chromosome
   after its file with `$(basename $file_chr)`, once per variant dataset of a search: on hg38 with
@@ -229,6 +230,25 @@ and the `release-crisprme` skill.
   made the same way in 2.8.1.
 
 ### Fixed
+- **The website's example report is this branch's report, not the one the defective figures
+  shipped in.** `docs/example-report.html`, which the website links ("See an example report"),
+  is generated: it still carried the PRE-FIX precision-recall PNGs and the prose the
+  explanation corrections replaced -- an AUPR row headed "held-out" over a CFD column that
+  holds nothing out, 359 positives printed as "sites", "bulge=1 AP ~ 0.01, essentially the
+  prevalence floor", and a caption sending higher recall "left-and-down" on an axis where
+  recall is x. It is rebuilt the way the release path builds it (`generate-report
+  --result-dir`, the run folder of the website's own example search, read only), so the
+  SEARCH is the same one: the bundled `run_manifest.json`, `Params.txt`,
+  `indexes_searched.txt`, `observed_haplotypes.tsv` and `indel_snp_cooc.tsv` come out byte
+  for byte as the shipped page's, 183,207 sites and 67,115 variant-created among them.
+  What moved is the report: the two embedded figures are now the committed
+  `calibration/pr_curves.png` and `calibration/pr_bulge_stratified.png` byte for byte (the
+  page had the 55,852 B and 124,588 B pre-fix pair), the risk-card modal is byte-identical
+  to the one this tree renders, the CRISPR-Bulge cells carry the `{:.6g}` text, the curated
+  tables carry `Aligned_protospacer+PAM_REF`, and the footer prints report generator v2.5.
+  `PostProcess/test_shared_numbers.py` now holds the page to the modal the code renders, so
+  it cannot fall behind again silently -- but it is a generated file: a change to the
+  rendered card or to the curated tables means regenerating it.
 - **An indel row whose reference alignment is shorter than its alignment gets a reference CFD of
   0, and each chromosome's notes count such rows.** The indel post-analysis reads a row's
   reference alignment from the plain reference, from the row's start, as many bases as its target
