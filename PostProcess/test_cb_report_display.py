@@ -757,6 +757,18 @@ class TestLegendPlacement(unittest.TestCase):
         self.assertEqual(geom["n_covered"], 0,
                          f"{where}: {geom['n_covered']} of {geom['n_points']} drawn "
                          "points are under a legend box")
+        # ...and the two boxes of the row do not run into each other: they share one line
+        # and the entries' wording (the threshold's, above all) sets their widths
+        for i, left in enumerate(geom["legends"]):
+            for right in geom["legends"][i + 1:]:
+                self.assertFalse(
+                    (left["box"][0] < right["box"][2] - self.TOL and
+                     left["box"][2] > right["box"][0] + self.TOL and
+                     left["box"][1] < right["box"][3] - self.TOL and
+                     left["box"][3] > right["box"][1] + self.TOL),
+                    f"{where}: the legends overlap each other "
+                    f"({left['labels']} {left['box']} vs {right['labels']} "
+                    f"{right['box']})")
 
     def _assert_nothing_clipped(self, geom, where=""):
         """Every legend is inside what savefig(bbox_inches='tight') keeps."""
