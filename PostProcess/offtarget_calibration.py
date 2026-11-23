@@ -14,17 +14,18 @@ Design (locked after an adversarial statistician review + a bake-off):
     guide-resampled isotonic maps, PLUS a negative-binomial / Gamma between-guide
     overdispersion multiplier (``phi_bands``), PLUS a Poisson count draw. Validated
     per held-out BENCHMARK guide -- NOT a clinically novel one, which is a different
-    and unvalidatable estimand (METHODS section 5) -- at the realized coverages the
-    artifacts carry in ``loo_total_count_coverage_nominal90``: 89.1% to 100% against a
-    nominal 90% over the bands the card shows, CFD 0.2-0.5 the only one below nominal.
+    and unvalidatable estimand (docs/offtarget_risk_summary_METHODS.md section 5) --
+    at the realized coverages the artifacts carry in
+    ``loo_total_count_coverage_nominal90``: 89.1% to 100% against a nominal 90% over
+    the bands the card shows, CFD 0.2-0.5 the only one below nominal.
   * EACH reported band -- including aggregates such as >=0.2 -- is computed on its
     OWN pooled sites with its OWN overdispersion ``phi_bands[label]``; aggregates are
     NEVER formed by summing independent sub-band draws (a guide's promiscuity is
     correlated across bands: +0.91 Pearson on per-guide positive counts (0.2-0.5 vs
-    >=0.5), +0.73 Spearman, +0.79 on the LOGO residuals -- METHODS section 7, which is
-    the one place that is measured. An earlier "~+0.66" here reproduced under no
-    definition and is retired.) Independent summation wrongly inflates the aggregate's
-    lower bound.
+    >=0.5), +0.73 Spearman, +0.79 on the LOGO residuals, measured in
+    docs/offtarget_risk_summary_METHODS.md section 7 and stated only there; the
+    "~+0.66" this line used to give is retired, it reproduced under no definition).
+    Independent summation wrongly inflates the aggregate's lower bound.
   * both scorers are sequence-based / variant-agnostic, so the calibration applies to
     any <=1-gap alignment (reference or variant/ALT allele). Only >=2-gap sites and the
     per-sample carrier-incidence dimension are out of scope (see METHODS).

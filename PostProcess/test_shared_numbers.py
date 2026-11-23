@@ -580,13 +580,25 @@ class TestCalibrationMethodClaims(_Surfaces):
         and §7 is the one place it is measured. It outlived its retirement in two
         docstrings, which is exactly the drift this file exists to catch."""
         self.assertIn("+0.91 Pearson", self.doc)
-        for name in ("calib_src", "fit_src"):
-            with self.subTest(surface=name):
-                text = getattr(self, name)
-                for para in re.split(r"\n\s*\n", text):
-                    if "+0.66" in para:
-                        self.assertIn("retired", para,
-                                      "a retired correlation is stated as current")
+        for name in ("calib_src", "fit_src", "doc"):
+            text = getattr(self, name)
+            for value in ("+0.91", "+0.73", "+0.79"):
+                with self.subTest(surface=name, value=value):
+                    self.assertIn(value, text,
+                                  f"{name} drops the measured correlation {value}")
+            # the retired figure may be NAMED -- in quotes, beside the sentence that
+            # retires it -- but never stated bare, which is how it survived two
+            # retirements and two documents
+            for m in re.finditer(r"\+0\.66", text):
+                with self.subTest(surface=name, at=text[max(0, m.start() - 30):m.end()]):
+                    self.assertIn('"', text[max(0, m.start() - 6):m.start()],
+                                  f"{name} states +0.66 as a live value, unquoted")
+            if "+0.66" in text:
+                with self.subTest(surface=name):
+                    self.assertTrue(
+                        any(w in text for w in ("retired", "no definition we can find",
+                                                "reproduced under no")),
+                        f"{name} names +0.66 without saying it was retired")
 
     def test_the_phi_and_band_values_the_document_quotes_are_the_artifacts(self):
         """Already covered per-sentence by test_methods_calibration_numbers; here the

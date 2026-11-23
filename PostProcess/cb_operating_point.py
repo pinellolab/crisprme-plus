@@ -26,8 +26,9 @@ The tail quantile is intrinsically noisy (wide CI), so this is the documented
 default operating point, not a hard physical constant. Higher recall buys recall
 only by inflating the validation list: on this benchmark 95% -> 99% is ~16x more
 sites to assay (6,048 -> 99,406, i.e. 16.4x). A single search's own ratio is a
-different quantity and is smaller -- the worked example lives in exactly one place,
-``docs/offtarget_risk_summary_METHODS.md`` section 3.5, and is not restated here.
+different quantity and need not match it; the worked example lives in exactly one
+place, ``docs/offtarget_risk_summary_METHODS.md`` section 3.5, and is not restated
+here.
 Select a different target with the ``CRISPRME_CB_RECALL_TARGET={90|95|99}``
 environment variable.
 
