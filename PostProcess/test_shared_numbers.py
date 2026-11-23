@@ -290,6 +290,26 @@ class TestAuprsAndIntervals(_Surfaces):
                     "no training set" in text or "nothing is held out" in text,
                     f"{name} does not say why CFD's column is not held out")
 
+    def test_the_on_target_tie_group_closes_arithmetically_on_both_pages(self):
+        """Why CFD moves most when the on-targets are dropped: its 46 on-targets tie at
+        exactly 1.0 at the head of the ranking, and that one tie group is worth most of
+        the headline. The document and the modal both spell the multiplication out, so
+        the three numbers have to multiply and the share has to be a share of the
+        artifact's own AUPR -- otherwise a reader can check the arithmetic and find it
+        does not close."""
+        import risk_card
+        precision, recall, share = 0.902, 0.128, 0.116
+        self.assertAlmostEqual(precision * recall, share, places=2)
+        self.assertEqual(f"{share / self.cfd['aupr']['point'] * 100:.0f}%", "69%")
+        card_src = _read("PostProcess", "risk_card.py")
+        for name, text in (("METHODS", self.doc), ("modal", risk_card._ONTARGET_NOTE)):
+            with self.subTest(surface=name):
+                self.assertIn("69%", text)
+        for value in ("0.902", "0.128", "0.116"):
+            with self.subTest(value=value):
+                self.assertIn(value, self.doc)
+                self.assertIn(value, card_src)
+
     def test_the_deployment_matched_values_agree_across_the_three_places(self):
         """0.025 / 0.521 are measured, not derivable here, so the three surfaces that
         print them are held to each other -- and to being BELOW the published ones."""
