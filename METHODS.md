@@ -2648,14 +2648,22 @@ validation loci at 95% recall for the ACTGA/NRG worked example).
 single `100/(100+Σ)` specificity score is replaced by a per-scorer risk card. For each scorer, shown
 side by side and never blended, the card reports the count of ≤1-gap off-target sites in each score
 band and a **calibrated expected number of true off-targets** with a coverage-valid 90% prediction
-interval. The calibration is an isotonic score-to-probability map fit leave-one-guide-out on an
-independent benchmark of 359 experimentally confirmed off-targets across 46 guides (four published
+interval. The calibration is an isotonic score-to-probability map **fit on all benchmark guides at
+once** — leave-one-guide-out is the *validation*, not the fit; the band errors, the overdispersion
+and the coverage check are the leave-one-guide-out quantities, while the shipped map closes on its
+own training data by construction (`docs/offtarget_risk_summary_METHODS.md` §4). The benchmark is
+359 experimentally confirmed off-targets across 46 guides (four published
 external-evaluation sets distributed with the CRISPR-Bulge repository: Tsai 2015, Refined TrueOT,
-Chen 2017, Listgarten 2018; Zenodo 10.5281/zenodo.10902445). Held-out AUPR on that benchmark
+Chen 2017, Listgarten 2018; Zenodo 10.5281/zenodo.10902445). **External**-benchmark AUPR on it
 is **0.168 (CFD)** and **0.613 (CRISPR-Bulge)**, with guide-cluster-bootstrap 90% CIs of 0.13 to
-0.24 and 0.56 to 0.70. The reported range is a two-level guide-cluster bootstrap plus a
-negative-binomial between-guide overdispersion term, validated per-held-out-guide to about 90%
-coverage. Because both scorers are sequence-based, the calibration applies to any ≤1-gap alignment,
+0.24 and 0.56 to 0.70; only CRISPR-Bulge's is *held out* — it is measured on the 40 guides outside
+its training set, while CFD has no training set, so its column is the whole 46-guide benchmark and
+nothing is held out for it. The reported range is a two-level guide-cluster bootstrap plus a
+negative-binomial between-guide overdispersion term, validated **per held-out benchmark guide** at
+89.1% to 100% realized coverage against a nominal 90% (the one band below nominal is CFD 0.2–0.5,
+at 89.1%; the rest are conservative). That validation is for a guide resembling the benchmark's 46;
+it is **not**, and cannot be, a coverage guarantee for a clinically novel guide, whose own
+propensity is the separate axis below. Because both scorers are sequence-based, the calibration applies to any ≤1-gap alignment,
 reference or variant allele; ≥2-gap sites and the per-sample carrier-incidence dimension are out of
 scope. The card also flags, qualitatively, that a deployed guide's own off-target propensity is
 unknown and can shift the absolute count substantially in either direction — usually a larger

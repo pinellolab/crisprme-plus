@@ -620,6 +620,24 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_methods_calibration_numbers -v
 
+      - name: "One quantity, one source: every off-target number that appears on more than one surface agrees with the artifact that owns it"
+        # Each surface used to be reviewed on its own, so the same quantity ended up
+        # stated differently in different places: the 95%->99% validation-list ratio read
+        # 6x in the modal, ~6x in cb_operating_point's docstring and 7.1x in the methods
+        # document where the benchmark's own figure is 16.4x; the CRISPR-Bulge bulge=1 AP
+        # read 0.25 where the figure that measures it says 0.285; the sites-per-validated-
+        # site column read 9 / 21 / 354 / 790 where the committed curve data gives
+        # 9.05 / 22.15 / 348.79 / 786.08; METHODS.md and README.md still called the
+        # shipped map a leave-one-guide-out FIT and CFD's AUPR "held-out"; and the
+        # retired "~+0.66" cross-band correlation outlived its retirement in two runtime
+        # docstrings. This suite re-reads each shared quantity from the one artifact that
+        # owns it -- pr_figure_data.npz for the curves, list sizes and marked points,
+        # {cfd,crispr_bulge}_calibration.npz for the AUPRs, CIs, phi, band support and
+        # coverage, cb_operating_point for the thresholds and labels -- and fails when
+        # any copy of it, prose included, disagrees.
+        working-directory: PostProcess
+        run: python -m unittest test_shared_numbers -v
+
       - name: "Top-1000 and Personal Risk Card plots draw every site (perfect matches starred, 1-edit sites kept, one site too); the report says what its top-1000 views leave out"
         # CRISPRme_plots.py / CRISPRme_plots_personal.py dropped every site with
         # mismatches+bulges <= 1, the on-target and any variant-created perfect match

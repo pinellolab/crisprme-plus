@@ -4,12 +4,16 @@
 Adds, beyond the point map + bootstrap ensemble + per-bin phi:
   * per-REPORT-BAND overdispersion phi (incl. the >=0.2 AGGREGATE) so aggregate
     intervals are computed on the combined band directly, not by summing
-    independent sub-bands (cross-band guide-promiscuity correlation is ~+0.66;
-    independent combination wrongly inflates the aggregate's lower bound).
+    independent sub-bands (cross-band guide-promiscuity correlation is +0.91 Pearson
+    / +0.73 Spearman / +0.79 on the LOGO residuals, measured in METHODS section 7 and
+    stated only there; the "~+0.66" this line used to give is retired, it reproduced
+    under no definition). Independent combination wrongly inflates the aggregate's
+    lower bound.
   * per-band guide-positive counts + #contributing guides (IND resolution).
   * guide-cluster-bootstrap AUPR CIs (the point AUPR is high-variance).
-  * per-held-out-guide (=one novel guide) TOTAL-count coverage per report band
-    (the valid single-guide coverage number).
+  * per-held-out-BENCHMARK-guide TOTAL-count coverage per report band. That is the
+    valid single-guide coverage number; it is NOT the novel-guide case, which this
+    benchmark cannot validate (METHODS section 5).
 
 Writes <scorer>_calibration.npz with grid, p_point, p_ens, phi (per-bin, legacy),
 and meta carrying phi_bands / band_counts / aupr / loo_coverage. numpy/scipy only."""

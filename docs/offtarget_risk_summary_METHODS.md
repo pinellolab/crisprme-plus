@@ -57,6 +57,23 @@ refit parenthetical no longer reads as if the largest absolute move and the larg
 relative move were the same bin — they are 0.039 at score 0.387 and 21% at 0.356, both in
 the 0.2–0.5 band.*
 
+*Cross-surface pass, same date and same tree, after every surface that states one of these
+numbers was read together rather than one at a time. Three §3.5 quantities moved, each
+because another surface already disagreed with it: the sites-per-true-off-target column was
+"≈9 / ≈21 / ≈354 / ≈790" where the curve data gives **9.05 / 22.15 / 348.79 / 786.08** (and
+22.26 at the shipped threshold, which is the ratio every other surface gives); the
+3-decimal-rounding cost was given as "~7%", which is the **total** miss at a 5×10⁻⁴ floor
+(267 of 287) and not the part the rounding causes (**6 sites, 2.1 points**); and
+`PostProcess/cb_operating_point.py`'s docstring, which this document used to point at as
+another lane's, is in the same tree and now carries the same list column and the same 16.4×
+rather than its own "~6x … 206 → 1,286 loci". The same pass corrected `METHODS.md` and
+`README.md`, which still called the shipped map "fit leave-one-guide-out" and CFD's AUPR
+"held-out", and the docstrings of `PostProcess/offtarget_calibration.py` and
+`scripts/fit_calibration.py`, which still carried the superseded "~+0.66" cross-band
+correlation §7 retires, and equated a held-out benchmark guide with a novel one.
+`PostProcess/test_shared_numbers.py` now re-reads each of these from its single source and
+fails when a copy disagrees.*
+
 ---
 
 ## 1. What the summary reports (and what it does not)
@@ -309,8 +326,12 @@ held-out benchmark —
 (point 1.9×10⁻⁴; guide-cluster bootstrap 95% CI [5.8×10⁻⁶, 3.1×10⁻³]; selectable to 90% or 99%
 via `CRISPRME_CB_RECALL_TARGET`, single source of truth `PostProcess/cb_operating_point.py`). The
 threshold is applied to **full-precision** CRISPR-Bulge scores — the report now writes `{:.6g}`,
-not 3 decimals, so the sub-5×10⁻⁴ operating point is representable (3-decimal rounding would have
-floored it at 5×10⁻⁴ and dropped ~7% of validated off-targets from the sensitive tier). The
+not 3 decimals, so the sub-5×10⁻⁴ operating point is representable. 3-decimal rounding would have
+floored it at 5×10⁻⁴, where the sensitive tier holds **267 of the 287** validated off-targets —
+93.0% recall, a 7.0% total miss. Earlier drafts gave that 7.0% as the cost *of the rounding*,
+which it is not: **the rounding itself costs 6 of them, 273 → 267, 2.1 percentage points** on top
+of the 4.9% already missed at 1.9×10⁻⁴ (20 held-out positives round to 0.000, and 14 of those are
+missed at full precision too). The
 practical default panel is a **union**, not a single cutoff:
 
 > **Default panel = (CRISPR-Bulge ≥ 1.9×10⁻⁴, 95%-recall) ∪ (CFD ≥ 0.2 on 0-bulge sites) ∪ (CFD ≥ 0.5 on single-bulge sites) ∪ must-includes**
@@ -355,14 +376,19 @@ measured benefit.
 
 **Recall vs. validation size.** Recall above ~95% is reachable but the list grows **steeply**,
 because the last few percent of true off-targets sit in the noise floor shared with the
-negatives. On the benchmark the trade is ≈**9 sites per true off-target at 90% recall, ≈21 at
-95%, ≈354 at 99%**, ≈790 at 100%. In list sizes on the 40 held-out guides, the 99%-recall list
+negatives. On the benchmark the trade is ≈**9.0 sites per true off-target at 90% recall, ≈22.3
+at 95%, ≈349 at 99%**, ≈786 at 100%. In list sizes on the 40 held-out guides, the 99%-recall list
 is **≈16× the 95% one — 6,076 sites against 99,477** at the shipped thresholds (16.4× at the
 exact recall quantiles, 6,048 → 99,406). Earlier drafts said "≈6×" here; that figure is the
-ACTGA/NRG worked example's ratio, not the benchmark's, and the "≈21 → ≈354" in the same
-sentence already implies ≈17×. (`PostProcess/cb_operating_point.py`'s docstring still carries a
-third version of the same claim, "~6x … 206 → 1,286 loci"; that file belongs to another lane
-and is listed for correction there.) For the ACTGA/NRG worked example (189,957
+ACTGA/NRG worked example's ratio, not the benchmark's. They also gave the per-true-OT column as
+"≈9 / ≈21 / ≈354 / ≈790", whose 95% and 99% entries are not what the curve data holds: the
+measured values are 9.05 / 22.15 / 348.79 / 786.08 at the exact recall quantiles and 22.26 at the
+shipped 1.9×10⁻⁴ (the 22.3 above). `PostProcess/cb_operating_point.py`'s docstring carried
+a third version of the claim, "~6x … 206 → 1,286 loci"; it now gives the benchmark's 16.4× and
+the same list column as this paragraph, and leaves the worked example below as the one place it
+is stated. Both are re-derived from `PostProcess/calibration/pr_figure_data.npz` by
+`PostProcess/test_shared_numbers.py`, so neither can drift from the figures again.
+For the ACTGA/NRG worked example (189,957
 candidate loci) the 95% threshold yields **162 off-target validation loci** (90% → 58; 99% → 1,158; the shipped crispr_bulge_gt_0.tsv tier; +2 perfect-match candidate on-targets), measured
 directly on the regenerated full-precision report (not the per-true-OT ratios above, which are
 benchmark-wide averages).

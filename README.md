@@ -2536,9 +2536,13 @@ is under `data/`). Reading top to bottom:
   CRISPR-Bulge separately (never blended), the count of ≤1-gap off-target sites in each score band and a
   **calibrated expected number of true off-targets** with a 90% range, plus a qualitative note that a
   deployed guide's own off-target propensity (unknown, not given a specific multiplier) can shift the
-  count further. The estimates come from an isotonic calibration fit leave-one-guide-out on 359
-  experimentally confirmed off-targets across 46 guides (held-out AUPR 0.168 [0.13–0.24] CFD /
-  0.613 [0.56–0.70] CRISPR-Bulge; CRISPR-Bulge held out on 287/40). A "How to read this" pop-up explains
+  count further. The estimates come from an isotonic calibration **fit on all 46 benchmark guides at
+  once** — leave-one-guide-out is the validation (band errors, overdispersion, coverage), not the fit —
+  on 359 experimentally confirmed off-targets across those 46 guides (external-benchmark AUPR
+  0.168 [0.13–0.24] CFD / 0.613 [0.56–0.70] CRISPR-Bulge; only CRISPR-Bulge's is *held out*, on the
+  287 positives of the 40 guides outside its training set, CFD having no training set). Coverage of
+  the 90% range, checked per held-out benchmark guide, is 89.1% to 100% across the displayed bands
+  (lowest: CFD 0.2–0.5) and is not a guarantee for a clinically novel guide. A "How to read this" pop-up explains
   the two scorers and shows the precision-recall curves. Full method, the four benchmark studies, and
   provenance (Zenodo 10.5281/zenodo.10902445) in `docs/offtarget_risk_summary_METHODS.md`.
 - **`data/observed_haplotypes.tsv`** — for every site reached by **two or more distinct observed

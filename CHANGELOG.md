@@ -418,6 +418,41 @@ and the `release-crisprme` skill.
   `PostProcess/test_risk_card.py` and the new `PostProcess/test_methods_calibration_numbers.py`
   read both documents against `PostProcess/calibration/*.npz` at run time and against each
   other, so the page and the document cannot drift apart again.
+- **Every off-target number that appears on more than one surface now has one source, and a
+  test that fails when a copy disagrees.** Each surface had been reviewed on its own, which
+  is how the same quantity kept ending up stated three ways: the 95%->99% validation-list
+  ratio read 6x in the modal, ~6x in `cb_operating_point`'s docstring and 7.1x in the methods
+  document, where the benchmark's own figure is 16.4x; the CRISPR-Bulge bulge=1 average
+  precision read 0.25 where the figure that measures it says 0.285; 287 and 359 -- counts of
+  validated POSITIVES -- were printed as counts of SITES. Reading the surfaces together
+  rather than one at a time found six more. **`docs/offtarget_risk_summary_METHODS.md` 3.5**
+  gave sites-listed-per-validated-site as "9 / 21 / 354 / 790" where the committed curve data
+  gives **9.05 / 22.15 / 348.79 / 786.08** (22.26 at the shipped threshold), and gave the cost of
+  3-decimal rounding as "~7% of validated off-targets", which is the TOTAL miss at a 5e-4
+  floor (267 of 287) and not the part the rounding causes (**6 sites, 2.1 points**, 273 ->
+  267); `PostProcess/cbulge_rows.py` carried the same fused "~7%". **`cb_operating_point`'s
+  docstring** carried a third version of the list-growth claim, "~6x ... 206 -> 1,286 loci",
+  whose worked-example counts also contradicted the methods document's measured 162 -> 1,158;
+  it now gives the benchmark's own list column (2,343 / 6,048 / 99,406 sites, 9.0 / 22.2 /
+  348.8 per true off-target) and leaves the worked example to the one place that states it.
+  **`METHODS.md` and `README.md`** still called the shipped calibration map a "fit
+  leave-one-guide-out" -- it is fit on all 46 guides at once and leave-one-guide-out is the
+  validation -- still called CFD's AUPR "held-out" when CFD has no training set, and still
+  rounded the coverage check to "about 90%" instead of the artifacts' 89.1% to 100% with the
+  one band that falls short named. **`PostProcess/offtarget_calibration.py` and
+  `scripts/fit_calibration.py`** still stated the retired "~+0.66" cross-band correlation that
+  section 7 replaced with +0.91 / +0.73 / +0.79, and still equated a held-out benchmark guide
+  with a novel one, which section 5 exists to deny. All are corrected. The new
+  `PostProcess/test_shared_numbers.py` (38 tests) re-reads each shared quantity from the
+  artifact that owns it -- `calibration/pr_figure_data.npz` for the curves, their average
+  precisions, their supports and the marked operating points; `calibration/*_calibration.npz`
+  for the AUPRs, their intervals, phi, the band support and the coverage;
+  `cb_operating_point` for the thresholds and the label text -- and matches it against every
+  copy, prose included. The list sizes and ratios are not quoted but **re-derived** from the
+  curve data at run time. It also holds `docs/example-report.html` to the modal this tree
+  renders, so the page a reader meets first cannot fall behind the code that produces it.
+  Every one of the 14 ways these surfaces have actually drifted was reintroduced one at a
+  time and the suite caught all 14.
 
 ## [2.10.0] - 2026-11-19
 

@@ -9,16 +9,27 @@ Default = the **95%-recall** threshold on the 40-guide held-out external benchma
 off-targets, CRISPR-Bulge held-out). Point estimates per recall target, each with
 the guide-cluster bootstrap 95% CI:
 
-    recall  CB threshold   guide-bootstrap 95% CI       sites/true-OT
-    90%     2.7e-3         [3.4e-4, 1.4e-2]             ~9
-    95%     1.9e-4         [5.8e-6, 3.1e-3]   <-DEFAULT ~21
-    99%     1.5e-8         [7.1e-10, 3.2e-4]            ~354
+    recall  CB threshold   guide-bootstrap 95% CI         list   sites/true-OT
+    90%     2.7e-3         [3.4e-4, 1.4e-2]              2,343      9.0
+    95%     1.9e-4         [5.8e-6, 3.1e-3]   <-DEFAULT  6,048     22.2
+    99%     1.5e-8         [7.1e-10, 3.2e-4]            99,406    348.8
+
+The last two columns are the list each threshold produces on that benchmark and how
+many sites it lists per validated off-target it finds, both at the EXACT recall
+quantiles. At the rounded thresholds printed here the 95% list is 6,076 (273 of the
+287, 22.3 listed per true one) and the 99% list 99,477. Every one of these numbers
+is re-derived from the committed curve data (``calibration/pr_figure_data.npz``) by
+``PostProcess/test_shared_numbers.py``, which also holds the methods document and
+the risk-card modal to the same values, so this table cannot drift from them.
 
 The tail quantile is intrinsically noisy (wide CI), so this is the documented
 default operating point, not a hard physical constant. Higher recall buys recall
-only by inflating the validation list: 95% -> 99% is ~6x more sites to assay
-(ACTGA/NRG worked example: 206 -> 1,286 loci). Select a different target with
-the ``CRISPRME_CB_RECALL_TARGET={90|95|99}`` environment variable.
+only by inflating the validation list: on this benchmark 95% -> 99% is ~16x more
+sites to assay (6,048 -> 99,406, i.e. 16.4x). A single search's own ratio is a
+different quantity and is smaller -- the worked example lives in exactly one place,
+``docs/offtarget_risk_summary_METHODS.md`` section 3.5, and is not restated here.
+Select a different target with the ``CRISPRME_CB_RECALL_TARGET={90|95|99}``
+environment variable.
 
 NOTE: the default threshold (1.9e-4) is BELOW the legacy 3-decimal display floor
 (5e-4), so CRISPR-Bulge scores must be written at full precision ("{:.6g}") for

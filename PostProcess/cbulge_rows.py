@@ -154,8 +154,11 @@ def score_rows(cluster_targets, do_scores):
 
     # CRISPR-Bulge scores are written at FULL precision ("{:.6g}"), NOT 3 decimals:
     # the sensitive operating point (cb_operating_point, 95%-recall default 1.9e-4) is
-    # below the old 3-decimal floor (5e-4), so rounding would make it unreachable and
-    # silently drop ~7% of validated off-targets from the sensitive tier.
+    # below the old 3-decimal floor (5e-4), so rounding would make it unreachable: on the
+    # held-out benchmark a 5e-4 floor leaves the sensitive tier holding 267 of the 287
+    # validated off-targets instead of 273 -- 6 sites, 2.1 points of recall, lost to the
+    # rounding alone (docs/offtarget_risk_summary_METHODS.md section 3.5, which is the one
+    # place that split is stated).
     # The rows to null as a set (2.10.0): a list's membership test read the whole list for
     # each row, and in a dense locus nearly every row has two bulges (a DNA and an RNA one)
     # and is nulled, so a batch of 100,000 rows took about a minute here alone.
