@@ -129,7 +129,9 @@ def fit_scorer(name, scores, labels, guides, provenance):
         auprs.append(aupr_exact(scores[idx],labels[idx]))
     aupr=dict(point=aupr_exact(scores,labels),
               ci=[float(np.percentile(auprs,5)),float(np.percentile(auprs,95))])
-    # per-held-out-guide (one novel guide) TOTAL-count coverage per report band
+    # per-held-out-BENCHMARK-guide TOTAL-count coverage per report band. The guide held
+    # out is still one of this benchmark's own, which is NOT the novel-guide case (the
+    # docstring above, and docs/offtarget_risk_summary_METHODS.md section 5).
     loo_cov={}
     for lbl,(lo,hi) in REPORT_BANDS.items():
         m=bin_in_range(lo,hi); ph=phi_bands[lbl]; cov=0

@@ -2704,5 +2704,51 @@ class Mutants(Case):
                 ).debug()
 
 
+class WhatTheDocsPromiseAboutTheHaplotypeCap(unittest.TestCase):
+    """Every surface that describes the companion files says the cap applies to them.
+
+    README, CHANGELOG and this module's own docstring each said a row "keeps every one"
+    of its distinct ALT sequences in the companion FASTA/TSV and that "none is dropped",
+    with ``--max-haplotypes`` mentioned only as something that trims the ``--alt-list``
+    CELL. It does not: ``site_entries`` truncates ``alts`` to ``--max-haplotypes``
+    (default 10) BEFORE returning, so the TSV and the FASTA are capped too -- which is
+    what ``test_the_cap_keeps_the_count_and_says_what_it_left_out`` asserts above, three
+    sequences written of six at ``--max-haplotypes 2``. Someone ordering oligos off the
+    companion files would have been short on exactly the busiest sites (11 rows of the
+    1,000-row shortlist at the 32-mer, and most of them at ``--window 200``, where the
+    median site has 22 distinct ALT sequences). METHODS § 7.1, which calls its last
+    column "sequences written", was the one surface that already had it right.
+    """
+
+    SURFACES = ("README.md", "CHANGELOG.md", os.path.join("PostProcess",
+                                                          "extract_flanks.py"))
+
+    def text(self, name):
+        with open(os.path.join(REPO, name), encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_no_surface_promises_that_every_alt_sequence_is_always_written(self):
+        for name in self.SURFACES:
+            with self.subTest(surface=name):
+                self.assertNotIn("none is dropped", self.text(name).lower())
+
+    def test_every_surface_names_the_cap_and_how_to_turn_it_off(self):
+        self.assertEqual(F.DEFAULT_MAX_HAPLOTYPES, 10)
+        for name in self.SURFACES:
+            body = self.text(name)
+            with self.subTest(surface=name):
+                self.assertIn("--max-haplotypes 0", body,
+                              f"{name} does not say how to write every haplotype")
+                self.assertIn(f"default {F.DEFAULT_MAX_HAPLOTYPES}", body.lower(),
+                              f"{name} does not give the cap's default")
+
+    def test_the_cap_really_does_reach_the_two_companion_files(self):
+        """The claim above is only worth making because the code behaves this way: if
+        the cap ever stops reaching the FASTA and the TSV, these docs become wrong in
+        the other direction and this test says so."""
+        src = self.text(os.path.join("PostProcess", "extract_flanks.py"))
+        self.assertIn("alts = alts[:max_haplotypes]", src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

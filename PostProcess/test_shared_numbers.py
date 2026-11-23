@@ -35,8 +35,17 @@ Every number below is recomputed from the one artifact that owns it --
     PostProcess/cb_operating_point.py               the three recall targets, their
                                                     thresholds, CIs and label text
 
--- and then matched against every copy of it, prose included. A copy that disagrees
-fails here rather than in a collaborator's hands.
+-- and then matched against every copy of it, prose included, so a surface that stops
+stating the source's value fails here rather than in a collaborator's hands.
+
+Be exact about what that buys, because the first version of this paragraph was not. A
+presence check sees a value DISAPPEAR from a surface -- which is what a drift does when
+the surface states the quantity once, and it is what every case of the mutation harness
+does. It does not see one copy of a twice-stated quantity drift while the other copy
+keeps it present. The two helpers that count are what cover that: assertNumberOnEvery
+accepts exactly one rounding per surface, and assertOnEvery(..., times=n) pins how many
+times. Where a surface legitimately repeats a number, the second copy is held by those
+and not by the plain assertion.
 
 Nothing here re-measures the benchmark: the benchmark is not in the repository. What
 is in the repository is the curve data the figures are drawn from, and every list
@@ -98,6 +107,22 @@ def _modal():
     _card, modal = risk_card.render_risk_card(
         {"guide_display": "G"}, [0.6, 0.3, 0.05], [0.6, 0.3, 0.05])
     return modal
+
+
+_PAYLOAD = re.compile(r"base64,[A-Za-z0-9+/=]+")
+
+
+def _prose(html):
+    """The modal with its embedded image payloads taken out.
+
+    The rendered modal is 261k characters and 249k of them are the base64 of two PNGs
+    -- random-looking text in which "16" occurs 146 times, "46" 75 and "40" 41. Every
+    assertion below about a SHORT token was therefore satisfiable by image noise rather
+    than by the sentence it is about: `assertIn("16", modal)` could not fail. The
+    figures are checked as figures (by sha256, in TestTheShippedExamplePage); what the
+    prose says is checked here, against the prose.
+    """
+    return _PAYLOAD.sub("base64,<payload>", html)
 
 
 def _unreleased_changelog():
@@ -164,15 +189,38 @@ class _Surfaces(unittest.TestCase):
         cls.cbop_doc = cbop.__doc__
         cls.calib_src = _read("PostProcess", "offtarget_calibration.py")
         cls.fit_src = _read("scripts", "fit_calibration.py")
-        cls.modal = _modal()
+        cls.modal_render = _modal()
+        # the SURFACE is what the modal says; the image bytes are checked as images
+        cls.modal = _prose(cls.modal_render)
+        assert len(cls.modal) < len(cls.modal_render), (
+            "the modal no longer embeds a base64 payload: _prose() is now a no-op and "
+            "the short-token assertions below have lost the guard it gives them")
 
     def surfaces(self, *names):
         return [(n, getattr(self, n)) for n in names]
 
-    def assertOnEvery(self, value, *names):
+    def assertOnEvery(self, value, *names, times=None):
+        """``value`` is on each named surface -- and, with ``times``, how often.
+
+        Counting rather than ``assertIn`` for the same reason assertNumberOnEvery
+        counts: a quantity written twice on one surface can drift in one copy and keep
+        the test green on the other, so where a surface should state something exactly
+        once the test says so instead of accepting "at least once".
+        """
         for name, text in self.surfaces(*names):
+            found = text.count(value)
             with self.subTest(surface=name, value=value):
-                self.assertIn(value, text, f"{name} does not state {value!r}")
+                self.assertTrue(found, f"{name} does not state {value!r}")
+                if times is not None:
+                    self.assertEqual(found, times,
+                                     f"{name} states {value!r} {found} times, "
+                                     f"expected {times}")
+
+    def assertPatternOnEvery(self, pattern, *names):
+        """A quantity in the shape of the sentence it belongs to, not as a bare token."""
+        for name, text in self.surfaces(*names):
+            with self.subTest(surface=name, pattern=pattern):
+                self.assertRegex(text, pattern, f"{name} does not state {pattern!r}")
 
     def assertOnNone(self, value, *names):
         for name, text in self.surfaces(*names):
@@ -353,17 +401,29 @@ class TestSupportCounts(_Surfaces):
                           int(self.d["scb_guides"])))
 
     def test_every_surface_quotes_those_counts_and_not_others(self):
+        """Each count in the phrase that makes it that quantity, not as a bare token.
+
+        "46" and "40" are two characters. Asserted bare they were satisfied by any two
+        digits anywhere on the surface -- which, before _prose(), included 75 and 41
+        hits inside the modal's base64 images. The phrase is what a reader reads and it
+        is what has to survive: a support count that loses its noun has still drifted.
+        """
         for meta in (self.cfd, self.cb):
+            pos, sites = meta["n_positives"], meta["n_sites"]
             with self.subTest(scorer=meta["scorer"]):
-                self.assertOnEvery(str(meta["n_positives"]), "doc", "modal", "changelog")
-                self.assertOnEvery(f'{meta["n_sites"]:,}', "doc", "modal", "changelog")
-                self.assertOnEvery(str(meta["n_guides"]), "doc", "modal")
+                self.assertOnEvery(f"{pos} positives", "doc", "changelog")
+                # the modal names the two together ("359 validated off-targets among
+                # 2,940,588 candidate sites", "287 among 2,703,869 sites")
+                self.assertPatternOnEvery(rf"\b{pos}\b[^<>]*among {sites:,}", "modal")
+                self.assertOnEvery(f"{sites:,}", "doc", "modal", "changelog")
+                self.assertOnEvery(f'{meta["n_guides"]} guides', "doc", "modal")
         # the 359/46 pair also carries METHODS.md's and README.md's risk-card sections
-        self.assertOnEvery(str(self.cfd["n_positives"]), "methods_card", "readme_card")
-        self.assertOnEvery(str(self.cfd["n_guides"]), "methods_card", "readme_card")
+        self.assertOnEvery(f'{self.cfd["n_positives"]} experimentally confirmed '
+                           f'off-targets', "methods_card", "readme_card")
+        self.assertOnEvery(f'{self.cfd["n_guides"]} guides', "methods_card", "readme_card")
         # and README's section names CRISPR-Bulge's own support beside it
-        self.assertOnEvery(str(self.cb["n_positives"]), "readme_card")
-        self.assertOnEvery(str(self.cb["n_guides"]), "readme_card")
+        self.assertOnEvery(f'{self.cb["n_positives"]} positives', "readme_card")
+        self.assertOnEvery(f'{self.cb["n_guides"]} guides', "readme_card")
 
     def test_a_positive_is_never_printed_as_a_site(self):
         """"CFD 359 sites / 46 guides" named the positive count as the site count, four
@@ -456,9 +516,14 @@ class TestValidationListSizes(_Surfaces):
         self.assertIn(f"{ratio:.1f}×", self.doc)
         self.assertIn(f"{l95:,} → {l99:,}", self.doc)
         self.assertIn(f"{l95:,} -> {l99:,}", self.cbop_doc)
-        for name in ("doc", "modal", "cbop_doc"):
-            with self.subTest(surface=name):
-                self.assertIn(f"{round(ratio)}", getattr(self, name))
+        # the ROUNDED form, in the spelling each surface actually writes. This line
+        # used to be assertIn(f"{round(ratio)}", surface) -- the two characters "16",
+        # which the modal's own "0.168" contains three times over. It could not fail,
+        # so it was not a check on the ratio at all.
+        rounded = round(ratio)
+        self.assertOnEvery(f"≈{rounded}×", "doc", times=1)
+        self.assertOnEvery(f"{rounded}&times;", "modal", times=1)
+        self.assertOnEvery(f"~{rounded}x", "cbop_doc", times=1)
 
     def test_the_shipped_99_percent_list_is_inside_the_curves_own_run(self):
         """99,477 is the list at the ROUNDED 1.5e-8, which sits below the exact recall
@@ -603,13 +668,31 @@ class TestCalibrationMethodClaims(_Surfaces):
 
     def test_a_held_out_benchmark_guide_is_never_equated_with_a_novel_one(self):
         """§5 is explicit that the per-held-out-guide check is not the novel-guide case.
-        Two runtime modules equated them in a parenthesis."""
+        Two runtime modules equated them in a parenthesis.
+
+        The first version of this guard banned the two exact spellings it had just
+        deleted, "(= one novel guide)" and "(=one novel guide)". It therefore missed a
+        third, "(one novel guide)" with no "=", which survived in fit_calibration.py 118
+        lines below the docstring the same commit corrected -- the same shape as the
+        bare "+0.66" the test below exists for. So the rule is now about the CLAIM, not
+        a spelling: in these two modules every mention of a novel guide has to be on a
+        line that denies it, which is the only thing §5 lets them say about one."""
+        mentions = re.compile(r"novel[- ]guide|novel one|novel\s+guide")
+        denial = re.compile(r"\bNOT\b|\bnot\b|cannot|never")
         for name in ("calib_src", "fit_src"):
+            text = getattr(self, name)
             with self.subTest(surface=name):
-                text = getattr(self, name)
                 self.assertNotIn("(= one novel guide)", text)
                 self.assertNotIn("(=one novel guide)", text)
                 self.assertIn("novel", text)   # it still says what it is NOT
+            lines = [l for l in text.splitlines() if mentions.search(l)]
+            self.assertTrue(lines, f"{name} no longer says what the check is NOT")
+            for line in lines:
+                with self.subTest(surface=name, line=line.strip()[:70]):
+                    self.assertRegex(
+                        line.strip(), denial,
+                        f"{name} mentions a novel guide without denying it: "
+                        f"{line.strip()!r}")
         self.assertIn("cannot be, validated for a clinically novel guide", self.modal)
 
     def test_the_cross_band_correlation_is_stated_once_and_is_the_measured_one(self):

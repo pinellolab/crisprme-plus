@@ -102,10 +102,13 @@ and the `release-crisprme` skill.
   many DISTINCT ALT sequences the row has, the true total whatever `--max-haplotypes`
   wrote), the length and the target's offset and length inside each, and
   `flank_row_id` to join -- on the report's top-N download and on an
-  `integrated_results.tsv` alike. A row with several distinct ALTs keeps every one of
-  them in the companion FASTA/TSV: none is dropped, and none is crammed into a cell
-  unless `--alt-list` asks -- and that cell is POSITIONAL, element k being `hapK` and
-  the first element `flank_alt`. A haplotype that DELETES the whole window (one entry
+  `integrated_results.tsv` alike. A row with several distinct ALTs keeps them in the
+  companion FASTA/TSV -- the ten most useful by default and EVERY one at
+  `--max-haplotypes 0`, that cap applying to those two files and not only to the cell,
+  with `flank_alt_count` always the true total and `flank_notes` counting what was left
+  out (on the 1,000-row shortlist above it binds on 11 rows at the 32-mer). None is
+  crammed into a cell unless `--alt-list` asks -- and that cell is POSITIONAL, element
+  k being `hapK` and the first element `flank_alt`. A haplotype that DELETES the whole window (one entry
   of 4,017 at the 32-mer on that shortlist, none of its 10,354 at `--window 200`) holds
   no bases at all there: it keeps its TSV line with `flank_len 0`, its carriers and the
   note `window-deleted-on-this-haplotype`, writes NO FASTA record (a header with no
@@ -439,7 +442,8 @@ and the `release-crisprme` skill.
   read both documents against `PostProcess/calibration/*.npz` at run time and against each
   other, so the page and the document cannot drift apart again.
 - **Every off-target number that appears on more than one surface now has one source, and a
-  test that fails when a copy disagrees.** Each surface had been reviewed on its own, which
+  test that fails when a surface stops stating it** (and, where the test counts spellings or
+  occurrences, when one copy of it drifts while another survives). Each surface had been reviewed on its own, which
   is how the same quantity kept ending up stated three ways: the 95%->99% validation-list
   ratio read 6x in the modal, ~6x in `cb_operating_point`'s docstring and 7.1x in the methods
   document, where the benchmark's own figure is 16.4x; the CRISPR-Bulge bulge=1 average
@@ -463,7 +467,7 @@ and the `release-crisprme` skill.
   `scripts/fit_calibration.py`** still stated the retired "~+0.66" cross-band correlation that
   section 7 replaced with +0.91 / +0.73 / +0.79, and still equated a held-out benchmark guide
   with a novel one, which section 5 exists to deny. All are corrected. The new
-  `PostProcess/test_shared_numbers.py` (38 tests) re-reads each shared quantity from the
+  `PostProcess/test_shared_numbers.py` (39 tests) re-reads each shared quantity from the
   artifact that owns it -- `calibration/pr_figure_data.npz` for the curves, their average
   precisions, their supports and the marked operating points; `calibration/*_calibration.npz`
   for the AUPRs, their intervals, phi, the band support and the coverage;
@@ -472,7 +476,40 @@ and the `release-crisprme` skill.
   curve data at run time. It also holds `docs/example-report.html` to the modal this tree
   renders, so the page a reader meets first cannot fall behind the code that produces it.
   Every one of the 14 ways these surfaces have actually drifted was reintroduced one at a
-  time and the suite caught all 14.
+  time and the suite caught all 14 -- each of those reintroductions changes the only copy
+  of a value on the surface it touches, so what is demonstrated is that a value cannot
+  silently LEAVE a surface; a quantity a surface states twice is held by the two helpers
+  that count spellings and occurrences, not by the plain assertion.
+- **`extract-flanks`: three surfaces said the companion FASTA/TSV keep every ALT sequence
+  of a row; the default cap keeps ten.** `README.md`, this changelog's `--annotate-table`
+  entry above and `PostProcess/extract_flanks.py`'s own docstring each said a row with
+  several distinct ALTs "keeps every one of them in the companion FASTA/TSV: none is
+  dropped", and mentioned `--max-haplotypes` only as something that trims the `--alt-list`
+  CELL. It trims the files: `site_entries` truncates the haplotype list to
+  `--max-haplotypes` (default 10) before anything is written, which the tool's own
+  `test_the_cap_keeps_the_count_and_says_what_it_left_out` asserts -- three sequences
+  written of six at `--max-haplotypes 2`. On the 1,000-row shortlist those surfaces quote,
+  the cap binds on 11 rows at the 32-mer and on most of them at `--window 200`, where the
+  median site has 22 distinct ALT sequences; someone ordering oligos off the companion
+  files would have been short on exactly the busiest sites. `METHODS.md` section 7.1, whose
+  column is headed "sequences written", was the one surface that already had it right. All
+  three now say that the cap is on those two files, that `--max-haplotypes 0` writes every
+  one, and that `flank_alt_count` / `n_haplotypes` is the true total either way;
+  `PostProcess/test_extract_flanks.py` holds all three to it (3 tests, 159 in the suite).
+- **Two assertions of the shared-number suite could not fail, and one guard missed the
+  occurrence it was written for.** `test_the_ninety_nine_percent_ratio_is_sixteen_fold_on_
+  every_surface` ended in `assertIn(f"{round(ratio)}", surface)` -- the two characters "16",
+  which the modal's own "0.168" contains; and the support counts were asserted bare as "46"
+  and "40" against a 260,999-character modal of which 249,128 are the base64 of two PNGs,
+  where "16" occurs 146 times, "46" 75 and "40" 41. The modal is now stripped of its image
+  payloads before any prose assertion (the images are checked as images, by sha256), the
+  ratio is asserted in the spelling each surface writes, and the support counts in their own
+  phrases. `assertOnEvery` counts occurrences and takes `times=n`. **`scripts/
+  fit_calibration.py`** still called the per-held-out-guide coverage "(one novel guide)" 118
+  lines below the docstring that says it is NOT the novel-guide case; the guard added with
+  that docstring banned two spellings with an "=" and missed this one, so it is now a rule
+  about the claim: in both calibration modules every line that mentions a novel guide has to
+  deny it.
 
 ## [2.10.0] - 2026-11-19
 

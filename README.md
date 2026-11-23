@@ -2903,12 +2903,17 @@ and length inside each of the two, `flank_window` / `flank_orientation` /
 > was measured at, which is why `window_spec` is on every line.
 
 A row can have **several** distinct ALT haplotypes, and a column is one cell wide, so:
-the *count* is a column of its own and **every** ALT sequence stays in the companion
-FASTA/TSV, reached by `flank_row_id`. None is dropped, and none is crammed into a cell
-unless you ask — `--alt-list` adds one more column holding them, `|`-delimited (the ones
-**written**: `flank_alt_count` is always the true total and `flank_notes` says how many
-`--max-haplotypes` left out, so pass `--max-haplotypes 0` to have every one in the
-cell). The primary ALT is `hap1`: the first in the order the command already uses — the
+the *count* is a column of its own and the sequences themselves stay in the companion
+FASTA/TSV, reached by `flank_row_id` — the **ten most useful** of them per row by
+default, and **every** one at `--max-haplotypes 0`. The cap is on those two files, not
+only on the cell: `--max-haplotypes` (default 10) is how many are **written** (the
+"sequences written" column of METHODS § 7.1), while `flank_alt_count` is always the
+true total and `flank_notes` says how many the cap left out. On the 1,000-row
+shortlist above it binds on **11** rows at the 32-mer and on **most** of them at
+`--window 200`, so a plan that needs every ALT oligo should pass
+`--max-haplotypes 0`. None is crammed into a cell unless you ask — `--alt-list` adds
+one more column holding the ones **written**, `|`-delimited. The primary ALT is
+`hap1`: the first in the order the command already uses — the
 sequences that **hold** the off-target first, then by how many haplotypes carry them.
 The list is **positional**: element *k* is `hapK` of `<prefix>.tsv` and the first
 element is `flank_alt`.

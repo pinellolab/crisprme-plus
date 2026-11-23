@@ -53,9 +53,11 @@ OUTPUT, three ways of reading one computation.
   * ``--annotate-table`` -- the INPUT table written back out with the sequences added as
     columns (the reference sequence, the primary ALT, how many distinct ALTs the row
     has), so a results table becomes an oligo order without a join. A row with several
-    distinct ALTs keeps every one of them in the two files above, reached by
-    ``flank_row_id``; none is dropped, and none is crammed into a cell unless
-    ``--alt-list`` asks for it.
+    distinct ALTs keeps them in the two files above, reached by ``flank_row_id``: the
+    ``--max-haplotypes`` most useful (DEFAULT 10, and the cap is on those two files,
+    not only on the cell), every one of them at ``--max-haplotypes 0``, with
+    ``n_haplotypes`` / ``flank_alt_count`` always the true total and the notes counting
+    what was left out. None is crammed into a cell unless ``--alt-list`` asks for it.
 
 ``--filter`` chooses which rows are done at all, as an expression over the table's OWN
 columns, with the CRISPR-Bulge sensitive operating point available by name
