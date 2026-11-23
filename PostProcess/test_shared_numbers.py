@@ -67,6 +67,17 @@ import render_pr_figures as rpf              # noqa: E402  (compact_sci: one for
 
 _SUP = str.maketrans("-0123456789", "⁻⁰¹²³⁴⁵⁶⁷⁸⁹")
 
+# Every surface in this file describes the SHIPPED operating point, and the committed
+# curve data marks only that one. Under CRISPRME_CB_RECALL_TARGET=90 or 99 the module
+# returns a threshold no document quotes and no mark carries -- which is not drift, it is
+# the variable doing its job. The checks that key on it say so and step aside; everything
+# that does not (the AUPRs, the supports, the bulge APs, the calibration claims) still runs.
+_only_default = unittest.skipUnless(
+    cbop.recall_target() == cbop.DEFAULT_TARGET,
+    f"CRISPRME_CB_RECALL_TARGET={cbop.recall_target()} selects an operating point the "
+    f"documents and the committed curve data do not describe (they carry the shipped "
+    f"{cbop.DEFAULT_TARGET}%-recall default)")
+
 
 def _read(*parts):
     with open(os.path.join(_REPO, *parts), encoding="utf-8") as fh:
@@ -190,6 +201,7 @@ class _Surfaces(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 # 1. The operating points and their labels
 # --------------------------------------------------------------------------- #
+@_only_default
 class TestOperatingPoints(_Surfaces):
     """cb_operating_point.CB_RECALL_POINTS is the one source; nothing may restate it
     differently, and the curve data's marked point must be the same number."""
@@ -424,6 +436,7 @@ class TestValidationListSizes(_Surfaces):
                 self.assertIn(f"{size / k:.2f}", self.doc,
                               f"§3.5 does not give {target:.0%} as {size / k:.2f}")
 
+    @_only_default
     def test_the_shipped_threshold_lists_what_the_marked_point_says(self):
         marks = json.loads(str(self.d["marks"]))
         _p, thr, _lab, _prec, _rec, tp, fp = [
@@ -655,6 +668,7 @@ class TestTheShippedExamplePage(_Surfaces):
     def page(cls):
         return _read("docs", "example-report.html")
 
+    @_only_default
     def test_the_example_page_embeds_the_modal_this_tree_renders(self):
         import risk_card
         import offtarget_calibration as oc
@@ -682,6 +696,7 @@ class TestTheShippedExamplePage(_Surfaces):
 
 class TestChangelogQuotesTheArtifacts(_Surfaces):
 
+    @_only_default
     def test_the_figure_entrys_after_numbers_are_the_committed_curve_datas(self):
         """Every "now reads" value in the PR-figure entry is re-derived here, so the
         entry cannot describe a figure the repository does not contain."""
