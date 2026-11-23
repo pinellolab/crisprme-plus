@@ -2722,16 +2722,32 @@ class WhatTheDocsPromiseAboutTheHaplotypeCap(unittest.TestCase):
     column "sequences written", was the one surface that already had it right.
     """
 
-    # the five places a reader can meet the claim: the README, the changelog entry, the
-    # module's own docstring, the subcommand's help in crisprme.py, and the text the
-    # tool prints for `extract-flanks --help`
-    SURFACES = ("README.md", "CHANGELOG.md", os.path.join("PostProcess",
-                                                          "extract_flanks.py"),
+    # every shipped text that describes this command: the README, METHODS, the
+    # changelog entry, the risk-summary document, the module's own docstring (which is
+    # also what `extract-flanks --help` prints), and crisprme.py's subcommand help
+    SURFACES = ("README.md", "METHODS.md", "CHANGELOG.md",
+                os.path.join("docs", "offtarget_risk_summary_METHODS.md"),
+                os.path.join("PostProcess", "extract_flanks.py"),
                 "crisprme.py")
 
     def text(self, name):
         with open(os.path.join(REPO, name), encoding="utf-8") as fh:
             return fh.read()
+
+    def test_the_promise_is_not_hiding_from_the_guard_behind_markdown(self):
+        """The guard above is only worth as much as its regex. Three occurrences were
+        invisible to the plain-substring version because Markdown writes the phrase as
+        "one flank per **distinct observed haplotype**" and the line wraps inside it, so
+        this pins that the emphasis-tolerant pattern still finds the plain form and that
+        every surface the tool is described on is in the list."""
+        self.assertRegex("one flank per distinct observed haplotype", self.PROMISE)
+        self.assertRegex("one flank per **distinct observed\nhaplotype**", self.PROMISE)
+        self.assertRegex("one flank per DISTINCT observed haplotype", self.PROMISE)
+        found = {name: len(self.PROMISE.findall(self.text(name)))
+                 for name in self.SURFACES}
+        for name, n in found.items():
+            with self.subTest(surface=name):
+                self.assertTrue(n, f"{name} no longer describes extract-flanks at all")
 
     def test_no_surface_promises_that_every_alt_sequence_is_always_written(self):
         # assertNotIn would print the whole file -- a megabyte of README around the one
@@ -2745,13 +2761,17 @@ class WhatTheDocsPromiseAboutTheHaplotypeCap(unittest.TestCase):
 
     def test_every_surface_names_the_cap_and_how_to_turn_it_off(self):
         self.assertEqual(F.DEFAULT_MAX_HAPLOTYPES, 10)
+        n = F.DEFAULT_MAX_HAPLOTYPES
+        # the default is written both ways across these files and both are fine; what is
+        # not fine is a surface that gives no default at all
+        spellings = (f"default {n}", f"{n} by default", f"default is {n}")
         for name in self.SURFACES:
-            body = self.text(name)
+            body = self.text(name).lower()
             with self.subTest(surface=name):
                 self.assertIn("--max-haplotypes 0", body,
                               f"{name} does not say how to write every haplotype")
-                self.assertIn(f"default {F.DEFAULT_MAX_HAPLOTYPES}", body.lower(),
-                              f"{name} does not give the cap's default")
+                self.assertTrue(any(sp in body for sp in spellings),
+                                f"{name} gives the cap no default: none of {spellings}")
 
     def test_the_help_a_user_reads_first_says_the_cap_applies(self):
         """`extract-flanks --help` is where most people meet this. Its opening summary
@@ -2770,7 +2790,11 @@ class WhatTheDocsPromiseAboutTheHaplotypeCap(unittest.TestCase):
             "the paragraph promising one flank per distinct haplotype does not say "
             "that only --max-haplotypes of them are written")
 
-    PROMISE = re.compile(r"flank per DISTINCT observed haplotype", re.I)
+    # the phrase as it is WRITTEN: Markdown puts ** inside it and the line wraps in the
+    # middle of it, and a plain-substring version of this regex missed three occurrences
+    # for exactly that reason -- README 2.2.12, METHODS 7.1 and the risk-summary document
+    PROMISE = re.compile(r"flank per[\s*_`]+distinct[\s*_`]+observed[\s*_`]+haplotype",
+                         re.I)
 
     def test_every_place_that_makes_the_promise_qualifies_it(self):
         """Per OCCURRENCE, not per file -- which is how five of seven survived.

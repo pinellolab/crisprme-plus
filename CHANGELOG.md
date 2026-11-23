@@ -482,8 +482,8 @@ and the `release-crisprme` skill.
   of a value on the surface it touches, so what is demonstrated is that a value cannot
   silently LEAVE a surface; a quantity a surface states twice is held by the two helpers
   that count spellings and occurrences, not by the plain assertion.
-- **`extract-flanks` promised one flank per observed haplotype in seven places and named
-  the cap in two of them; the default writes ten.** `README.md`, this changelog's `--annotate-table`
+- **`extract-flanks` promised one flank per observed haplotype in NINE places and named
+  the cap in none of them; the default writes ten.** `README.md`, this changelog's `--annotate-table`
   entry above and `PostProcess/extract_flanks.py`'s own docstring each said a row with
   several distinct ALTs "keeps every one of them in the companion FASTA/TSV: none is
   dropped", and mentioned `--max-haplotypes` only as something that trims the `--alt-list`
@@ -504,9 +504,13 @@ and the `release-crisprme` skill.
   The check that matters is made per OCCURRENCE and not per file: every "one flank per
   distinct observed haplotype" in the tree has to name `--max-haplotypes` within a
   paragraph of itself. A per-file check -- "the README mentions the flag somewhere" --
-  passes while the sentence a reader actually meets says none of it, which is how five of
-  the seven survived the first pass; the same mistake, in miniature, was an earlier version
-  of the `--help` check that the usage line's `[--max-haplotypes 10]` satisfied.
+  passes while the sentence a reader actually meets says none of it, which is how most of
+  the nine survived a pass that was looking for them. Two smaller versions of the same
+  mistake were caught by the check itself: an earlier `--help` assertion that the usage
+  line's `[--max-haplotypes 10]` satisfied, and a plain-substring form of the pattern that
+  missed three occurrences outright because Markdown puts `**` inside that phrase and the
+  line wraps there. The pattern now tolerates emphasis and wrapping, and a test pins that
+  it still matches the plain form.
 - **Two assertions of the shared-number suite could not fail, and one guard missed the
   occurrence it was written for.** `test_the_ninety_nine_percent_ratio_is_sixteen_fold_on_
   every_surface` ended in `assertIn(f"{round(ratio)}", surface)` -- the two characters "16",

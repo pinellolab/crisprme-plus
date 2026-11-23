@@ -421,8 +421,9 @@ crisprme.py extract-flanks \
 
 Per input row it writes the **reference** flank and one flank per **distinct observed
 haplotype** (deduplicated by sequence, each with its carriers and — where the VCF is
-phased — the haplotype side), with the protospacer+PAM's offset and length marked inside
-every flank and a `target_found` column saying whether that haplotype actually reads the
+phased — the haplotype side; `--max-haplotypes` caps how many are written, 10 by default
+and every one at `--max-haplotypes 0`), with the protospacer+PAM's offset and length
+marked inside every flank and a `target_found` column saying whether that haplotype actually reads the
 row's protospacer. The window is anchored on the target's two ends and parametric:
 `--upstream` beyond the protospacer and `--downstream` beyond the PAM, in the guide's
 orientation (3 and 6 by default — a 32-mer for a 20-nt spacer with a 3-nt PAM);

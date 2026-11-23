@@ -2426,7 +2426,9 @@ designing oligos from the reference alone can target the wrong locus.
 `crisprme.py extract-flanks` writes, per input row of a results table (the report's top-N
 download or an `integrated_results.tsv`): the **reference** flank, and one flank per
 **distinct observed haplotype**, deduplicated by sequence, each with the samples (and the
-haplotype side, where the VCF is phased) that carry it. A site with no variant in its
+haplotype side, where the VCF is phased) that carry it — the `--max-haplotypes` most
+carried of them, **10 by default**, every one at `--max-haplotypes 0`, with
+`n_haplotypes` always the row's true total (§ 7.1). A site with no variant in its
 window, or whose haplotypes all read alike, gives one entry.
 
 **How a haplotype is written.** The reference with every ALT allele the sample's genotype

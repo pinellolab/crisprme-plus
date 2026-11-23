@@ -2736,7 +2736,9 @@ writes:
 
 - the **reference** flank, and
 - one flank per **distinct observed haplotype**, deduplicated by sequence, each with the
-  samples (and the haplotype side, where the VCF is phased) that carry it.
+  samples (and the haplotype side, where the VCF is phased) that carry it — the
+  `--max-haplotypes` most carried of them, **10 by default**, every one at
+  `--max-haplotypes 0`, with `n_haplotypes` always the row's true total.
 
 A site with no variant in its window gives one entry. A site whose haplotypes all read
 alike gives one entry. In every entry the **target's own coordinates are marked** — the
