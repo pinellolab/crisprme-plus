@@ -15,7 +15,9 @@ So this writes, per input row:
 
   * the REFERENCE flank, and
   * one flank per DISTINCT observed haplotype sequence, deduplicated by sequence, each
-    with the samples (and, where the VCF is phased, the haplotype side) that carry it.
+    with the samples (and, where the VCF is phased, the haplotype side) that carry it --
+    the ``--max-haplotypes`` most carried of them, 10 by default, every one at
+    ``--max-haplotypes 0``, with ``n_haplotypes`` always the row's true total.
 
 A site with no variant in its window yields one entry. A site whose haplotypes all read
 alike yields one entry. The target's own coordinates are marked in every entry -- the

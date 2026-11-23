@@ -1080,8 +1080,10 @@ outputs. The following is a summary of CRISPRme's key features:
 
 - [**Extract Flanks**](#2212-extract-flanks) (`extract-flanks`) 
   <br>Writes the genomic sequence around each off-target of a shortlist — the reference 
-  flank and one flank per distinct observed haplotype, with the samples carrying each 
-  and the protospacer marked — so a site can be turned into a validation oligo order. 
+  flank and one flank per distinct observed haplotype (the `--max-haplotypes` most 
+  carried, 10 by default; `--max-haplotypes 0` writes every one), with the samples 
+  carrying each and the protospacer marked — so a site can be turned into a validation 
+  oligo order. 
   The window is anchored on the target's two ends and parametric (3 nt beyond the 
   protospacer and 6 beyond the PAM by default: a 32-mer for a 20-nt spacer), with named 
   presets, a `--filter` over the table's own columns, and a mode that writes the REF and 

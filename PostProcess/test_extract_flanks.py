@@ -2770,6 +2770,28 @@ class WhatTheDocsPromiseAboutTheHaplotypeCap(unittest.TestCase):
             "the paragraph promising one flank per distinct haplotype does not say "
             "that only --max-haplotypes of them are written")
 
+    PROMISE = re.compile(r"flank per DISTINCT observed haplotype", re.I)
+
+    def test_every_place_that_makes_the_promise_qualifies_it(self):
+        """Per OCCURRENCE, not per file -- which is how five of seven survived.
+
+        A file-level check ("README names --max-haplotypes somewhere") passes while the
+        sentence a reader actually meets says none of it. The phrase "one flank per
+        distinct observed haplotype" is the promise; wherever it is made, the cap has to
+        be within reach of it. 400 characters is about a paragraph.
+        """
+        reach = 400
+        for name in self.SURFACES:
+            body = self.text(name)
+            hits = list(self.PROMISE.finditer(body))
+            for m in hits:
+                line = body[:m.start()].count("\n") + 1
+                with self.subTest(surface=name, line=line):
+                    self.assertIn(
+                        "--max-haplotypes", body[m.end():m.end() + reach],
+                        f"{name}:{line} promises one flank per distinct haplotype and "
+                        f"does not name --max-haplotypes within {reach} characters")
+
     def test_the_cap_really_does_reach_the_two_companion_files(self):
         """The claim above is only worth making because the code behaves this way: if
         the cap ever stops reaching the FASTA and the TSV, these docs become wrong in

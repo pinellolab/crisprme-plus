@@ -23,7 +23,9 @@ and the `release-crisprme` skill.
   measure the wrong locus. Given a results table (the report's top-N download or an
   `integrated_results.tsv`), the command writes, per row, the reference flank and one
   flank per distinct observed haplotype -- deduplicated by sequence, each with the samples
-  and, where the VCF is phased, the haplotype side that carries it -- as a FASTA plus a
+  and, where the VCF is phased, the haplotype side that carries it; `--max-haplotypes`
+  caps how many are written, 10 by default and every one at `--max-haplotypes 0`, with
+  `n_haplotypes` always the row's true total -- as a FASTA plus a
   TSV index that joins back by the input's line number and rank. The protospacer+PAM's
   offset and length are marked inside every flank, read from that haplotype's own
   coordinates, so an indel that shifts the site reads as a shifted offset rather than as a
@@ -480,8 +482,8 @@ and the `release-crisprme` skill.
   of a value on the surface it touches, so what is demonstrated is that a value cannot
   silently LEAVE a surface; a quantity a surface states twice is held by the two helpers
   that count spellings and occurrences, not by the plain assertion.
-- **`extract-flanks`: five surfaces said the companion FASTA/TSV keep every ALT sequence
-  of a row; the default cap keeps ten.** `README.md`, this changelog's `--annotate-table`
+- **`extract-flanks` promised one flank per observed haplotype in seven places and named
+  the cap in two of them; the default writes ten.** `README.md`, this changelog's `--annotate-table`
   entry above and `PostProcess/extract_flanks.py`'s own docstring each said a row with
   several distinct ALTs "keeps every one of them in the companion FASTA/TSV: none is
   dropped", and mentioned `--max-haplotypes` only as something that trims the `--alt-list`
@@ -498,10 +500,13 @@ and the `release-crisprme` skill.
   column is headed "sequences written", was the one surface that already had it right. All
   three now say that the cap is on those two files, that `--max-haplotypes 0` writes every
   one, and that `flank_alt_count` / `n_haplotypes` is the true total either way;
-  `PostProcess/test_extract_flanks.py` holds all of them to it (4 tests, 160 in the suite),
-  including that the paragraph of `--help` which makes the promise is the one that carries
-  the qualification -- the flag being named in the usage block a few lines above is not the
-  same thing, and an earlier version of the check was satisfied by exactly that.
+  `PostProcess/test_extract_flanks.py` holds all of them to it (5 tests, 161 in the suite).
+  The check that matters is made per OCCURRENCE and not per file: every "one flank per
+  distinct observed haplotype" in the tree has to name `--max-haplotypes` within a
+  paragraph of itself. A per-file check -- "the README mentions the flag somewhere" --
+  passes while the sentence a reader actually meets says none of it, which is how five of
+  the seven survived the first pass; the same mistake, in miniature, was an earlier version
+  of the `--help` check that the usage line's `[--max-haplotypes 10]` satisfied.
 - **Two assertions of the shared-number suite could not fail, and one guard missed the
   occurrence it was written for.** `test_the_ninety_nine_percent_ratio_is_sixteen_fold_on_
   every_surface` ended in `assertIn(f"{round(ratio)}", surface)` -- the two characters "16",
