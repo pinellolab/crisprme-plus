@@ -340,9 +340,10 @@ max-total-edits budget. Bulges can be consecutive (e.g., `NN--NN`) or interleave
 2 RNA bulges make the variant search of the dense loci (the immunoglobulin loci) explode, to
 many hours or out of memory, unless the total budget is 3 or less: the job's
 `log_verbose.txt` says so before its variant search. (The **Maximum edits** slider alone never
-asks for more than 1 bulge of each type.) CRISPRme 2.10.1 is planned to search, in those loci,
-the samples' own haplotypes in place of the variant genome's combinations, in a per-sample search
-(the haplotype scan), with the same indexes ([Troubleshooting](TROUBLESHOOTING.md) §14).
+asks for more than 1 bulge of each type.) A later release of CRISPRme+ is planned to search, in
+those loci, the samples' own haplotypes in place of the variant genome's combinations, in a
+per-sample search (the haplotype scan), with the same indexes
+([Troubleshooting](TROUBLESHOOTING.md) §14).
 
 Bulge searches need a genome index. If no installed **reference** index serves the PAM and the
 bulges you ask for (an index of that PAM, of a PAM that holds it, or the general index), the

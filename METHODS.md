@@ -1215,9 +1215,12 @@ slot are listed nowhere, so no row is left to hold them; a slot of rule 3 leaves
 only and stays on the complex record's, which is what the 90.4 % of the real targets above counts.
 
 What 2.10.1 changes in HPRC's rows (the listings of §10, the MNV rows' carriers, each shape's
-slots) is to be measured by the gates. HGDP + 1000 Genomes and the mega hold no MNV, and no store
-of theirs holds a record whose REF and ALT have one length, so their rows are not to change; that
-too is to be measured by the gates.
+slots) was measured by the release's gates, on HPRC's two genome-wide searches: the real-data
+check counts 0 `limit-indel-row-mnv` after, against 1,163 before, and 0 `limit-snp-row-mnv`
+against 3,334, and 0 of the two gating classes that replace them. HGDP + 1000 Genomes and the
+mega hold no MNV, and no store of theirs holds a record whose REF and ALT have one length, so
+their rows do not change; the gates measured that too, over seventeen searches whose every table
+came back with the md5 it had without the MNV work.
 
 The co-occurrence companion `indel_snp_cooc.tsv` lists the SNP alts the indel
 post-analysis's rows **require** — the guide's own base at a spacer column, or a base that
@@ -2132,8 +2135,9 @@ chr22 (IGL), and chr14's indel post-analysis took 790 s over 49,265,617 lines (2
 not timed per chromosome); the whole search used 1,923% CPU on average, against 2.8.1's 2,558
 to 2,803%. That is the cost of coding every allele: the population-level analysis reads no
 haplotype, so the pre-check skips none of the dense windows, where per sample it skips the
-raw targets no sample carries. 2.10.0 is released with it (decided on 2026-11-16); a faster
-population-level post-analysis of the dense loci is planned for 2.10.1. On 16 threads, the README
+raw targets no sample carries. 2.10.0 is released with it (decided on 2026-11-16), and 2.10.1
+with it too; a faster population-level post-analysis of the dense loci is planned for a later
+release. On 16 threads, the README
 guide with NRR, the default, took 4 h 16 min to 4 h 32 min per sample and 6 h 13 min to 6 h 27 min
 population-level, on two nodes of the hardware above at different loads (on 8 threads, 4 h 33 min
 and 7 h 0 min), against the estimate of 1.5 to 4 h per sample made from its parts before the
@@ -4027,11 +4031,13 @@ repository of its own (`lucapinello/crisprme-data-general-index`), apart from th
 The limits below are those a user of 2.10.0 can meet, each with its scale where it was measured.
 Each is stated where its method is described too. `docs/TROUBLESHOOTING.md` says what a user sees
 of them and what to do: §15 for the rows, §14 for the searches above 1 DNA + 1 RNA bulge, §12
-for the refusal's advice. The haplotype scan of the dense regions, planned for CRISPRme 2.10.1
-with no index rebuild (its engine hooks are in CRISPRitz 2.10.0), is to lift one of them, in a
-per-sample search: the searches above 1 DNA + 1 RNA bulge in dense regions. It writes there the
-lines the search would write, one indel per fake-indel window, so it leaves the two-indel limit as
-it is; where 2.10.1 plans a fix for another limit, its item says so.
+for the refusal's advice. The haplotype scan of the dense regions, planned for a release
+after 2.10.1 and needing no index rebuild (its engine hooks are in CRISPRitz 2.10.0), is to lift
+one of them, in a per-sample search: the searches above 1 DNA + 1 RNA bulge in dense regions. It
+writes there the lines the search would write, one indel per fake-indel window, so it leaves the
+two-indel limit as it is; where a later release plans a fix for another limit, its item says so.
+Of the limits below, 2.10.1 lifts the MNV one where the panel's store holds the MNVs; the rest
+it keeps.
 
 - **Two indels on one haplotype.** A fake-indel window holds one indel, and a carrier is listed on
   an indel row when its own bases read the row's target through the indel, from the target's first
@@ -4098,8 +4104,8 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   from the VCF, every carrier of 13 of these targets (at 8 sites of five searches; 2,782 listings)
   holds the target on a haplotype that does not hold it with only one of its indels there, or none;
   so does every carrier of HPRC's 24 targets (223 listings), with only one of the indels and MNVs
-  that meet the target, or none. No fix is planned yet: the haplotype scan planned for 2.10.1 writes
-  the lines the search writes, one indel per window.
+  that meet the target, or none. No fix is planned yet: the haplotype scan planned for a later
+  release writes the lines the search writes, one indel per window.
 - **An MNV beside an indel on one haplotype.** No store the search reads holds an MNV (the phased
   indel store keeps records whose REF and ALT differ in length, the SNP tiers SNVs, and the indel
   log lists an MNV's carriers with no phase), so a carrier whose haplotype holding a row's indel
@@ -4136,13 +4142,15 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   the haplotype scan does not read either (it reads the stores the search reads). 2.10.1 builds
   that store (§4, MNVs in the phased store): HPRC's Dictionaries are built again with an MNV file
   per chromosome, its index as it is, and a search reads an MNV there as a second record of the
-  slot, which takes a carrier off a row of a sequence it does not have. How many of the listings
-  above leave their rows is to be measured by the gates. Two things stay limits, said plainly.
+  slot, which takes a carrier off a row of a sequence it does not have. The release's gates
+  measured it: every one of the listings above leaves its row, the real-data check counting 0
+  `limit-indel-row-mnv` and 0 `limit-snp-row-mnv` on both of HPRC's genome-wide searches, and 0
+  of the two gating classes that replace them. Two things stay limits, said plainly.
   First, a target held only through an MNV and a second indel-path record stays unreported, as one
   held through two indels does. With the MNVs read, more targets fall there: those of the 171
   listings above whose haplotype holds another target, now off the row, and those of the slots
-  the overlap shapes of §4 take off a row; how many is to be measured by the gates. The fix moves
-  such a carrier from a wrong row to none. Second, a store without its MNV file (2.10.0's, and that
+  the overlap shapes of §4 take off a row. The fix moves such a carrier from a wrong row to
+  none. Second, a store without its MNV file (2.10.0's, and that
   of 2.8.1's HPRC v2.0 archives, which get none) is read as 2.10.0 read it, and this item holds
   there as stated; so does a chromosome whose MNV file cannot be read (§4). An install of 2.10.0
   gets the files with `crisprme.py download --what indel-genotypes --dataset hg38_HPRC`, a dataset
@@ -4167,8 +4175,9 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   reaches 1,388 bases from the target, and no other row of that search lies within 4 kb. The
   real-data check's SNP-row report finds it (6 report-only `carrier-missing` lines) and no such
   carrier on the per-sample searches of HGDP + 1000 Genomes; a row the rule takes off whole, which
-  the report cannot see, is not counted (the check of SNP rows for completeness planned for 2.10.1
-  sees it). 2.10.1 is to read the store over the frame a haplotype's own indels need.
+  the report cannot see, is not counted (the check of SNP rows for completeness planned for a later
+  release sees it). A later release is to read the store over the frame a haplotype's own indels
+  need; 2.10.1 does not.
 - **A target wholly inside a tandem repeat.** The merge reads each row's place on the haplotype
   from its own bases, the first place they fit (§4). In a microsatellite that holds a whole
   target, the target's alignments, each with its own bases, can fit different places, so they
@@ -4176,7 +4185,7 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   model of microsatellites around insertion anchors, at 1 DNA + 1 RNA bulge and `--merge` 3,
   split 134 targets and wrote 15 twice in 10,000 trials. No search of real data checked has
   such a target, and no row is lost or wrong: at worst one off-target is reported twice. A fix
-  is planned for 2.10.1.
+  is planned for a later release, and is not in 2.10.1.
 - **An unphased call of two ALTs at one position.** An unphased carrier is listed for every
   non-empty subset of its variants in the target (§4). For a `1/2` call, both slots hold an ALT of
   the position, yet the subsets take in those that hold neither, the reference base there: such a
@@ -4205,7 +4214,8 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   `Variant_info_spacer+PAM`, nor whether an alternative alignment is one the merge should have
   folded into a better one of the same target (a redundant fold). A variant numbered at the
   wrong place, or a redundant alternative alignment, passes it; the unit tests and the
-  SNP+indel oracle's planted sites check both. 2.10.1 is to check both (`docs/ROADMAP.md`).
+  SNP+indel oracle's planted sites check both. A later release is to check both
+  (`docs/ROADMAP.md`); 2.10.1 does not.
 - **When the check cannot tell the genome's generation.** The check reads how a run's variant
   genome was coded from the run's own records (§8, Releases, gives each rule). Where they do not
   tell whether it codes every allele of a split site, a run whose VCF holds a split SNP site (two
@@ -4216,8 +4226,8 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   where an earlier line holds an ALT the last line does not (two lines of one SNV REF>ALT, case
   twins such as `C>g` beside `C>G` among them, never tell), and an index download holds no
   enriched genome: there a run is refused where a chromosome it checks has a split SNP site in
-  its VCF and no Q in its variant index of 2.10.0. 2.10.1 is to tell the run's genome where the
-  check refuses one today.
+  its VCF and no Q in its variant index of 2.10.0. A later release is to tell the run's genome
+  where the check refuses one today; 2.10.1 does not.
 - **Searches above 1 DNA + 1 RNA bulge in dense regions.** On an index that codes every allele
   (CRISPRitz 2.10.0), the IUPAC search of the immunoglobulin loci and of some tandem repeats grows
   by orders of magnitude above the default budget, a cost no step after the search removes: on IGL
@@ -4227,9 +4237,9 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   (`Bulge_budget_note`), and every dense window a search meets is listed, one line a window, in
   `<out>.high_variant_density_regions.bed` (§5). Keep the default 1 DNA + 1 RNA bulge there, or a
   `--max-total-edits` of 3 or less, which keeps a wider budget near the default's cost. The
-  haplotype scan of 2.10.1, which searches the samples' own haplotypes in the dense regions in place
-  of the IUPAC search, is to make such searches exact and tractable per sample; a population-level
-  search reads no haplotype and keeps the IUPAC search there.
+  haplotype scan planned for a later release, which is to search the samples' own haplotypes in the
+  dense regions in place of the IUPAC search, is to make such searches exact and tractable per
+  sample; a population-level search reads no haplotype and keeps the IUPAC search there.
 - **Population-level searches of a dense panel in its dense loci.** Coding every allele makes some
   loci dense, the immunoglobulin loci among them, and the population-level analysis reads no
   haplotype, so the haplotype pre-check, which skips per sample the raw targets no sample carries,
@@ -4238,8 +4248,8 @@ it is; where 2.10.1 plans a fix for another limit, its item says so.
   min against 1 h 8 min, 32 threads), where its per-sample searches took 0.95 to 1.30 times and
   HPRC's searches 0.90 and 0.96. Its searches take about 2.8.1's time; the SNP post-analysis of
   chr14 (IGH), chr2 (IGK), chr4 and chr22 (IGL) took 2,474, 1,626, 853 and 765 s. 2.10.0 is released
-  with it (decided on 2026-11-16); a faster population-level post-analysis of the dense loci is
-  planned for 2.10.1.
+  with it (decided on 2026-11-16), and 2.10.1 with it too; a faster population-level post-analysis
+  of the dense loci is planned for a later release.
 - **One refusal's advice on a sites-only dataset.** Where a search refuses the INDELS index of a
   sites-only dataset (the mega) whose fake-indel genome is not in place while its VCFs are, the
   refusal says to remove that index and the dataset's enriched genome (and its variant index,

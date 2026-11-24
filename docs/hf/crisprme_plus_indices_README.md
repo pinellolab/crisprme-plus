@@ -89,8 +89,8 @@ codes, and each indel carries its `AF_max`.
 **Searching them.** The default budget is 4 mismatches + 1 DNA + 1 RNA bulge. Above 1 + 1 a
 search of a variant index here warns: the variant search of the densest windows (the
 immunoglobulin loci) grows by orders of magnitude, to hours or out of memory; raise the
-mismatches first (CRISPRme 2.10.1 is planned to search the samples' own haplotypes there, with
-these indexes as they are). A search of mega withholds by default its windows of 2^20
+mismatches first (a later release of CRISPRme+ is planned to search the samples' own haplotypes
+there, with these indexes as they are). A search of mega withholds by default its windows of 2^20
 sequences or more, listing them in the dense-region files (`--no-sites-only-density-guard`
 analyses them), and ranks its combinations whose frequencies fail the safeguards' bound after
 the others.
