@@ -15,9 +15,6 @@ and the `release-crisprme` skill.
 
 ## [2.10.1] - 2026-11-24
 
-<!-- The date is the day this section was finished on main. The release is tagged after review:
-     if the tag is cut on a later day, set this date to the day of the tag and delete this note. -->
-
 CRISPRme 2.10.1 runs on CRISPRitz 2.10.0 and on the indexes of 2.10.0: no index is built again.
 HPRC's `Dictionaries` are, for the MNVs' phase, and `download --what indel-genotypes` puts them
 into an install of 2.10.0 without the index being downloaded again. The main changes, each told
