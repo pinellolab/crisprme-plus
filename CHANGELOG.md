@@ -190,7 +190,9 @@ in its entry below:
   wrote), the length and the target's offset and length inside each, and
   `flank_row_id` to join -- on the report's top-N download and on an
   `integrated_results.tsv` alike. A row with several distinct ALTs keeps them in the
-  companion FASTA/TSV -- the ten most useful by default and EVERY one at
+  companion FASTA/TSV -- the ten most carried that hold the off-target by default (an
+  order that reads no score, so the cap can drop a higher-scoring haplotype before a
+  lower-scoring one) and EVERY one at
   `--max-haplotypes 0`, that cap applying to those two files and not only to the cell,
   with `flank_alt_count` always the true total and `flank_notes` counting what was left
   out (on the 1,000-row shortlist above it binds on 11 rows at the 32-mer). None is
