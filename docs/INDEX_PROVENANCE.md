@@ -11,11 +11,61 @@ the index builder and a second, non-backward-compatible index family appeared.
 > provenance is the next section. The rest of this page covers the archives of 2.8.1, which stay
 > in `lucapinello/crisprme-data` and `lucapinello/crisprme-data-general-index` for 2.8.1.
 
-> **2.10.1: pending.** CRISPRme 2.10.1 packs three of HPRC's archives again, with the MNV files of
-> its phased indel genotype store: `20-NRR_3_hg38+hg38_HPRC`, `dictionaries-bundle_hg38_HPRC` and
-> `indel_genotypes_hg38_HPRC` (the index files in the first are unchanged). Their sizes, SHA-256
-> and Hub commit are to be recorded here at the publish, in a section of their own. Until then,
-> and for 2.10.0, the rows of the next section are those of the Hub's commit `a4d4bc00`.
+> **2.10.1.** CRISPRme 2.10.1 packs three of HPRC's archives again, with the MNV files of its
+> phased indel genotype store: `20-NRR_3_hg38+hg38_HPRC`, `dictionaries-bundle_hg38_HPRC` and
+> `indel_genotypes_hg38_HPRC` (the index files in the first are unchanged). They were published
+> on 2026-11-24 in **one** Hub commit, `1a3593e8`; their sizes and SHA-256 are in
+> [the section below](#the-hprc-archives-re-packed-for-crisprme-2101). The rows of the 2.10.0
+> section are those of the Hub's commit `a4d4bc00`, the parent of that one, and still describe
+> every archive 2.10.1 did not re-pack.
+
+## The HPRC archives re-packed for CRISPRme 2.10.1
+
+CRISPRme 2.10.1 adds the MNV files to HPRC's phased indel genotype store (`gt_mnv_<chrom>.tsv.gz`,
+one per chromosome, with its `.done` marker). Three archives carry them, so three were packed
+again from the same build tree the 2.10.0 archives were packed from; **no index was built again**,
+and the 650 index files inside `20-NRR_3_hg38+hg38_HPRC.tar.gz` are byte for byte those of
+2.10.0.
+
+Published **2026-11-24, 12:29:01 UTC**, to `lucapinello/crisprme_plus_indices`, in **one Hub
+commit** — `1a3593e80e355dea282d0d588139bc39da532692`, made directly above the pinned parent
+`a4d4bc0003b8112d64088b0d6acdae46caa331f0`: 6 files, 32,620,221,147 bytes.
+`scripts/hf_one_commit.py` (`HfApi.create_commit`) sends every file in one commit request with
+the parent pinned, so a repo that moved in between is refused rather than overwritten. The
+alternative, `hf upload` of a folder, commits each batch as it closes and would have left a
+window in which a downloader meets a new companion record beside an old archive — 2.10.0's own
+publish was seven commits and left that window open for 8 minutes 36 seconds.
+
+| file | bytes | SHA-256 |
+|---|---:|---|
+| `20-NRR_3_hg38+hg38_HPRC.tar.gz` | 29,548,088,133 | `a3a13742ba9fc2ba2c01dcf7f4b8aefeb8d894fec3c62d7ccbbbc68c4e763793` |
+| `dictionaries-bundle_hg38_HPRC.tar.gz` | 2,462,806,248 | `c0950aa0ba462b482d787fd980ea45e0e861edba3977908d5b4a605265268065` |
+| `indel_genotypes_hg38_HPRC.tar.gz` | 609,323,819 | `25f06a44ca142233085d656e471cd93ccfb3d3e8fe3a6b7cf7bb4c2530074aa6` |
+
+The commit's other three files are the two companion records those archives belong to
+(`dictionaries-bundle_hg38_HPRC.json`, `indel_genotypes_hg38_HPRC.json`) and `indexes/SHA256SUMS`.
+**`genotypes_hg38_HPRC.tar.gz` was not touched** and keeps
+`30be4ab5878925ea88b0c82dbaf8a022d9f2f639bfa0ec52353f256af1f07c40`.
+
+The Dictionaries bundle's fingerprint therefore changes, and a 2.10.0 install refuses a companion
+whose fingerprint its index manifest does not name, so this is the one thing that could have
+broken a user who never asked for the MNV work:
+
+| | before (`a4d4bc00`) | after (`1a3593e8`) |
+|---|---|---|
+| `dictionaries_bundle.fingerprint` | `a88c6810d8b95d42b0433abfb7ae87bc2be8e31606318d8c24069dd8a8c2ab10` | `a82c8db68804efc54cdfec11339cd04aaab199541268a27d467c84340e1d41d3` |
+| files / bytes | 122 / 4,889,686,284 | 170 / 4,908,986,852 |
+
+It does not break them, and that was measured rather than argued. A clean-room install of the
+**released v2.10.0 image**, running only 2.10.0's own code (three file md5s checked against
+`git show v2.10.0:<path>`, nothing mounted over its tree), ran both commands its own
+`docs/PRECOMPUTED_INDEXES.md` gives: both exited 0, with **no `DownloadIntegrityError`**, and a
+chr22 per-sample search then produced the table it produced before the republish, byte for byte.
+2.10.0 ignores the new files — it opens the indel file by name, and `grep -rIl gt_mnv` over the
+image's 558-file tree finds nothing — which was also shown empirically: two installs differing by
+exactly the 48 new `gt_mnv` files gave md5-identical results. The check is live, not merely
+silent: given a fingerprint that is not the manifest's, 2.10.0's own `_install_companion` raised
+`DownloadIntegrityError` and installed nothing.
 
 ## The indexes of CRISPRme 2.10.0 (index format 2)
 
