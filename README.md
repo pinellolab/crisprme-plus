@@ -22,7 +22,7 @@ through an interactive web-based interface.
 ### What CRISPRme+ adds over classic CRISPRme
 
 If you know CRISPRme 2.1.x, this is what the "+" line does that it did not. What *changed* in
-behaviour, and what to pass to get the old behaviour back, is the [migration
+behavior, and what to pass to get the old behavior back, is the [migration
 guide](#what-changed-vs-stock-crisprme-migration-guide) below; each item here is spelled out in
 [Highlights](#-highlights) and in [METHODS](METHODS.md).
 
@@ -39,7 +39,7 @@ guide](#what-changed-vs-stock-crisprme-migration-guide) below; each item here is
   pangenome**, and the sites-only five-source **mega** — plus your own cohort, built and published
   with the same commands. One index answers many PAMs, pruned as results are emitted.
 - **A score with a threshold you can defend.** **CRISPR-Bulge** replaces CRISTA as the ML scorer,
-  and CFD now penalises a bulge by its position instead of ignoring it, so a PAM-proximal bulge no
+  and CFD now penalizes a bulge by its position instead of ignoring it, so a PAM-proximal bulge no
   longer scores as though it were not there. "Assay down to here" is a stated operating point — the
   95 %-recall threshold on a 40-guide held-out benchmark, with its confidence interval and its
   90 %/99 % alternatives — rather than a round number.
