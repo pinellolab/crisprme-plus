@@ -78,9 +78,15 @@ in its entry below:
   of the companions' records that a publish makes, to keep a companion the repo holds already and
   to refuse another build unless `--replace-companions`. It refuses a folder that holds a staged
   publish already. It prints, and does not run, the commands that publish the folder in one Hub
-  commit with `indexes/SHA256SUMS`: `scripts/hf_sha256sums.py --staged`, one `hf upload` of the
-  folder, then the check that the Hub holds what was staged. `publish-index` itself makes one
-  commit per file. HPRC's republish uses it (Changed).
+  commit with `indexes/SHA256SUMS`: the repo's head, `scripts/hf_sha256sums.py --staged`, one
+  `scripts/hf_one_commit.py` of the folder, then the check that the Hub holds what was staged.
+  `scripts/hf_one_commit.py` (new) calls `HfApi.create_commit`, which sends one commit request
+  for every file at once and does not retry it, with the head as `--parent` so a repo that
+  moved in between is refused rather than overwritten; `hf upload` of a folder is **not** used,
+  because `upload_folder` commits each batch as the batch closes (250 operations, 100 MiB of
+  regular content, or 300 s of age), so a folder whose first file is 29.55 GB can land as two or
+  three commits and a download in between meets a new companion beside the old archive.
+  `publish-index` itself makes one commit per file. HPRC's republish uses it (Changed).
 - **`download --what indel-genotypes --dataset <panel>`: the MNVs for an install of 2.10.0.**
   `crisprme.py download --what indel-genotypes --dataset hg38_HPRC` fetches the panel's
   `indel_genotypes_hg38_HPRC` companion (0.61 GB), which holds the MNV files, and installs it whole
@@ -246,7 +252,9 @@ in its entry below:
   index files are the same, but its manifest names the bundle by its fingerprint, and a download
   refuses a bundle the manifest does not name. `genotypes_hg38_HPRC` stays as it is (the same
   fingerprint). The three archives, the two companions' records and `indexes/SHA256SUMS` go up in
-  one Hub commit (`publish-index --replace-companions --stage-only`, then the commands it prints).
+  one Hub commit (`publish-index --replace-companions --stage-only`, then the commands it prints:
+  `scripts/hf_one_commit.py`, one `HfApi.create_commit` request pinned to the head it was staged
+  against, not `hf upload`, which can split a folder this size into two or three commits).
   No index name, index format or catalog entry changes. At the publish, `docs/INDEX_PROVENANCE.md`
   gets the new archives' sizes, SHA-256 and Hub commit (2.10.1), in a section of its own; until
   then it says "2.10.1: pending". 2.10.0's stay in the Hub's history. CRISPRme 2.10.0 reads no MNV

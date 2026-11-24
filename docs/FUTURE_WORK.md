@@ -99,7 +99,7 @@ pangenome index at a high budget. A quick coverage item, not a gap.
 with `--max-total-edits`) and record the result for the validation matrix. On an index of 2.10.0,
 which codes every allele, `complete-search` warns of such a budget, whose variant search can
 explode in the dense loci ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §14): measure first how it
-fares on HPRC, a panel of 232 samples, or run it with the haplotype scan of 2.10.1. (Was tracking
-task #242.)
+fares on HPRC, a panel of 232 samples, or run it with the haplotype scan planned for a later
+release. (Was tracking task #242.)
 
 **Acceptance.** HPRC ACTGA high-budget result captured alongside the other indices'.

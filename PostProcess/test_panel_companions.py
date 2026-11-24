@@ -666,11 +666,18 @@ class StageOnlyPublish(_Base):
         title = (f"Publish dictionaries-bundle_{VCF}, indel_genotypes_{VCF}, {NRR} with "
                  "indexes/SHA256SUMS, in one commit (publish-index --stage-only)")
         cmds = hf.stage_commands(self.stage, FMT2, title)
-        self.assertEqual(cmds[1], f"hf upload {FMT2} {self.stage}/indexes indexes --repo-type "
-                                  f"dataset --commit-message '{title}'")
-        self.assertTrue(cmds[0].startswith("python3 ") and cmds[0].endswith(
+        # the upload is create_commit (scripts/hf_one_commit.py), pinned to the head read
+        # first: `hf upload` of a folder commits each batch as it closes and can split
+        self.assertEqual(len(cmds), 4)
+        self.assertTrue(cmds[0].startswith(
+            f"PARENT=$(curl -sS https://huggingface.co/api/datasets/{FMT2} |"))
+        self.assertTrue(cmds[1].startswith("python3 ") and cmds[1].endswith(
             f" {FMT2} --staged {self.stage}/staged.sha256 > {self.stage}/indexes/SHA256SUMS"))
-        self.assertTrue(cmds[2].endswith(f" {FMT2} | diff - {self.stage}/indexes/SHA256SUMS"))
+        self.assertTrue(cmds[2].startswith("python3 ") and cmds[2].endswith(
+            f" {FMT2} {self.stage}/indexes indexes --parent \"$PARENT\" --message '{title}'"))
+        self.assertIn("hf_one_commit.py", cmds[2])
+        self.assertTrue(cmds[3].endswith(f" {FMT2} | diff - {self.stage}/indexes/SHA256SUMS"))
+        self.assertFalse(any(c.startswith("hf upload") for c in cmds))
         for cmd in cmds:
             self.assertIn(f"  {cmd}\n", said)
         self.assertIn(f"Staged in {self.stage}; NOTHING was uploaded to {FMT2}", said)
@@ -699,9 +706,9 @@ class StageOnlyPublish(_Base):
         self.assertEqual(hub_files(self.hub, FMT2), self.before)
 
     def test_the_folder_in_one_commit_is_what_a_download_installs(self):
-        """The staged folder copied into the repo whole (what `hf upload` of it does, in one
-        commit): a fresh download of the index installs the bundle with the MNV files, and
-        an install of 2.10.0 gains them by the download step."""
+        """The staged folder copied into the repo whole (what scripts/hf_one_commit.py does,
+        in one commit): a fresh download of the index installs the bundle with the MNV files,
+        and an install of 2.10.0 gains them by the download step."""
         old = os.path.join(self.tmp, "old")
         os.makedirs(old)
         self.download(old, NRR)  # an install of 2.10.0's publish

@@ -1216,11 +1216,13 @@ only and stays on the complex record's, which is what the 90.4 % of the real tar
 
 What 2.10.1 changes in HPRC's rows (the listings of §10, the MNV rows' carriers, each shape's
 slots) was measured by the release's gates, on HPRC's two genome-wide searches: the real-data
-check counts 0 `limit-indel-row-mnv` after, against 1,163 before, and 0 `limit-snp-row-mnv`
-against 3,334, and 0 of the two gating classes that replace them. HGDP + 1000 Genomes and the
-mega hold no MNV, and no store of theirs holds a record whose REF and ALT have one length, so
-their rows do not change; the gates measured that too, over seventeen searches whose every table
-came back with the md5 it had without the MNV work.
+check counts 0 `limit-indel-row-mnv` after on both runs, against 1,163 before in the per-sample
+run and 558 in the population-level one, and 0 `limit-snp-row-mnv` against 3,334 in the
+per-sample run — the check does not apply that class to a population-level run, whose SNP rows
+are a worst-case union — and 0 of the two gating classes that replace them, on both runs.
+HGDP + 1000 Genomes and the mega hold no MNV, and no store of theirs holds a record whose REF
+and ALT have one length, so their rows do not change; the gates measured that too, over
+seventeen searches whose every table came back with the md5 it had without the MNV work.
 
 The co-occurrence companion `indel_snp_cooc.tsv` lists the SNP alts the indel
 post-analysis's rows **require** — the guide's own base at a spacer column, or a base that

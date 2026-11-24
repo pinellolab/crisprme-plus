@@ -150,8 +150,10 @@ The main ones:
   `crisprme.py download --what indel-genotypes --dataset hg38_HPRC`
   ([Troubleshooting](docs/TROUBLESHOOTING.md) §15); so does a store that `build-index-only` of
   2.10.1 builds. Such carriers then leave those rows: on HPRC's two genome-wide searches the
-  release's gates measured none left, the real-data check counting 0 of both listings after,
-  against 1,163 and 3,334 before. A target held only through an MNV and another indel or MNV
+  release's gates measured none left, the real-data check counting 0 of both listings after on
+  both runs — before, the per-sample run had 1,163 indel-row and 3,334 SNP-row listings, the
+  population-level run 558 indel-row listings and no SNP-row count, the check not applying that
+  class to a population-level run. A target held only through an MNV and another indel or MNV
   stays unreported.
 - **Two indels on one haplotype**: a target held only through two indels is not reported for its
   carriers, and some carriers of a second indel are listed on a row of one indel; most often for
