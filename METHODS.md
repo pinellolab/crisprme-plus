@@ -2533,6 +2533,35 @@ and the annotation legend of Section 6. Allele frequencies can be omitted
 (`--no-maf`) for runs where they are not yet finalized, so the site set and
 scores can be shared without misleading frequency values.
 
+**How a CRISPR-Bulge score is shown, and both alignments of a site.** The curated schema
+(the in-report table and every download share it) is written for a reader who has to act on
+it, which for this score family means two things. *Precision:* a CRISPR-Bulge cell carries
+**6 significant digits** — `0.00019`, `2.35e-39`, `0` for a true zero, `-` for a row the
+model did not score — the same `"{:.6g}"` text the post-analyses already write into the
+search's own tables. Fixed decimals cannot work here: the sensitive operating point is
+`1.9e-4` (§3.5 of `docs/offtarget_risk_summary_METHODS.md`; `PostProcess/cb_operating_point.py`
+is the single source of both the threshold and this text, so the two cannot drift), 4
+decimals print the same `0.0002` on either side of it, and a whole genome-wide run reads
+`0.0000`. CFD keeps its 4 decimals: it is calibrated, uses the whole 0–1 range, and its own
+thresholds (0.05 / 0.2 / 0.5) are far from any display floor. *Both alignments:* the curated
+tables carry `Aligned_spacer+PAM`, `Aligned_protospacer+PAM_REF` and
+`Aligned_protospacer+PAM` (the variant sequence, the reference one on a row no variant
+creates) as three adjacent columns, so the site reads as an alignment and the base a variant
+changes — the base a validation assay must be designed around — is visible without going
+back to the raw table. A variant-created site with no reference alignment shows `-` there; a
+run with no variant off-target at all drops the `_REF` column rather than repeat the other
+one on every row, as it drops `Observed`. For the same reason the **CRISPR-Bulge score
+panels use a log10 y-axis** (CFD's stay linear 0–1), with the operating point drawn on it as
+a labelled line: on a linear 0–1 axis every point of a genome-wide run lies on the bottom
+rule. A log axis cannot show 0 and the model's float32 output underflows to exactly 0 for a
+few percent of the rows of such a run, so those sites are clipped onto a floor one decade
+below the smallest non-zero score, inside a shaded band the legend and the caption name as
+"0" — they are shown as zeros, never dropped in silence. A panel's **legends are drawn in a
+row below the axes**, never over the points: on the log axis the well-scoring sites are
+pressed into the top of the panel, which is where an in-plot legend sits. **None of this
+changes the search's result tables**: it is display, applied to the report's own tables and
+panels.
+
 The report and all of its tables are built from the **best alignment per locus**
 (`bestMerge`). The exhaustive **alternative-alignments** file
 (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments at each
@@ -2614,6 +2643,165 @@ genotypes — so no carrier or homozygote count is estimated: the registry holds
 `--keep-intermediates`) gives as **NA**, and a per-dataset **`indel_af.tsv`** companion
 carries indel allele frequencies by source alongside the SNP+indel co-occurrence table.
 
+### 7.1 Flanking sequences for validation (`extract-flanks`)
+
+A shortlist says where each off-target is; validating one in the lab needs the **sequence
+around it**. For a site in a variant region that is not one sequence, and the haplotype
+that carries the variant making the off-target is usually not the reference one, so
+designing oligos from the reference alone can target the wrong locus.
+
+`crisprme.py extract-flanks` writes, per input row of a results table (the report's top-N
+download or an `integrated_results.tsv`): the **reference** flank, and one flank per
+**distinct observed haplotype**, deduplicated by sequence, each with the samples (and the
+haplotype side, where the VCF is phased) that carry it — the `--max-haplotypes` most
+carried of them, **10 by default**, every one at `--max-haplotypes 0`, with
+`n_haplotypes` always the row's true total (§ 7.1). A site with no variant in its
+window, or whose haplotypes all read alike, gives one entry.
+
+**How a haplotype is written.** The reference with every ALT allele the sample's genotype
+puts on that slot, each in place of its REF bases, as VCF 4.x defines it — by
+`scripts/variant_haplotypes.py`, the same reconstruction `scripts/check_indel_rows.py`
+(the independent real-data check of the indel path) is built on, so the release gate's
+notion of a haplotype and the user's validation sequence cannot drift apart. Only records
+whose `FILTER` is `PASS` or `.` are written by default, as CRISPRitz's enricher reads them
+and therefore as the search modelled them, so the emitted protospacer matches the row's
+own alignment; records outside them are **counted in the notes**, never silently dropped
+(`filtered-records-in-window:N`). `--include-filtered` writes them into the sequence, and
+then says so twice: the note becomes `filtered-records-written:N` and each such record
+carries its `FILTER` in the `variants` column (`chr8_127736240_A_AT|LowQual`), so no base
+of a low-quality call is in an ordered oligo without a mark on it.
+
+**The window: anchored, parametric, and read in the guide's orientation.** A window is
+the target plus a padding at each of its two ends, and each padding is named for what it
+sits beside: `--upstream N` beyond the **protospacer's** outer end (default 3) and
+`--downstream M` beyond the **PAM's** outer end (default 6) — for a 20-nt spacer with a
+3-nt PAM, a **32-mer**, with the protospacer+PAM at offset 3. The anchored form is the
+default because it is the general one (its meaning does not depend on the target's
+length, while a symmetric window is only the case where the two paddings are equal) and
+because an oligo read straight off the site has no primer slack to absorb a padding
+error; `--window W` is the symmetric form and *is* `--upstream W --downstream W` (200 is
+a 423 bp interval for a 23 bp target: a 250–300 bp NGS amplicon with room for primers
+50–150 bp from the cut, and the short end of a Sanger/TIDE amplicon). A `--preset` names
+a set of these flags, from a config file rather than from code, so another assay's
+geometry needs no change to CRISPRme.
+
+Which **genomic** side each padding lands on is worked out per row from the row's strand
+and from which end of the target the PAM is: on a minus-strand row the genomic order
+reverses, and on a **5′ PAM** (Cas12a, PAM then protospacer) the target's two ends swap,
+so the same two numbers land on the opposite genomic sides from the 3′ case. The PAM's
+side is read from the run's own records — the PAM file its `--pam` names, whose signed
+length carries the side, else the `Pam` of its `Params.txt` with the side read off the
+table's `Aligned_spacer+PAM` run of `N`s — never assumed; where neither answers and the
+two paddings differ, the command refuses rather than guess SpCas9 (a symmetric window
+does not need the answer).
+
+The window is cut on the **reference** — the same genomic interval for every haplotype of
+a site, so the entries line up and the table can print one interval. An indel inside the
+window makes one haplotype's flank longer or shorter than another's, which is what that
+genome holds; the `flank_len` column gives it. Near a contig end the window is truncated
+and the entry says so.
+
+**Bulges: the one assumption a fixed-length oligo makes, made explicit.** A 32-mer
+assumes protospacer+PAM is 23 bases of genome. That holds for a mismatch-only site but
+not where the alignment carries a bulge: a **DNA** bulge is a genomic base with no
+partner in the guide (the footprint is one base **longer** per bulge) and an **RNA**
+bulge a guide base with no genomic partner (one base **shorter**). Bulge-carrying sites
+are the class CRISPR-Bulge under-detects (§3.5), so they are over-represented in anything
+filled in from a sensitive threshold, and a silently wrong length there would be a
+systematically wrong oligo on exactly those sites. The default (`--length-policy
+anchored`) keeps the paddings and lets the total vary, which keeps the sequence
+genomically true; `--length-policy fixed-total` holds the reference interval at
+`upstream + spacer+PAM + downstream` and takes the difference out of the padding (beyond
+the PAM first, never below zero). Either way the row states its own geometry —
+`flank_len`, `target_span_ref`, `nominal_target_len`, `bulge_type`, `pad_upstream` /
+`pad_downstream` as applied — and carries the note
+`target-span-not-nominal:<span>/<nominal>` where the two differ.
+
+**Marking the target.** Each entry gives the offset and the length of the protospacer+PAM
+inside its own flank, and whether that haplotype actually **reads** the row's
+protospacer. On a carrier of an insertion inside the target, the offset is the exact
+place its bases start; on a haplotype that does not hold the row's variant, the target's
+reference span is mapped through that haplotype's own coordinates, so an indel that
+shifts the site reads as a shifted offset rather than as a miscount. A flank is written
+as the **guide** reads it by default — the protospacer 5′→3′, so the sequence is the
+oligo — or on the reference's plus strand under `--orientation genome`; which it was is
+on every line (`orientation`, `emitted_strand`), the coordinates are genomic either way,
+and `protospacer_on_strand` always gives the target read on the row's own strand.
+
+**What it refuses to guess.** A sample whose call in the window is unphased and
+heterozygous, has a missing allele, or has fewer copies than another of its calls has no
+known slot — which of its alleles share a haplotype is not in the VCF — and a slot whose
+records' REF spans meet describes those bases twice, so the VCF gives it no sequence.
+Either way the sample (or the one copy at fault) is listed under `unresolved` with the
+reason and the records, and no haplotype is written for it. Two genotyped VCFs that cover
+one chromosome and name a sample in common are refused outright. An input the run's
+records name but that is not there is raised **by name**, with what to pass instead. The
+reference entry of a row says which of four things it is: the sequence every sample
+without a variant here carries (a genotyped VCF covers this contig),
+`no-vcf-covers-this-contig` (VCFs were read, none holds this contig — chrY, `_alt`,
+`_random`, `chrUn` under a typical autosome+chrX panel), `reference-only` (no VCF was
+read at all), or `no-genotyped-vcf-for-this-contig` (a sites-only dataset). The sequence
+is the same; only the first is a statement about the panel's samples.
+
+**"Observed haplotype": two rules, deliberately.** CRISPRme's own enumerator
+(`PostProcess/observed_haplotypes.py`, behind the report's `Observed` column) is
+sensitivity-first: an unphased individual is never dropped — its whole alt collection in
+the window becomes ONE *putative* variant set, so no risk is missed. `extract-flanks` is
+sequence-first: it emits the bases a user will order oligos against, and for that
+individual the VCF does not say which alleles share a copy, so no sequence is written and
+the sample is listed under `unresolved`. On a phased panel the two agree (0 unphased
+unresolved rows in a 1,000-row HGDP+1000G shortlist); on an unphased one the report's
+carrier list for a site and the flank TSV's will differ, by this rule.
+
+**Output, three ways of reading one computation.** A FASTA (one record per sequence,
+whose names never carry a sample identity) and a TSV index joining back to the input by
+its line number and, where the table has one, its rank; and, with `--annotate-table`,
+the **input table itself** written back out with the reference sequence, the primary ALT
+sequence and the count of distinct ALT sequences as columns, so a results table becomes
+an oligo order without a join. The order is deterministic: rows in input order, the
+reference entry first, then the haplotypes that hold the off-target, then by carrier
+count and sequence. `--filter` chooses which rows are done at all, as an expression over
+the table's own columns, with the CRISPR-Bulge sensitive operating point (§3.5)
+available by name rather than copied as a number.
+
+**Three places where a wrong answer would look exactly like a right one, and what
+prevents each.** (i) *The join.* Every output is keyed on the input's own data line
+number, so the reader and the `--annotate-table` writer must count lines identically: the
+table is parsed as plain tab-separated text, one row per **physical line**, with no
+quoting convention (a double quote in a cell is a double quote), and the writer refuses
+to produce a table at all if its count of the data lines ever differs from the reader's.
+A sequence written on the neighbouring row carries the right number of columns and a
+plausible value in each. (ii) *A haplotype that deletes the whole window.* It holds no
+bases between the flank's two coordinates — real at a 32-mer, absent at 200 bp, because a
+423 bp window does not fit inside those deletions — so the entry keeps its line
+(`flank_len 0`, its carriers, the note `window-deleted-on-this-haplotype`) but writes no
+FASTA record and takes a placeholder in the `--alt-list` cell: an empty record or an
+empty element silently renumbers every sequence after it for a reader pairing them by
+position. (iii) *A cell that is both a value and a marker.* `-` is "not measured" in a
+CFD or CRISPR-Bulge column and is the **value** of `Strand`, of an intergenic
+`Gene_region`, of a `PAM_creation` that did not happen; nothing in the file says which,
+so the expression decides — a cell read as a number is missing where it holds `NA`, `-`,
+`.` or nothing (and the rows are counted), while a cell compared with a string is its own
+text. `Strand == "-"` therefore selects the minus-strand rows rather than reporting them
+as unmeasured, and a threshold on a score column still skips the rows nobody measured.
+
+**How many distinct ALT sequences a site has depends on the window, strongly, so every
+such figure must be labelled with the window it belongs to.** On the 1,000-site
+shortlist of one genome-wide HGDP + 1000 Genomes run (4,091 samples):
+
+| window | sites with ≥1 ALT sequence | with ≥2 | ALT sequences per site (median / mean / max) | sequences written |
+|---|---|---|---|---|
+| `--window 200` (423 bp) | 940 / 1000 | 939 / 1000 | 22 / 27.5 / 4,263 | 10,354 |
+| `--upstream 3 --downstream 6` (32-mer) | 803 / 1000 | 546 / 1000 | 2 / 3.0 / 837 | 3,069 |
+
+A short window spans far fewer variants, so it collapses many distinct 400 bp haplotypes
+onto one 32-mer — but it does not make the multi-sequence case rare: **more than half**
+the sites of that shortlist still have more than one distinct ALT 32-mer. A validation
+plan that assumes one ALT sequence per site is therefore wrong on about half of them, at
+either window. `--max-haplotypes` (default 10) writes the most useful and the notes count
+the rest, while `n_haplotypes` (and the column mode's `flank_alt_count`) always gives the
+true total.
+
 ## 8. Off-target scoring, assumptions and limitations
 
 **Scoring models.** Candidate off-targets are scored with two independent,
@@ -2681,22 +2869,38 @@ panel keys on — is the **95%-recall threshold** on the 40-guide held-out bench
 (**CB ≥ 1.9×10⁻⁴**; point estimate, guide-bootstrap 95% CI [5.8×10⁻⁶, 3.1×10⁻³]; selectable to
 90% / 99% via `CRISPRME_CB_RECALL_TARGET`), not an ad-hoc `> 0`: CRISPR-Bulge scores almost every
 site non-zero, so `> 0` would list the whole genome. CRISPR-Bulge scores are written at full
-precision (`{:.6g}`) so this sub-5×10⁻⁴ operating point is representable. See
-`docs/offtarget_risk_summary_METHODS.md` §3.5 for the recall↔validation-size trade (162 off-target
+precision (`{:.6g}`) so this sub-5×10⁻⁴ operating point is representable. **That 95% is measured
+on the benchmark's own convention, whose 287 held-out positives include each guide's on-target
+(40 perfect matches), while the ranked list excludes perfect matches**: over off-targets only the
+same threshold recovers 233 of 247 (94.33%, guide-cluster 95% CI [0.902, 0.994]) on the assay's
+own alignment and 241 of 247 (97.57%) under the best-CRISPR-Bulge alignment the report's tables
+are ranked by, and the 99%-recall point is the same number on both populations. The value is kept
+at 1.9×10⁻⁴ because the implied correction is two permitted misses, has no determinate sign
+across the defensible framings, and is smaller than the interval above. See
+`docs/offtarget_risk_summary_METHODS.md` §3.5 for that population question in full and for the
+recall↔validation-size trade (162 off-target
 validation loci at 95% recall for the ACTGA/NRG worked example).
 
 **Top-of-report off-target risk summary (replaces the aggregated specificity score).** The legacy
 single `100/(100+Σ)` specificity score is replaced by a per-scorer risk card. For each scorer, shown
 side by side and never blended, the card reports the count of ≤1-gap off-target sites in each score
 band and a **calibrated expected number of true off-targets** with a coverage-valid 90% prediction
-interval. The calibration is an isotonic score-to-probability map fit leave-one-guide-out on an
-independent benchmark of 359 experimentally confirmed off-targets across 46 guides (four published
+interval. The calibration is an isotonic score-to-probability map **fit on all benchmark guides at
+once** — leave-one-guide-out is the *validation*, not the fit; the band errors, the overdispersion
+and the coverage check are the leave-one-guide-out quantities, while the shipped map closes on its
+own training data by construction (`docs/offtarget_risk_summary_METHODS.md` §4). The benchmark is
+359 experimentally confirmed off-targets across 46 guides (four published
 external-evaluation sets distributed with the CRISPR-Bulge repository: Tsai 2015, Refined TrueOT,
-Chen 2017, Listgarten 2018; Zenodo 10.5281/zenodo.10902445). Held-out AUPR on that benchmark
+Chen 2017, Listgarten 2018; Zenodo 10.5281/zenodo.10902445). **External**-benchmark AUPR on it
 is **0.168 (CFD)** and **0.613 (CRISPR-Bulge)**, with guide-cluster-bootstrap 90% CIs of 0.13 to
-0.24 and 0.56 to 0.70. The reported range is a two-level guide-cluster bootstrap plus a
-negative-binomial between-guide overdispersion term, validated per-held-out-guide to about 90%
-coverage. Because both scorers are sequence-based, the calibration applies to any ≤1-gap alignment,
+0.24 and 0.56 to 0.70; only CRISPR-Bulge's is *held out* — it is measured on the 40 guides outside
+its training set, while CFD has no training set, so its column is the whole 46-guide benchmark and
+nothing is held out for it. The reported range is a two-level guide-cluster bootstrap plus a
+negative-binomial between-guide overdispersion term, validated **per held-out benchmark guide** at
+89.1% to 100% realized coverage against a nominal 90% (the one band below nominal is CFD 0.2–0.5,
+at 89.1%; the rest are conservative). That validation is for a guide resembling the benchmark's 46;
+it is **not**, and cannot be, a coverage guarantee for a clinically novel guide, whose own
+propensity is the separate axis below. Because both scorers are sequence-based, the calibration applies to any ≤1-gap alignment,
 reference or variant allele; ≥2-gap sites and the per-sample carrier-incidence dimension are out of
 scope. The card also flags, qualitatively, that a deployed guide's own off-target propensity is
 unknown and can shift the absolute count substantially in either direction — usually a larger

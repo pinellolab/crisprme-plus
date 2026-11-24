@@ -13,12 +13,19 @@ Design (locked after an adversarial statistician review + a bake-off):
   * interval = two-level guide-cluster bootstrap over the bundled ensemble of
     guide-resampled isotonic maps, PLUS a negative-binomial / Gamma between-guide
     overdispersion multiplier (``phi_bands``), PLUS a Poisson count draw. Validated
-    per-held-out-guide (= one novel guide) to ~90% coverage.
+    per held-out BENCHMARK guide -- NOT a clinically novel one, which is a different
+    and unvalidatable estimand (docs/offtarget_risk_summary_METHODS.md section 5) --
+    at the realized coverages the artifacts carry in
+    ``loo_total_count_coverage_nominal90``: 89.1% to 100% against a nominal 90% over
+    the bands the card shows, CFD 0.2-0.5 the only one below nominal.
   * EACH reported band -- including aggregates such as >=0.2 -- is computed on its
     OWN pooled sites with its OWN overdispersion ``phi_bands[label]``; aggregates are
     NEVER formed by summing independent sub-band draws (a guide's promiscuity is
-    correlated across bands ~+0.66, so independent summation wrongly inflates the
-    aggregate's lower bound).
+    correlated across bands: +0.91 Pearson on per-guide positive counts (0.2-0.5 vs
+    >=0.5), +0.73 Spearman, +0.79 on the LOGO residuals, measured in
+    docs/offtarget_risk_summary_METHODS.md section 7 and stated only there; the
+    "~+0.66" this line used to give is retired, it reproduced under no definition).
+    Independent summation wrongly inflates the aggregate's lower bound.
   * both scorers are sequence-based / variant-agnostic, so the calibration applies to
     any <=1-gap alignment (reference or variant/ALT allele). Only >=2-gap sites and the
     per-sample carrier-incidence dimension are out of scope (see METHODS).
@@ -123,6 +130,9 @@ def artifact_summary(scorer: str) -> dict:
     """Expose the bundled IND quantities (AUPR + CI, per-held-out-guide coverage,
     per-band guide/positive counts, prevalence, provenance) for the report/modal."""
     m = load_artifact(scorer)["meta"]
+    # n_sites is exposed alongside n_positives because the modal quotes both and they
+    # were confused there: "CFD 359 sites / 46 guides" named the POSITIVE count as the
+    # site count, four orders of magnitude out (2,940,588 sites carry those 359).
     return {k: m.get(k) for k in (
-        "scorer", "n_guides", "n_positives", "prevalence", "aupr",
+        "scorer", "n_guides", "n_positives", "n_sites", "prevalence", "aupr",
         "loo_total_count_coverage_nominal90", "band_counts", "phi_bands", "provenance")}

@@ -13,12 +13,28 @@ import warnings
 import math
 import sys
 
+import cb_operating_point as cbop  # the CRISPR-Bulge operating point + its log axis
+
 
 # ignore all warnings
 warnings.filterwarnings("ignore")
 
 # set matplotlib to not use X11 server
 matplotlib.use("Agg")
+
+
+# prefix of the PLOTTED copy of a score column: the values masked to the score's range
+# and clipped to the log axis' floor (see plot_with_CRISPR_BULGE_score). A copy, so the
+# table's own columns -- which the perfect-match stars and the sort read -- stay exact.
+_PLOT = "_plot_"
+
+
+def _in_range(series):
+    """A float Series masked to [0,1], the score's range: the -1 the pipeline writes for
+    a row the model does not score is not a score of 0 and must not be drawn as one
+    (the same mask as generate_report._in_range)."""
+    s = pd.to_numeric(series, errors="coerce")
+    return s.where((s >= 0.0) & (s <= 1.0))
 
 
 def reference_count_analysis(row):
@@ -210,24 +226,20 @@ def plot_with_MMvBUL(df, out_folder, guide, tag="top_1000_log_for_main_text"):
         )
         # +/- to avoid overlap of arrow w/ points, head_width calculated to remain constant despite log scale of x-axis
 
-    # Size legend
-    plt.gca().add_artist(
-        plt.legend(handles=[s1, s01, s001], title="Allele frequency", ncol=3, loc=9)
-    )
-
     # Perfect matches: starred at their (ALT) count, 0
     star = mark_perfect_matches(
         plt.gca(), df, "Mismatches+bulges_(fewest_mm+b)", "Mismatches+bulges_ALT_(fewest_mm+b)"
     )
-    # Color legend
+    # Size + colour legends, BELOW the axes -- the one placement of every score panel
+    # (cb_operating_point.legend_below); it lays the figure out, so no tight_layout here.
     red = mpatches.Patch(color=transparent_red, label="Reference")
     blue = mpatches.Patch(color=transparent_blue, label="Alternative")
-    plt.legend(handles=[red, blue] + ([star] if star else []))
+    cbop.legend_below(plt.gca(), size_handles=[s1, s01, s001],
+                      series_handles=[red, blue] + ([star] if star else []))
 
-    # Save
-    plt.tight_layout()
-    plt.savefig(out_folder + f"CRISPRme_fewest_{tag}_{guide}.png")
-    plt.savefig(out_folder + f"CRISPRme_fewest_{tag}_{guide}.pdf")
+    # Save (bbox_inches="tight": the legends are outside the axes and must not be cut)
+    plt.savefig(out_folder + f"CRISPRme_fewest_{tag}_{guide}.png", bbox_inches="tight")
+    plt.savefig(out_folder + f"CRISPRme_fewest_{tag}_{guide}.pdf", bbox_inches="tight")
     plt.clf()
     plt.close()
 
@@ -311,10 +323,28 @@ def plot_with_CRISPR_BULGE_score(df, out_folder, guide, tag="top_1000_log_for_ma
     plt.rcParams["pdf.fonttype"] = 42
     plt.rcParams["ps.fonttype"] = 42
 
-    # Plot data CFD SCORE
+    # The CRISPR-Bulge y-axis is log10, not the linear 0-1 of the CFD plot: this score's
+    # sensitive operating point is 1.9e-4 (cb_operating_point) and a genome-wide run's
+    # sites score orders of magnitude below it, so on a linear axis every point lies on
+    # the bottom rule and the threshold cannot be drawn. The columns below are the
+    # plotted ones: out of [0,1] (the -1 of a row the model does not score) -> not drawn,
+    # as it was off a 0-1 axis; exactly 0 -> clipped UP onto the axis floor, inside the
+    # band draw_log_score_axis shades and the legend names, so an underflowed score is
+    # shown as a zero instead of vanishing with the log transform.
+    ref_col = "CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)"
+    alt_col = "CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)"
+    score_col = "CRISPR_BULGE_score_(highest_CRISPR_BULGE)"
+    scores = {c: _in_range(df[c]) for c in (ref_col, alt_col, score_col) if c in df.columns}
+    values = [v for s in scores.values() for v in s.dropna().tolist()]
+    zeros = any(v <= 0 for v in values)
+    log_axis = cbop.log_axis(values)
+    for col, series in scores.items():
+        df[_PLOT + col] = series.clip(lower=log_axis.floor)
+
+    # Plot data CRISPR-BULGE SCORE
     ax = df.plot.scatter(
         x="index",
-        y="CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)",
+        y=_PLOT + ref_col,
         s="ref_AF",
         c=transparent_red,
         zorder=1,
@@ -322,7 +352,7 @@ def plot_with_CRISPR_BULGE_score(df, out_folder, guide, tag="top_1000_log_for_ma
     # ax = df.plot.scatter(x="index", y="highest_CRISPR_BULGE_score(ref)", s="ref_AF", c=transparent_red, zorder=1, ax=ax)
     df.plot.scatter(
         x="index",
-        y="CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)",
+        y=_PLOT + alt_col,
         # no ALT point for a site without a variant: size 0 (a NaN size drew none
         # either, but savefig failed on a plot whose only site had one)
         s=df["plot_AF"].fillna(0),
@@ -333,57 +363,58 @@ def plot_with_CRISPR_BULGE_score(df, out_folder, guide, tag="top_1000_log_for_ma
         ax=ax,
     )
     ax.set_xscale("log")
+    # log10 y-axis, the sensitive operating point drawn on it, and the "= 0" band
+    _axis, log_handles = cbop.draw_log_score_axis(ax, values, zeros=zeros)
 
     plt.xlabel(
         "Candidate off-target site"
         + (" (ranked by variant effect |ALT-REF|)" if "variant_effect" in tag else "")
     )
-    plt.ylabel("CRISPR-Bulge score")
+    plt.ylabel("CRISPR-Bulge score (log10)")
 
-    # Boundaries
+    # Boundaries (the y limits are the log axis', set above)
     plt.xlim(xmin=0.9, xmax=1000)
-    plt.ylim(ymin=0, ymax=1)
 
-    # Arrows
+    # Arrows. A ref->alt arrow is drawn from one data point to the other with annotate:
+    # the old +0.02/-0.04 trims and 0.02 head are lengths of a 0-1 axis and would, on a
+    # log one, swallow every arrow below 0.02 and start the rest at a wrong score.
     for x, y, z in zip(
         df["index"],
-        df["CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)"],
-        df["CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)"]
-        - df["CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)"],
+        df[_PLOT + ref_col],
+        df[_PLOT + alt_col],
     ):
-        plt.arrow(
-            x,
-            y + 0.02,
-            0,
-            z - 0.04,
-            color="gray",
-            head_width=(x * (10**0.005 - 10 ** (-0.005))),
-            head_length=0.02,
-            length_includes_head=True,
+        if pd.isna(y) or pd.isna(z) or y == z:
+            continue
+        plt.annotate(
+            "",
+            xy=(x, z),
+            xytext=(x, y),
             zorder=0,
-            alpha=0.5,
+            arrowprops=dict(arrowstyle="->", color="gray", alpha=0.5, lw=0.5,
+                            shrinkA=1.5, shrinkB=1.5),
         )
-        # +/- to avoid overlap of arrow w/ points, head_width calculated to remain constant despite log scale of x-axis
 
-    # Size legend
-    plt.gca().add_artist(
-        plt.legend(handles=[s1, s01, s001], title="Allele frequency", ncol=3, loc=9)
-    )
-
-    # Perfect matches: starred at their best score
+    # Perfect matches: starred at their best score (the plotted column, so a perfect
+    # match whose score underflowed to 0 is starred on the floor, not dropped)
     star = mark_perfect_matches(
         plt.gca(), df, "Mismatches+bulges_(highest_CRISPR_BULGE)",
-        "CRISPR_BULGE_score_(highest_CRISPR_BULGE)",
+        _PLOT + score_col,
     )
-    # Color legend
+    # Size + colour legends, BELOW the axes: on the log axis the well-scoring sites are
+    # pressed into the top band of the panel, where these boxes used to sit (see
+    # cb_operating_point.legend_below). It lays the figure out, so no tight_layout here.
     red = mpatches.Patch(color=transparent_red, label="Reference")
     blue = mpatches.Patch(color=transparent_blue, label="Alternative")
-    plt.legend(handles=[red, blue] + ([star] if star else []))
+    cbop.legend_below(
+        plt.gca(), size_handles=[s1, s01, s001],
+        series_handles=[red, blue] + ([star] if star else []) + log_handles,
+    )
 
-    # Save
-    plt.tight_layout()
-    plt.savefig(out_folder + f"CRISPRme_CRISPR_BULGE_{tag}_{guide}.png")
-    plt.savefig(out_folder + f"CRISPRme_CRISPR_BULGE_{tag}_{guide}.pdf")
+    # Save (bbox_inches="tight": the legends are outside the axes and must not be cut)
+    plt.savefig(out_folder + f"CRISPRme_CRISPR_BULGE_{tag}_{guide}.png",
+                bbox_inches="tight")
+    plt.savefig(out_folder + f"CRISPRme_CRISPR_BULGE_{tag}_{guide}.pdf",
+                bbox_inches="tight")
     plt.clf()
     plt.close()
 
@@ -526,24 +557,22 @@ def plot_with_CFD_score(df, out_folder, guide, tag="top_1000_log_for_main_text")
         )
         # +/- to avoid overlap of arrow w/ points, head_width calculated to remain constant despite log scale of x-axis
 
-    # Size legend
-    plt.gca().add_artist(
-        plt.legend(handles=[s1, s01, s001], title="Allele frequency", ncol=3, loc=9)
-    )
-
     # Perfect matches: starred at their best score
     star = mark_perfect_matches(
         plt.gca(), df, "Mismatches+bulges_(highest_CFD)", "CFD_score_(highest_CFD)"
     )
-    # Color legend
+    # Size + colour legends, BELOW the axes -- the one placement of every score panel
+    # (cb_operating_point.legend_below). CFD's own linear 0-1 axis happens to leave its
+    # top-right corner empty on most runs, but the panels of one report are read side by
+    # side and a run whose top CFD scores stay near 1 covers it too.
     red = mpatches.Patch(color=transparent_red, label="Reference")
     blue = mpatches.Patch(color=transparent_blue, label="Alternative")
-    plt.legend(handles=[red, blue] + ([star] if star else []))
+    cbop.legend_below(plt.gca(), size_handles=[s1, s01, s001],
+                      series_handles=[red, blue] + ([star] if star else []))
 
-    # Save
-    plt.tight_layout()
-    plt.savefig(out_folder + f"CRISPRme_CFD_{tag}_{guide}.png")
-    plt.savefig(out_folder + f"CRISPRme_CFD_{tag}_{guide}.pdf")
+    # Save (bbox_inches="tight": the legends are outside the axes and must not be cut)
+    plt.savefig(out_folder + f"CRISPRme_CFD_{tag}_{guide}.png", bbox_inches="tight")
+    plt.savefig(out_folder + f"CRISPRme_CFD_{tag}_{guide}.pdf", bbox_inches="tight")
     plt.clf()
     plt.close()
 
