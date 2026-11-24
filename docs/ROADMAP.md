@@ -1,63 +1,51 @@
 # CRISPRme+ / CRISPRitz roadmap
 
-What is planned after CRISPRme+ 2.10.0 and CRISPRitz 2.10.0, which share their major.minor from
-2.10 on ([`RELEASING.md`](RELEASING.md#version-policy)). Nothing here is in 2.10.0. Deferred
+What is planned after CRISPRme+ 2.10.1 and CRISPRitz 2.10.0, which share their major.minor from
+2.10 on ([`RELEASING.md`](RELEASING.md#version-policy)). Nothing here is in 2.10.1. Deferred
 ideas with no release named are in [`FUTURE_WORK.md`](FUTURE_WORK.md); the classic-CRISPRme plan
 this file held before is kept at its end, for the record.
 
-## CRISPRme+ 2.10.1 (planned)
+## The next CRISPRme+ release (planned)
 
-2.10.1 is to run on CRISPRitz 2.10 and on the indexes of 2.10.0: no index is to be built again
-(HPRC's Dictionaries are, for the MNVs' phase). Each item below is a limit of 2.10.0 that METHODS
+No release number is named for these yet. The next release is to run on CRISPRitz 2.10 and on the
+indexes of 2.10.0: no index is to be built again. Each item below is a limit of 2.10.1 that METHODS
 §10 and [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §14 and §15 state with its measured size, or a
 gap the release's gates found.
 
-- **The MNVs' phase (HPRC).** No store 2.10.0 reads holds an MNV, so on HPRC v2.1 a carrier
-  whose haplotype holding an indel row's indel also holds an MNV in the target is listed for a
-  sequence it does not have ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15): 1,163 listings at 94
-  sites in the README guide's genome-wide search per sample, 3,334 on SNP rows. 2.10.1 stores each
-  MNV with its phase, in a file beside each chromosome's indel file (`gt_mnv_<chrom>.tsv.gz`), and
-  reads it as a second record of the slot, which takes such a carrier off that row. Three rules,
-  set on 2026-11-20, read an MNV and an indel that overlap on one slot (METHODS §4, each shape on
-  both records' rows). The parts:
-  - the store, its readers (the indel post-analysis, the SNP rows, the carrier gate) and the two
-    helpers that read an MNV as an indel up to 2.10.0;
-  - `build-index-only`, which writes the MNV files (STEP 1c), and the NOTEs a search writes;
-  - the real-data check, which reads the MNVs as the search does;
-  - HPRC's Dictionaries built again with the MNV files, its index as it is, and published in one
-    Hub commit (`publish-index --stage-only`); an install of 2.10.0 gets them with a 0.61 GB
-    `download` step (`download --what indel-genotypes --dataset hg38_HPRC`);
-  - the gates: on HGDP + 1000 Genomes, which hold no MNV, the same tables byte for byte as
-    without the MNV work; on HPRC, every row that differs explained from the VCF.
-
-  A target held only through an MNV and another indel or MNV stays unreported, as one held through
-  two indels does (below). In 171 of the 1,163 listings the haplotype holds another target within
-  the search's budget there (METHODS §10); each such target, held through the indel and the MNV,
-  goes unreported too, and so do the targets of the slots the overlap rules take off a row. How
-  many is to be measured by the gates. An SNV and an MNV that share a base on one phased slot (28
-  pairs on HPRC v2.1, 150 slots) are read base by base, on the indel rows, the SNP rows and in the
-  carrier gate (METHODS §4, rule 2).
+**Shipped in 2.10.1, and no longer planned here: the MNVs' phase on HPRC.** Each chromosome's
+phased store now has an MNV file beside its indel file (`gt_mnv_<chrom>.tsv.gz`), read as a second
+record of the slot by the indel post-analysis, the SNP rows, the carrier gate and the real-data
+check; three rules read an MNV and another record that overlap on one slot (METHODS §4). HPRC's
+`Dictionaries` are published again with the files, and `download --what indel-genotypes` adds them
+to an install of 2.10.0. On HPRC's two genome-wide gate searches every listing of the old limit
+left its row (0 after on both; before, the per-sample run had 1,163 on indel rows and 3,334 on
+SNP rows, the population-level run 558 on indel rows and no SNP-row count, the check not
+applying that class to a population-level run), and no row of HGDP + 1000 Genomes or the mega
+moved over the other seventeen searches. `CHANGELOG.md` [2.10.1] has it in full. A target held
+only through an MNV and a second indel-path record stays unreported (below).
 - **The haplotype scan.** In the dense regions of a variant genome that codes every allele (the
   immunoglobulin loci above all), a search above 1 DNA + 1 RNA bulge expands so many IUPAC
   combinations that it runs for hours or out of memory, and 2.10.0 warns of it
-  ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §14). 2.10.1 is to search there, per sample, the
-  samples' own haplotype sequences, indels included, in place of the IUPAC search (one indel per
+  ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §14). The next release is to search there, per
+  sample, the samples' own haplotype sequences, indels included, in place of the IUPAC search
+  (one indel per
   fake-indel window, as the search writes them; a population-level search keeps the IUPAC search
   there): its design was checked on IGL and IGH, up to 4 mismatches + 2 + 2 bulges, where the lines
   of the IUPAC search that a real haplotype can give are exactly the scan's. The engine's hooks for
   it (a region skip, keep-only, the skipped-leaf dump and a capability report) ship in CRISPRitz
-  2.10.0, which 2.10.1 runs on, and the indexes of 2.10.0 serve it as they are: no index is rebuilt.
+  2.10.0, which 2.10.1 already runs on, and the indexes of 2.10.0 serve it as they are: no index is
+  rebuilt.
 - **One density pass before the search**, defined by the genome and shared by the scan, the speed
-  steps of 2.10.0 and the mega's density guard (in 2.10.0 the dense-region file is written from
+  steps of 2.10.0 and the mega's density guard (up to 2.10.1 the dense-region file is written from
   each search's own raw targets).
 - **A faster population-level post-analysis of the dense loci.** In the release gate, 2.10.0's
   genome-wide population-level search of the README guide with NRG on HGDP + 1000 Genomes took 2.20
   times 2.8.1's time, its search phases about 2.8.1's: a population-level post-analysis reads no
   haplotype, so the haplotype pre-check skips none of the dense loci's windows, the immunoglobulin
-  loci among them (METHODS §10). 2.10.1 is to make that post-analysis faster, and to time the
-  search again (C9, with C8 and C10, the per-sample ones beside it), with the post-analysis changes
-  made after the gate.
-- **Known limits of 2.10.0 the release fixes** ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15):
+  loci among them (METHODS §10). The next release is to make that post-analysis faster, and to
+  time the search again (C9, with C8 and C10, the per-sample ones beside it), with the
+  post-analysis changes made after the gate.
+- **Known limits the next release fixes** ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15):
   one target written as two rows, or twice, in a microsatellite (the merge); and a SNP row's carrier
   left off beside an indel that adds or deletes more than the 500 bases the store is read around a
   target, less the target's length (one carrier on two rows of the release gate's HPRC search), the

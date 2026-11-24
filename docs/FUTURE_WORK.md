@@ -4,7 +4,7 @@ Deferred, non-blocking enhancements. None are correctness bugs; each is a self-c
 improvement another contributor (or agent) can pick up. For each: **why**, **current behavior**,
 **what to build**, **code pointers**, **acceptance**. Keep this list current — move an item to the
 CHANGELOG when it ships, and delete it from here. What the next release is to bring, the haplotype
-scan of CRISPRme+ 2.10.1 first, is in [`ROADMAP.md`](ROADMAP.md).
+scan first, is in [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
@@ -99,7 +99,7 @@ pangenome index at a high budget. A quick coverage item, not a gap.
 with `--max-total-edits`) and record the result for the validation matrix. On an index of 2.10.0,
 which codes every allele, `complete-search` warns of such a budget, whose variant search can
 explode in the dense loci ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §14): measure first how it
-fares on HPRC, a panel of 232 samples, or run it with the haplotype scan of 2.10.1. (Was tracking
-task #242.)
+fares on HPRC, a panel of 232 samples, or run it with the haplotype scan planned for a later
+release. (Was tracking task #242.)
 
 **Acceptance.** HPRC ACTGA high-budget result captured alongside the other indices'.

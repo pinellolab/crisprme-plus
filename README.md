@@ -48,8 +48,10 @@ guide](#what-changed-vs-stock-crisprme-migration-guide) below; the detail behind
 - **A run that ends in a validation plan.** Every search writes a self-contained HTML report to
   hand to a collaborator or a reviewer: risk card, precision-recall curves, top hits annotated
   for function and for cancer-driver genes, per-tier downloads, and a **recommended validation
-  panel**. `extract-flanks` then gives the sequence around a site **per observed haplotype**, so
-  primers for a site that exists only on an ALT haplotype are not ordered off the reference.
+  panel**. `extract-flanks` then gives the sequence around a site for the reference and for **each
+  distinct haplotype observed** in the panel (the most carried 10 by default, all of them on
+  request), so primers for a site that exists only on an ALT haplotype are not ordered off the
+  reference.
 - **An assembled personal genome, searched directly.** `assembly-search` takes a diploid
   assembly — two haplotype FASTAs — lifts each to hg38 and reconciles them. No variant calling,
   no VCF.
@@ -103,8 +105,8 @@ that matter most:
 ### Upgrading from 2.8.1
 
 An update (the one-click app's **Update**, `docker pull`, or `conda install -n crisprme
-crisprme=2.10.0`) changes CRISPRme, not your data folder: its indexes stay 2.8.1's (index format
-1; 2.8.1's install downloads `NRG_3_hg38+hg38_HGDP1kGP`), which 2.10.0 still searches, with their
+crisprme=2.10.1`) changes CRISPRme, not your data folder: its indexes stay 2.8.1's (index format
+1; 2.8.1's install downloads `NRG_3_hg38+hg38_HGDP1kGP`), which 2.10.1 still searches, with their
 limits (the last ALT of a split site alone, fake-indel windows of 25/27, no site within 2 nt of a
 contig end or an `N` run, and HPRC's v2.0). 2.8.1 cannot read 2.10.0's indexes.
 
@@ -148,7 +150,7 @@ contig end or an `N` run, and HPRC's v2.0). 2.8.1 cannot read 2.10.0's indexes.
 
 ### Known limitations and roadmap
 
-CRISPRme+ 2.10.0 ships with limits we measured and state plainly.
+CRISPRme+ 2.10.1 ships with limits we measured and state plainly.
 The main ones:
 
 - **Above 1 DNA + 1 RNA bulge**, a search of the dense immunoglobulin loci can run for hours or
@@ -165,8 +167,12 @@ The main ones:
   2.10.0 gets them with a 0.61 GB download step,
   `crisprme.py download --what indel-genotypes --dataset hg38_HPRC`
   ([Troubleshooting](docs/TROUBLESHOOTING.md) §15); so does a store that `build-index-only` of
-  2.10.1 builds. Such carriers then leave those rows (how many is to be measured by the gates).
-  A target held only through an MNV and another indel or MNV stays unreported.
+  2.10.1 builds. Such carriers then leave those rows: on HPRC's two genome-wide searches the
+  release's gates measured none left, the real-data check counting 0 of both listings after on
+  both runs — before, the per-sample run had 1,163 indel-row and 3,334 SNP-row listings, the
+  population-level run 558 indel-row listings and no SNP-row count, the check not applying that
+  class to a population-level run. A target held only through an MNV and another indel or MNV
+  stays unreported.
 - **Two indels on one haplotype**: a target held only through two indels is not reported for its
   carriers, and some carriers of a second indel are listed on a row of one indel; most often for
   guides whose sites lie in tandem repeats (the release gate's check counts 9,059 listings under
@@ -179,11 +185,12 @@ The main ones:
 
 What each is, its measured size and who meets it: the
 [release notes](docs/release-notes-2.10.0.md), [METHODS §10](METHODS.md#10-known-limits-of-2100)
-and [Troubleshooting](docs/TROUBLESHOOTING.md) §12, §14 and §15. What comes next, CRISPRme+ 2.10.1
-(the MNVs' phase on HPRC, the haplotype scan of the dense regions above 1 + 1 bulges, a faster
-population-level analysis of the dense loci, a SNP row's carriers beside a long indel (the store
-read as far as their indels need), one row for a target in a microsatellite, and the checker's and
-the web app's hardening), is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+and [Troubleshooting](docs/TROUBLESHOOTING.md) §12, §14 and §15. The MNVs' phase on HPRC is in
+this release; what comes after it (the haplotype scan of the dense regions above 1 + 1 bulges, a
+faster population-level analysis of the dense loci, a SNP row's carriers beside a long indel (the
+store read as far as their indels need), one row for a target in a microsatellite, and the
+checker's and the web app's hardening) is in [`docs/ROADMAP.md`](docs/ROADMAP.md), with no release
+named for it yet.
 
 > ⚠️ **Note**  
 > The original public CRISPRme web service is no longer available.  
@@ -554,7 +561,7 @@ so the search above works out of the box on a fresh install.
 <br>6 [License](#6-license)
 <br>• [Methods &amp; validation](METHODS.md) — the self-contained technical reference (variant-aware data model, haplotype scanning, worst-case scoring, annotation, report, scoring assumptions &amp; limitations)
 <br>• [What CRISPRme+ adds over classic CRISPRme](#what-crisprme-adds-over-classic-crisprme) and [Upgrading from 2.8.1](#upgrading-from-281) — everything the "+" line brought over CRISPRme 2.1.x in one list (release by release: the [CHANGELOG](CHANGELOG.md)), and how to move a 2.8.1 install to the current indexes
-<br>• [Known limitations and roadmap](#known-limitations-and-roadmap) — what 2.10.0 does not do yet, with its measured size, and what 2.10.1 is to do
+<br>• [Known limitations and roadmap](#known-limitations-and-roadmap) — what 2.10.1 does not do yet, with its measured size, and what is to come after it
 
 ## 0 System Requirements
 
@@ -1195,17 +1202,18 @@ per-sample search of HGDP + 1000 Genomes took 0.95 to 1.30 times 2.8.1's time an
 gained and lost), but the README guide's population-level search of HGDP + 1000 Genomes with
 NRG took 2.2 times 2.8.1's: 2 h 29 min against 1 h 8 min. Its searches took about 2.8.1's time;
 its post-analysis, which reads no haplotype and so skips none of the dense windows (the
-immunoglobulin loci's and others'), did not; a faster one is planned for 2.10.1 (METHODS.md says
-how).
+immunoglobulin loci's and others'), did not; a faster one is planned for a later release
+(METHODS.md says how).
 Above 1 DNA + 1 RNA bulge the variant search itself explodes in those loci (IGL alone, at the
 default `--max-total-edits` of 6: 5.1 million SNP raw targets at 4 + 2 + 1, 33.7 million at
 4 + 2 + 2, where the indel search, on windows of 25/27, wrote 204 million and needed 157 GB of
 memory; with the cap raised to the budget's sum, 7.9 and 93.8 million SNP raw targets), and
 `complete-search` warns, unless `--max-total-edits` 3 or less bounds the alignments (6 + 2 + 2 at
 a cap of 3 wrote fewer raw targets there than the default). For a wider search, raise `--mm`
-first. CRISPRme 2.10.1 is planned to search, in those regions, the samples' own haplotypes,
-indels included, in place of the variant genome's combinations, per sample (the haplotype scan;
-CRISPRitz 2.10.0 already holds what it needs, and the indexes of 2.10.0 serve it as they are).
+first. A later release of CRISPRme+ is planned to search, in those regions, the samples' own
+haplotypes, indels included, in place of the variant genome's combinations, per sample (the
+haplotype scan; CRISPRitz 2.10.0 already holds what it needs, and the indexes of 2.10.0 serve it
+as they are).
 See METHODS.md
 [§5](METHODS.md#search-speed-on-indexes-that-code-every-allele-the-haplotype-pre-check-the-k-skip-and-the-post-analysis-in-pieces).
 

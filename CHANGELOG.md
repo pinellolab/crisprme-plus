@@ -13,7 +13,10 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
-## [2.10.1] - 2026-11-23
+## [2.10.1] - 2026-11-24
+
+<!-- The date is the day this section was finished on main. The release is tagged after review:
+     if the tag is cut on a later day, set this date to the day of the tag and delete this note. -->
 
 CRISPRme 2.10.1 runs on CRISPRitz 2.10.0 and on the indexes of 2.10.0: no index is built again.
 HPRC's `Dictionaries` are, for the MNVs' phase, and `download --what indel-genotypes` puts them
@@ -26,7 +29,8 @@ in its entry below:
   beside its indel file, and the indel post-analysis, the SNP rows, the carrier gate and the
   independent real-data check all read it; three rules say how an MNV and another record that
   overlap on one slot are read. HGDP + 1000 Genomes and the mega hold no MNV, and the release's
-  gates moved no row of theirs over nineteen searches.
+  gates moved no row of theirs over seventeen searches, five genome-wide and twelve of chr22; the
+  other two of the gates' nineteen are the HPRC searches whose rows the fix is meant to move.
 - **Validation sequences.** `crisprme.py extract-flanks` writes, for each row of a results table,
   the reference flank and one per distinct observed haplotype, with the protospacer+PAM marked in
   each, to order validation oligos from.
@@ -74,9 +78,15 @@ in its entry below:
   of the companions' records that a publish makes, to keep a companion the repo holds already and
   to refuse another build unless `--replace-companions`. It refuses a folder that holds a staged
   publish already. It prints, and does not run, the commands that publish the folder in one Hub
-  commit with `indexes/SHA256SUMS`: `scripts/hf_sha256sums.py --staged`, one `hf upload` of the
-  folder, then the check that the Hub holds what was staged. `publish-index` itself makes one
-  commit per file. HPRC's republish uses it (Changed).
+  commit with `indexes/SHA256SUMS`: the repo's head, `scripts/hf_sha256sums.py --staged`, one
+  `scripts/hf_one_commit.py` of the folder, then the check that the Hub holds what was staged.
+  `scripts/hf_one_commit.py` (new) calls `HfApi.create_commit`, which sends one commit request
+  for every file at once and does not retry it, with the head as `--parent` so a repo that
+  moved in between is refused rather than overwritten; `hf upload` of a folder is **not** used,
+  because `upload_folder` commits each batch as the batch closes (250 operations, 100 MiB of
+  regular content, or 300 s of age), so a folder whose first file is 29.55 GB can land as two or
+  three commits and a download in between meets a new companion beside the old archive.
+  `publish-index` itself makes one commit per file. HPRC's republish uses it (Changed).
 - **`download --what indel-genotypes --dataset <panel>`: the MNVs for an install of 2.10.0.**
   `crisprme.py download --what indel-genotypes --dataset hg38_HPRC` fetches the panel's
   `indel_genotypes_hg38_HPRC` companion (0.61 GB), which holds the MNV files, and installs it whole
@@ -230,11 +240,11 @@ in its entry below:
   checker's behaviour is unchanged (its full suite passes, and it still runs standalone and
   imports no CRISPRme module). README section 2.2.12, METHODS section 7.1,
   `docs/offtarget_risk_summary_METHODS.md` section 3.6, and a new CI suite
-  (`PostProcess/test_extract_flanks.py`, 156 tests) with a mutant for every rule.
+  (`PostProcess/test_extract_flanks.py`, 162 tests) with a mutant for every rule.
 
 ### Changed
-- **HPRC's Dictionaries are published again, with the MNV files. Pending: the publish**, after
-  the release's gates and the PI's go; nothing of it is on the Hub yet. Only
+- **HPRC's Dictionaries are published again, with the MNV files. Pending: the upload**, which the
+  release's gates have cleared; nothing of it is on the Hub yet. Only
   `Dictionaries/indel_genotypes_hg38_HPRC/` changes: it gains 24 `gt_mnv_<chrom>.tsv.gz` and their
   markers (about 19.3 MB). Its indel files, the registry, the indel logs, the genotype store, the
   index and its INDELS index stay byte for byte. `dictionaries-bundle_hg38_HPRC` and
@@ -242,7 +252,9 @@ in its entry below:
   index files are the same, but its manifest names the bundle by its fingerprint, and a download
   refuses a bundle the manifest does not name. `genotypes_hg38_HPRC` stays as it is (the same
   fingerprint). The three archives, the two companions' records and `indexes/SHA256SUMS` go up in
-  one Hub commit (`publish-index --replace-companions --stage-only`, then the commands it prints).
+  one Hub commit (`publish-index --replace-companions --stage-only`, then the commands it prints:
+  `scripts/hf_one_commit.py`, one `HfApi.create_commit` request pinned to the head it was staged
+  against, not `hf upload`, which can split a folder this size into two or three commits).
   No index name, index format or catalog entry changes. At the publish, `docs/INDEX_PROVENANCE.md`
   gets the new archives' sizes, SHA-256 and Hub commit (2.10.1), in a section of its own; until
   then it says "2.10.1: pending". 2.10.0's stay in the Hub's history. CRISPRme 2.10.0 reads no MNV
@@ -477,17 +489,20 @@ in its entry below:
   post-analysis, the SNP rows and the carrier gate read that chromosome as with a store of 2.10.0,
   its indel file as it is, and each says so in a NOTE that says how to write the file again; the
   gate does not stop on it. The release's gates measured all this, over the nineteen searches of
-  2.10.0's own real-data gate. On HPRC v2.1 the two gating classes the check raises for a carrier
-  an MNV takes off a row count 0: `indel-row-mnv-carrier` per sample and population-level, and
+  2.10.0's own real-data gate that ran: two of them genome-wide on HPRC, where the fix is meant to
+  move rows, and seventeen on panels that hold no MNV, where it must move none. On HPRC v2.1 the
+  two gating classes the check raises for a carrier an MNV takes off a row count 0:
+  `indel-row-mnv-carrier` per sample and population-level, and
   `snp-row-mnv-carrier` per sample (a population-level run's SNP rows are a worst-case union, and
   the check counts no SNP-row class on one). `limit-putative-carrier`, raised where the check had
   to guess a carrier's phase, falls from 6,105 per sample and 3,414 population-level to 0, and the
   per-sample run's `carrier-missing`, `limit-snp-row-unphased` and `limit-two-indels` are
-  untouched. HGDP + 1000 Genomes and the mega hold no MNV, and no row of theirs moved: five
-  genome-wide searches wrote every BED, TSV, PNG, `bestMerge.txt` and integrated-results table with
-  the md5 it had without the MNV work, and twelve further searches of chr22 -- SpCas9 NRG in both
-  analysis modes, the mega beside HGDP + 1000 Genomes, Cas12a's 5-prime PAMs, SaCas9 at 21 and
-  22 nt and the PAM-less index -- moved no row either.
+  untouched. HGDP + 1000 Genomes and the mega hold no MNV, and no row of theirs moved in any of
+  those seventeen: five genome-wide searches wrote every BED, TSV, PNG, `bestMerge.txt` and
+  integrated-results table with the md5 it had without the MNV work, and twelve further searches
+  of chr22 -- SpCas9 NRG in both analysis modes, the mega beside HGDP + 1000 Genomes, Cas12a's
+  5-prime PAMs, SaCas9 at 21 and 22 nt, the PAM-less index and the TRAC guide -- moved no row
+  either.
 
   Two limits stay. A target held only through an MNV and another indel or
   MNV is still not generated (a fake-indel window holds one record), so the fix moves such a
@@ -765,7 +780,7 @@ in its entry below:
   column is headed "sequences written", was the one surface that already had it right. All
   three now say that the cap is on those two files, that `--max-haplotypes 0` writes every
   one, and that `flank_alt_count` / `n_haplotypes` is the true total either way;
-  `PostProcess/test_extract_flanks.py` holds all of them to it (5 tests, 161 in the suite).
+  `PostProcess/test_extract_flanks.py` holds all of them to it (5 tests, 162 in the suite).
   The check that matters is made per OCCURRENCE and not per file: every "one flank per
   distinct observed haplotype" in the tree has to name `--max-haplotypes` within a
   paragraph of itself. A per-file check -- "the README mentions the flag somewhere" --

@@ -3049,6 +3049,11 @@ def _window_notes(local_dir, workdir, install_name, vcf_name):
 SHA256SUMS_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                  "scripts", "hf_sha256sums.py")
 
+# The script that puts every file of the staged folder into the repo in ONE commit
+# (HfApi.create_commit), which `hf upload` of a folder cannot promise
+ONE_COMMIT_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "scripts", "hf_one_commit.py")
+
 
 def _sha256_file(path: str) -> str:
     import hashlib
@@ -3061,22 +3066,38 @@ def _sha256_file(path: str) -> str:
 
 def stage_commands(stage_dir: str, repo: str, title: str) -> List[str]:
     """The commands that publish the folder publish-index --stage-only packed
-    (publish_index's stage_dir) in ONE commit of ``repo``, in order: indexes/SHA256SUMS
-    written from the Hub's list with the staged archives' lines in place of theirs
-    (scripts/hf_sha256sums.py --staged), the folder uploaded in one commit (``hf upload`` of
-    a folder makes one commit of every file in it), and the check that the Hub holds what was
-    staged (an empty diff). None is run here; the upload takes a write token from HF_TOKEN in
-    the environment, never from the command line."""
+    (publish_index's stage_dir) in ONE commit of ``repo``, in order: the repo's head, which
+    the upload pins as the commit's parent, so the SHA256SUMS written next can never
+    describe a repo that has moved; indexes/SHA256SUMS written from the Hub's list with the
+    staged archives' lines in place of theirs (scripts/hf_sha256sums.py --staged); the
+    folder uploaded by scripts/hf_one_commit.py; and the check that the Hub holds what was
+    staged (an empty diff).
+
+    Not ``hf upload``: it calls ``HfApi.upload_folder``, which since huggingface_hub 1.19
+    streams through a pipeline that commits each batch as the batch closes -- at 250
+    operations, 100 MiB of regular content, or 300 s of age -- so a folder whose first file
+    is tens of GB can land as two or three commits ("<title> (part 2)"), leaving a window in
+    which the repo holds a new companion beside the old archive. hf_one_commit.py calls
+    ``HfApi.create_commit``, which has no batching, no clock and no file count: it sends
+    exactly one commit request, for every file at once, and does not retry it.
+
+    None is run here; the upload takes a write token from HF_TOKEN in the environment or the
+    machine's Hub login, never from the command line."""
     q = shlex.quote
     script = (SHA256SUMS_SCRIPT if os.path.isfile(SHA256SUMS_SCRIPT)
               else "scripts/hf_sha256sums.py")
+    one_commit = (ONE_COMMIT_SCRIPT if os.path.isfile(ONE_COMMIT_SCRIPT)
+                  else "scripts/hf_one_commit.py")
     folder = os.path.join(stage_dir, "indexes")
     sums = os.path.join(folder, "SHA256SUMS")
     return [
+        "PARENT=$(python3 -I -c 'import json,sys,urllib.request; print(json.load("
+        "urllib.request.urlopen(\"https://huggingface.co/api/datasets/\" + sys.argv[1]))"
+        f"[\"sha\"])' {q(repo)})",
         f"python3 {q(script)} {q(repo)} --staged {q(os.path.join(stage_dir, 'staged.sha256'))}"
         f" > {q(sums)}",
-        f"hf upload {q(repo)} {q(folder)} indexes --repo-type dataset --commit-message "
-        f"{q(title)}",
+        f"python3 {q(one_commit)} {q(repo)} {q(folder)} indexes --parent \"$PARENT\""
+        f" --message {q(title)}",
         f"python3 {q(script)} {q(repo)} | diff - {q(sums)}",
     ]
 
@@ -3104,11 +3125,14 @@ def _finish_stage(stage_dir: str, repo: str, staged: List[str]) -> None:
     said.append(f"\nTo publish them in ONE commit of {repo}, with indexes/SHA256SUMS, run, "
                 f"with a write token of the repo in HF_TOKEN (exported in the environment, "
                 f"never on the command line; in the release image as "
-                f"seq_script/rebuild/README.md's publish says):")
+                f"seq_script/rebuild/README.md's publish says). Not `hf upload` of the "
+                f"folder: it commits each batch as the batch closes (300 s of age is "
+                f"enough), so a folder this size can land as two or three commits, and a "
+                f"download in between meets a new companion beside the old archive:")
     cmds = stage_commands(stage_dir, repo, title)
-    said += [f"  {cmds[0]}", f"  {cmds[1]}",
+    said += [f"  {cmds[0]}", f"  {cmds[1]}", f"  {cmds[2]}",
              "Then check that the Hub holds what was staged (the diff must be empty):",
-             f"  {cmds[2]}"]
+             f"  {cmds[3]}"]
     sys.stdout.write("\n".join(said) + "\n")
     sys.stdout.flush()
 
