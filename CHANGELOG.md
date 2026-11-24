@@ -477,16 +477,19 @@ in its entry below:
   post-analysis, the SNP rows and the carrier gate read that chromosome as with a store of 2.10.0,
   its indel file as it is, and each says so in a NOTE that says how to write the file again; the
   gate does not stop on it. The release's gates measured all this, over the nineteen searches of
-  2.10.0's own real-data gate. On HPRC v2.1, per sample and population-level, the two gating
-  classes the check raises for a carrier an MNV takes off a row, `indel-row-mnv-carrier` and
-  `snp-row-mnv-carrier`, count 0, and `limit-putative-carrier`, raised where the check had to guess
-  a carrier's phase, falls from 6,105 and 3,414 to 0; `carrier-missing`, `limit-snp-row-unphased`
-  and `limit-two-indels` are untouched. HGDP + 1000 Genomes and the mega hold no MNV, and no row of
-  theirs moved: five genome-wide searches wrote every BED, TSV, PNG, `bestMerge.txt` and
-  integrated-results table with the md5 it had without the MNV work, and twelve further searches of
-  chr22 -- SpCas9 NRG in both analysis modes, the mega beside HGDP + 1000 Genomes, Cas12a's
-  5-prime PAMs, SaCas9 at 21 and 22 nt and the PAM-less index -- moved no row either. Two limits
-  stay. A target held only through an MNV and another indel or
+  2.10.0's own real-data gate. On HPRC v2.1 the two gating classes the check raises for a carrier
+  an MNV takes off a row count 0: `indel-row-mnv-carrier` per sample and population-level, and
+  `snp-row-mnv-carrier` per sample (a population-level run's SNP rows are a worst-case union, and
+  the check counts no SNP-row class on one). `limit-putative-carrier`, raised where the check had
+  to guess a carrier's phase, falls from 6,105 per sample and 3,414 population-level to 0, and the
+  per-sample run's `carrier-missing`, `limit-snp-row-unphased` and `limit-two-indels` are
+  untouched. HGDP + 1000 Genomes and the mega hold no MNV, and no row of theirs moved: five
+  genome-wide searches wrote every BED, TSV, PNG, `bestMerge.txt` and integrated-results table with
+  the md5 it had without the MNV work, and twelve further searches of chr22 -- SpCas9 NRG in both
+  analysis modes, the mega beside HGDP + 1000 Genomes, Cas12a's 5-prime PAMs, SaCas9 at 21 and
+  22 nt and the PAM-less index -- moved no row either.
+
+  Two limits stay. A target held only through an MNV and another indel or
   MNV is still not generated (a fake-indel window holds one record), so the fix moves such a
   carrier from a wrong row to none. And a target held only through two indels stays unreported, as
   in 2.10.0. Covered by `test_mnv_overlap_rules` (the three shapes above, on the real records,
