@@ -23,37 +23,39 @@ through an interactive web-based interface.
 
 If you know CRISPRme 2.1.x, this is what the "+" line does that it did not. What *changed* in
 behavior, and what to pass to get the old behavior back, is the [migration
-guide](#what-changed-vs-stock-crisprme-migration-guide) below; each item here is spelled out in
-[Highlights](#-highlights) and in [METHODS](METHODS.md).
+guide](#what-changed-vs-stock-crisprme-migration-guide) below; the detail behind each item is in
+[Highlights](#-highlights) below it and in [METHODS](METHODS.md).
 
-- **Off-targets no one variant reveals.** A site that needs two nearby variants on the *same*
-  chromosome copy is found and reported — SNP+SNP or SNP+indel, **CONFIRMED** where phasing proves
-  *cis* or **PUTATIVE** where it cannot, with the joint allele frequency and, on a genotyped panel,
-  the individuals who carry it by name. The search resolves per sample wherever the index supports
-  it, and otherwise falls back to a worst-case screen that is lossless for detection, in which a
-  carrier gate marks the top-ranked rows no real haplotype holds.
+- **Whole haplotypes, not one variant at a time.** A site that needs two nearby variants on the
+  *same* chromosome copy is found and reported — SNP+SNP or SNP+indel, **CONFIRMED** where phasing
+  proves *cis* or **PUTATIVE** where it cannot, with the joint allele frequency and, on a
+  genotyped panel, the individuals who carry it by name. The search resolves per sample wherever
+  the index supports it, and otherwise falls back to a worst-case screen that is lossless for
+  detection, in which a carrier gate marks the top-ranked rows no real haplotype holds.
 - **Indexes you download instead of build.** The variant index carries its own allele-frequency
   registry and genotype store, so there are no per-sample dictionaries to build and a first
-  genome-wide variant search is a download away, not a day. Three panels to pick by what you need —
-  phased **HGDP + 1000 Genomes** (4,091 samples, named carriers; the default), the **HPRC
-  pangenome**, and the sites-only five-source **mega** — plus your own cohort, built and published
-  with the same commands. One index answers many PAMs, pruned as results are emitted.
+  genome-wide variant search is a download away, not a day. Three production panels, chosen by
+  what you need — phased **HGDP + 1000 Genomes** (4,091 samples, named carriers; the default),
+  the **HPRC pangenome**, and the sites-only five-source **mega** — plus your own cohort, built
+  and published with the same commands. One index answers many PAMs, pruned as results are
+  emitted.
 - **A score with a threshold you can defend.** **CRISPR-Bulge** replaces CRISTA as the ML scorer,
   and CFD now penalizes a bulge by its position instead of ignoring it, so a PAM-proximal bulge no
-  longer scores as though it were not there. "Assay down to here" is a stated operating point — the
-  95 %-recall threshold on a 40-guide held-out benchmark, with its confidence interval and its
-  90 %/99 % alternatives — rather than a round number.
+  longer scores as though it were not there. "Assay down to here" is a stated operating point —
+  the 95 %-recall threshold on a 40-guide held-out benchmark, with its confidence interval and
+  its 90 %/99 % alternatives — rather than a round number.
 - **A run that ends in a validation plan.** Every search writes a self-contained HTML report to
-  hand to a collaborator or a reviewer: risk card, precision-recall curves, top hits annotated for
-  function and for cancer-driver genes, per-tier downloads, and a **recommended validation panel**.
-  `extract-flanks` then gives the sequence around a site **per observed haplotype**, so primers for
-  a site that exists only on an ALT haplotype are not ordered off the reference.
-- **A personal genome, as assembled.** `assembly-search` searches a diploid assembly — two
-  haplotype FASTAs — directly, lifts each to hg38 and reconciles them. No variant calling, no VCF.
-- **Grounds for believing a genome-wide number.** Every change to the pipeline is checked against a
-  committed brute-force ground truth over a whole chromosome; an independent checker re-derives the
-  indel rows from the VCFs and the reference, on real data, as a release gate; and what the tool
-  still gets wrong is stated, with its measured size, under [Known
+  hand to a collaborator or a reviewer: risk card, precision-recall curves, top hits annotated
+  for function and for cancer-driver genes, per-tier downloads, and a **recommended validation
+  panel**. `extract-flanks` then gives the sequence around a site **per observed haplotype**, so
+  primers for a site that exists only on an ALT haplotype are not ordered off the reference.
+- **An assembled personal genome, searched directly.** `assembly-search` takes a diploid
+  assembly — two haplotype FASTAs — lifts each to hg38 and reconciles them. No variant calling,
+  no VCF.
+- **Grounds for believing a genome-wide number.** Every change to the pipeline is checked against
+  a committed brute-force ground truth over a whole chromosome; an independent checker re-derives
+  the indel rows from the VCFs and the reference, on real data, as a release gate; and what the
+  tool still gets wrong is stated, with its measured size, under [Known
   limitations](#known-limitations-and-roadmap).
 
 Which release brought what, and every fix along the way, is in the [CHANGELOG](CHANGELOG.md) and,
