@@ -51,6 +51,48 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Build the runner's own arch first and LOAD it, so the next step can RUN it.
+      # A multi-platform build cannot be loaded into the daemon, which is why this is
+      # a separate single-arch build; buildx reuses its layers for the matrix below.
+      - name: Build linux/amd64 and load it (for the smoke test)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: crisprme:ci-smoke
+
+      # Building the image is not evidence that it RUNS. Up to 2.10.0 nothing here ever
+      # started a container, so a change that breaks the image at run time but not at
+      # build time would have shipped to :latest on the tag. These two commands are the
+      # cheapest check that would have caught one: the version the image reports, and
+      # the scorer env, which the image builds and then deletes the package cache
+      # underneath (`micromamba clean --all --force-pkgs-dirs`). The env's own
+      # compute-self-test runs BEFORE that deletion, so only running the built image
+      # tests what users actually get.
+      - name: Smoke-test the built image (it must run, not just build)
+        run: |
+          set -euo pipefail
+          want="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' crisprme.py)"
+          echo "::notice::tree pins crisprme $want"
+          got="$(docker run --rm crisprme:ci-smoke crisprme.py --version | tr -d '\r')"
+          echo "image reports: $got"
+          case "$got" in
+            *"$want"*) echo "version OK" ;;
+            *) echo "::error::image reports '$got', tree pins '$want'"; exit 1 ;;
+          esac
+          # The real test: `scorer-env check` runs a COMPUTE self-test (it asserts the
+          # scorer returns real, distinct scores) and exits 1 on error. It must pass
+          # with no /opt/conda/pkgs present.
+          docker run --rm crisprme:ci-smoke crisprme.py scorer-env check
+          # Informational only -- a cache left behind costs image size, not correctness,
+          # so it reports and never fails the build.
+          sz="$(docker run --rm crisprme:ci-smoke sh -c \
+                 'du -sh /opt/conda/pkgs 2>/dev/null | cut -f1 || true')"
+          echo "::notice::/opt/conda/pkgs in the image: ${sz:-absent}"
+
       - name: Build linux/amd64 + linux/arm64 (validation, no push)
         uses: docker/build-push-action@v6
         with:
