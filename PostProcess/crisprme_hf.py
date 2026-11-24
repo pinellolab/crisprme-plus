@@ -3091,8 +3091,9 @@ def stage_commands(stage_dir: str, repo: str, title: str) -> List[str]:
     folder = os.path.join(stage_dir, "indexes")
     sums = os.path.join(folder, "SHA256SUMS")
     return [
-        f"PARENT=$(curl -sS https://huggingface.co/api/datasets/{repo}"
-        " | python3 -I -c 'import json,sys; print(json.load(sys.stdin)[\"sha\"])')",
+        "PARENT=$(python3 -I -c 'import json,sys,urllib.request; print(json.load("
+        "urllib.request.urlopen(\"https://huggingface.co/api/datasets/\" + sys.argv[1]))"
+        f"[\"sha\"])' {q(repo)})",
         f"python3 {q(script)} {q(repo)} --staged {q(os.path.join(stage_dir, 'staged.sha256'))}"
         f" > {q(sums)}",
         f"python3 {q(one_commit)} {q(repo)} {q(folder)} indexes --parent \"$PARENT\""

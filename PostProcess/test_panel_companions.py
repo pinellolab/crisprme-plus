@@ -669,8 +669,11 @@ class StageOnlyPublish(_Base):
         # the upload is create_commit (scripts/hf_one_commit.py), pinned to the head read
         # first: `hf upload` of a folder commits each batch as it closes and can split
         self.assertEqual(len(cmds), 4)
-        self.assertTrue(cmds[0].startswith(
-            f"PARENT=$(curl -sS https://huggingface.co/api/datasets/{FMT2} |"))
+        # the head read is stdlib python3, not curl: the release image has no curl
+        self.assertTrue(cmds[0].startswith("PARENT=$(python3 -I -c "))
+        self.assertTrue(cmds[0].endswith(f" {FMT2})"))
+        self.assertIn("https://huggingface.co/api/datasets/", cmds[0])
+        self.assertNotIn("curl", cmds[0])
         self.assertTrue(cmds[1].startswith("python3 ") and cmds[1].endswith(
             f" {FMT2} --staged {self.stage}/staged.sha256 > {self.stage}/indexes/SHA256SUMS"))
         self.assertTrue(cmds[2].startswith("python3 ") and cmds[2].endswith(
