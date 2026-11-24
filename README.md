@@ -266,11 +266,11 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:
 
 > **`:latest` vs a pinned tag.** These commands use `pinellolab/crisprme:latest` — the
 > auto-updating, GPU-capable default image. For a fully reproducible run, pin the exact
-> release instead, e.g. `pinellolab/crisprme:v2.10.0`.
+> release instead, e.g. `pinellolab/crisprme:v2.10.1`.
 
 > **On HPC with Apptainer/Singularity.** Use **`apptainer run`**, which invokes the image
 > entrypoint so `crisprme.py` is on `PATH`, binding your data dir to `/DATA` — e.g.
-> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.10.0 crisprme.py --version`
+> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.10.1 crisprme.py --version`
 > (add `crisprme.py web-interface` / `complete-search …` the same way). Note that
 > `apptainer exec … crisprme.py …` **bypasses** the entrypoint, so `crisprme.py` is not found on
 > `PATH` — prefer `apptainer run` (or prefix `bash -lc`). A home it cannot write in (`--no-home`,
@@ -685,7 +685,7 @@ By completing these steps, your system will be fully prepared for installing CRI
 Create a dedicated environment, naming the CRISPRme version and Python 3.11 explicitly, then
 set up the CRISPR-Bulge scorer, which runs in its own conda env (`cbulge`):
 ```bash
-conda create -n crisprme crisprme=2.10.0 python=3.11
+conda create -n crisprme crisprme=2.10.1 python=3.11
 conda activate crisprme
 # CPU build; add --gpu for CUDA
 crisprme.py scorer-env create
@@ -696,7 +696,7 @@ crisprme.py scorer-env doctor
 > **Always name the version.** Given a bare `crisprme`, the solver silently falls back to the
 > newest release it can satisfy, which can be years old: in testing, an unsolvable 2.8.0 resolved
 > to `crisprme 2.0.0` on Python 3.6. With an explicit version the install fails loudly instead. If
-> conda reports that nothing provides `crisprme=2.10.0`, the release has not reached Bioconda yet:
+> conda reports that nothing provides `crisprme=2.10.1`, the release has not reached Bioconda yet:
 > use [Docker](#12-install-crisprme-via-docker) or the
 > [source build](#13-install-crisprme-from-source-without-bioconda) until it does.
 
@@ -712,7 +712,7 @@ you opt into CFD-only scoring with `CRISPRME_SKIP_SCORER_ENV=1`.
 > 2.10.0 runs no `pr`, and its other calls give the same bytes with either. Run CRISPRme with
 > the environment activated, as above.
 
-Verify the installation; it prints the installed version, `v2.10.0`:
+Verify the installation; it prints the installed version, `v2.10.1`:
 
 ```bash
 crisprme.py --version
@@ -868,7 +868,7 @@ included. `:latest` is the auto-updating default image; it runs on **CPU** out o
 box (fully supported — this is the default scoring path), and a **GPU can optionally
 accelerate the CRISPR-Bulge scorer** on an NVIDIA host (add `--gpus all` + `--compute-backend
 cuda`). For a fully reproducible setup pin the exact release instead, e.g.
-`docker pull pinellolab/crisprme:v2.10.0`.
+`docker pull pinellolab/crisprme:v2.10.1`.
 
 Once the download is complete, the CRISPRme Docker image will be ready for use. 
 To confirm the image is successfully installed, you can list all available Docker 
@@ -926,7 +926,7 @@ Use this to run the CRISPRme+ line (Python 3.11 + Dash 2.x) from a checkout, for
 
 ```bash
 # 1. clone the release (omit --branch for the development line on main)
-git clone --branch v2.10.0 https://github.com/pinellolab/crisprme-plus.git
+git clone --branch v2.10.1 https://github.com/pinellolab/crisprme-plus.git
 cd crisprme-plus
 
 # 2. create + activate the runtime environment (pinned deps from environment.yml)
@@ -1036,7 +1036,7 @@ The directory organization required by CRISPRme is illustrated below:
 > To run it in **Docker**, prefix it with
 > `docker run --rm -v "${PWD}:/DATA" -w /DATA -i pinellolab/crisprme:latest`
 > (add `-p 8080:8080` for `web-interface`; on an NVIDIA host add `--gpus all` to run the
-> CRISPR-Bulge scorer on the GPU). Pin `:v2.10.0` instead of `:latest` for reproducibility.
+> CRISPR-Bulge scorer on the GPU). Pin `:v2.10.1` instead of `:latest` for reproducibility.
 > From a **source / Conda** install, run it as-is inside the activated `crisprme`
 > environment.
 
@@ -3149,7 +3149,7 @@ Open a terminal and execute the following command to check the software version:
   crisprme.py --version
   ```
 
-If the output displays the correct software version (e.g., `v2.10.0`), CRISPRme 
+If the output displays the correct software version (e.g., `v2.10.1`), CRISPRme 
 is successfully installed and ready for use.
 
 **Step 2: Access CRISPRme Help Menu**

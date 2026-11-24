@@ -25,7 +25,7 @@ import re
 import difflib
 
 
-version = "2.10.0"  # CRISPRme version
+version = "2.10.1"  # CRISPRme version
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))

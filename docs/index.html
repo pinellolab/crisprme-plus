@@ -18,7 +18,7 @@
       <img src="crisprme-logo.svg" alt="CRISPRme" class="logo">
     </h1>
     <p class="tagline">Variant-aware CRISPR off-target nomination</p>
-    <p class="tagline" style="font-size:0.9em;color:#2b6cb0">Latest: <strong>v2.10.0</strong> &mdash; rebuilt indexes that code every allele of a multi-allelic site, SpCas9 <code>NRR</code> as the default PAM, an exact haplotype pre-check and a parallel post-analysis that keep variant searches of the new indexes tractable, and many correctness and web-security fixes. <a href="example-report.html">See an example report &rarr;</a> <a href="https://github.com/pinellolab/crisprme-plus/blob/main/docs/release-notes-2.10.0.md">Release notes and known limitations &rarr;</a></p>
+    <p class="tagline" style="font-size:0.9em;color:#2b6cb0">Latest: <strong>v2.10.1</strong> &mdash; the phase of HPRC&rsquo;s multi-nucleotide variants, so a search no longer lists a carrier whose haplotype one of them changes; <code>extract-flanks</code>, the sequence around an off-target per observed haplotype, to order validation oligos from; corrected precision-recall figures and off-target explanation; and a CRISPR-Bulge score that keeps a DNA bulge falling inside the PAM. It runs on the indexes of 2.10.0 (HPRC&rsquo;s dictionaries are republished with the new files). <a href="example-report.html">See an example report &rarr;</a> <a href="https://github.com/pinellolab/crisprme-plus/blob/main/CHANGELOG.md">Release notes and known limitations &rarr;</a> <a href="https://github.com/pinellolab/crisprme-plus/blob/main/docs/release-notes-2.10.0.md">What 2.10.0 brought &rarr;</a></p>
   </header>
 
   <main>
@@ -348,7 +348,7 @@ conda config --add channels conda-forge
 conda config --set channel_priority strict
 
 # Create and activate the environment, set up the CRISPR-Bulge scorer, then verify
-conda create -n crisprme crisprme=2.10.0 python=3.11 -y
+conda create -n crisprme crisprme=2.10.1 python=3.11 -y
 conda activate crisprme
 crisprme.py scorer-env create
 crisprme.py scorer-env doctor

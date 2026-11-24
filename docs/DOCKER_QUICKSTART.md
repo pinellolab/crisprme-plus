@@ -1,6 +1,6 @@
 # CRISPRme Docker Quickstart — run the web interface in a few commands
 
-> ℹ️ **CRISPRme+ (v2.10.0)** is the current release of the next-generation line
+> ℹ️ **CRISPRme+ (v2.10.1)** is the current release of the next-generation line
 > (Python 3.11 + Dash 2.x, variant-aware SNP+indel co-occurrence, context-aware analysis
 > mode — per-sample by default on genotyped+phased indexes, population-level on sites-only,
 > with opt-out `--population-level`). For a frozen
@@ -91,7 +91,7 @@ docker pull pinellolab/crisprme:latest
 ```
 
 > **Reproducibility:** `:latest` auto-updates to the newest release (and is the
-> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.10.0`
+> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.10.1`
 > everywhere below in place of `:latest`. An image carries the CRISPRitz search engine it was
 > tested with, of its own major.minor from 2.10.0 (CRISPRme+ 2.10.z runs on CRISPRitz 2.10.z:
 > the [version policy](RELEASING.md#version-policy)); `crisprme.py --version` and

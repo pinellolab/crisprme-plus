@@ -1,8 +1,8 @@
 # CRISPRme+ — Methods
 
 This document describes the methods introduced in **CRISPRme+** (the 2.3 through 2.10
-line: the current release is 2.10.0, whose changes are marked "since 2.10.0" or
-"2.10.0"), intended as a self-contained technical reference and as
+line: the current release is 2.10.1, whose changes are marked "since 2.10.1" or
+"2.10.1"), intended as a self-contained technical reference and as
 source material for the Methods section of the manuscript. It focuses on what is **new or
 changed** relative to the original CRISPRme (Cancellieri, Zeng, Lin et al.,
 *Nature Genetics* 2023); the core enumeration of candidate off-targets by
@@ -4412,7 +4412,7 @@ checklist, E, step 5; `docs/INDEX_PROVENANCE.md`).
 ---
 
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the
-methods as of CRISPRme+ 2.10.0, the current release, on
+methods as of CRISPRme+ 2.10.1, the current release, on
 CRISPRitz 2.10.0 (default SNP+indel co-occurrence, context-aware
 analysis mode — per-sample on genotyped+PHASED indexes / population-level otherwise, with opt-out
 `--population-level` / forced `--per-sample`, and the CRISPR-Bulge ML off-target
