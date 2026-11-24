@@ -27,7 +27,9 @@ in its entry below:
   independent real-data check all read it; three rules say how an MNV and another record that
   overlap on one slot are read. HGDP + 1000 Genomes and the mega hold no MNV, and the release's
   gates moved no row of theirs over seventeen searches, five genome-wide and twelve of chr22; the
-  other two of the gates' nineteen are the HPRC searches whose rows the fix is meant to move.
+  other two of the gates' nineteen are the HPRC searches the fix is meant to move, and it moved
+  them: the three classes of wrongly listed carrier fall from 1,163, 558 and 3,334 listings to
+  none, and the two genome-wide tables lose 1,345 and 1,133 of their rows.
 - **Validation sequences.** `crisprme.py extract-flanks` writes, for each row of a results table,
   the reference flank and one per distinct observed haplotype, with the protospacer+PAM marked in
   each, to order validation oligos from.
