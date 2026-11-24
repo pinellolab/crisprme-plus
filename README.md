@@ -2953,6 +2953,15 @@ sequences that **hold** the off-target first, then by how many haplotypes carry 
 The list is **positional**: element *k* is `hapK` of `<prefix>.tsv` and the first
 element is `flank_alt`.
 
+> **`hap1` is not the highest-scoring haplotype.** The order is by string-identity with
+> the row's *displayed* protospacer and then by carrier count — nothing in it reads a
+> score, and a variant that makes the site a *better* target stops the haplotype
+> spelling that exact string and so demotes it. On the 187-site panel this was measured
+> on, the haplotype carrying the row's reported score is `hap1` on 66 of the 81
+> ALT-origin rows and **not** on 8 (at chr2:174719314, 0.195 against `flank_alt`'s
+> 0.0032). To order one oligo per site *by score*, join on the score instead of taking
+> `flank_alt`; `--alt-list` and the FASTA carry every haplotype written.
+
 > **A haplotype can delete the whole window.** At a 32-mer it happens (one entry of
 > 4,017 on a 1,000-row shortlist; none of the 10,354 of that shortlist at `--window
 > 200`, because a 423 bp window does not fit inside those deletions): that genome holds
@@ -3106,8 +3115,9 @@ so a fixed total fixes the reference interval, not every carrier's base count.
   (default `10`; `0` writes every one). How many a row has depends strongly on the
   window: a 400 bp one over a panel of thousands holds dozens of distinct haplotypes,
   nearly all differing from each other far from the target, while a 32-mer spans too
-  little to hold many. The most useful come first — the ones that **hold** the
-  off-target, then by carrier count. The `n_haplotypes` column always gives the true
+  little to hold many. The ones that **hold** the off-target come first, then by carrier
+  count — an order that reads no score, so the cap can drop a higher-scoring haplotype
+  before a lower-scoring one. The `n_haplotypes` column always gives the true
   total (and so does `flank_alt_count`) and the notes say how many were left out.
 - `--anonymise` (`--anonymize`) — write no sample identity anywhere: the `carriers`
   column is blank and only the counts are kept. FASTA record names never carry a sample

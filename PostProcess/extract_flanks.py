@@ -1732,8 +1732,26 @@ def annotation_rows(out_lines):
 
     The PRIMARY ALT is ``hap1``: the first of the row's ALT sequences in the order the
     rest of the command already uses -- the sequences that HOLD the off-target first,
-    then by how many haplotypes carry them, then by the sequence itself. That is the one
-    a validation assay wants if it only has room for one.
+    then by how many haplotypes carry them, then by the sequence itself.
+
+    **``hap1`` is NOT the highest-scoring haplotype, and must not be read as one.**
+    "Holds the off-target" means this haplotype spells the row's DISPLAYED protospacer
+    (``row["aligned"]`` with its gaps removed) at the target start. Two things follow.
+    The displayed protospacer is the highest-CFD alignment, while the ``CRISPR-Bulge``
+    column beside it is the highest-CRISPR-Bulge one -- a different alignment on 133 of
+    the 187 rows of the panel this was measured on. And a variant that makes the site
+    WORSE for the assay's purposes -- a new PAM, a closer match -- stops the haplotype
+    spelling that exact string, so it is demoted behind every haplotype that still
+    spells it. Nothing in the key refers to a score.
+
+    Measured on that panel: of the 81 ALT-origin rows, the haplotype carrying the row's
+    reported score is hap1 on 66 and NOT hap1 on 8, where ``flank_alt`` is a much
+    lower-scoring sequence -- 0.195 against 0.0032 (61x) at chr2:174719314, and
+    0.104 against 1.4e-06 (76,161x) at chr19:33766053.
+
+    So: to order one oligo per site from a score, join on the score rather than taking
+    ``flank_alt``; ``flank_alt_all`` (and the FASTA) carry every haplotype that was
+    written. Ordering these entries by score is backlog item 55.
 
     ``flank_alt_all`` is hap1, hap2, ... in that order, one element per ALT entry
     written: element k IS hapK of ``<prefix>.tsv``, and the first element IS
