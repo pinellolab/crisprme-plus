@@ -449,36 +449,57 @@ class IndelIndex(object):
     indel, "<pos>_<REF>_<ALT>\t<sample>:<genotype>,..."), by position, with their carriers
     read on demand. ``wanted``: the 0-based reference positions a search's rows touch; only
     an indel whose REF (or the base past it, where an insertion goes) meets one of them is
-    kept, so a chromosome's whole store is not held for a few targets. None keeps all."""
+    kept, so a chromosome's whole store is not held for a few targets. None keeps all.
 
-    def __init__(self, path, wanted=None):
+    ``path`` is the store's indel file; its MNV file (``mnv_path``; None: the one beside it,
+    build_indel_genotypes.mnv_store_path) is read too where it is there (from 2.10.1), its
+    MNVs held as its indels are: an MNV a row names is in the panel, its haplotypes read by
+    phase, and one inside a SNP-only row's target takes a haplotype holding it off the row's
+    combination (the state "indel in the target"). With a store of 2.10.0 an MNV is in no
+    panel, as in 2.10.0. An MNV file that cannot be read to its end (corrupt, cut short:
+    build_indel_genotypes.read_mnv_lines) is read so too, the indel file as it is:
+    ``mnv_error`` says why (None where it was read, or is not there), for PanelChrom's NOTE;
+    before, it raised out of the gate's pool of chromosomes and failed the gate. An indel
+    file that cannot be read raises, as before."""
+
+    def __init__(self, path, wanted=None, mnv_path=None):
         self._toks = {}
+        if mnv_path is None:
+            mnv_path = big.mnv_store_path(path)
+        self.mnv_path = mnv_path or None
+        self.mnv_error = None
         opener = gzip.open if path.endswith(".gz") else open
         with opener(path, "rt") as fh:
-            for line in fh:
-                key, _, toks = line.rstrip("\n").partition("\t")
-                pos, _, rest = key.partition("_")
-                ref, _, alt = rest.partition("_")
-                try:
-                    pos = int(pos)
-                except ValueError:
-                    continue
-                if wanted is not None and not any(
-                        p in wanted for p in range(pos - 1, pos + len(ref))):
-                    continue
-                # REF and ALT in upper case, as parse_variants reads a row's
-                # (build_indel_genotypes.store_key): keyed as the VCF writes them, an
-                # indel written in lower case (1,546 of HPRC chr22) was in no panel
-                key = (pos, ref.upper(), alt.upper())
-                prev = self._toks.get(key)
-                # an indel the VCF writes on two lines, in one case or in two: one
-                # allele, its carriers merged
-                self._toks[key] = (toks if prev is None else
-                                   big.merge_store_carriers(prev, toks))
+            self._take(fh, wanted)
+        if mnv_path and os.path.isfile(mnv_path):
+            lines, self.mnv_error = big.read_mnv_lines(mnv_path)
+            self._take(lines or (), wanted)
         self.indels = sorted(self._toks)
         self.starts = [p for p, _r, _a in self.indels]
         self.maxref = max((len(r) for _p, r, _a in self.indels), default=1)
         self._gts = {}
+
+    def _take(self, lines, wanted):
+        for line in lines:
+            key, _, toks = line.rstrip("\n").partition("\t")
+            pos, _, rest = key.partition("_")
+            ref, _, alt = rest.partition("_")
+            try:
+                pos = int(pos)
+            except ValueError:
+                continue
+            if wanted is not None and not any(
+                    p in wanted for p in range(pos - 1, pos + len(ref))):
+                continue
+            # REF and ALT in upper case, as parse_variants reads a row's
+            # (build_indel_genotypes.store_key): keyed as the VCF writes them, an
+            # indel written in lower case (1,546 of HPRC chr22) was in no panel
+            key = (pos, ref.upper(), alt.upper())
+            prev = self._toks.get(key)
+            # an indel the VCF writes on two lines, in one case or in two: one
+            # allele, its carriers merged
+            self._toks[key] = (toks if prev is None else
+                               big.merge_store_carriers(prev, toks))
 
     def carriers(self, pos, ref, alt):
         key = (pos, ref.upper(), alt.upper())
@@ -536,12 +557,35 @@ def breakers_of(changing, alleles, lo, hi, seq_at=None, own=()):
     tandem repeat's unit gained or lost) -- but one whose REF holds a SNP's base at another
     position whatever the reference says: a slot holding both holds two records of that
     base, whose bases cannot be read. Without the reference, every other indel that
-    changes the bases."""
+    changes the bases.
+
+    A record whose REF and ALT have one length (an MNV) is read base by base, as the
+    post-analysis reads it (2.10.1: indel_snp_cis.allele_breaks_record): a SNP of the row
+    on a base it keeps wins over the MNV's copy of the reference base, one on a base it
+    replaces agrees with the MNV's base, and only a true third-base conflict -- the
+    reference base, the MNV's and the SNP's all different -- leaves the haplotype with no
+    sequence and takes it off the row. That holds at the MNV's own POS too, which it
+    replaces as it does the bases after it -- though support() does not ask there: a
+    record at the position of a variant the row names is a rival allele of that position
+    on the slot, which makes the slot's phase unknown, the gate's own convention since
+    2.10.0 (PanelChrom.rivals, METHODS section 4). Up to 2.10.0 a SNP at an MNV's POS
+    took it off the gate's reading and a SNP anywhere else on its REF took the
+    haplotype off."""
     out = []
     for p, r, a, g in changing:
-        if (p, r, a) in own or p in alleles:
+        if (p, r, a) in own:
             continue
-        over = any(p < q <= p + len(r) - 1 for q in alleles)
+        mnv = len(r) == len(a) > 1
+        touched = [q for q in alleles if p <= q <= p + len(r) - 1]
+        if not mnv:
+            if p in alleles:
+                continue  # another allele of that base: a phasing artefact
+            over = any(q > p for q in touched)
+        elif seq_at is None:
+            over = bool(touched)  # not read base by base without the reference
+        else:
+            over = any(isc.allele_breaks_record(p, r, a, q - 1, alleles[q],
+                                                seq_at(q - 1, q)) for q in touched)
         if not over and seq_at is not None and holds_target(seq_at, lo, hi, alleles,
                                                             (p, r, a)):
             continue
@@ -557,7 +601,14 @@ def holds_target(seq_at, lo, hi, alleles, indel):
     (indel_snp_cis.target_pairs). In a tandem repeat a unit gained or lost at the target's
     edge leaves its bases where they were. ``seq_at(a, b)``: the reference bases a..b-1
     (0-based, upper case; shorter at a chromosome's end). The bases the indel's REF and ALT
-    share at the start or at the end stay reference bases."""
+    share at the start or at the end stay reference bases.
+
+    A record whose REF and ALT have one length (an MNV) moves no base: its ALT bases stand
+    at the places of the bases they replace, and on a base it keeps the haplotype's own
+    allele there is its base (2.10.1, the base-by-base reading; indel_snp_cis
+    .local_haplotype reads it so for the post-analysis). Up to 2.10.0 it was read as an
+    indel: its bases stood at no reference position, and its copy of a kept reference base
+    hid the haplotype's allele."""
     p, r, a = indel
     p0 = p - 1
     n = hi - lo + 1
@@ -566,17 +617,24 @@ def holds_target(seq_at, lo, hi, alleles, indel):
     t = isc.shared_tail(r, a)
     gone_from, gone_to = p0 + c, p0 + len(r) - t  # reference bases the indel takes out
     put = a[c:len(a) - t].upper()                  # and the bases it puts in their place
+    mnv = len(r) == len(a) > 1                     # which it replaces one for one
     pad = n + len(r) + len(a)
     first = max(0, min(lo, p0) - pad)
     ref = seq_at(first, max(hi, p0 + len(r)) + 1 + pad)
     hap = []  # (reference position or None, base)
     for q in range(first, first + len(ref)):
-        if q == gone_from:
+        if q == gone_from and not mnv:
             hap.extend((None, b) for b in put)
         if gone_from <= q < gone_to:
+            if not mnv:
+                continue
+            b = put[q - gone_from]
+            # a base it keeps: the haplotype's own allele there
+            hap.append((q, b if b != ref[q - first].upper()
+                        else alleles.get(q + 1, ref[q - first])))
             continue
         hap.append((q, alleles.get(q + 1, ref[q - first])))
-    if gone_from >= first + len(ref):
+    if gone_from >= first + len(ref) and not mnv:
         hap.extend((None, b) for b in put)
     where = {q: i for i, (q, _b) in enumerate(hap) if q is not None}
     bases = "".join(b for _q, b in hap)
@@ -595,10 +653,11 @@ def breaking_indels(index, lo, hi, snps, own=(), seq_at=None):
 
 class PanelChrom(object):
     """One panel's phased genotypes on one chromosome: the SNP store (Tier-1) and the indel
-    store, either absent. ``carriers`` gives a variant's carriers with each genotype read
-    against that variant ("1|0"), or None for a variant the panel does not hold.
-    ``wanted``: the positions the rows touch, for the indel store (IndelIndex); ``seq_at``:
-    the chromosome's reference bases (holds_target), or None."""
+    store (its MNVs too, from 2.10.1: IndelIndex), either absent. ``carriers`` gives a
+    variant's carriers with each genotype read against that variant ("1|0"), or None for a
+    variant the panel does not hold. ``wanted``: the positions the rows touch, for the indel
+    store (IndelIndex); ``seq_at``: the chromosome's reference bases (holds_target), or
+    None."""
 
     def __init__(self, name, dictionaries, chrom, role="own", wanted=None, seq_at=None):
         self.name = name
@@ -616,6 +675,14 @@ class PanelChrom(object):
         ipath = os.path.join(dictionaries, f"indel_genotypes_{name}", f"gt_indel_{chrom}.tsv.gz")
         if os.path.isfile(ipath):
             self.indels = IndelIndex(ipath, wanted)
+            if self.indels.mnv_error is not None:
+                # (2.10.1) the store's MNV file of this chromosome cannot be read to its end:
+                # read as a store of 2.10.0, which has none (IndelIndex), said on stdout
+                # (never stderr) from the gate's worker, which no longer raises on it
+                print(big.mnv_unreadable_note(
+                    name, chrom, self.indels.mnv_path, self.indels.mnv_error,
+                    f"the carrier gate finds no MNV in the panel {name} there, and none "
+                    f"inside a SNP-only row's target takes a haplotype off"), flush=True)
         self._sites = {}
         self._ploidy = {}
         self._an = None

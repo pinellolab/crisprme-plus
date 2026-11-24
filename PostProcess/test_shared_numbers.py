@@ -125,11 +125,22 @@ def _prose(html):
     return _PAYLOAD.sub("base64,<payload>", html)
 
 
-def _unreleased_changelog():
+def _newest_changelog_section():
+    """The section the entries this suite holds are written in.
+
+    While a release is being written that is ``[Unreleased]``. At the release it is
+    emptied and its entries move into the dated ``[X.Y.Z]`` section below it
+    (``docs/RELEASING.md`` step 3), so an empty ``[Unreleased]`` means the section to
+    read is the next one. Reading ``[Unreleased]`` alone would have made every
+    assertion below vacuous the moment a release was cut.
+    """
     txt = _read("CHANGELOG.md")
     start = txt.index("## [Unreleased]")
     end = txt.index("\n## [", start + 1)
-    return txt[start:end]
+    if txt[start + len("## [Unreleased]"):end].strip():
+        return txt[start:end]
+    start = end + 1
+    return txt[start:txt.index("\n## [", start + 1)]
 
 
 def _block(text, opening, closing):
@@ -185,7 +196,7 @@ class _Surfaces(unittest.TestCase):
             cls.methods, "**Top-of-report off-target risk summary", "\n\n**")
         cls.readme_card = _block(
             cls.readme, "- **Off-target risk summary (top of the report).**", "\n- **")
-        cls.changelog = _unreleased_changelog()
+        cls.changelog = _newest_changelog_section()
         cls.cbop_doc = cbop.__doc__
         cls.calib_src = _read("PostProcess", "offtarget_calibration.py")
         cls.fit_src = _read("scripts", "fit_calibration.py")

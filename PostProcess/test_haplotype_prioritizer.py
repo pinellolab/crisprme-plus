@@ -36,17 +36,19 @@ SAMPLES = [f"S{i:02d}" for i in range(20)]
 SAMPLE_META = {s: ("TEST", "AFR" if i < 12 else "EUR", "female") for i, s in enumerate(SAMPLES)}
 
 
-def build_panel(dicts, snps, indels=(), name=PANEL):
+def build_panel(dicts, snps, indels=(), name=PANEL, mnvs=()):
     """A phased store of ``name`` under ``dicts``: ``snps`` [(pos, REF, ALT, {sample: gt})]
     through tier1_genotypes, ``indels`` [(pos, REF, ALT, {sample: gt})] through a VCF and
-    build_indel_genotypes, as build-index-only writes them."""
+    build_indel_genotypes, as build-index-only writes them; with ``mnvs`` (the same, REF
+    and ALT of one length) the store's MNV file too, from the same VCF in one pass
+    (build_indel_genotypes.compile_store, as from 2.10.1)."""
     gdir = os.path.join(dicts, f"genotypes_{name}")
     os.makedirs(gdir, exist_ok=True)
     t1.compile_genotypes([(p, a, dict(g), r) for p, r, a, g in snps],
                          t1.build_sample_axis(SAMPLE_META),
                          os.path.join(gdir, f"gt_{CHROM}.bin"),
                          os.path.join(gdir, f"gt_{CHROM}.idx"))
-    if indels:
+    if indels or mnvs:
         idir = os.path.join(dicts, f"indel_genotypes_{name}")
         os.makedirs(idir, exist_ok=True)
         vcf = os.path.join(dicts, f"{name}.indels.vcf")
@@ -54,10 +56,14 @@ def build_panel(dicts, snps, indels=(), name=PANEL):
             fh.write("##fileformat=VCFv4.2\n")
             fh.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t"
                      + "\t".join(SAMPLES) + "\n")
-            for p, r, a, gts in indels:
+            for p, r, a, gts in sorted(list(indels) + list(mnvs)):
                 fh.write(f"{CHROM}\t{p}\t.\t{r}\t{a}\t.\tPASS\t.\tGT\t"
                          + "\t".join(gts.get(s, "0|0") for s in SAMPLES) + "\n")
-        big.compile_indel_genotypes(vcf, os.path.join(idir, f"gt_indel_{CHROM}.tsv.gz"))
+        indel_out = os.path.join(idir, f"gt_indel_{CHROM}.tsv.gz")
+        if mnvs:
+            big.compile_store(vcf, indel_out, os.path.join(idir, f"gt_mnv_{CHROM}.tsv.gz"))
+        else:
+            big.compile_indel_genotypes(vcf, indel_out)
     return gdir
 
 
@@ -156,8 +162,8 @@ class TestClassify(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def panel(self, snps, indels=()):
-        build_panel(self.dicts, snps, indels)
+    def panel(self, snps, indels=(), mnvs=()):
+        build_panel(self.dicts, snps, indels, mnvs=mnvs)
         p = hp.PanelChrom(PANEL, self.dicts, CHROM)
         self.addCleanup(p.close)
         return p
@@ -319,6 +325,59 @@ class TestClassify(unittest.TestCase):
         ver = hp.classify([v(108, "C", "G")], [both], span=(100, 122))
         self.assertEqual(ver.tier, "B")
 
+    def test_an_mnv_is_in_the_panel(self):
+        """2.10.1: the store's MNV file, beside its indel file. A row that names an MNV is
+        tiered on the panel's phased haplotypes, as one naming an indel: alone, B (in the
+        panel); with a SNP on one haplotype, A; with one it is never on a haplotype with
+        (S01: trans), not A. At c64e62e1 no MNV was in a panel: alone B "not in the panel",
+        and a combination holding one C2 ("not checked")."""
+        snps = [(100, "A", "G", {"S00": "1|0", "S01": "1|0", "S02": "0|1"}),
+                (130, "C", "T", {"S01": "1|0", "S04": "1|0"})]
+        mnvs = [(110, "AC", "GT", {"S00": "1|0", "S01": "0|1", "S03": "1|0"})]
+        p = self.panel(snps, mnvs=mnvs)
+        single = hp.classify([v(110, "AC", "GT")], [p])
+        self.assertEqual((single.tier, single.state, single.panel), ("B", "", PANEL))
+        pair = hp.classify([v(100, "A", "G"), v(110, "AC", "GT")], [p])
+        self.assertEqual((pair.tier, pair.state, pair.haplotypes, pair.samples),
+                         ("A", hp.ONE_HAPLOTYPE, 1, ("S00",)))
+        apart = hp.classify([v(110, "AC", "GT"), v(130, "C", "T")], [p])
+        self.assertEqual(apart.tier, "C1")
+        self.assertEqual(p.indels.indels, [(110, "AC", "GT")])
+
+    def test_an_mnv_in_the_target_takes_the_slot(self):
+        """An MNV inside a SNP-only row's target on the haplotype that holds the row's SNP
+        takes that haplotype out, as an indel does (the state keeps its label, "indel in the
+        target"): the SNP at 100 and the MNV at 104..105 on the same slots of S00 and S01.
+        A target that ends before the MNV keeps them; S05's MNV is on its other slot. In a
+        CA repeat an MNV on the target's first two bases takes the slot too, read on the
+        reference (holds_target): no reading puts the target's bases back. At c64e62e1 no
+        MNV was read: tier B."""
+        snps = [(100, "A", "G", {"S00": "1|0", "S01": "1|0"})]
+        mnvs = [(105, "AC", "GT", {"S00": "1|0", "S01": "1|0", "S05": "0|1"})]
+        p = self.panel(snps, mnvs=mnvs)
+        ver = hp.classify([v(100, "A", "G")], [p], span=(90, 112))
+        self.assertEqual((ver.tier, ver.state, ver.haplotypes), ("C1", hp.INDEL_IN_TARGET, 2))
+        self.assertEqual(ver.label(), f"all 2 {PANEL} haplotypes carrying it have an indel "
+                                      "in the target")
+        self.assertEqual(hp.classify([v(100, "A", "G")], [p], span=(90, 103)).tier, "B")
+        # S05 holds the SNP on the slot without the MNV: that haplotype has the target
+        p = self.panel([(100, "A", "G", {"S00": "1|0", "S01": "1|0", "S05": "1|0"})],
+                       mnvs=mnvs)
+        ver = hp.classify([v(100, "A", "G")], [p], span=(90, 112))
+        self.assertEqual((ver.tier, ver.haplotypes), ("B", 1))
+        ref = "G" * 100 + "CA" * 10 + "T" * 20
+        self.assertEqual(ref[102:104], "CA")
+        repeat = self.panel([(105, "C", "G", {"S00": "1|0", "S01": "1|0"})],
+                            mnvs=[(103, "CA", "GT", {"S00": "1|0", "S01": "0|1"})])
+        repeat.seq_at = lambda a, b: ref[max(a, 0):max(b, 0)]
+        ver = hp.classify([v(105, "C", "G")], [repeat], span=(102, 113))
+        self.assertEqual((ver.tier, ver.haplotypes), ("B", 1))
+        repeat_only_s00 = self.panel([(105, "C", "G", {"S00": "1|0"})],
+                                     mnvs=[(103, "CA", "GT", {"S00": "1|0"})])
+        repeat_only_s00.seq_at = repeat.seq_at
+        ver = hp.classify([v(105, "C", "G")], [repeat_only_s00], span=(102, 113))
+        self.assertEqual((ver.tier, ver.state, ver.haplotypes), ("C1", hp.INDEL_IN_TARGET, 1))
+
     def test_multi_alt_genotypes_are_read_per_alt(self):
         # one VCF line with two ALTs: S00 is G on slot 0 and T on slot 1 (1|2), listed under
         # both; with 105 C>T on slot 1, T and 105 are together, G and 105 are not
@@ -368,8 +427,8 @@ class TestAVariantTheScoreDoesNotNeed(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.dicts = os.path.join(self.tmp, "Dictionaries")
 
-    def panel(self, snps, indels=()):
-        build_panel(self.dicts, snps, indels)
+    def panel(self, snps, indels=(), mnvs=()):
+        build_panel(self.dicts, snps, indels, mnvs=mnvs)
         p = hp.PanelChrom(PANEL, self.dicts, CHROM)
         self.addCleanup(p.close)
         return p
@@ -748,6 +807,117 @@ class TestGateCommand(unittest.TestCase):
             with open(os.path.join(self.out, hp.META_NAME)) as fh:
                 self.assertEqual(json.load(fh)["status"], status)
             self.assertFalse(os.path.exists(hp.companion_path(self.results)))
+
+
+class TestTheGateReadsTheMnvsAsTheSearchRunsIt(unittest.TestCase):
+    """The command the pipeline runs (2.10.1), on rows of two chromosomes and two threads,
+    so each chromosome is gated in a worker of a pool (run_gate's pool.map), its store read
+    only at the positions its rows touch (_gate_chromosome's ``wanted``), not whole as the
+    unit tests above read it (the review's mutant Y read the MNV file only for a store read
+    whole, and every MNV left the gate as the search runs it):
+
+      * a SNP-only row whose target holds the MNV at 105 on the SNP's slot of S00 and S01:
+        C1, "indel in the target" (B where the MNV is not read);
+      * a row naming the MNV at 150 and the SNV at 155, one haplotype of S00 holding both:
+        A (C2, "not checked", where the MNV is in no panel);
+      * a row naming that MNV alone: B, in the panel (B "not in the panel" without it).
+
+    And an MNV file that cannot be read (the review's item 4): the chromosome is gated as
+    with a store of 2.10.0 (no MNV in the panel), its indel file read, a NOTE on stdout,
+    and the gate ends as it should, where its worker raised out of the pool and the gate
+    failed. A corrupt indel file still fails the gate, as it did."""
+
+    ALN = "ACGTACGTACGTACGTACGTAGG"
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gate_mnv_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.dicts = os.path.join(self.tmp, "Dictionaries")
+        build_panel(self.dicts, [(100, "A", "G", {"S00": "1|0", "S01": "1|0"}),
+                                 (155, "C", "T", {"S00": "1|0", "S04": "1|0"})],
+                    indels=[(300, "AT", "A", {"S02": "1|0"})],
+                    mnvs=[(105, "AC", "GT", {"S00": "1|0", "S01": "1|0", "S05": "0|1"}),
+                          (150, "AC", "GT", {"S00": "1|0", "S03": "1|0"})])
+        self.store = os.path.join(self.dicts, f"indel_genotypes_{PANEL}")
+        out = os.path.join(self.tmp, "Results", "job")
+        os.makedirs(out)
+        self.vcfs = os.path.join(self.tmp, "list_vcf.txt")
+        with open(self.vcfs, "w") as fh:
+            fh.write(f"VCFs/{PANEL}\n")
+        self.results = os.path.join(out, "GUIDE+NRG_hg38+" + PANEL + "_4+2_integrated_results.tsv")
+        aln = self.ALN
+
+        def row(chrom, start, variants):
+            return {"Spacer+PAM": "G", "Chromosome": chrom,
+                    **block("highest_CFD", start, "+", aln, "alt", variants),
+                    **block("fewest_mm+b", start, "+", aln, "ref", "NA"),
+                    **block("highest_CRISPR_BULGE", start, "+", aln, "ref", "NA")}
+        write_results(self.results, [
+            row(CHROM, 90, f"{CHROM}_100_A_G"),
+            row(CHROM, 140, f"{CHROM}_150_AC_GT,{CHROM}_155_C_T"),
+            row(CHROM, 145, f"{CHROM}_150_AC_GT"),
+            row(CHROM, 290, f"{CHROM}_300_AT_A"),
+            row("chr21", 90, "chr21_100_A_G")])
+
+    def gate(self):
+        done = subprocess.run(
+            [sys.executable, os.path.join(HERE, "haplotype_prioritizer.py"), "--results",
+             self.results, "--dictionaries", self.dicts, "--vcf-list", self.vcfs, "--mode",
+             "population-level", "--threads", "2"], capture_output=True, text=True)
+        tiers = None
+        if done.returncode == 0:
+            with open(hp.companion_path(self.results)) as fh:
+                tiers = [(r[0], r[7], r[8], r[9]) for r in
+                         (ln.rstrip("\n").split("\t") for ln in fh if not ln.startswith("#"))
+                         if r[1] == "highest_CFD"]
+        return done, tiers
+
+    def cut_short(self, kind):
+        path = os.path.join(self.store, f"gt_{kind}_{CHROM}.tsv.gz")
+        with open(path, "rb") as fh:
+            data = fh.read()
+        with open(path, "wb") as fh:
+            fh.write(data[:len(data) // 2])
+
+    def test_the_mnvs_are_read_where_the_rows_touch_them(self):
+        done, tiers = self.gate()
+        self.assertEqual((done.returncode, done.stderr), (0, ""), done.stderr)
+        self.assertEqual(tiers, [("1", "C1", hp.INDEL_IN_TARGET, PANEL),
+                                 ("2", "A", hp.ONE_HAPLOTYPE, PANEL),
+                                 ("3", "B", "-", PANEL),
+                                 ("4", "B", "-", PANEL),
+                                 ("5", "B", hp.NOT_IN_PANEL, "-")])
+        self.assertNotIn("holds no MNV", done.stdout)
+
+    def test_an_mnv_file_cut_short_is_read_as_none_in_the_pool(self):
+        self.cut_short("mnv")
+        self.assert_read_as_none()
+
+    def test_an_mnv_file_of_0_bytes_is_read_as_none_in_the_pool(self):
+        """A file of 0 bytes (a copy stopped at once), its .done marker left as it was, is
+        one that cannot be read, as one cut short is; at 6b5ab4d3 gzip read it as a file of
+        no line, and the gate wrote no NOTE."""
+        open(os.path.join(self.store, f"gt_mnv_{CHROM}.tsv.gz"), "wb").close()
+        self.assert_read_as_none()
+
+    def assert_read_as_none(self):
+        done, tiers = self.gate()
+        self.assertEqual((done.returncode, done.stderr), (0, ""), done.stderr)
+        self.assertEqual(tiers, [("1", "B", "-", PANEL),
+                                 ("2", "C2", "-", PANEL),
+                                 ("3", "B", hp.NOT_IN_PANEL, "-"),
+                                 ("4", "B", "-", PANEL),
+                                 ("5", "B", hp.NOT_IN_PANEL, "-")])
+        self.assertEqual(done.stdout.count(
+            f"NOTE [indel-snp]: the phased indel genotype store of {PANEL} on {CHROM} holds no "
+            f"MNV that can be read: its MNV file gt_mnv_{CHROM}.tsv.gz is corrupt or cut short "
+            "("), 1, done.stdout)
+        self.assertIn(f"the carrier gate finds no MNV in the panel {PANEL} there", done.stdout)
+
+    def test_an_indel_file_cut_short_still_fails_the_gate(self):
+        self.cut_short("indel")
+        done, _tiers = self.gate()
+        self.assertNotEqual(done.returncode, 0)
 
 
 class TestTheSearchGivesTheGateItsPam(unittest.TestCase):

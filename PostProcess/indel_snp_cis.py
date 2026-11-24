@@ -363,13 +363,52 @@ def shared_tail(ref, alt):
     return t
 
 
+def allele_breaks_record(pos1, ref, alt, q, base, ref_base):
+    """True iff the haplotype's own allele ``base`` at the reference position ``q``
+    (0-based, inside the REF of the record (pos1, ref, alt)) leaves it with no one
+    sequence there, so the record cannot be written on it. ``ref_base``: the reference
+    base at ``q``; ``base`` None (the genotypes cannot put an allele on that haplotype)
+    always breaks it.
+
+    An indel or a complex record: any allele but the reference base breaks it. A VCF
+    writes a haplotype holding both as one record, so a slot phased with the two is a
+    phasing artefact.
+
+    A record whose REF and ALT have one length (an MNV) is read base by base (2.10.1).
+    On a base it keeps (its ALT base is the reference base there) the SNV's base wins;
+    on one it replaces the MNV's base does, which an SNV naming that same base agrees
+    with. Only an allele that is neither -- a true third-base conflict, the reference
+    base, the MNV's and the SNV's all different -- leaves the slot with no sequence. Of
+    HPRC v2.1's 28 SNV-MNV pairs on one phased slot (150 slots) exactly one is such a
+    conflict (chrY, one copy, the records' CONFLICT field naming another sample): a
+    decomposition artefact, where the two records come from one bubble of the pangenome
+    graph that vcfwave cut in two."""
+    if base is None:
+        return True
+    if not len(ref) == len(alt) > 1:  # an indel, a complex record, a record of one base
+        return base.upper() != ref_base.upper()
+    k = q - (pos1 - 1)
+    if not 0 <= k < len(alt):
+        return base.upper() != ref_base.upper()
+    return (alt[k].upper() != ref_base.upper()
+            and base.upper() not in (alt[k].upper(), ref_base.upper()))
+
+
 def changes_span(pos1, ref, alt, lo, hi, gone=None):
     """True iff a variant (VCF POS / REF / ALT) changes the reference bases lo..hi
     (0-based, inclusive) of a haplotype that carries it: a deleted or replaced base
     inside, or bases inserted between two bases of it. The bases REF and ALT share
     at the start (the VCF anchor base) or at the end are kept, so they change nothing.
     ``gone`` (first, last; 0-based, inclusive): bases the haplotype has lost already,
-    to the indel of the window being read: losing them again changes nothing."""
+    to the indel of the window being read: losing them again changes nothing.
+
+    A record whose REF and ALT have one length (an MNV, an SNV) inserts no base: its ALT
+    bases stand in the places of the REF bases they replace (2.10.1). So one only on bases
+    of ``gone`` changes nothing (question 2a of the MNV plan, reading (i): METHODS section
+    4's rule for a variant on bases the indel deletes), and one elsewhere changes the bases
+    it replaces. Up to 2.10.0 its ALT was counted as bases inserted before its first
+    changed base, as a complex record's (TCC>G) still is, and such an MNV took the slot off
+    the deletion's row."""
     a = pos1 - 1
     c = kept_bases(ref, alt)
     t = shared_tail(ref, alt)
@@ -379,7 +418,7 @@ def changes_span(pos1, ref, alt, lo, hi, gone=None):
             (first, min(last, gone[0] - 1)), (max(first, gone[1] + 1), last)]
         if any(f <= l and f <= hi and l >= lo for f, l in parts):
             return True
-    if len(alt) - t > c:  # bases inserted between a+c-1 and a+c
+    if len(alt) - t > c and len(alt) != len(ref):  # bases inserted between a+c-1 and a+c
         return lo <= a + c - 1 and a + c <= hi
     return False
 
@@ -846,13 +885,24 @@ def local_haplotype(lo, hi, window, others=()):
     ``window`` (VCF POS, REF, ALT) is the indel of the fake-indel window, written as the
     window writes it: its REF out, its ALT in, the anchor base included; None for a
     haplotype read around a SNP row's target, which holds no window indel. ``others`` are
-    the haplotype's other indels; the bases one shares with its REF at either end
+    the haplotype's other indels and MNVs; the bases one shares with its REF at either end
     (kept_bases, shared_tail) stay reference bases. A source is a reference position
     (int), whose base is the haplotype's own allele there, or a base an ALT puts in
     (str). A place sorts as the haplotype runs: (p, 0) for reference position p, and
     (p, rank, k) for the k-th base an ALT puts in after reference position p, another
     indel's (rank 1) before the window's (rank 2), which follows the bases an indel
-    inserted before its anchor. None where two of the variants overlap, or insert at
+    inserted before its anchor. A record of ``others`` whose REF and ALT have one length
+    (an MNV) moves no base: its ALT bases are written at the places of the REF bases they
+    replace, (p, 0) with the ALT base as the source (2.10.1). Up to 2.10.0 they were
+    written after the base before its edit, as an insertion's are, and the places of the
+    bases it replaces were left out: on an MNV at a target's first base, the reading "from
+    the first base on" (target_pairs) then started past the MNV, where in a repeat it found
+    the target's bases, and a slot that does not hold them kept the row. A base such a
+    record KEEPS (its ALT base is the REF base there, inside the bases it replaces: AAC>CAG
+    keeps the middle A) stays a reference place, so the slot's own allele there is its
+    base and a SNV on it wins (2.10.1, the base-by-base reading of an SNV and an MNV on
+    one slot). Up to that the MNV's copy of the reference base was written, and it hid the
+    SNV. None where two of the variants overlap, or insert at
     one point: no one haplotype holds both (a VCF writes such a haplotype as one
     record). Two variants overlap when their REFs share a base, whatever bases each
     keeps: two records at one POS always do (an insertion and a deletion there are two
@@ -866,23 +916,31 @@ def local_haplotype(lo, hi, window, others=()):
     if window is not None:
         p1, ref, alt = window
         s = p1 - 1
-        edits.append((s, s + len(ref), alt, s - 1, 2))
+        edits.append((s, s + len(ref), alt, s - 1, 2, ref))
     for p1, ref, alt in others:
         s = p1 - 1
         c = kept_bases(ref, alt)
         t = shared_tail(ref, alt)
-        edits.append((s + c, s + len(ref) - t, alt[c:len(alt) - t], s + c - 1, 1))
+        edits.append((s + c, s + len(ref) - t, alt[c:len(alt) - t], s + c - 1, 1,
+                      ref[c:len(ref) - t]))
     # with no two REFs sharing a base, only an insertion can start where another record's
     # changed bases start, and it comes first: its bases go in before them
     edits.sort(key=lambda e: (e[0], e[1], e[4]))
     out = []
     at = lo
     last = None
-    for start, end, put, after, rank in edits:
+    for start, end, put, after, rank, cut in edits:
         if last is not None and start == last[0] == last[1] == end and rank == last[2]:
             return None  # two insertions at one point: their bases have no one order
         out.extend(((p, 0), p) for p in range(at, min(start, hi + 1)))
-        out.extend(((after, rank, k), b.upper()) for k, b in enumerate(put))
+        if rank == 1 and end - start == len(put):
+            # an MNV's bases stand in the places of the bases they replace; one it keeps
+            # (its ALT base is the reference base there) stays a reference place
+            out.extend(((start + k, 0),
+                        b.upper() if b.upper() != cut[k].upper() else start + k)
+                       for k, b in enumerate(put) if lo <= start + k <= hi)
+        else:
+            out.extend(((after, rank, k), b.upper()) for k, b in enumerate(put))
         at = max(at, end)
         last = (start, end, rank)
     out.extend(((p, 0), p) for p in range(at, hi + 1))
@@ -1031,7 +1089,8 @@ def snp_target_held(lo, hi, snps, held, value, reference, unread=None):
     gives the haplotype's alleles, the row's at a position of lo..hi; ``reference`` is
     the chromosome's sequence. The haplotype is written without the indels it cannot be
     written with: those of ``unread``, one with a SNP alt of the haplotype (or an allele
-    its calls leave unknown) on a base of its REF, and two records of one base (two
+    its calls leave unknown) on a base of its REF (allele_breaks_record: of an MNV, only
+    a true third-base conflict, since 2.10.1), and two records of one base (two
     indels whose REFs share a base, or that insert at one point: overlapping_records).
     A way that reaches a base of one of their REFs -- a base of its stretch on the
     haplotype, or of the target's bases -- cannot be read; one that ends before them or
@@ -1045,7 +1104,8 @@ def snp_target_held(lo, hi, snps, held, value, reference, unread=None):
             continue
         bad = set(unread[side]) if unread is not None else set()
         bad.update((p, r, a) for p, r, a in indels
-                   if any(not 0 <= q < len(reference) or value(q) != reference[q]
+                   if any(not 0 <= q < len(reference)
+                          or allele_breaks_record(p, r, a, q, value(q), reference[q])
                           for q in range(p - 1, p - 1 + len(r))))
         bad |= overlapping_records(indels)
         got = [rec for rec in indels if rec not in bad]

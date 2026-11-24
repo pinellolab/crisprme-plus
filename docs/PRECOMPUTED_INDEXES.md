@@ -183,7 +183,9 @@ it, once (HGDP + 1000 Genomes' default, `20-NRR_3_hg38+hg38_HGDP1kGP`, 50.13 GB 
 that is not installed (`download --what all` fetches `20-NRR_3_hg38`); a later index of the panel
 its own archive (and its PAM's reference index where that is not installed), not the bundle and the
 store again. The `indel_genotypes_` archive is fetched, with the genotype store, by `download --what
-genotype-oracle`, the stores without the index (an index's bundle holds the same indel store).
+genotype-oracle`, the stores without the index (an index's bundle holds the same indel store), and
+alone by `download --what indel-genotypes --dataset <panel>` (2.10.1), which adds the MNV files to
+a store installed with CRISPRme 2.10.0 ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15).
 Measured from the Hub on a clean install (2026-11-18), the default install (`download --what all`,
 then `20-NRR_3_hg38+hg38_HGDP1kGP`) is a 71.46 GB download and takes 153.39 GB, its peak 159.25 GB
 while the archives unpack (`download --what all` alone: 21.33 GB, 44.14 GB installed). A panel's
@@ -1125,12 +1127,14 @@ every carrier of the indel, PUTATIVE; a sequence no individual has is dropped; s
 off-target, a **CONFIRMED-cis** call (all covered variants phased on one haplotype) or
 **PUTATIVE** (unphased / can't prove cis), with the per-sample carriers and the joint
 allele frequency (`AC_cis / AN` over the VCF-genotyped panel). On a sites-only panel it
-falls back to a PUTATIVE min-AF bound with no carriers (see METHODS §4/§8). The indel
-genotype store keeps only records whose REF and ALT differ in length, so an equal-length
-multi-base record (an MNV, such as AC>TG), which the indel search covers too, has its
-carriers resolved with the phase unknown, PUTATIVE: the HGDP + 1000 Genomes index has
-none, HPRC's chr22 has 9,079 among its 195,813 indel-search records (in v2.0 of its graph,
-2.8.1's input). Since 2.10.0 a
+falls back to a PUTATIVE min-AF bound with no carriers (see METHODS §4/§8). Up to 2.10.0
+the indel genotype store kept only records whose REF and ALT differ in length, so an
+equal-length multi-base record (an MNV, such as AC>TG), which the indel search covers too,
+had its carriers resolved with the phase unknown, PUTATIVE: the HGDP + 1000 Genomes index
+has none, HPRC's chr22 has 9,079 among its 195,813 indel-search records (in v2.0 of its
+graph, 2.8.1's input). Since 2.10.1 the store holds the MNVs in a file of their own,
+`gt_mnv_<chrom>.tsv.gz`, and a search that reads it resolves their carriers by their phase
+(METHODS §4); a store without it is read as before. Since 2.10.0 a
 per-sample search also reads the store for the SNP rows: a SNP row does not list a carrier
 whose haplotype holding its SNPs also holds an indel that changes the target (METHODS §4).
 With the gate off it lists them, as up to 2.8.1.

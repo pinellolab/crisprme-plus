@@ -2607,7 +2607,7 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
                         lines = out.splitlines()
                         warned = [i for i, line in enumerate(lines) if line.startswith(
                             ("WARNING [build_dictless_tiers]: could not emit dictless tiers for ",
-                             "WARNING [indel-snp]: compile_indel_genotypes failed for "))]
+                             "WARNING [indel-snp]: compile_store failed for "))]
                         self.assertEqual(len(warned), 1, out)
                         if step == "tiers":
                             kept = (f"WARNING [build-index-only]: the dict-less tiers of 1 of 2 "
@@ -3290,6 +3290,10 @@ BEFORE = {
             "f241d8830c69dc31  Dictionaries/indel_genotypes_ds/gt_indel_chr1.tsv.gz.done",
             "8e3f9e931ce698b8  Dictionaries/indel_genotypes_ds/gt_indel_chr2.tsv.gz",
             "f241d8830c69dc31  Dictionaries/indel_genotypes_ds/gt_indel_chr2.tsv.gz.done",
+            "e3b0c44298fc1c14  Dictionaries/indel_genotypes_ds/gt_mnv_chr1.tsv.gz",
+            "51a917be45a8c5ae  Dictionaries/indel_genotypes_ds/gt_mnv_chr1.tsv.gz.done",
+            "e3b0c44298fc1c14  Dictionaries/indel_genotypes_ds/gt_mnv_chr2.tsv.gz",
+            "51a917be45a8c5ae  Dictionaries/indel_genotypes_ds/gt_mnv_chr2.tsv.gz.done",
             "dir  Dictionaries/log_indels_ds/",
             "5717b5bb7539d559  Dictionaries/log_indels_ds/logchr1.txt.gz",
             "0004c31cfbfba66d  Dictionaries/log_indels_ds/logchr2.txt.gz",
@@ -3382,6 +3386,10 @@ BEFORE = {
             "f241d8830c69dc31  Dictionaries/indel_genotypes_ds/gt_indel_chr1.tsv.gz.done",
             "8e3f9e931ce698b8  Dictionaries/indel_genotypes_ds/gt_indel_chr2.tsv.gz",
             "f241d8830c69dc31  Dictionaries/indel_genotypes_ds/gt_indel_chr2.tsv.gz.done",
+            "e3b0c44298fc1c14  Dictionaries/indel_genotypes_ds/gt_mnv_chr1.tsv.gz",
+            "51a917be45a8c5ae  Dictionaries/indel_genotypes_ds/gt_mnv_chr1.tsv.gz.done",
+            "e3b0c44298fc1c14  Dictionaries/indel_genotypes_ds/gt_mnv_chr2.tsv.gz",
+            "51a917be45a8c5ae  Dictionaries/indel_genotypes_ds/gt_mnv_chr2.tsv.gz.done",
             "dir  Dictionaries/log_indels_ds/",
             "5717b5bb7539d559  Dictionaries/log_indels_ds/logchr1.txt.gz",
             "0004c31cfbfba66d  Dictionaries/log_indels_ds/logchr2.txt.gz",
@@ -4778,6 +4786,145 @@ class ASitesOnlyDatasetsWindowsComeFromItsKit(_Fixture):
         self.assertEqual([c for c in self.calls()[calls:] if c.startswith("add-variants ")], [])
 
 
+class TheStoreGainsItsMnvFiles(_Fixture):
+    """STEP 1c from 2.10.1: a job per chromosome writes, in one pass over its VCF, whichever
+    of its store's two files is missing or not current, the indel file
+    (gt_indel_<chrom>.tsv.gz) and the MNV file (gt_mnv_<chrom>.tsv.gz,
+    build_indel_genotypes.files_to_write, compile_store_safe). So a store of 2.10.0 (indel
+    files current, no MNV file) gains its MNV files and keeps its indel files byte for byte,
+    their markers and times too; a VCF with no MNV gets MNV files of no record; and the
+    store is marked unfinished while either is written, so a run stopped while it adds the
+    MNV files leaves it refused until a run finishes it. Up to 516d42a0 STEP 1c wrote the
+    indel file alone, while the indel post-analysis' NOTE of a store of 2.10.0 already said
+    that build-index-only of 2.10.1 adds the MNVs (the review's item 2)."""
+
+    MNV_POS = 31  # (1-based) an MNV of two bases on chr1, carried by S1 on its first slot
+
+    def add_mnv(self):
+        """chr1's VCF with an MNV beside its SNP and its insertion (the stub engine's
+        add-variants reads no VCF; STEP 1c reads it)."""
+        seq = GENOME["chr1"]
+        ref = seq[self.MNV_POS - 1:self.MNV_POS + 1]
+        self.mnv = (self.MNV_POS, ref, ref.translate(str.maketrans("ACGT", "TGCA")))
+        vcf = self.path("VCFs", "ds", "ds.chr1.vcf.gz")
+        with gzip.open(vcf, "rt") as fh:
+            lines = fh.read().splitlines(True)
+        lines.append(f"chr1\t{self.MNV_POS}\trs_chr1_mnv\t{self.mnv[1]}\t{self.mnv[2]}\t.\tPASS"
+                     "\tAF=0.25\tGT\t1|0\t0|0\n")
+        with gzip.open(vcf, "wt") as fh:
+            fh.writelines(lines)
+
+    def store(self, *name):
+        return self.path("Dictionaries", "indel_genotypes_ds", *name)
+
+    def indel_files(self):
+        """{file: (bytes, mtime)} of the store's indel files and their markers."""
+        out = {}
+        for chrom in GENOME:
+            for name in (f"gt_indel_{chrom}.tsv.gz", f"gt_indel_{chrom}.tsv.gz.done"):
+                with open(self.store(name), "rb") as fh:
+                    out[name] = (fh.read(), os.stat(self.store(name)).st_mtime_ns)
+        return out
+
+    def drop_mnv_files(self):
+        """The store as 2.10.0 left it: its MNV files gone."""
+        for chrom in GENOME:
+            for name in (f"gt_mnv_{chrom}.tsv.gz", f"gt_mnv_{chrom}.tsv.gz.done"):
+                os.remove(self.store(name))
+
+    def mnv_lines(self, chrom):
+        with gzip.open(self.store(f"gt_mnv_{chrom}.tsv.gz"), "rt") as fh:
+            return fh.read().splitlines()
+
+    def test_a_vcf_with_no_mnv_gets_mnv_files_of_no_record(self):
+        import build_indel_genotypes as big
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        for chrom in GENOME:
+            self.assertEqual(self.mnv_lines(chrom), [])
+            with open(self.store(f"gt_mnv_{chrom}.tsv.gz.done")) as fh:
+                self.assertEqual(fh.read(), f"0\n{big.FILTER_MARK}\n")
+            self.assertTrue(big.store_is_current(self.store(f"gt_mnv_{chrom}.tsv.gz")))
+        self.assertFalse(os.path.exists(self.store(".building")))
+        self.assertNotIn("MNV file alone", out)
+
+    def test_a_store_of_2_10_0_gains_its_mnv_files_and_keeps_its_indel_files(self):
+        self.add_mnv()
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        clean = self.outputs()
+        p, r, a = self.mnv
+        self.assertEqual(self.mnv_lines("chr1"), [f"{p}_{r}_{a}\tS1:1|0"])
+        self.assertEqual(self.mnv_lines("chr2"), [])
+        self.drop_mnv_files()
+        before = self.indel_files()
+        time.sleep(0.05)  # (a file written again would show a later time)
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.assertIn("[indel-snp] building phased indel GT for 2 chromosome(s) with 2 parallel "
+                      "worker(s)\n[indel-snp] 2 of them with a current indel file, kept as it is "
+                      "(a store of CRISPRme 2.10.0): their MNV file alone (gt_mnv_<chrom>.tsv.gz) "
+                      "is added\n", out)
+        self.assertIn("[indel-snp] phased indel genotype store: 2 chromosome(s) -> "
+                      "indel_genotypes_ds\n", out)
+        self.assertEqual(self.indel_files(), before)
+        self.assertEqual(self.outputs(), clean)
+        self.assertFalse(os.path.exists(self.store(".building")))
+        # and a run with every file current writes none
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("building phased indel GT", out)
+        self.assertEqual(self.outputs(), clean)
+
+    def test_a_run_stopped_while_it_adds_them_is_refused_until_one_finishes(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        clean = self.outputs()
+        self.drop_mnv_files()
+        before = self.indel_files()
+        proc = self.start(shim=True, STUB_WRITE_HANG="/indel_genotypes_ds/gt_mnv_chr2",
+                          CRISPRME_INDELGT_WORKERS="1")
+        self.wait_for_mark(proc)
+        self.kill_group(proc)
+        self.assertTrue(os.path.isdir(self.store(".building")))
+        self.assertTrue(os.path.isfile(self.store("gt_mnv_chr1.tsv.gz")))
+        self.assertFalse(os.path.exists(self.store("gt_mnv_chr2.tsv.gz")))
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(f"Error: {self.store()} is unfinished: the build-index-only run that "
+                      f"wrote the ", err)
+        self.assertNotIn("Launching job ", out)
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.assertIn("[indel-snp] building phased indel GT for 1 chromosome(s)", out)
+        self.assertEqual(self.indel_files(), before)
+        self.assertEqual(self.outputs(), clean)
+        self.assert_searched()
+
+    def test_an_mnv_file_that_fails_leaves_the_store_marked(self):
+        """A guarded failure of the MNV file alone (a store of 2.10.0 gaining it) skips the
+        chromosome with a WARNING, as one of its indel file does: the mark stays (a store
+        read with the MNVs of some chromosomes only), the run ends with an ERROR, and the
+        next run finishes it; its indel file is left as it was."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        clean = self.outputs()
+        self.drop_mnv_files()
+        before = self.indel_files()
+        rc, out, err = self.run_bio(shim=True, STUB_WRITE_FAIL="/indel_genotypes_ds/gt_mnv_chr2",
+                                    STUB_WRITE_FAIL_ERRNO="EACCES", CRISPRME_INDELGT_WORKERS="1")
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("WARNING [indel-snp]: compile_store failed for ds.chr2.vcf.gz", out)
+        self.assertIn(f"WARNING [indel-snp]: the phased indel genotype store of 1 of 2 "
+                      f"chromosome(s) of ds was not built (above), so {self.store()} stays "
+                      f"marked unfinished", out)
+        self.assertTrue(os.path.isdir(self.store(".building")))
+        self.assertEqual(self.indel_files(), before)
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self.outputs(), clean)
+
+
 class SameTreeAsBefore(_Fixture):
     """(f): a successful build, and a re-run with everything in place, produce the
     same tree, file for file, and print the same lines, as before the fix: but for the
@@ -4785,10 +4932,13 @@ class SameTreeAsBefore(_Fixture):
     the record of the code before the fix with NRG_2_hg38 named 20-NRG_2_hg38, which a
     --record of 2.10.0 gives, byte for byte), the .done marker of each chromosome's
     phased indel genotypes, which since 2.10.0 says, after its record count, that the store
-    holds only records whose FILTER is PASS or '.' (build_indel_genotypes.FILTER_MARK), and
+    holds only records whose FILTER is PASS or '.' (build_indel_genotypes.FILTER_MARK),
     the record of each INDELS sub-index (.index_meta.json), which since 2.10.0 says the
     fake-indel windows it was built from, as its chromosome's indel log records them
-    (indel_window: the stub's 25 and 34)."""
+    (indel_window: the stub's 25 and 34), and the MNV file of each chromosome's phased
+    indel genotypes with its .done marker (gt_mnv_<chrom>.tsv.gz: of no record, as the
+    stub's VCFs hold no MNV, its marker's count 0), which STEP 1c writes beside its indel
+    file since 2.10.1."""
 
     maxDiff = None
 

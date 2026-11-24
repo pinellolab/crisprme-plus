@@ -1154,10 +1154,12 @@ class _Reference(object):
 
 class _Store(object):
     """The phased indel store's reader (build_indel_genotypes.IndelGenotypeReader):
-    {(POS, REF, ALT): {sample: genotype}}."""
+    {(POS, REF, ALT): {sample: genotype}}; ``has_mnv``: whether it read an MNV file (from
+    2.10.1; a store of 2.10.0 has none)."""
 
-    def __init__(self, records):
+    def __init__(self, records, has_mnv=False):
         self.records = records
+        self.has_mnv = has_mnv
 
     def indels(self):
         return sorted(self.records)
@@ -1390,6 +1392,199 @@ class AVariantPastTheStretch(unittest.TestCase):
         # a record left unnormalized (TCA>TCAG) and an insertion on its last base
         self.assertEqual(isc.overlapping_records([(110, "TCA", "TCAG"), (112, "A", "AT")]),
                          {(110, "TCA", "TCAG"), (112, "A", "AT")})
+
+
+class TheMnvRules(unittest.TestCase):
+    """The indel post-analysis' functions (analisi_indels_NNN.py, run as the analyzer
+    defines them) on a store that holds MNVs (2.10.1: the store's MNV file), by the rules of
+    the plan of the MNVs' phase on HPRC (question 2, confirmed by the PI):
+
+      (a)(i) an MNV only on bases the window's deletion deletes changes nothing;
+      (b) a deletion on bases an MNV window replaces changes its target (an MNV window
+          loses no base), so on the MNV's rows the slot is read as the deletion's;
+      (c) an MNV and an indel at one POS are other alleles of that position, a phasing
+          artefact: each is read without the other, on both records' rows, where the MNV
+          file was read (a store of 2.10.0 is read as 2.10.0 read it);
+
+    and the placement of an MNV's bases on a slot (indel_snp_cis.local_haplotype): the
+    plan's toy calls, an MNV on a target's first base in a repeat. Each fails at c64e62e1."""
+
+    NAMES = AVariantPastTheStretch.NAMES
+
+    def _ns(self, store, seq, at, snps=None):
+        import ast
+        path = os.path.join(HERE, "analisi_indels_NNN.py")
+        with open(path) as fh:
+            tree = ast.parse(fh.read())
+        body = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in self.NAMES]
+        snps = snps or {}
+        ns = {"bisect": __import__("bisect"), "_isc": isc, "_jgt_cache": {},
+              "_cache_held": {}, "_CACHE_CARRIERS": 1000000, "_indel_index": None,
+              "_indel_starts": [], "_indel_maxref": 0, "_indelgt": store,
+              "genomeStr": _Reference(at, seq), "_snp_record": lambda pos1: snps.get(pos1, {})}
+        exec(compile(ast.Module(body=body, type_ignores=[]), path, "exec"), ns)
+        return ns
+
+    # 0-based 1000..1069: ten C, forty A, twenty T; and ten C, twenty AT units, twenty G
+    A_RUN = "C" * 10 + "A" * 40 + "T" * 20
+    AT_RUN = "C" * 10 + "AT" * 20 + "G" * 20
+    SEQ = "ACGT" * 15
+
+    @staticmethod
+    def _other(bases):
+        """An MNV's ALT for REF ``bases``: every base another (its complement), so that it
+        keeps no base of its REF, as every MNV of HPRC v2.1 (the plan's census)."""
+        return bases.translate(str.maketrans("ACGT", "TGCA"))
+
+    def _left_with_the_mnv(self, seq, window, mnv, offsets, span):
+        """The carriers of ``mnv`` that the window's carriers' slots leave with: S1 holds
+        the window's record and the MNV on one slot, S2 the MNV on its other slot
+        (_breaking_slots keeps, among the MNV's carriers, the slots it takes off)."""
+        ipos, iref, ialt = window
+        records = {window: {"S1": "1|0", "S2": "1|0"}, mnv: {"S1": "1|0", "S2": "0|1"}}
+        ns = self._ns(_Store(records, has_mnv=True), seq, 1000)
+        found = ns["_other_indels"](span[0], span[1], ipos, iref, ialt)
+        self.assertEqual([k for k, _g, _o in found], [mnv])
+        out = ns["_breaking_slots"](found, offsets, span, ipos, iref, ialt, ipos - 1 - 30,
+                                    isc.IndelCarriers(records[window]))
+        return dict((k, g) for k, g, _o in out)[mnv]
+
+    def test_an_mnv_on_the_targets_first_base_in_a_repeat_breaks_the_slot(self):
+        """The plan's toy calls through _breaking_slots. An insertion row in an A run (A>AA
+        at 1030, the target from 1020 on, 15 bases, through the inserted A) with AA>GG on
+        the target's first base; a unit-deletion row (TAT>T at 1031, AT>TA on the first
+        base, 16 bases) in an AT repeat. S1's slot holds the MNV: its target's first bases
+        are the MNV's, so it leaves the row (it stays among the MNV's carriers that take a
+        slot off). At c64e62e1 the MNV's bases were written after the base before it, the
+        reading from the first base on started past the MNV, where the repeat holds the
+        target's bases, and S1 kept the row. S2's MNV is on its other slot."""
+        self.assertEqual(self._left_with_the_mnv(
+            self.A_RUN, (1031, "A", "AA"), (1021, "AA", "GG"), (20, 34), (1020, 1033)),
+            {"S1": "1|0", "S2": "0|1"})
+        self.assertEqual(self.AT_RUN[31:34], "TAT")
+        self.assertEqual(self._left_with_the_mnv(
+            self.AT_RUN, (1032, "TAT", "T"), (1021, "AT", "TA"), (20, 35), (1020, 1037)),
+            {"S1": "1|0", "S2": "0|1"})
+        # the same MNV inside the target: off, at c64e62e1 too
+        self.assertEqual(self._left_with_the_mnv(
+            self.A_RUN, (1031, "A", "AA"), (1025, "AA", "GG"), (20, 34), (1020, 1033)),
+            {"S1": "1|0", "S2": "0|1"})
+
+    def test_2a_an_mnv_only_on_bases_the_deletion_deletes_changes_nothing(self):
+        """A deletion of 1010..1017 (POS 1010) with an MNV on 1012..1013 (shape 5 of the
+        plan's table, the deletion's rows): the slot holds the deletion's sequence, read
+        without the MNV, as METHODS section 4 reads any variant on deleted bases. One that
+        also replaces a base past the deleted ones (shape 3, the deletion's rows) changes
+        the target. At c64e62e1 changes_span counted the MNV's ALT as bases inserted, and
+        the slot left the row."""
+        seq = self.SEQ
+        window = (1010, seq[9:18], seq[9])
+        inside = (1013, seq[12:14], self._other(seq[12:14]))
+        past = (1017, seq[16:19], self._other(seq[16:19]))
+        store = _Store({window: {"S1": "1|0"}, inside: {"S1": "1|0"}, past: {"S1": "1|0"}},
+                       has_mnv=True)
+        ns = self._ns(store, seq, 1000)
+        found = ns["_other_indels"](1000, 1030, *window)
+        self.assertEqual([k for k, _g, _o in found], [past])
+
+    def test_2b_a_deletion_on_an_mnv_windows_bases_changes_its_target(self):
+        """An MNV window of four bases (1011..1014, POS 1012) and, on its slot, a deletion
+        whose deleted bases lie inside the MNV (anchor 1010, deleting 1011..1012: shape 4,
+        the MNV's rows) or are exactly the MNV's (shape 5): the haplotype is read as the
+        deletion's, so the slot leaves the MNV's rows. At c64e62e1 the MNV window's bases
+        counted as lost, so such a deletion changed nothing."""
+        seq = self.SEQ
+        window = (1012, seq[11:15], self._other(seq[11:15]))
+        for deletion in ((1011, seq[10:13], seq[10]), (1011, seq[10:15], seq[10])):
+            with self.subTest(deletion=deletion):
+                store = _Store({window: {"S1": "1|0"}, deletion: {"S1": "1|0", "S2": "0|1"}},
+                               has_mnv=True)
+                ns = self._ns(store, seq, 1000)
+                found = ns["_other_indels"](1005, 1025, *window)
+                self.assertEqual([(k, o) for k, _g, o in found], [(deletion, True)])
+                exact, putative = isc.resolve_carriers(
+                    [], isc.IndelCarriers({"S1": "1|0", "S2": "1|0"}),
+                    others=[g for _k, g, _o in found])
+                kept = set().union(*[e[0] for e in exact.values()], *putative.values())
+                self.assertEqual(kept, {"S2"})
+
+    def test_2c_an_mnv_and_an_indel_at_one_pos_both_ways(self):
+        """An indel row whose slot also holds an MNV at the indel's own POS, and an MNV row
+        whose slot also holds an indel at the MNV's own POS: each record is read without the
+        other where the store's MNV file was read; with a store of 2.10.0 (no MNV file) the
+        indel at an MNV row's POS is read as 2.10.0 read it, an overlapping record (its row's
+        carriers are the indel log's, phase unknown: PUTATIVE). An MNV keeps no anchor, so
+        the rule for two indels at one anchor never took one (c64e62e1 read both as
+        overlapping records)."""
+        seq = self.SEQ
+        deletion = (1012, seq[11:13], seq[11])           # TA>T
+        mnv = (1012, seq[11:13], self._other(seq[11:13]))  # TA>AT
+        insertion = (1012, seq[11], seq[11] + "AA")      # T>TAA
+        records = {deletion: {"S1": "1|0"}, mnv: {"S1": "1|0"}, insertion: {"S1": "1|0"}}
+        for has_mnv in (True, False):
+            ns = self._ns(_Store(records, has_mnv=has_mnv), seq, 1000)
+            on_indel = [k for k, _g, _o in ns["_other_indels"](1000, 1030, *deletion)]
+            on_mnv = [(k, o) for k, _g, o in ns["_other_indels"](1000, 1030, *mnv)]
+            if has_mnv:
+                self.assertNotIn(mnv, on_indel)
+                self.assertEqual(on_mnv, [])
+            else:
+                self.assertEqual(sorted(on_mnv), sorted([(deletion, True), (insertion, True)]))
+        # two indels at one POS that keep its anchor stay other alleles of it either way
+        ns = self._ns(_Store(records, has_mnv=True), seq, 1000)
+        self.assertEqual([k for k, _g, _o in ns["_other_indels"](1000, 1030, *deletion)], [])
+
+    def test_two_mnvs_at_one_pos_are_two_records_not_other_alleles(self):
+        """The review's mutant B: the same-POS rule (c) is for an MNV and an indel. Another
+        MNV at an MNV row's own POS, on its slot, is read as a second record that changes
+        the target's bases (as two indels at one POS that do not keep its anchor are), so
+        the slot leaves the MNV's rows; only an indel at that POS is another allele there,
+        read without it. (No HPRC v2.1 slot holds two MNVs that share a base: the plan's
+        census.) Read as another allele too, the second MNV was never read, and the slot
+        stayed on the row of an MNV its haplotype does not hold alone. Two MNVs that keep
+        their first base, as two indels that keep their anchor, stay other alleles of it."""
+        seq = self.SEQ
+        mnv = (1012, seq[11:13], self._other(seq[11:13]))        # TA>AT
+        other = (1012, seq[11:13], "GG")                          # TA>GG, at its POS
+        insertion = (1012, seq[11], seq[11] + "AA")               # T>TAA, at its POS
+        records = {mnv: {"S1": "1|0"}, other: {"S1": "1|0", "S2": "0|1"},
+                   insertion: {"S1": "1|0"}}
+        ns = self._ns(_Store(records, has_mnv=True), seq, 1000)
+        found = ns["_other_indels"](1000, 1030, *mnv)
+        self.assertEqual([(k, o) for k, _g, o in found], [(other, True)])
+        exact, putative = isc.resolve_carriers(
+            [], isc.IndelCarriers({"S1": "1|0", "S2": "1|0"}),
+            others=[g for _k, g, _o in found])
+        kept = set().union(*[e[0] for e in exact.values()], *putative.values())
+        self.assertEqual(kept, {"S2"})
+        # each way: the other MNV's rows read this one as a second record too
+        self.assertEqual([k for k, _g, _o in ns["_other_indels"](1000, 1030, *other)], [mnv])
+        # two MNVs that keep their first base: other alleles of it, as two indels are
+        keeps = {(1012, seq[11:14], seq[11] + "GG"): {"S1": "1|0"},
+                 (1012, seq[11:14], seq[11] + "CC"): {"S1": "1|0"}}
+        ns = self._ns(_Store(keeps, has_mnv=True), seq, 1000)
+        self.assertEqual(ns["_other_indels"](1000, 1030, 1012, seq[11:14], seq[11] + "GG"), [])
+
+    def test_the_store_reader_brings_the_mnv_file(self):
+        """The real reader (build_indel_genotypes.IndelGenotypeReader) of a store whose MNV
+        file is beside its indel file: _other_indels finds the MNV inside the target, and the
+        same-POS rule reads has_mnv. At c64e62e1 the reader read the indel file alone."""
+        import gzip
+        import shutil
+        import tempfile
+        import build_indel_genotypes as big
+        tmp = tempfile.mkdtemp(prefix="mnv_rules_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        indel_file = os.path.join(tmp, "gt_indel_chrT.tsv.gz")
+        with gzip.open(indel_file, "wt") as fh:
+            fh.write("1031_A_AA\tS1:1|0\n")
+        with gzip.open(os.path.join(tmp, "gt_mnv_chrT.tsv.gz"), "wt") as fh:
+            fh.write("1025_AA_GG\tS1:1|0\n")
+        reader = big.IndelGenotypeReader(indel_file)
+        self.assertTrue(getattr(reader, "has_mnv", False))
+        ns = self._ns(reader, self.A_RUN, 1000)
+        found = ns["_other_indels"](1020, 1033, 1031, "A", "AA")
+        self.assertEqual([(k, g) for k, g, _o in found], [((1025, "AA", "GG"), {"S1": "1|0"})])
 
 
 class TheAnalyzerUsesIt(unittest.TestCase):

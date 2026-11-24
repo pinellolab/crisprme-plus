@@ -49,7 +49,7 @@ version. The full list is in the [release notes](docs/release-notes-2.10.0.md) a
 ### ✨ Highlights
 
 - **Dictionary-less variant-aware search** — a compact allele-frequency registry + genotype store ship with the index, so variant off-target search (with allele frequencies, rsIDs, and per-dataset provenance) runs out of the box. ([methods](METHODS.md#1-variant-aware-dictionary-less-data-model))
-- **Co-occurring off-targets** — off-targets that need two nearby variants together on the same chromosome copy (*in cis*, i.e. the same haplotype), so one individual carries both — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported **CONFIRMED** (phasing proves cis) or **PUTATIVE** (co-occurrence possible but cis unproven — unphased genotyped panels still name the carriers; sites-only panels like `mega` give a conservative min-AF bound with no carriers), with joint AF, and surfaced in the report. Since 2.8.1 an indel row lists only the individuals whose own haplotype has its sequence, with two known limits ([§10](METHODS.md#10-known-limits-of-2100)): an MNV beside the indel on that haplotype, which no store CRISPRme reads holds (met on HPRC alone of the published panels; a SNP row keeps such a carrier too), and a second indel on it, which a fake-indel window cannot hold (most often in tandem repeats; see [Known limitations](#known-limitations-and-roadmap)); where the phase is unknown, those whose own alleles allow it (PUTATIVE); on an install without SNP genotypes (`download --what index --no-genotypes`), every carrier of the indel where a SNP makes the site with it (PUTATIVE). Since 2.10.0 a per-sample SNP row does not list an individual whose haplotype holding its SNPs also holds an indel that changes the target (where that indel's phase is unknown, it stays, PUTATIVE; `CRISPRME_INDEL_SNP=0` turns this off too). Split multi-allelic SNP sites are the exception on an index CRISPRitz 2.9.1 or earlier built, as every one published until the rebuild for 2.10.0 ([§8](METHODS.md#8-off-target-scoring-assumptions-and-limitations)). An indel off-target is searched in a window of 30 reference bases on either side of its indel (CRISPRitz 2.10.0; 25 before and 27 after up to 2.9.1), which holds a target of up to 31 bases, guide, PAM and DNA bulges counted (27 on 2.9.1's, 26 at an MNV): a search whose targets need more says so, and each window's width is read from its index's own indel log, so an index of either release reads right. ([methods](METHODS.md#snpindel-off-targets-each-carriers-own-haplotype))
+- **Co-occurring off-targets** — off-targets that need two nearby variants together on the same chromosome copy (*in cis*, i.e. the same haplotype), so one individual carries both — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported **CONFIRMED** (phasing proves cis) or **PUTATIVE** (co-occurrence possible but cis unproven — unphased genotyped panels still name the carriers; sites-only panels like `mega` give a conservative min-AF bound with no carriers), with joint AF, and surfaced in the report. Since 2.8.1 an indel row lists only the individuals whose own haplotype has its sequence, with two known limits ([§10](METHODS.md#10-known-limits-of-2100)): an MNV beside the indel on that haplotype, which no store CRISPRme 2.10.0 reads holds (met on HPRC alone of the published panels; a SNP row keeps such a carrier too; CRISPRme+ 2.10.1 reads the MNVs' phase where the dataset's store holds them, see [Known limitations](#known-limitations-and-roadmap)), and a second indel on it, which a fake-indel window cannot hold (most often in tandem repeats; see [Known limitations](#known-limitations-and-roadmap)); where the phase is unknown, those whose own alleles allow it (PUTATIVE); on an install without SNP genotypes (`download --what index --no-genotypes`), every carrier of the indel where a SNP makes the site with it (PUTATIVE). Since 2.10.0 a per-sample SNP row does not list an individual whose haplotype holding its SNPs also holds an indel that changes the target (where that indel's phase is unknown, it stays, PUTATIVE; `CRISPRME_INDEL_SNP=0` turns this off too). Split multi-allelic SNP sites are the exception on an index CRISPRitz 2.9.1 or earlier built, as every one published until the rebuild for 2.10.0 ([§8](METHODS.md#8-off-target-scoring-assumptions-and-limitations)). An indel off-target is searched in a window of 30 reference bases on either side of its indel (CRISPRitz 2.10.0; 25 before and 27 after up to 2.9.1), which holds a target of up to 31 bases, guide, PAM and DNA bulges counted (27 on 2.9.1's, 26 at an MNV): a search whose targets need more says so, and each window's width is read from its index's own indel log, so an index of either release reads right. ([methods](METHODS.md#snpindel-off-targets-each-carriers-own-haplotype))
 - **Complementary production indexes** — the **recommended default** is the phased **HGDP + 1000 Genomes** index of the default SpCas9 **NRR** PAM (`20-NRR_3_hg38+hg38_HGDP1kGP`: 4,091 samples, jointly SHAPEIT5-re-phased → CONFIRMED cis + named per-sample carriers throughout), with the **HPRC pangenome** and the sites-only five-source **mega** alternatives. All carry searchable indels genome-wide with SNP+SNP / SNP+indel co-occurrence — see the [index comparison table below](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) and [`docs/PRECOMPUTED_INDEXES.md`](docs/PRECOMPUTED_INDEXES.md). (Per-source retrieval recipes for 1000G 2019/2021, HGDP, gnomAD v4.1, TOPMed and All-of-Us are in [`paper/reproducibility/variant-datasets/`](paper/reproducibility/variant-datasets/).)
 - **One index, many PAMs (`--prune-pam`)** — a **PAM-less** index stores the raw genomic flank instead of a fixed PAM, and the PAM you pass is applied during the search, so one index answers any 3′ PAM no longer than that flank (a 3-nt flank serves NRG, NGG, NAG, …). Measured genome-wide on HGDP + 1000 Genomes for one guide, a PAM-less index with `--prune-pam` returned a **byte-identical** report to a dedicated NRG index at both a 3-nt and an 8-nt flank. A flank wider than the PAM, in an index built by CRISPRitz 2.9.1 or earlier (index format 1, as every one published until the rebuild for 2.10.0 is), does not index a PAM at a contig's very end (+ strand) or start (− strand): on hg38 at an 8-nt flank, 145 + 101 NGG and 308 + 241 NRG sites, none on a primary chromosome; the search says so when it uses such a flank. An index of format 2, which CRISPRitz 2.10.0 writes, has no such limit. The trade is size — 2.8.1's 3-nt PAM-less variant index is 110 GB against 28 GB for its `NRG_3_hg38+hg38_HGDP1kGP` — and pruning happens as results are emitted, so it is not *faster* than a dedicated index; it is worth it when you expect to search several PAMs over one genome. Since 2.10.0 a search prunes by itself, from the command line or the web form, whenever no installed index serves it unpruned, and a dedicated index serves any PAM its own holds the same way (an NRR index serves NGG, NAG, NGA and NRG). ([methods](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering))
 - **Context-aware analysis mode: per-sample on phased indexes by default; `--population-level` to opt out** — as of 2.8.0 `complete-search` auto-selects **per-sample** (CONFIRMED cis phasing + named carriers + exact joint AF) on a genotyped + **PHASED** index (e.g. the HGDP + 1000 Genomes default) and **population-level** (worst-possible representatives per variant window, lossless for detection) otherwise (sites-only / unphased / hybrid / reference-only). Add **`--population-level`** (CLI) or pick **Population-level** in the web form to force the worst-case screen on a phased index; add **`--per-sample`** to force resolution on any genotyped index (on a sites-only index, which has no genotypes, it runs the population-level analysis, with a warning). This is a **genotype-resolution** dial, not a speed dial: which mode is faster depends on the panel. On the indexes CRISPRitz 2.10.0 builds, which code every allele, per-sample is the faster on a dense panel of many samples such as the default HGDP + 1000 Genomes one (its haplotype pre-check skips the dense windows' raw targets nobody carries), and population-level can be on a small panel such as HPRC ([Search speed](METHODS.md#search-speed-on-indexes-that-code-every-allele-the-haplotype-pre-check-the-k-skip-and-the-post-analysis-in-pieces)). The report states which mode was used. ([methods](METHODS.md#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis))
@@ -144,7 +144,13 @@ The main ones:
   does not have. In the README guide's genome-wide search per sample, this happens 1,163 times at
   94 sites on indel rows (each at a CFD of 0.085 or less) and 3,334 times at 219 sites on SNP rows.
   A target held only through an MNV and another indel or MNV is not reported for its carriers (16
-  sites on chr22, each at a CFD of 0.0164 or less).
+  sites on chr22, each at a CFD of 0.0164 or less). CRISPRme+ 2.10.1 reads the MNVs' phase where
+  the dataset's phased store holds them: HPRC's Dictionaries of 2.10.1 do, and an install of
+  2.10.0 gets them with a 0.61 GB download step,
+  `crisprme.py download --what indel-genotypes --dataset hg38_HPRC`
+  ([Troubleshooting](docs/TROUBLESHOOTING.md) §15); so does a store that `build-index-only` of
+  2.10.1 builds. Such carriers then leave those rows (how many is to be measured by the gates).
+  A target held only through an MNV and another indel or MNV stays unreported.
 - **Two indels on one haplotype**: a target held only through two indels is not reported for its
   carriers, and some carriers of a second indel are listed on a row of one indel; most often for
   guides whose sites lie in tandem repeats (the release gate's check counts 9,059 listings under
@@ -260,11 +266,11 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:
 
 > **`:latest` vs a pinned tag.** These commands use `pinellolab/crisprme:latest` — the
 > auto-updating, GPU-capable default image. For a fully reproducible run, pin the exact
-> release instead, e.g. `pinellolab/crisprme:v2.10.0`.
+> release instead, e.g. `pinellolab/crisprme:v2.10.1`.
 
 > **On HPC with Apptainer/Singularity.** Use **`apptainer run`**, which invokes the image
 > entrypoint so `crisprme.py` is on `PATH`, binding your data dir to `/DATA` — e.g.
-> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.10.0 crisprme.py --version`
+> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.10.1 crisprme.py --version`
 > (add `crisprme.py web-interface` / `complete-search …` the same way). Note that
 > `apptainer exec … crisprme.py …` **bypasses** the entrypoint, so `crisprme.py` is not found on
 > `PATH` — prefer `apptainer run` (or prefix `bash -lc`). A home it cannot write in (`--no-home`,
@@ -679,7 +685,7 @@ By completing these steps, your system will be fully prepared for installing CRI
 Create a dedicated environment, naming the CRISPRme version and Python 3.11 explicitly, then
 set up the CRISPR-Bulge scorer, which runs in its own conda env (`cbulge`):
 ```bash
-conda create -n crisprme crisprme=2.10.0 python=3.11
+conda create -n crisprme crisprme=2.10.1 python=3.11
 conda activate crisprme
 # CPU build; add --gpu for CUDA
 crisprme.py scorer-env create
@@ -690,7 +696,7 @@ crisprme.py scorer-env doctor
 > **Always name the version.** Given a bare `crisprme`, the solver silently falls back to the
 > newest release it can satisfy, which can be years old: in testing, an unsolvable 2.8.0 resolved
 > to `crisprme 2.0.0` on Python 3.6. With an explicit version the install fails loudly instead. If
-> conda reports that nothing provides `crisprme=2.10.0`, the release has not reached Bioconda yet:
+> conda reports that nothing provides `crisprme=2.10.1`, the release has not reached Bioconda yet:
 > use [Docker](#12-install-crisprme-via-docker) or the
 > [source build](#13-install-crisprme-from-source-without-bioconda) until it does.
 
@@ -706,7 +712,7 @@ you opt into CFD-only scoring with `CRISPRME_SKIP_SCORER_ENV=1`.
 > 2.10.0 runs no `pr`, and its other calls give the same bytes with either. Run CRISPRme with
 > the environment activated, as above.
 
-Verify the installation; it prints the installed version, `v2.10.0`:
+Verify the installation; it prints the installed version, `v2.10.1`:
 
 ```bash
 crisprme.py --version
@@ -862,7 +868,7 @@ included. `:latest` is the auto-updating default image; it runs on **CPU** out o
 box (fully supported — this is the default scoring path), and a **GPU can optionally
 accelerate the CRISPR-Bulge scorer** on an NVIDIA host (add `--gpus all` + `--compute-backend
 cuda`). For a fully reproducible setup pin the exact release instead, e.g.
-`docker pull pinellolab/crisprme:v2.10.0`.
+`docker pull pinellolab/crisprme:v2.10.1`.
 
 Once the download is complete, the CRISPRme Docker image will be ready for use. 
 To confirm the image is successfully installed, you can list all available Docker 
@@ -920,7 +926,7 @@ Use this to run the CRISPRme+ line (Python 3.11 + Dash 2.x) from a checkout, for
 
 ```bash
 # 1. clone the release (omit --branch for the development line on main)
-git clone --branch v2.10.0 https://github.com/pinellolab/crisprme-plus.git
+git clone --branch v2.10.1 https://github.com/pinellolab/crisprme-plus.git
 cd crisprme-plus
 
 # 2. create + activate the runtime environment (pinned deps from environment.yml)
@@ -1030,7 +1036,7 @@ The directory organization required by CRISPRme is illustrated below:
 > To run it in **Docker**, prefix it with
 > `docker run --rm -v "${PWD}:/DATA" -w /DATA -i pinellolab/crisprme:latest`
 > (add `-p 8080:8080` for `web-interface`; on an NVIDIA host add `--gpus all` to run the
-> CRISPR-Bulge scorer on the GPU). Pin `:v2.10.0` instead of `:latest` for reproducibility.
+> CRISPR-Bulge scorer on the GPU). Pin `:v2.10.1` instead of `:latest` for reproducibility.
 > From a **source / Conda** install, run it as-is inside the activated `crisprme`
 > environment.
 
@@ -2466,7 +2472,8 @@ is under `data/`). Reading top to bottom:
   it has an indel in the target, which it says.
   An indel (or MNV) row is resolved per carrier in
   either mode and reads `N carrier(s)`: CONFIRMED where each carrier is placed on its
-  phased haplotype, PUTATIVE where the phase is unknown (an unphased call, an MNV). On an
+  phased haplotype, PUTATIVE where the phase is unknown (an unphased call; an MNV where the
+  store has no MNV file, as 2.10.0's has none). On an
   install without SNP genotypes (`download --what index --no-genotypes`), a row an indel
   and a SNP make together lists every carrier of the indel, with or without the SNP; its
   phase is in `indel_snp_cooc.tsv`.) On a sites-only panel (e.g.
@@ -2618,7 +2625,7 @@ To build a **different PAM** (NGG, NNGRRT, TTTN, …) on the shipped re-phased *
 
 **`complete-search --index-path <dir>`** — reuse a prebuilt/staged index library instead of building one under the working directory. A missing matching reference index is a hard error (rather than a silent rebuild), which is what you want on a read-only shared mount; a search with no bulges needs none, as it scans the genome. A variant index is read from that library first, with its `_INDELS` index beside it, then from the working directory's `genome_library/`; a search builds no index in that library. The dataset's `Dictionaries/`, `samplesIDs/` and `Genomes/` stay in the working directory (links are fine).
 
-**`download`** — fetch reference data from a HuggingFace dataset repository over HF's CDN (typically much faster than the FTP/UCSC sources). `--what` selects the component: `genome`, `annotations`, `pams`, `samples`, `index` (with `--index-name`), `assembly` (with `--sample <HPRC id>`), `vcf` (with `--dataset` — the raw source VCFs of a variant panel, kept bgzipped under `VCFs/<dataset>/`; the default repo, `lucapinello/crisprme-data`, hosts `hg38_HGDP1kGP`, `hg38_HPRC` and `hg38_mega`, the inputs of 2.8.1's archives, which you need only to build an index yourself. HGDP + 1000 Genomes' and the mega's are 2.10.0's inputs as they are, but its `hg38_HPRC` is HPRC's graph v2.0: the normalised v2.1 VCFs that 2.10.0's HPRC index was built from are `build-inputs/hg38_HPRC/` of `lucapinello/crisprme_plus_indices`, which no `download` fetches (`hf download lucapinello/crisprme_plus_indices --repo-type dataset --include "build-inputs/hg38_HPRC/*" --local-dir .`; to build from them, put the VCFs and their `.tbi` under `VCFs/hg38_HPRC/`)), `build-inputs` (with `--dataset`: the pre-enriched genome kit that lets `build-index-only` skip enrichment for a new PAM; 2.10.0's, from `lucapinello/crisprme_plus_indices`, for `hg38_HGDP1kGP`, `hg38_HPRC` and `hg38_mega`), `genotype-oracle` (the phased genotypes and indel genotypes of a panel, by default HGDP + 1000 Genomes (`--panel HGDP1kGP`), into `Dictionaries/`, without its index: what `complete-search --prioritize-observed` checks a sites-only dataset's rows against; an installed index of the panel already holds them), or `all` (genome + annotations + PAMs + samples; on hg38 `all` also fetches the default `20-NRR_3_hg38` reference index (2.8.1's `NRR_3_hg38` where that cannot be fetched) so a reference scan works with no on-demand build; the PAM files include the default `20bp-NRR-SpCas9.txt`, which CRISPRme ships where the data repo has none). For `--what index`, `--no-genotypes` skips the big separate Tier-1 genotype store; the Tier-0 registry it keeps still corrects allele frequencies and rsIDs, but **per-individual `Samples` and CONFIRMED cis phasing require the genotype tier**: without it a search runs the population-level analysis (each variant site's worst case, with no carriers but those of an indel, which the index itself holds), and `--per-sample` falls back to it with a warning — omit `--no-genotypes` for full dict-less variant-aware output. The genome, annotations, PAM files, sample lists and VCFs come from `lucapinello/crisprme-data`, as does an archive of 2.8.1 fetched by its own name (one of an 8-nt flank from `lucapinello/crisprme-data-general-index`); an index named for its guide length and side (2.10.0's), with its panel's Dictionaries bundle and genotype store, and the `build-inputs` kits come from `lucapinello/crisprme_plus_indices` (`genotype-oracle` looks there first, then in `lucapinello/crisprme-data`). `--hf-repo` or `CRISPRME_HF_REPO` overrides the repo:
+**`download`** — fetch reference data from a HuggingFace dataset repository over HF's CDN (typically much faster than the FTP/UCSC sources). `--what` selects the component: `genome`, `annotations`, `pams`, `samples`, `index` (with `--index-name`), `assembly` (with `--sample <HPRC id>`), `vcf` (with `--dataset` — the raw source VCFs of a variant panel, kept bgzipped under `VCFs/<dataset>/`; the default repo, `lucapinello/crisprme-data`, hosts `hg38_HGDP1kGP`, `hg38_HPRC` and `hg38_mega`, the inputs of 2.8.1's archives, which you need only to build an index yourself. HGDP + 1000 Genomes' and the mega's are 2.10.0's inputs as they are, but its `hg38_HPRC` is HPRC's graph v2.0: the normalised v2.1 VCFs that 2.10.0's HPRC index was built from are `build-inputs/hg38_HPRC/` of `lucapinello/crisprme_plus_indices`, which no `download` fetches (`hf download lucapinello/crisprme_plus_indices --repo-type dataset --include "build-inputs/hg38_HPRC/*" --local-dir .`; to build from them, put the VCFs and their `.tbi` under `VCFs/hg38_HPRC/`)), `build-inputs` (with `--dataset`: the pre-enriched genome kit that lets `build-index-only` skip enrichment for a new PAM; 2.10.0's, from `lucapinello/crisprme_plus_indices`, for `hg38_HGDP1kGP`, `hg38_HPRC` and `hg38_mega`), `genotype-oracle` (the phased genotypes and indel genotypes of a panel, by default HGDP + 1000 Genomes (`--panel HGDP1kGP`), into `Dictionaries/`, without its index: what `complete-search --prioritize-observed` checks a sites-only dataset's rows against; an installed index of the panel already holds them), `indel-genotypes` (2.10.1, with `--dataset`: the MNVs of an installed panel's phased indel genotype store, for an index downloaded with CRISPRme 2.10.0, whose store has none; `crisprme.py download --what indel-genotypes --dataset hg38_HPRC` fetches the panel's `indel_genotypes_<dataset>` companion and installs it whole where it is the store installed with an MNV file added for each chromosome, and refuses any other build, installing nothing; [Troubleshooting](docs/TROUBLESHOOTING.md) §15), or `all` (genome + annotations + PAMs + samples; on hg38 `all` also fetches the default `20-NRR_3_hg38` reference index (2.8.1's `NRR_3_hg38` where that cannot be fetched) so a reference scan works with no on-demand build; the PAM files include the default `20bp-NRR-SpCas9.txt`, which CRISPRme ships where the data repo has none). For `--what index`, `--no-genotypes` skips the big separate Tier-1 genotype store; the Tier-0 registry it keeps still corrects allele frequencies and rsIDs, but **per-individual `Samples` and CONFIRMED cis phasing require the genotype tier**: without it a search runs the population-level analysis (each variant site's worst case, with no carriers but those of an indel, which the index itself holds), and `--per-sample` falls back to it with a warning — omit `--no-genotypes` for full dict-less variant-aware output. The genome, annotations, PAM files, sample lists and VCFs come from `lucapinello/crisprme-data`, as does an archive of 2.8.1 fetched by its own name (one of an 8-nt flank from `lucapinello/crisprme-data-general-index`); an index named for its guide length and side (2.10.0's), with its panel's Dictionaries bundle and genotype store, and the `build-inputs` kits come from `lucapinello/crisprme_plus_indices` (`genotype-oracle` looks there first, then in `lucapinello/crisprme-data`). `--hf-repo` or `CRISPRME_HF_REPO` overrides the repo:
 
 ```bash
 crisprme.py download --what all --path /data/crisprme
@@ -2631,7 +2638,7 @@ crisprme.py download --what assembly --sample HG01255 --path /data/crisprme
 crisprme.py download --what genotype-oracle --path /data/crisprme
 ```
 
-**`publish-index`** — upload a locally built index to a HuggingFace dataset repository so other machines can skip the build (needs an HF write token via `--token` or `HF_TOKEN`). Add `--dictless` for a variant index to drop the ~152 GB per-sample SNP dicts (the registry + genotype tiers replace them; indel logs kept), upload the genotype store as a separate companion, and bundle the samplesID lists so the index is self-complete. With the genotype store, the index's phased indel genotypes are uploaded on their own too (`indel_genotypes_<vcf>.tar.gz`), for `download --what genotype-oracle`. Since 2.10.0 an index of index format 2 goes to `lucapinello/crisprme_plus_indices` by itself (never to a repo 2.8.1 reads), and a variant one leaves its panel's Dictionaries and samplesID lists out of its archive: they go once per panel into the Dictionaries bundle (`dictionaries-bundle_<vcf>.tar.gz`), as the genotype store does into its companion, uploaded only where the repo does not hold them already, the same (another build there is refused; `--replace-companions` replaces it). `download` then fetches them once per panel:
+**`publish-index`** — upload a locally built index to a HuggingFace dataset repository so other machines can skip the build (needs an HF write token via `--token` or `HF_TOKEN`). Add `--dictless` for a variant index to drop the ~152 GB per-sample SNP dicts (the registry + genotype tiers replace them; indel logs kept), upload the genotype store as a separate companion, and bundle the samplesID lists so the index is self-complete. With the genotype store, the index's phased indel genotypes are uploaded on their own too (`indel_genotypes_<vcf>.tar.gz`), for `download --what genotype-oracle`. Since 2.10.0 an index of index format 2 goes to `lucapinello/crisprme_plus_indices` by itself (never to a repo 2.8.1 reads), and a variant one leaves its panel's Dictionaries and samplesID lists out of its archive: they go once per panel into the Dictionaries bundle (`dictionaries-bundle_<vcf>.tar.gz`), as the genotype store does into its companion, uploaded only where the repo does not hold them already, the same (another build there is refused; `--replace-companions` replaces it). `download` then fetches them once per panel. `--stage-only <folder>` (2.10.1) packs everything a publish would upload into `<folder>/indexes/`, with the SHA-256 of each archive in `<folder>/staged.sha256`, and uploads nothing (no token needed): it prints the commands that publish the folder in one Hub commit with `indexes/SHA256SUMS`. One commit narrows the risk that a download meets an index of one build and a bundle of another to the downloads in flight at that moment (such a download fails once, and works when run again: [Troubleshooting](docs/TROUBLESHOOTING.md) §15):
 
 ```bash
 crisprme.py publish-index --index genome_library/20-NRR_3_hg38
@@ -3142,7 +3149,7 @@ Open a terminal and execute the following command to check the software version:
   crisprme.py --version
   ```
 
-If the output displays the correct software version (e.g., `v2.10.0`), CRISPRme 
+If the output displays the correct software version (e.g., `v2.10.1`), CRISPRme 
 is successfully installed and ready for use.
 
 **Step 2: Access CRISPRme Help Menu**

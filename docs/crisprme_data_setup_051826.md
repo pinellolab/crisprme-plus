@@ -33,7 +33,7 @@ conda config --set channel_priority strict
 ### Create and activate the environment
 
 ```bash
-# CRISPRme+ (2.10.0) from source, Python 3.11 (or from Bioconda instead: README §1.1):
+# CRISPRme+ (2.10.1) from source, Python 3.11 (or from Bioconda instead: README §1.1):
 git clone https://github.com/pinellolab/crisprme-plus.git && cd crisprme-plus
 # env 'crisprme' (Python 3.11)
 mamba env create -f environment.yml

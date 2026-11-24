@@ -714,11 +714,54 @@ class Hap(object):
         return [z for z in self.clash if z[0] <= b and z[1] - 1 >= a]
 
 
+def base_by_base(members, refseq):
+    """[(place, base, the allele whose base it is)] of one overlap run of a slot's
+    alleles that does have one sequence, read base by base (2.10.1, METHODS section 4):
+    a record whose REF and ALT have one length (an MNV) and the SNVs on bases of its REF.
+    Its ALT bases stand where it replaces them, and on a base it keeps -- its ALT base is
+    the reference base there, or the base lies in the bases REF and ALT share at either
+    end -- the SNV's base wins. HPRC's pre-vcfwave original records name the SNV's base
+    on every such base they decide (16 of 20 slots, 2 of them confirmed against the
+    carriers' assemblies).
+
+    None where the run is anything else -- two records that describe a stretch twice, so
+    the VCF gives it no sequence -- or where an SNV is a true third-base conflict: its
+    base neither the MNV's base there nor the reference base the MNV keeps (one slot of
+    HPRC v2.1, a decomposition artefact, which leaves both records' rows)."""
+    mnvs = [a for a in members if a.kind == "mnv"]
+    snvs = [a for a in members if a.kind == "snv"]
+    if len(mnvs) != 1 or len(mnvs) + len(snvs) != len(members):
+        return None
+    al = mnvs[0]
+    at = {}
+    for s in snvs:
+        if s.lo in at or not al.lo <= s.lo < al.hi:
+            return None  # two alts of one base, or an SNV past the record's REF
+        at[s.lo] = s
+        if al.edit_lo <= s.lo < al.edit_hi:
+            mine = al.body[s.lo - al.edit_lo].upper()
+            if mine != refseq[s.lo].upper() and mine != s.body.upper():
+                return None  # a true third-base conflict
+    out = []
+    for q in range(al.lo, al.hi):
+        s = at.get(q)
+        if al.edit_lo <= q < al.edit_hi:
+            mine = al.body[q - al.edit_lo]
+            keeps = mine.upper() == refseq[q].upper()
+            out.append(((q, 0), s.body if (s is not None and keeps) else mine,
+                        s if (s is not None and keeps) else al))
+        else:  # a base REF and ALT share: the record keeps it, so the SNV's base wins
+            out.append(((q, 0), s.body if s is not None else refseq[q], s))
+    return out
+
+
 def make_hap(refseq, alleles, lo, hi):
     """[lo, hi) of the haplotype that holds ``alleles``. Alleles whose REF spans meet
-    describe one stretch twice: none of them is written and the stretch is in ``clash``.
-    Only the window is written: an allele reaching into it from either side puts in the
-    bases of its edit that stand (or are added after a base) inside it."""
+    describe one stretch twice: none of them is written and the stretch is in ``clash``,
+    unless they are an MNV and the SNVs on bases of its REF, which have one sequence read
+    base by base (base_by_base, 2.10.1). Only the window is written: an allele reaching
+    into it from either side puts in the bases of its edit that stand (or are added after
+    a base) inside it."""
     hi = min(hi, len(refseq))
     use = sorted((a for a in alleles if a.hi > lo and a.lo < hi), key=lambda a: (a.lo, a.hi))
     runs = []
@@ -741,7 +784,17 @@ def make_hap(refseq, alleles, lo, hi):
 
     for members, end in runs:
         if len(members) > 1:
-            clash.append((members[0].lo, end, tuple(members)))
+            merged = base_by_base(members, refseq)
+            if merged is None:
+                clash.append((members[0].lo, end, tuple(members)))
+                continue
+            p = ref_upto(merged[0][0][0])
+            for pl, b, who in merged:
+                if lo <= pl[0] < hi:
+                    seq.append(b)
+                    place.append(pl)
+                    src.append(who)
+            p = max(p, end)
             continue
         a = members[0]
         p = ref_upto(a.edit_lo)

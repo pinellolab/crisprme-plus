@@ -12,16 +12,31 @@ this file held before is kept at its end, for the record.
 §10 and [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §14 and §15 state with its measured size, or a
 gap the release's gates found.
 
-- **The MNVs' phase (HPRC).** No store the search reads holds an MNV, so on HPRC v2.1 a carrier
+- **The MNVs' phase (HPRC).** No store 2.10.0 reads holds an MNV, so on HPRC v2.1 a carrier
   whose haplotype holding an indel row's indel also holds an MNV in the target is listed for a
   sequence it does not have ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15): 1,163 listings at 94
-  sites in the README guide's genome-wide search per sample, 3,334 on SNP rows. 2.10.1 is to store
-  each MNV with its haplotype, HPRC's Dictionaries built again and its index as it is, and to read
-  it as a second variant of the slot, which takes such a carrier off that row. A target held only
-  through an MNV and another indel or MNV stays unreported, as one held through two indels does
-  (below); in 171 of the 1,163 listings the haplotype holds another target within the search's
-  budget there (METHODS §10), and each such target, held through the indel and the MNV, would then
-  go unreported too.
+  sites in the README guide's genome-wide search per sample, 3,334 on SNP rows. 2.10.1 stores each
+  MNV with its phase, in a file beside each chromosome's indel file (`gt_mnv_<chrom>.tsv.gz`), and
+  reads it as a second record of the slot, which takes such a carrier off that row. Three rules,
+  set on 2026-11-20, read an MNV and an indel that overlap on one slot (METHODS §4, each shape on
+  both records' rows). The parts:
+  - the store, its readers (the indel post-analysis, the SNP rows, the carrier gate) and the two
+    helpers that read an MNV as an indel up to 2.10.0;
+  - `build-index-only`, which writes the MNV files (STEP 1c), and the NOTEs a search writes;
+  - the real-data check, which reads the MNVs as the search does;
+  - HPRC's Dictionaries built again with the MNV files, its index as it is, and published in one
+    Hub commit (`publish-index --stage-only`); an install of 2.10.0 gets them with a 0.61 GB
+    `download` step (`download --what indel-genotypes --dataset hg38_HPRC`);
+  - the gates: on HGDP + 1000 Genomes, which hold no MNV, the same tables byte for byte as
+    without the MNV work; on HPRC, every row that differs explained from the VCF.
+
+  A target held only through an MNV and another indel or MNV stays unreported, as one held through
+  two indels does (below). In 171 of the 1,163 listings the haplotype holds another target within
+  the search's budget there (METHODS §10); each such target, held through the indel and the MNV,
+  goes unreported too, and so do the targets of the slots the overlap rules take off a row. How
+  many is to be measured by the gates. An SNV and an MNV that share a base on one phased slot (28
+  pairs on HPRC v2.1, 150 slots) are read base by base, on the indel rows, the SNP rows and in the
+  carrier gate (METHODS §4, rule 2).
 - **The haplotype scan.** In the dense regions of a variant genome that codes every allele (the
   immunoglobulin loci above all), a search above 1 DNA + 1 RNA bulge expands so many IUPAC
   combinations that it runs for hours or out of memory, and 2.10.0 warns of it
@@ -47,16 +62,27 @@ gap the release's gates found.
   left off beside an indel that adds or deletes more than the 500 bases the store is read around a
   target, less the target's length (one carrier on two rows of the release gate's HPRC search), the
   store to be read as far as a haplotype's own indels need.
-- **One rule for a complex record inside an indel's deleted bases.** CRISPRme takes a carrier off
-  an indel row where its slot holds a second record, inside the first's deleted or replaced bases,
-  that puts bases of its own there (METHODS §4), and the real-data check reads that slot without it
-  (31 pairs of records on one slot in HPRC v2.1, 249 slots): 2.10.1 is to decide which reading is
-  right and make the other say the same.
+- **Do not make the collisions the overlap rules read** (METHODS §4, rules 1 to 3). The three
+  shapes those rules read — a complex record inside an indel's deleted bases, an SNV and an MNV on
+  one slot, an indel at a complex record's POS — are artefacts of turning the pangenome graph into
+  VCF records, and 45 of rule 3's 50 pairs come from CRISPRme's own preparation of the panel
+  (`bcftools norm -m -any -f hg38`), which left-aligns each indel against hg38 alone and so slides
+  it across the haplotype's other variants in a repeat. At the next HPRC rebuild, split and trim
+  the records without left-aligning them, and measure what is left. HPRC should also be told that
+  their published `vcfbub` VCF drops a whole site where any one ALT has AC=0, which is why the
+  measurement had to read their raw `vg deconstruct` VCF. Measured on chr21:8,000,000-9,000,000,
+  by taking every record of `hprc-v2.1-mc-grch38.raw.vcf.gz` that `vcfbub`'s rule keeps (LV=0 with
+  REF ≤ 100 kb, or a child of a popped parent) and looking it up by ID in
+  `hprc-v2.1-mc-grch38.vcf.gz`: of 10,431 such records 215 are missing, every one of them carrying
+  an ALT with AC=0, where not one of the 10,216 present does; 207 of the 215 are multi-allelic and
+  206 of those still carry an allele somebody has, and no record present there has lost an ALT, so
+  the site goes whole rather than the empty allele alone.
 - **The real-data check** (`scripts/check_indel_rows.py`): to check `Variant_info_spacer+PAM` (each
   variant's number in its target) and redundant alternative alignments, which it does not today
   ([`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md), step 4c); to hold less memory (one process holds
   the whole alternative-alignment table: 106.5 to 116.1 GiB on the release gate's largest searches
-  genome-wide, 124.6 GiB with a SNP-row report); to check a search beside the mega on chrY, which
+  genome-wide, 124.6 GiB with a SNP-row report; 2.10.1's `gc.freeze()` before its worker pools
+  cuts what the workers copy, not that peak); to check a search beside the mega on chrY, which
   only the mega's VCFs hold (it refuses the whole genome there today, so the gate checked each
   other chromosome); to check SNP rows for completeness, so that it sees a SNP row the rule takes
   off whole; to name every record a missed target needs in its completeness line, a record past a
@@ -83,7 +109,10 @@ gap the release's gates found.
   holds only through two indels is not reported for its carriers, and a carrier whose second indel
   pushes a SNP the row names out of its own target is listed on that row
   ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) §15; METHODS §10 gives the release gate's counts).
-  The haplotype scan does not lift it: it writes, as the search does, one indel per window.
+  The haplotype scan does not lift it: it writes, as the search does, one indel per window. A
+  target held only through an MNV and another indel or MNV is not reported either: 2.10.1's MNV
+  store takes such a carrier off the row of a sequence it does not have, and does not generate its
+  own target.
 - An unphased call of two ALTs at one position (`1/2`) is listed on a row that needs the
   reference base there, and on a classic install a carrier with an unphased call in a VCF that is
   otherwise phased only on the row of all its variants ([`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)

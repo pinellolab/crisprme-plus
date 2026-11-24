@@ -1156,43 +1156,63 @@ class _SnpRowIndels(object):
     """The indels of a phased indel genotype store (build_indel_genotypes: one line per
     indel alt, '<POS>_<REF>_<ALT>' then 'sample:gt,...') whose REF meets a SNP target
     span widened by ``margin``: only those a SNP row's carrier can hold inside, or
-    around, its target. Their carriers are parsed when first asked for."""
+    around, its target. Their carriers are parsed when first asked for.
 
-    def __init__(self, store_path, spans, margin):
+    ``store_path`` is the store's indel file; its MNV file (``mnv_path``; None: the one
+    beside it, build_indel_genotypes.mnv_store_path) is read too where it is there (from
+    2.10.1), its MNVs read as its indels are: an MNV inside a SNP row's target takes off the
+    row a carrier whose haplotype holds it, its bases found nowhere on that haplotype
+    (indel_snp_cis.snp_target_held). A store of 2.10.0 has no MNV file: no SNP row loses a
+    carrier for an MNV, as in 2.10.0. An MNV file that cannot be read to its end (corrupt,
+    cut short: build_indel_genotypes.read_mnv_lines) is read so too, the indel file as it is:
+    ``mnv_error`` says why (None where it was read, or is not there), for the NOTE
+    _read_snp_row_indels writes. An indel file that cannot be read raises, as before."""
+
+    def __init__(self, store_path, spans, margin, mnv_path=None):
         self.intervals = _merge_spans(spans, margin)
-        starts = [a for a, _b in self.intervals]
+        self._ivstarts = [a for a, _b in self.intervals]
         self.indels = []
         self._tokens = {}
         self._gts = {}
+        if mnv_path is None:
+            mnv_path = _big.mnv_store_path(store_path)
+        self.mnv_path = mnv_path or None
+        self.mnv_error = None
         if self.intervals:
             with (gzip.open(store_path, "rt") if store_path.endswith(".gz")
                   else open(store_path)) as fh:
-                for line in fh:
-                    key, _tab, toks = line.partition("\t")
-                    pos, _u, rest = key.partition("_")
-                    ref, _u, alt = rest.partition("_")
-                    try:
-                        p0 = int(pos) - 1
-                    except ValueError:
-                        continue
-                    k = bisect.bisect_right(starts, p0 + len(ref) - 1) - 1
-                    if k < 0 or self.intervals[k][1] < p0:
-                        continue  # meets no target's surroundings
-                    # REF and ALT in upper case (build_indel_genotypes.store_key)
-                    rec = (p0 + 1, ref.upper(), alt.upper())
-                    toks = toks.rstrip("\n")
-                    if rec in self._tokens:
-                        # an indel the VCF writes on two lines, in one case or in two:
-                        # one allele, its carriers merged
-                        # (build_indel_genotypes.merge_store_carriers)
-                        self._tokens[rec] = _big.merge_store_carriers(self._tokens[rec], toks)
-                        continue
-                    self.indels.append(rec)
-                    self._tokens[rec] = toks
+                self._take(fh)
+            if mnv_path and os.path.isfile(mnv_path):
+                lines, self.mnv_error = _big.read_mnv_lines(mnv_path)
+                self._take(lines or ())
         self.indels.sort()
         self._starts = [p for p, _r, _a in self.indels]
-        self._ivstarts = starts
         self._maxref = max((len(r) for _p, r, _a in self.indels), default=1)
+
+    def _take(self, lines):
+        starts = self._ivstarts
+        for line in lines:
+            key, _tab, toks = line.partition("\t")
+            pos, _u, rest = key.partition("_")
+            ref, _u, alt = rest.partition("_")
+            try:
+                p0 = int(pos) - 1
+            except ValueError:
+                continue
+            k = bisect.bisect_right(starts, p0 + len(ref) - 1) - 1
+            if k < 0 or self.intervals[k][1] < p0:
+                continue  # meets no target's surroundings
+            # REF and ALT in upper case (build_indel_genotypes.store_key)
+            rec = (p0 + 1, ref.upper(), alt.upper())
+            toks = toks.rstrip("\n")
+            if rec in self._tokens:
+                # an indel the VCF writes on two lines, in one case or in two:
+                # one allele, its carriers merged
+                # (build_indel_genotypes.merge_store_carriers)
+                self._tokens[rec] = _big.merge_store_carriers(self._tokens[rec], toks)
+                continue
+            self.indels.append(rec)
+            self._tokens[rec] = toks
 
     def __len__(self):
         return len(self.indels)
@@ -1339,7 +1359,10 @@ def _snp_slot_verdict(sample, slot, vset, lo, hi, touching, readings=None):
     carrier stays, PUTATIVE. An indel at the position of a SNP the row names is another
     allele of that base (a haplotype holding both is one VCF record), so a slot phased
     with both is a phasing artefact: it takes no carrier off the row, as for an indel
-    row's own position (2.8.1).
+    row's own position (2.8.1). An MNV there is not: it replaces that base and as many
+    after it, so a slot holding both is read base by base, the row's SNP against the
+    MNV's own base (2.10.1; indel_snp_cis.allele_breaks_record, which keeps a true
+    third-base conflict an artefact).
 
     ``readings`` (a dict of the target's, or None) keeps each reading of the bases: it
     depends on the haplotype only through the indels each way reads, those it reaches
@@ -1349,7 +1372,7 @@ def _snp_slot_verdict(sample, slot, vset, lo, hi, touching, readings=None):
     row = {lo + pc: alt for pc, alt in vset}
     mine, unknown = [], False
     for rec in touching:
-        if rec[0] - 1 in row:
+        if rec[0] - 1 in row and len(rec[1]) != len(rec[2]):
             continue  # another allele of a row SNP's base: a phasing artefact
         on = _snp_indel_on_slot(sample, slot, rec)
         if on is None:
@@ -1362,8 +1385,8 @@ def _snp_slot_verdict(sample, slot, vset, lo, hi, touching, readings=None):
     held = [list(mine), list(mine)]  # the indels each way reads
     unread = [[], []]                # those it reaches whose slot is unknown
     for rec in _snp_indels.near(first, last):
-        p, r, _a = rec
-        if rec in mine or p - 1 in row:
+        p, r, a = rec
+        if rec in mine or (p - 1 in row and len(r) != len(a)):
             continue
         reach = (p - 2 + len(r) >= lo, p - 1 <= hi)  # from the first base on, up to the last
         if not any(reach):
@@ -2516,8 +2539,8 @@ def _collect_needed_dict_keys(cluster_path, chrom, spans=None):
 def _resolve_indel_genotype_path(dict_path, chrom):
     """The phased indel genotype store of ``chrom`` (build_indel_genotypes) from the SNP
     dict path: ``<...>/Dictionaries/indel_genotypes_<vcf>/gt_indel_<chrom>.tsv.gz``, the
-    one analisi_indels_NNN.py reads, or None when absent. MIRRORS
-    ``_resolve_genotype_paths``."""
+    one analisi_indels_NNN.py reads, or None when absent (its MNV file, beside it, is read
+    with it: _SnpRowIndels). MIRRORS ``_resolve_genotype_paths``."""
     dict_dir = os.path.dirname(dict_path)
     name = os.path.basename(dict_dir)
     suffix = name[len("dictionaries_"):] if name.startswith("dictionaries_") else name
@@ -2876,6 +2899,16 @@ def _read_snp_row_indels(spans, needed_keys):
             return None
         t0 = time.time()
         store = _SnpRowIndels(path, spans, _SNP_INDEL_MARGIN)
+        if store.mnv_error is not None:
+            # (2.10.1) its MNV file cannot be read to its end: the chromosome is read as with
+            # a store of 2.10.0, which has none, the indel file as it is (stdout, never
+            # stderr: the run's own record of it)
+            _name = os.path.basename(os.path.dirname(path))
+            print(_big.mnv_unreadable_note(
+                _name[len("indel_genotypes_"):] if _name.startswith("indel_genotypes_")
+                else _name, current_chr, store.mnv_path, store.mnv_error,
+                "no per-sample SNP row loses a carrier for an MNV inside its target"),
+                flush=True)
         needed_keys |= _snp_indel_frame_keys(store, spans, current_chr)
         print(f"Read {len(store)} indel(s) of the phased indel genotype store near "
               f"{current_chr}'s SNP targets in {time.time() - t0:.1f}s")

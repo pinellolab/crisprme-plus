@@ -1,8 +1,10 @@
 # SNP+indel oracle (synthetic, real CLI)
 
 `run_oracle.sh <empty work dir> [<oracle dir>] [cas12a]` runs inside a CRISPRme image. It
-generates a 22 kb reference chromosome and a phased VCF of 89 samples (`oracle.py
-generate`), builds the indexes and dictionaries with `build-index-only`, runs
+generates a 23.3 kb reference chromosome and a phased VCF of 98 samples (`oracle.py
+generate`), builds the indexes and dictionaries with `build-index-only` (since 2.10.1 its
+phased indel genotype store holds the MNVs too, in a file of their own: sites MF, MQ, MC and
+MS), runs
 `complete-search` with `--per-sample` and with `--population-level`, then checks every row
 whose variant list holds an indel or an MNV (`oracle.py check`) against each sample's two
 haplotypes built from the VCF, and the carriers of every per-sample SNP-only row ("SNP rows"
@@ -94,6 +96,9 @@ an insertion's or a deletion's). The planted sites then pin who has which target
 | QY | (-) its mirror, C>T and the bases added, the PAM (forward CCA) and the protospacer's first forward base added | S87 CFD 1; PAM_creation TGG (the window, CCG from the replaced C, is CGG on -) |
 | QZ | (-) a complex record, G>CCA: the row starts on the replaced G, its PAM CCA (TGG on -) that base and the two added ones, the protospacer reference bases, and the reference holds CTG (CAG on -) beside it | S88 CFD 1, the site's row in both modes; PAM_creation NA (the window from the replaced G, GGC, is GCC on -) |
 | QV | (-) a complex record, TG>C: the T replaced by C and the G lost, the junction inside the PAM CCA (TGG on -) | S89 CFD 1; PAM_creation TGG (the reference holds TGA, TCA on -, beside the protospacer; the window from the row's start, CTG, is CAG on -, with the lost G) |
+| MF | (+) a deletion restores a perfect target whose first bases (ACT) sit in a tandem repeat (ACTACT before them); on S90's slot of the deletion an MNV, AC>GT, on the target's first two bases; S92's MNV on its other slot | S91, S92 CFD 1; S90 off the perfect row (its haplotype's target needs both records, which no window holds: unreported) |
+| MQ | (+) an MNV (AA>TG) and a SNP the guide needs (its 13th base) make a perfect target: in cis on S95, in trans on S96 | S95 CFD 1, CONFIRMED co-occurrence; S96 off the perfect row, on a one-mismatch row (CFD 0.211) |
+| MC | (+) a deletion restores a perfect target; on S93's slot an MNV at the deletion's own POS (TC>GA), another allele of that position | S93 (a phasing artefact, read without the MNV) and S94 CFD 1 |
 
 The `cas12a` profile (a 3.8 kb reference, 11 samples, 5' PAM TTTV, a 20-nt spacer; CFD is not
 computed for a 5' PAM, so a perfect row is one with no mismatch and no bulge):
@@ -161,11 +166,34 @@ last record in the enriched genome and the dictionary, the other alt invisible t
 stage. `PostProcess/test_indel_haplotype_resolution.py` covers a position whose genotype
 source knows both alts (a slot holding two of them resolved PUTATIVE), and the real-data
 check's tests (`PostProcess/test_check_indel_rows.py`) such sites through the check.
-(Several alts on one VCF line reach every stage: sites N and N2.) Nor an MNV carrier
-heterozygous for a SNP its target covers: the phased indel genotype store holds only
-records whose REF and ALT differ in length, so an MNV's phase is unknown to the
-post-analysis, and such a carrier gets the strongest target its own alleles allow,
-PUTATIVE, as an unphased carrier does (site U).
+(Several alts on one VCF line reach every stage: sites N and N2.)
+
+## MNVs by their phase (2.10.1, sites MF, MQ, MC, MS)
+
+Up to 2.10.0 the phased indel genotype store held only records whose REF and ALT differ in
+length: an MNV's phase was unknown to the post-analysis, an MNV row's carriers were the indel
+log's (PUTATIVE, each with the strongest target its own alleles allow), and an MNV on a
+carrier's haplotype was not read on another record's rows nor on a SNP row. Since 2.10.1
+build-index-only writes each chromosome's MNVs into the store's MNV file
+(`gt_mnv_<chrom>.tsv.gz`), and the post-analysis reads an MNV row's carriers by phase and an
+MNV on a slot as a second record (the overlap rules of the plan of 2.10.1's MNVs: an MNV and
+an indel at one POS are other alleles of it, site MC). Site MF is the plan's MNV on a target's
+first bases in a repeat; the 2.10.0 placement's shifted reading, which found a target's bases
+past such an MNV, needs a repeat over the whole target, which this guide does not match within
+4 mismatches: `PostProcess/test_indel_snp_cis.py`'s toy calls pin it. MF's MNV row also has a
+target that starts at the MNV's second base (an RNA-bulge alignment): the check takes an MNV
+as held by an occurrence that holds any base of it (up to 2.10.1, its POS base alone).
+
+On 516d42a0 (2.10.1's MNV readers, with build-index-only writing no MNV file, so the store
+holds no MNV, as 2.10.0's) the SpCas9 profile fails 40 times, all at those sites: carriers
+listed for a sequence their haplotypes do not have (S90 on MF's deletion and MNV rows, S95
+and S96 on MQ's, S97 on MS's SNP row and S98 on its MNV row), and the sites' own expectations
+(MF: S90 on the perfect row; MQ: S96 there, no CONFIRMED co-occurrence of S95; MS: S97 on
+the SNP row). The real-data check finds them as its non-gating limit-indel-row-mnv and
+limit-putative-carrier there. With the MNV file, the check takes the run's reading from its
+NOTE (its stderr says "MNVs from the store's MNV file"), and a carrier listed through an MNV
+there gates (indel-row-mnv-carrier, snp-row-mnv-carrier): the profile's four checks find no
+gating line. The `cas12a` profile holds no MNV: unchanged.
 
 ## SNP rows (2.10.0, `snp_rows.py`)
 
@@ -186,8 +214,8 @@ lines of several ALTs share a position, their allele numbers are not told apart,
 one can be tied to an index of the other's and its carriers read on the wrong slot (METHODS
 section 4; the input validator warns of such positions, and the real-data check refuses a run
 whose dictionary holds one so). No row names two alts of one position. Sites
-Y1-Y4 sit at 17000-17900 and use samples S70-S78 (the reference is 22 kb, the panel 89
-samples):
+Y1-Y4 sit at 17000-17900 and use samples S70-S78 (the reference is 23.3 kb, the panel 98
+samples); site MS (2.10.1) at 22900, with S97 and S98:
 
 | Site | Planted | Expected (per sample) |
 |---|---|---|
@@ -195,6 +223,7 @@ samples):
 | Y2 | Y1's geometry, the SNP phased and the insertion unphased (S75) | S75 on the CFD-1 SNP row, PUTATIVE |
 | Y3 | Y1's SNP, the PAM TGG followed by a G, and on S76's SNP slot a 1-bp deletion in that G run | S76 on the CFD-1 SNP row (the run puts the G back) |
 | Y4 | a minus-strand SNP target whose SNP is in cis with a 2-bp insertion inside it on every haplotype (S77, S78) | no SNP row lists them |
+| MS | Y1's SNP and an MNV inside the target (AA>TT, its 13th and 14th bases): in cis on S97, in trans on S98 | S98 on the CFD-1 SNP row; S97 on no SNP row |
 
 Without this fix (fix/282-indel-alignment at e4dbb9c) the check fails 62 times: the SNP-only
 alignments of sites D, F, M, N, Q, R, J, Z3, Y1, Y3 and Y4 list the indel's cis carriers (57

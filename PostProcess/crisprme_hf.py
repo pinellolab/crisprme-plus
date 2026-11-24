@@ -38,6 +38,7 @@ import io
 import json
 import gzip
 import re
+import shlex
 import shutil
 import subprocess
 import tarfile
@@ -127,15 +128,11 @@ def _masked_sha256(path: str) -> str:
     return h.hexdigest()
 
 
-def companion_fingerprint(members: List[str]) -> Dict:
-    """What a panel companion holds, the same wherever it is computed: ``members`` are
-    (archive path, local path) pairs, a folder (Dictionaries/<dir>) or a file
-    (samplesIDs/<file>). Returns {"fingerprint": the SHA-256 of one line per file,
-    "<archive path>\\t<bytes>\\t<_masked_sha256>", in path order; "files"; "bytes";
-    "members": the archive paths}. A dot file (a marker this module writes) and an
-    AppleDouble file (._name) are left out, as the archive leaves them out."""
-    import hashlib
-    lines, total, files = [], 0, 0
+def _fingerprint_lines(members: List[str]) -> List[str]:
+    """The lines companion_fingerprint hashes, one per file of ``members``: "<archive
+    path>\\t<bytes>\\t<_masked_sha256>", in path order (dot files and AppleDouble files
+    left out)."""
+    lines = []
     for arc, local in sorted(members):
         if os.path.isdir(local):
             for root, dirs, names in os.walk(local):
@@ -145,18 +142,28 @@ def companion_fingerprint(members: List[str]) -> Dict:
                         continue
                     p = os.path.join(root, fn)
                     rel = os.path.join(arc, os.path.relpath(p, local)).replace(os.sep, "/")
-                    size = os.path.getsize(p)
-                    lines.append(f"{rel}\t{size}\t{_masked_sha256(p)}")
-                    total += size
-                    files += 1
+                    lines.append(f"{rel}\t{os.path.getsize(p)}\t{_masked_sha256(p)}")
         elif os.path.isfile(local):
-            size = os.path.getsize(local)
-            lines.append(f"{arc}\t{size}\t{_masked_sha256(local)}")
-            total += size
-            files += 1
+            lines.append(f"{arc}\t{os.path.getsize(local)}\t{_masked_sha256(local)}")
     lines.sort()
-    digest = hashlib.sha256("\n".join(lines).encode()).hexdigest()
-    return {"fingerprint": digest, "files": files, "bytes": total,
+    return lines
+
+
+def _fingerprint_of(lines: List[str]) -> str:
+    import hashlib
+    return hashlib.sha256("\n".join(sorted(lines)).encode()).hexdigest()
+
+
+def companion_fingerprint(members: List[str]) -> Dict:
+    """What a panel companion holds, the same wherever it is computed: ``members`` are
+    (archive path, local path) pairs, a folder (Dictionaries/<dir>) or a file
+    (samplesIDs/<file>). Returns {"fingerprint": the SHA-256 of one line per file,
+    "<archive path>\\t<bytes>\\t<_masked_sha256>", in path order; "files"; "bytes";
+    "members": the archive paths}. A dot file (a marker this module writes) and an
+    AppleDouble file (._name) are left out, as the archive leaves them out."""
+    lines = _fingerprint_lines(members)
+    return {"fingerprint": _fingerprint_of(lines), "files": len(lines),
+            "bytes": sum(int(line.split("\t")[1]) for line in lines),
             "members": sorted(arc for arc, _ in members)}
 
 # Components understood by the download command and their remote sub-paths.
@@ -1478,6 +1485,178 @@ def download_genotype_oracle(
                 f"({store}_{panel}.tar.gz): the carrier gate reads its SNP genotypes "
                 f"alone, so an indel inside a target takes no carrier off.\n")
     return out
+
+
+def _is_mnv_store_file(name: str) -> bool:
+    """Whether ``name`` is a file of a phased indel genotype store's MNV half (2.10.1:
+    gt_mnv_<chrom>.tsv.gz and its .done marker, build_indel_genotypes.store_files)."""
+    return name.startswith("gt_mnv_") and name.endswith((".tsv.gz", ".tsv.gz.done"))
+
+
+def _store_digests(folder: str) -> Dict[str, str]:
+    """{file name: "<bytes>\\t<_masked_sha256>"} of each file of a store folder, dot files
+    aside (companion_fingerprint's lines)."""
+    out = {}
+    for line in _fingerprint_lines([("x", folder)]):
+        path, size, digest = line.split("\t")
+        out[path[len("x/"):]] = f"{size}\t{digest}"
+    return out
+
+
+def download_indel_genotypes(workdir: str, vcf: str, repo: Optional[str] = None,
+                             token: Optional[str] = None) -> str:
+    """download --what indel-genotypes --dataset <vcf> (2.10.1): bring an install's phased
+    indel genotype store (Dictionaries/indel_genotypes_<vcf>/) its MNVs, the MNV file of
+    each chromosome (gt_mnv_<chrom>.tsv.gz, build_indel_genotypes.store_files), which a
+    store of CRISPRme 2.10.0 has none of: a search then reads each MNV's carriers by their
+    phase (the plan of 2.10.1's MNVs, question 1, option A). It fetches the panel's
+    companion indel_genotypes_<vcf> (indexes/<name>.tar.gz, 0.61 GB for HPRC once
+    republished) and installs it whole, in place of the store, where it is the documented
+    upgrade: the store installed here, file for file (each indel file and its marker the
+    same bytes), with an MNV file added for each of its chromosomes. No manifest of an
+    installed index names a fingerprint of this companion (an index's manifest names its
+    panel's Dictionaries bundle, which holds the store, and its genotype store: an install
+    keeps their markers), so the store installed is what the index was installed with, and
+    any other build of the companion is refused (DownloadIntegrityError, nothing of it
+    installed), as a download refuses a companion the index's manifest does not name: one
+    whose files are not what its record says, one whose indel files differ from those
+    installed, one that leaves a chromosome without its MNV file. A repo whose companion
+    holds no MNV file yet (2.10.0's) is said, and nothing installed. A store whose every
+    chromosome has a whole MNV file costs no call to the Hub. Returns the store's folder.
+
+    The repo: ``repo`` where named (--hf-repo, CRISPRME_HF_REPO), else the one the panel's
+    Dictionaries bundle came from (its marker), else this release's (FORMAT2_HF_REPO)."""
+    import build_indel_genotypes as big
+    name = f"indel_genotypes_{vcf}"
+    dicts = os.path.join(workdir, "Dictionaries")
+    store = os.path.join(dicts, name)
+    chroms = sorted(f[len("gt_indel_"):-len(".tsv.gz")] for f in _listdir_or_none(store)
+                    if f.startswith("gt_indel_") and f.endswith(".tsv.gz"))
+    if not chroms:
+        raise ValueError(
+            f"No phased indel genotype store of {vcf} is installed in {dicts} ({name}/, its "
+            f"gt_indel_<chromosome>.tsv.gz files): this step adds the MNVs to an installed "
+            f"one. Install the panel's index (crisprme.py download --what index "
+            f"--index-name <its index>), which brings its store with the MNVs the repo's "
+            f"holds, or build it with build-index-only and the dataset's VCFs.")
+    if os.path.isdir(os.path.join(store, ".building")):
+        raise ValueError(
+            f"{store} is unfinished: a build-index-only run is writing it, or stopped before "
+            f"it was done. Let that run finish, or run build-index-only again to its end, "
+            f"which writes its MNV files too. Nothing was fetched.")
+
+    def whole(folder, chrom):
+        path = big.store_files(folder, chrom)[1]
+        return big.store_is_current(path) and big.read_mnv_lines(path)[0] is not None
+
+    if all(whole(store, c) for c in chroms):
+        sys.stdout.write(f"{name}/ holds the MNVs of each of its {len(chroms)} chromosome(s) "
+                         f"already (gt_mnv_<chromosome>.tsv.gz beside each indel file, "
+                         f"whole): nothing fetched ({store})\n")
+        return store
+    bundle = installed_companion(workdir, f"{BUNDLE_PREFIX}{vcf}")
+    if repo_overridden(repo):
+        repo = resolve_repo(repo)
+    elif bundle and bundle.get("repo"):
+        repo = bundle["repo"]
+    else:
+        repo = FORMAT2_HF_REPO
+    prefix = _COMPONENT_PREFIXES["index"]
+    remote = f"{prefix}/{name}.tar.gz"
+    staging = os.path.join(workdir, f".hf_stage_{name}")
+    extract_tmp = os.path.join(dicts, f".extract_{name}")
+    shutil.rmtree(staging, ignore_errors=True)
+    shutil.rmtree(extract_tmp, ignore_errors=True)
+    nothing = "Nothing of it was installed."
+    try:
+        _hf_snapshot(repo, [remote, f"{prefix}/{name}.json"], staging, token)
+        tgz = os.path.join(staging, prefix, f"{name}.tar.gz")
+        if not os.path.isfile(tgz):
+            raise ValueError(f"{repo} holds no {remote}, the phased indel genotypes of {vcf}: "
+                             f"nothing was installed. Check --dataset, or name the repo "
+                             f"that holds them (--hf-repo).")
+        record = _read_json_file(os.path.join(staging, prefix, f"{name}.json")) or {}
+        os.makedirs(extract_tmp)
+        with tarfile.open(tgz) as tf:
+            safe_tar.extract(tf, extract_tmp)
+        shutil.rmtree(staging, ignore_errors=True)  # (the archive, unpacked)
+        inner = _read_json_file(os.path.join(extract_tmp, "bundle.json")) or {}
+        got = os.path.join(extract_tmp, "Dictionaries", name)
+        extra = sorted(set(_listdir_or_none(extract_tmp)) - {"Dictionaries", "bundle.json"}) + \
+            sorted(f"Dictionaries/{d}" for d in _listdir_or_none(os.path.join(extract_tmp,
+                                                                                "Dictionaries"))
+                   if d != name)
+        if not os.path.isdir(got) or extra:
+            raise DownloadIntegrityError(
+                f"{remote} in {repo} is not the phased indel genotypes of {vcf} alone (it "
+                f"holds {', '.join(extra) or f'no Dictionaries/{name}/'}). {nothing}")
+        new = _store_digests(got)
+        fingerprint = _fingerprint_of([f"Dictionaries/{name}/{n}\t{v}" for n, v in new.items()])
+        said = record.get("fingerprint") or inner.get("fingerprint")
+        if said and said != fingerprint:
+            raise DownloadIntegrityError(
+                f"{remote} in {repo} holds other files than its record says (fingerprint "
+                f"{fingerprint}, the record {said}): a transfer cut short, or an archive and "
+                f"a record of two publishes. {nothing} Run this download again.")
+        have = _store_digests(store)
+        differ = sorted(n for n in set(have) | set(new)
+                        if not _is_mnv_store_file(n) and have.get(n) != new.get(n))
+        if differ:
+            raise DownloadIntegrityError(
+                f"{remote} in {repo} is another build of the phased indel genotypes of {vcf} "
+                f"than the one installed in {dicts}: {len(differ)} of its indel files "
+                f"(beside its MNV files) differ from those installed, or are not in one of "
+                f"the two ({', '.join(differ[:4])}{', ...' if len(differ) > 4 else ''}). The "
+                f"index installed with this store was built with it, and this step installs "
+                f"the repo's store only where it is the one installed with an MNV file added "
+                f"for each chromosome (the upgrade of CRISPRme 2.10.1). {nothing} To take the "
+                f"repo's build of {vcf}, download its index again (remove it, and its _INDELS "
+                f"folder, from genome_library/, then crisprme.py download --what index "
+                f"--index-name <the index>).")
+        if not any(_is_mnv_store_file(n) for n in new):
+            raise ValueError(
+                f"{remote} in {repo} holds no MNV file: it is the store installed here, as "
+                f"CRISPRme 2.10.0 published it, so the repo does not hold the MNVs of {vcf} "
+                f"yet. Nothing was installed.")
+        lacking = [c for c in chroms if not whole(got, c)]
+        if lacking:
+            raise DownloadIntegrityError(
+                f"{remote} in {repo} holds no whole MNV file for {len(lacking)} of the "
+                f"{len(chroms)} chromosome(s) of the store installed "
+                f"({', '.join(lacking[:4])}{', ...' if len(lacking) > 4 else ''}): a store "
+                f"read with the MNVs of some chromosomes only. {nothing}")
+        # installed whole, in place of the store, as a companion's folders are
+        # (_install_companion): moved aside, the new one renamed in, the old one removed
+        backup = os.path.join(dicts, f".{name}.replaced")
+        if os.path.isdir(backup) and not os.path.exists(store):
+            os.rename(backup, store)
+        shutil.rmtree(backup, ignore_errors=True)
+        os.rename(store, backup)
+        os.rename(got, store)
+        shutil.rmtree(backup, ignore_errors=True)
+    finally:
+        shutil.rmtree(extract_tmp, ignore_errors=True)
+        shutil.rmtree(staging, ignore_errors=True)
+    added = sorted(n for n in new if n not in have)
+    _write_marker(workdir, name, {
+        "name": name, "fingerprint": fingerprint, "repo": repo,
+        "members": [f"Dictionaries/{name}"],
+        "indexes": (bundle or {}).get("indexes", []),
+        "replaced": _fingerprint_of([f"Dictionaries/{name}/{n}\t{v}" for n, v in have.items()]),
+        "installed_at": datetime.now(timezone.utc).isoformat()})
+    sys.stdout.write(
+        f"Installed {name} from {repo} into {dicts}: the phased indel genotype store of {vcf} "
+        f"with the MNV file of each of its {len(chroms)} chromosome(s) ({len(added)} file(s) "
+        f"added), its indel files the ones installed, byte for byte. A search now reads each "
+        f"MNV's carriers by their phase.\n")
+    return store
+
+
+def _listdir_or_none(path: str) -> List[str]:
+    try:
+        return sorted(os.listdir(path))
+    except OSError:
+        return []
 
 
 def _derive_perdb_datasets(vcf_name: str, ref: str = "hg38") -> List[str]:
@@ -2865,6 +3044,75 @@ def _window_notes(local_dir, workdir, install_name, vcf_name):
     return notes
 
 
+# The script that writes a repo folder's SHA256SUMS from the Hub's own record of each
+# archive's SHA-256, with the lines of archives about to be uploaded (--staged)
+SHA256SUMS_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "scripts", "hf_sha256sums.py")
+
+
+def _sha256_file(path: str) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for blk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(blk)
+    return h.hexdigest()
+
+
+def stage_commands(stage_dir: str, repo: str, title: str) -> List[str]:
+    """The commands that publish the folder publish-index --stage-only packed
+    (publish_index's stage_dir) in ONE commit of ``repo``, in order: indexes/SHA256SUMS
+    written from the Hub's list with the staged archives' lines in place of theirs
+    (scripts/hf_sha256sums.py --staged), the folder uploaded in one commit (``hf upload`` of
+    a folder makes one commit of every file in it), and the check that the Hub holds what was
+    staged (an empty diff). None is run here; the upload takes a write token from HF_TOKEN in
+    the environment, never from the command line."""
+    q = shlex.quote
+    script = (SHA256SUMS_SCRIPT if os.path.isfile(SHA256SUMS_SCRIPT)
+              else "scripts/hf_sha256sums.py")
+    folder = os.path.join(stage_dir, "indexes")
+    sums = os.path.join(folder, "SHA256SUMS")
+    return [
+        f"python3 {q(script)} {q(repo)} --staged {q(os.path.join(stage_dir, 'staged.sha256'))}"
+        f" > {q(sums)}",
+        f"hf upload {q(repo)} {q(folder)} indexes --repo-type dataset --commit-message "
+        f"{q(title)}",
+        f"python3 {q(script)} {q(repo)} | diff - {q(sums)}",
+    ]
+
+
+def _finish_stage(stage_dir: str, repo: str, staged: List[str]) -> None:
+    """Write ``<stage_dir>/staged.sha256`` (the SHA-256 of each archive staged, sha256sum's
+    format, by name) and print what was staged and the commands that publish it in one
+    commit (stage_commands), which it does not run."""
+    title = ("Publish " + ", ".join(os.path.basename(r)[:-len(".tar.gz")] for r in staged
+                                    if r.endswith(".tar.gz"))
+             + " with indexes/SHA256SUMS, in one commit (publish-index --stage-only)")
+    lines = {}
+    for remote in sorted(r for r in staged if r.endswith(".tar.gz")):
+        sys.stdout.write(f"Hashing {remote} (SHA-256)...\n")
+        sys.stdout.flush()
+        lines[os.path.basename(remote)] = _sha256_file(os.path.join(stage_dir, remote))
+    with open(os.path.join(stage_dir, "staged.sha256"), "w") as fh:
+        fh.writelines(f"{lines[n]}  {n}\n" for n in sorted(lines))
+    said = [f"\nStaged in {stage_dir}; NOTHING was uploaded to {repo}:"]
+    for remote in sorted(staged):
+        size = os.path.getsize(os.path.join(stage_dir, remote))
+        said.append(f"  {remote}  ({size:,} bytes)")
+    said.append(f"  staged.sha256: the SHA-256 of each archive staged, the lines "
+                f"indexes/SHA256SUMS takes from them")
+    said.append(f"\nTo publish them in ONE commit of {repo}, with indexes/SHA256SUMS, run, "
+                f"with a write token of the repo in HF_TOKEN (exported in the environment, "
+                f"never on the command line; in the release image as "
+                f"seq_script/rebuild/README.md's publish says):")
+    cmds = stage_commands(stage_dir, repo, title)
+    said += [f"  {cmds[0]}", f"  {cmds[1]}",
+             "Then check that the Hub holds what was staged (the diff must be empty):",
+             f"  {cmds[2]}"]
+    sys.stdout.write("\n".join(said) + "\n")
+    sys.stdout.flush()
+
+
 def publish_index(
     index_dir: str,
     repo: Optional[str] = None,
@@ -2872,6 +3120,7 @@ def publish_index(
     display_name: Optional[str] = None,
     dictless: bool = False,
     replace_companions: bool = False,
+    stage_dir: Optional[str] = None,
 ) -> str:
     """Tar a locally built genome_library index and upload it to HF.
 
@@ -2914,9 +3163,22 @@ def publish_index(
     one in place), before anything is uploaded. An index of format 1 is published as up to
     2.8.1 (its Dictionaries in its own archive, which 2.8.1's download installs).
 
+    ``stage_dir`` (publish-index --stage-only, 2.10.1): pack everything the publish would
+    upload into ``<stage_dir>/indexes/`` (the archives, the companions' records) and upload
+    NOTHING: no token is asked for, the only calls to the Hub are anonymous reads of the
+    companions' records (indexes/<name>.json, as the publish reads them, to keep a
+    companion the repo holds already, the same, and to refuse one it holds in another build
+    unless ``replace_companions``), and ``<stage_dir>/staged.sha256`` gets the SHA-256 of
+    each archive staged, the lines indexes/SHA256SUMS takes from it. It then prints the
+    commands that publish the folder in ONE commit of the repo, with indexes/SHA256SUMS
+    (stage_commands), and runs none of them. publish-index otherwise uploads each file as
+    it packs it, one commit each, the companions first, so a download that fetches the
+    index's archive before the companions' commit and its bundle after it meets two builds
+    (the plan of 2.10.1's MNVs, section 4: HPRC's republish).
+
     Returns:
         The remote path (``indexes/<index_name>.tar.gz``) the main index was
-        uploaded to.
+        uploaded to (staged at, under ``stage_dir``).
     """
     index_dir = os.path.abspath(index_dir.rstrip("/"))
     if not os.path.isdir(index_dir):
@@ -2958,12 +3220,28 @@ def publish_index(
             f"aborts on: it is not published in {repo}, which they read (decision C2). "
             f"Publish it in {FORMAT2_HF_REPO} (the default for it), or in a repo of your own "
             f"(--hf-repo).")
-    token = resolve_token(token)
-    if not token:
-        raise ValueError(
-            "An HF write token is required to publish an index. Provide --token "
-            "or set HF_TOKEN (never commit it)."
-        )
+    staged: List[str] = []  # (stage_dir) the files staged, as their paths in the repo
+    if stage_dir:
+        stage_dir = os.path.abspath(stage_dir)
+        _staged_at = os.path.join(stage_dir, "indexes")
+        if os.path.isdir(_staged_at) and os.listdir(_staged_at):
+            raise ValueError(
+                f"{_staged_at} holds files already: stage into a new, empty folder, so that "
+                f"the folder uploaded holds what this publish packs and nothing else. Nothing "
+                f"was staged.")
+        if os.path.exists(os.path.join(stage_dir, "staged.sha256")):
+            raise ValueError(
+                f"{os.path.join(stage_dir, 'staged.sha256')} is there already: stage into a "
+                f"new, empty folder. Nothing was staged.")
+        # (reads alone, of public records: anonymous unless a token is given by name)
+        token = token or False
+    else:
+        token = resolve_token(token)
+        if not token:
+            raise ValueError(
+                "An HF write token is required to publish an index. Provide --token "
+                "or set HF_TOKEN (never commit it)."
+            )
     hf = _require_hf()
     # self-describing provenance travels inside the tarball (adopted from the
     # #141 design): PAM / bulge / genome parsed from the folder name
@@ -3123,7 +3401,25 @@ def publish_index(
     manifest["dictless"] = bool(dictless and vcf_name)
     manifest["has_genotypes"] = genotypes_dir is not None
     manifest["has_samplesids"] = bool(samplesid_files)
-    api = hf.HfApi()
+    # (stage_dir: no HfApi at all, so nothing can be uploaded)
+    api = None if stage_dir else hf.HfApi()
+
+    def _packed_at(name):
+        # where an archive or a record is packed: beside the index, uploaded and removed;
+        # staged: in the stage folder, kept
+        return (os.path.join(stage_dir, "indexes", name) if stage_dir
+                else os.path.join(os.path.dirname(index_dir), name))
+
+    def _put(local, remote):
+        if stage_dir:
+            staged.append(remote)
+            return
+        api.upload_file(path_or_fileobj=local, path_in_repo=remote, repo_id=repo,
+                        repo_type="dataset", token=token)
+        os.remove(local)
+
+    if stage_dir:
+        os.makedirs(os.path.join(stage_dir, "indexes"), exist_ok=True)
     indel_gt_dir = (os.path.join(os.path.dirname(genotypes_dir), f"indel_genotypes_{vcf_name}")
                     if genotypes_dir is not None else None)
     if vcf_name and index_format == 2:
@@ -3179,72 +3475,54 @@ def publish_index(
                                  f"(fingerprint {record['fingerprint'][:12]}): not uploaded "
                                  f"again\n")
                 continue
-            ctar = os.path.join(os.path.dirname(index_dir), f"{name}.tar.gz")
-            crec = os.path.join(os.path.dirname(index_dir), f"{name}.json")
+            ctar = _packed_at(f"{name}.tar.gz")
+            crec = _packed_at(f"{name}.json")
             _make_companion_tarball(ctar, members, record)
             with open(crec, "w") as fh:
                 json.dump(record, fh, indent=1, sort_keys=True)
                 fh.write("\n")
             for local, remote_name in ((ctar, f"{name}.tar.gz"), (crec, f"{name}.json")):
-                api.upload_file(path_or_fileobj=local,
-                                path_in_repo=f"indexes/{remote_name}", repo_id=repo,
-                                repo_type="dataset", token=token)
-                os.remove(local)
-            sys.stdout.write(f"Published the {what} {name} to {repo}:indexes/{name}.tar.gz\n")
+                _put(local, f"indexes/{remote_name}")
+            sys.stdout.write(f"{'Staged' if stage_dir else 'Published'} the {what} {name} "
+                             f"{'for' if stage_dir else 'to'} {repo}:indexes/{name}.tar.gz\n")
         dict_dirs, samplesid_files = [], []  # in the bundle, not in the index's archive
-    tarball = f"{index_dir}.tar.gz"
+    tarball = _packed_at(f"{index_name}.tar.gz")
     _make_index_tarball(
         tarball, index_dir, index_name, indels_dir, manifest, dict_dirs,
         samplesid_files=samplesid_files,
     )
     remote_path = f"indexes/{index_name}.tar.gz"
-    api.upload_file(
-        path_or_fileobj=tarball,
-        path_in_repo=remote_path,
-        repo_id=repo,
-        repo_type="dataset",
-        token=token,
-    )
-    os.remove(tarball)
-    sys.stdout.write(f"Published index to {repo}:{remote_path}\n")
+    _put(tarball, remote_path)
+    sys.stdout.write(f"{'Staged' if stage_dir else 'Published'} index "
+                     f"{'for' if stage_dir else 'to'} {repo}:{remote_path}\n")
     if vcf_name and index_format == 2:
+        if stage_dir:
+            _finish_stage(stage_dir, repo, staged)
         return remote_path
     # SEPARATE upload of the big Tier-1 genotype store (only when it exists), to
     # the SAME repo + indexes/ prefix as the main tarball, named after the vcf so
     # download can find it deterministically from the index name.
     if genotypes_dir is not None:
-        gt_tarball = os.path.join(os.path.dirname(index_dir),
-                                  f"genotypes_{vcf_name}.tar.gz")
+        gt_tarball = _packed_at(f"genotypes_{vcf_name}.tar.gz")
         _make_genotypes_tarball(gt_tarball, genotypes_dir)
         gt_remote = f"indexes/genotypes_{vcf_name}.tar.gz"
-        api.upload_file(
-            path_or_fileobj=gt_tarball,
-            path_in_repo=gt_remote,
-            repo_id=repo,
-            repo_type="dataset",
-            token=token,
-        )
-        os.remove(gt_tarball)
+        _put(gt_tarball, gt_remote)
         sys.stdout.write(
-            f"Published Tier-1 genotype store to {repo}:{gt_remote}\n"
+            f"{'Staged' if stage_dir else 'Published'} Tier-1 genotype store "
+            f"{'for' if stage_dir else 'to'} {repo}:{gt_remote}\n"
         )
         # and the phased indel genotypes on their own too (they are in the main archive
         # as well): with the genotypes, the genotype oracle a sites-only search's rows are
         # checked against (download --what genotype-oracle), without the index
         if os.path.isdir(indel_gt_dir) and os.listdir(indel_gt_dir):
-            ig_tarball = os.path.join(os.path.dirname(index_dir),
-                                      f"indel_genotypes_{vcf_name}.tar.gz")
+            ig_tarball = _packed_at(f"indel_genotypes_{vcf_name}.tar.gz")
             _make_genotypes_tarball(ig_tarball, indel_gt_dir)
             ig_remote = f"indexes/indel_genotypes_{vcf_name}.tar.gz"
-            api.upload_file(
-                path_or_fileobj=ig_tarball,
-                path_in_repo=ig_remote,
-                repo_id=repo,
-                repo_type="dataset",
-                token=token,
-            )
-            os.remove(ig_tarball)
+            _put(ig_tarball, ig_remote)
             sys.stdout.write(
-                f"Published the phased indel genotypes to {repo}:{ig_remote}\n"
+                f"{'Staged' if stage_dir else 'Published'} the phased indel genotypes "
+                f"{'for' if stage_dir else 'to'} {repo}:{ig_remote}\n"
             )
+    if stage_dir:
+        _finish_stage(stage_dir, repo, staged)
     return remote_path
