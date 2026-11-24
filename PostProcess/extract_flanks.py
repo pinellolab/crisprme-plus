@@ -1747,7 +1747,10 @@ def annotation_rows(out_lines):
     Measured on that panel: of the 81 ALT-origin rows, the haplotype carrying the row's
     reported score is hap1 on 66 and NOT hap1 on 8, where ``flank_alt`` is a much
     lower-scoring sequence -- 0.195 against 0.0032 (61x) at chr2:174719314, and
-    0.104 against 1.4e-06 (76,161x) at chr19:33766053.
+    0.104 against 1.4e-06 (76,161x) at chr19:33766053. On the remaining 7 no haplotype
+    in the window reproduces the row's score at all (the score belongs to an indel
+    haplotype that cannot be scored on this footing, or the window is short), so those
+    are unknown rather than agreeing: 8 is a lower bound on the disagreement, not 8/81.
 
     So: to order one oligo per site from a score, join on the score rather than taking
     ``flank_alt``; ``flank_alt_all`` (and the FASTA) carry every haplotype that was

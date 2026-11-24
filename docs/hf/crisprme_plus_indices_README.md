@@ -120,13 +120,13 @@ and companion as `publish-index` packs it, measured before the publish, and each
 | `indexes/TTTN-23_3_hg38` | 3.09 | `indexes/TTTN-23_3_hg38+hg38_HGDP1kGP` | 4.83 |
 | `indexes/20-NRR_3_hg38+hg38_HPRC` | 29.55 | `indexes/20-NRR_3_hg38+hg38_mega` | 24.11 |
 | `indexes/dictionaries-bundle_hg38_HGDP1kGP` | 16.42 | `indexes/genotypes_hg38_HGDP1kGP` | 5.87 |
-| `indexes/dictionaries-bundle_hg38_HPRC` | 2.44 | `indexes/genotypes_hg38_HPRC` | 0.56 |
+| `indexes/dictionaries-bundle_hg38_HPRC` | 2.46 | `indexes/genotypes_hg38_HPRC` | 0.56 |
 | `indexes/dictionaries-bundle_hg38_mega` | 1.95 | `indexes/indel_genotypes_hg38_HGDP1kGP` | 7.64 |
-| `indexes/indel_genotypes_hg38_HPRC` | 0.59 | `build-inputs/hg38_HGDP1kGP` | 1.24 |
+| `indexes/indel_genotypes_hg38_HPRC` | 0.61 | `build-inputs/hg38_HGDP1kGP` | 1.24 |
 | `build-inputs/hg38_HPRC` | 1.18 | `build-inputs/hg38_mega` | 1.02 |
 
 A panel's first index is fetched with its Dictionaries bundle and genotype store, once: the default
-`20-NRR_3_hg38+hg38_HGDP1kGP` with them is 50.13 GB, HPRC's 32.55 GB, the mega's 26.06 GB (its
+`20-NRR_3_hg38+hg38_HGDP1kGP` with them is 50.13 GB, HPRC's 32.57 GB, the mega's 26.06 GB (its
 bundle alone). A variant index also brings its PAM's reference index where that is not installed;
 `download --what all` installs the default's, `20-NRR_3_hg38`.
 
@@ -145,6 +145,25 @@ threads, wall time, memory and size, and each kit's SHA-256 and member list — 
 [METHODS §11](https://github.com/pinellolab/crisprme-plus/blob/main/METHODS.md#11-index-rebuild-of-2100).
 The known limits of 2.10.0, which these indexes share, are in
 [METHODS §10](https://github.com/pinellolab/crisprme-plus/blob/main/METHODS.md#10-known-limits-of-2100).
+
+**The HPRC archives were packed again on 2026-11-24, for CRISPRme+ 2.10.1.** That release reads
+the panel's multi-nucleotide variants (an MNV replaces two or more bases with as many; HPRC v2.1
+has 702,193 of them), so its phased indel genotype store carries one `gt_mnv_<chrom>.tsv.gz`
+beside each chromosome's indel file. `20-NRR_3_hg38+hg38_HPRC`, `dictionaries-bundle_hg38_HPRC`
+and `indel_genotypes_hg38_HPRC` were therefore packed again, from the same build tree, and
+published in **one** Hub commit, `1a3593e8`. **No index was built again**: the 650 index files
+inside the first archive are byte for byte those of 2.10.0, and `genotypes_hg38_HPRC` was not
+touched. HGDP + 1000 Genomes and the mega hold no MNV; their archives are unchanged.
+
+**An install of CRISPRme+ 2.10.0 is not affected.** It opens the indel file by name and never
+looks for the new ones. This was measured, not assumed: a clean-room install of the released
+v2.10.0 image, running only its own code, installs from these archives with no error and
+reproduces the table it produced before the re-pack, byte for byte. An install of 2.10.0 that
+*wants* the MNVs takes them without downloading the 29.55 GB index again:
+
+```bash
+crisprme.py download --what indel-genotypes --dataset hg38_HPRC   # 0.61 GB
+```
 
 ## Layout
 

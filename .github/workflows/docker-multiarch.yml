@@ -76,6 +76,13 @@ jobs:
         run: |
           set -euo pipefail
           want="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' crisprme.py)"
+          # If that sed ever stops matching, "$got" == *""* is true for ANY output and the
+          # version arm passes vacuously. A gate that silently stops checking is worse than
+          # no gate, so an unreadable pin is a failure, not a pass.
+          if [ -z "$want" ]; then
+            echo "::error::could not read the version pin from crisprme.py (did the line change?)"
+            exit 1
+          fi
           echo "::notice::tree pins crisprme $want"
           got="$(docker run --rm crisprme:ci-smoke crisprme.py --version | tr -d '\r')"
           echo "image reports: $got"

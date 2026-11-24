@@ -171,15 +171,15 @@ written at the publish (`docs/RELEASE_CHECKLIST.md`, E, step 5); each kit's is i
 | `TTTN-23_3_hg38` | 3.09 | `TTTN-23_3_hg38+hg38_HGDP1kGP` | 4.83 |
 | `20-NRR_3_hg38+hg38_HPRC` | 29.55 | `20-NRR_3_hg38+hg38_mega` | 24.11 |
 | `dictionaries-bundle_hg38_HGDP1kGP` | 16.42 | `genotypes_hg38_HGDP1kGP` | 5.87 |
-| `dictionaries-bundle_hg38_HPRC` | 2.44 | `genotypes_hg38_HPRC` | 0.56 |
+| `dictionaries-bundle_hg38_HPRC` | 2.46 | `genotypes_hg38_HPRC` | 0.56 |
 | `dictionaries-bundle_hg38_mega` | 1.95 | `indel_genotypes_hg38_HGDP1kGP` | 7.64 |
-| `indel_genotypes_hg38_HPRC` | 0.59 | `build-inputs/hg38_HGDP1kGP` (kit) | 1.24 |
+| `indel_genotypes_hg38_HPRC` | 0.61 | `build-inputs/hg38_HGDP1kGP` (kit) | 1.24 |
 | `build-inputs/hg38_HPRC` (kit) | 1.18 | `build-inputs/hg38_mega` (kit) | 1.02 |
 
 The 23 index and companion archives add up to 388.76 GB, the 3 kits to 3.44 GB. What a download
 fetches: a panel's first index brings the panel's Dictionaries bundle and its genotype store with
 it, once (HGDP + 1000 Genomes' default, `20-NRR_3_hg38+hg38_HGDP1kGP`, 50.13 GB with them; HPRC's
-32.55 GB; the mega's, sites-only, 26.06 GB with its bundle alone), and its reference index where
+32.57 GB; the mega's, sites-only, 26.06 GB with its bundle alone), and its reference index where
 that is not installed (`download --what all` fetches `20-NRR_3_hg38`); a later index of the panel
 its own archive (and its PAM's reference index where that is not installed), not the bundle and the
 store again. The `indel_genotypes_` archive is fetched, with the genotype store, by `download --what
