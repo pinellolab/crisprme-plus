@@ -21,9 +21,8 @@ to an install of 2.10.0. On HPRC's two genome-wide gate searches every listing o
 left its row (0 after on both; before, the per-sample run had 1,163 on indel rows and 3,334 on
 SNP rows, the population-level run 558 on indel rows and no SNP-row count, the check not
 applying that class to a population-level run), and no row of HGDP + 1000 Genomes or the mega
-moved over the other seventeen searches. `CHANGELOG.md` [2.10.1]
-has it in full. A target held only through an MNV and a second indel-path record stays unreported
-(below).
+moved over the other seventeen searches. `CHANGELOG.md` [2.10.1] has it in full. A target held
+only through an MNV and a second indel-path record stays unreported (below).
 - **The haplotype scan.** In the dense regions of a variant genome that codes every allele (the
   immunoglobulin loci above all), a search above 1 DNA + 1 RNA bulge expands so many IUPAC
   combinations that it runs for hours or out of memory, and 2.10.0 warns of it
