@@ -253,8 +253,8 @@ in its entry below:
   `indel_genotypes_hg38_HPRC` are packed again. So is `20-NRR_3_hg38+hg38_HPRC` (29.55 GB): its
   index files are the same, but its manifest names the bundle by its fingerprint, and a download
   refuses a bundle the manifest does not name. `genotypes_hg38_HPRC` stays as it is (the same
-  fingerprint). The three archives, the two companions' records and `indexes/SHA256SUMS` go up in
-  one Hub commit (`publish-index --replace-companions --stage-only`, then the commands it prints:
+  fingerprint). The three archives, the two companions' records and `indexes/SHA256SUMS` went up
+  in that one commit (`publish-index --replace-companions --stage-only`, then the commands it prints:
   `scripts/hf_one_commit.py`, one `HfApi.create_commit` request pinned to the head it was staged
   against, not `hf upload`, which can split a folder this size into two or three commits).
   No index name, index format or catalog entry changes. Each archive's size, SHA-256 and that Hub
