@@ -4,12 +4,16 @@
 Adds, beyond the point map + bootstrap ensemble + per-bin phi:
   * per-REPORT-BAND overdispersion phi (incl. the >=0.2 AGGREGATE) so aggregate
     intervals are computed on the combined band directly, not by summing
-    independent sub-bands (cross-band guide-promiscuity correlation is ~+0.66;
-    independent combination wrongly inflates the aggregate's lower bound).
+    independent sub-bands (cross-band guide-promiscuity correlation is +0.91 Pearson
+    / +0.73 Spearman / +0.79 on the LOGO residuals, measured in
+    docs/offtarget_risk_summary_METHODS.md section 7 and stated only there; the "~+0.66" this line used to give is retired, it reproduced
+    under no definition). Independent combination wrongly inflates the aggregate's
+    lower bound.
   * per-band guide-positive counts + #contributing guides (IND resolution).
   * guide-cluster-bootstrap AUPR CIs (the point AUPR is high-variance).
-  * per-held-out-guide (=one novel guide) TOTAL-count coverage per report band
-    (the valid single-guide coverage number).
+  * per-held-out-BENCHMARK-guide TOTAL-count coverage per report band. That is the
+    valid single-guide coverage number; it is NOT the novel-guide case, which this
+    benchmark cannot validate (docs/offtarget_risk_summary_METHODS.md section 5).
 
 Writes <scorer>_calibration.npz with grid, p_point, p_ens, phi (per-bin, legacy),
 and meta carrying phi_bands / band_counts / aupr / loo_coverage. numpy/scipy only."""
@@ -30,13 +34,34 @@ REPORT_BANDS={"0-0.1":(0.0,0.1),"0.1-0.2":(0.1,0.2),"0.2-0.5":(0.2,0.5),
               # band ("gt0") renders expected_counts for it, so the fitted npz must carry it.
               "gt0":(cbop.sensitive_threshold(),1.0)}
 
-def load():
+def load(scored_path="scored.tsv",benchmark_path="benchmark.tsv"):
+    """Read the two row-aligned benchmark TSVs BY COLUMN NAME.
+
+    These used to be read by hard-coded column index. The CRISPR-Bulge fit keys on
+    `cb_heldout` (index 11 in the historical layout), and the column before it was
+    `in_domain` -- a flag that is `n_bulge<=1`, i.e. constant 1 on a <=1-gap
+    benchmark, so it said nothing and has since been dropped from the builder
+    (scripts/build_offtarget_benchmark.py). Under the old positional read that
+    removal would have silently shifted `cb_heldout` onto `crrna_aligned`, every
+    row would have tested False, and the CRISPR-Bulge artifact would have been fit
+    on an empty set. Resolve the header instead, and check the two files really
+    are row-aligned rather than trusting zip()."""
     g=[];cfd=[];cb=[];lab=[];cbh=[]
-    with open("scored.tsv") as s,open("benchmark.tsv") as b:
-        rs,rb=csv.reader(s,delimiter="\t"),csv.reader(b,delimiter="\t");next(rs);next(rb)
-        for a,c in zip(rs,rb):
-            lab.append(int(a[5]));cfd.append(float(a[6]));cb.append(float(a[7]))
-            g.append(c[0]);cbh.append(c[11]=="1")
+    with open(scored_path) as s,open(benchmark_path) as b:
+        rs,rb=csv.reader(s,delimiter="\t"),csv.reader(b,delimiter="\t")
+        hs={k:i for i,k in enumerate(next(rs))};hb={k:i for i,k in enumerate(next(rb))}
+        for need,have,path in (("label cfd_score crispr_bulge_score",hs,scored_path),
+                               ("guide offtarget_seq cb_heldout",hb,benchmark_path)):
+            missing=[k for k in need.split() if k not in have]
+            if missing: raise SystemExit(f"{path}: missing column(s) {', '.join(missing)}")
+        for i,(a,c) in enumerate(zip(rs,rb)):
+            if a[hs["guide"]]!=c[hb["guide"]] or a[hs["offtarget_seq"]]!=c[hb["offtarget_seq"]]:
+                raise SystemExit(f"{scored_path}/{benchmark_path}: rows diverge at data row {i}")
+            lab.append(int(a[hs["label"]]));cfd.append(float(a[hs["cfd_score"]]))
+            cb.append(float(a[hs["crispr_bulge_score"]]))
+            g.append(c[hb["guide"]]);cbh.append(c[hb["cb_heldout"]]=="1")
+        if next(rs,None) is not None or next(rb,None) is not None:
+            raise SystemExit(f"{scored_path} and {benchmark_path} have different row counts")
     return np.array(g),np.array(cfd),np.array(cb),np.array(lab,dtype=np.int64),np.array(cbh)
 
 def binof(s): return np.clip((s*B).astype(int),0,B-1)
@@ -104,7 +129,9 @@ def fit_scorer(name, scores, labels, guides, provenance):
         auprs.append(aupr_exact(scores[idx],labels[idx]))
     aupr=dict(point=aupr_exact(scores,labels),
               ci=[float(np.percentile(auprs,5)),float(np.percentile(auprs,95))])
-    # per-held-out-guide (one novel guide) TOTAL-count coverage per report band
+    # per-held-out-BENCHMARK-guide TOTAL-count coverage per report band. The guide held
+    # out is still one of this benchmark's own, which is NOT the novel-guide case (the
+    # docstring above, and docs/offtarget_risk_summary_METHODS.md section 5).
     loo_cov={}
     for lbl,(lo,hi) in REPORT_BANDS.items():
         m=bin_in_range(lo,hi); ph=phi_bands[lbl]; cov=0

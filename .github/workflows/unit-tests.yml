@@ -435,6 +435,70 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_check_indel_rows -v
 
+      - name: "extract-flanks (validation oligos: the reference flank + one per observed haplotype, the protospacer marked)"
+        # crisprme.py extract-flanks (PostProcess/extract_flanks.py): the sequence a user
+        # orders validation oligos from, so a wrong one is a wrong assay. Hermetic: a
+        # reference and a phased VCF written by the test, with the answer known by hand --
+        # a site with no variant, a SNV beside the target and one inside it (the second
+        # haplotype does NOT read the row's protospacer and must say so), an insertion
+        # and a deletion before the target (the marked offset moves by exactly their
+        # bases), an insertion INSIDE the target (its carrier reads the row's protospacer,
+        # the reference does not), two variants in one window, a contig start and a contig
+        # end (truncated, said, never a crash), an unphased call, a missing allele and a
+        # slot whose records overlap (REPORTED, never written as a haplotype), identical
+        # haplotypes deduplicated by sequence with their carriers, a minus-strand row
+        # written on the plus strand on request, both VCF reader paths (plain gzip and BGZF, written
+        # here), determinism, --anonymise leaking no sample identity, a record outside
+        # PASS left out and counted, and every input the run's records name but that is
+        # gone raised BY NAME. Then a MUTANT per rule (the offset read off the reference,
+        # an unphased call read as phased, no deduplication, the window cut by arithmetic,
+        # a variant named for a flank it does not change, a clash ignored, the protospacer
+        # claimed everywhere, a sample leaked into a FASTA name): each must break its own
+        # test, so no rule is untested. It also holds the reuse: the tool and the checker
+        # read ONE haplotype writer (scripts/variant_haplotypes.py) and ONE reader of a
+        # run's sidecars (scripts/run_records.py), both standard library only, and the
+        # checker still imports no CRISPRme module and still runs standalone.
+        # It also holds what each column may CLAIM: a record straddling either edge of
+        # the flank window puts in only the bases inside it, a haplotype with a deletion
+        # inside the target marks the bases it really has there, a haploid call is one
+        # slot (and beside a diploid one is reported, never read onto both), an
+        # integrated row is read on its ALT alignment, the guide column is filled from
+        # the curated download's Aligned_spacer+PAM, --include-filtered marks what it
+        # writes, n_samples counts a sample once, and the reference entry claims the
+        # panel only on a contig a genotyped VCF covers.
+        # And the ANCHORED, PARAMETRIC window: the 3/6 default is a 32-mer on a
+        # mismatch-only site, --window W is exactly --upstream W --downstream W (giving
+        # both is refused), a minus-strand row keeps its padding in the guide's
+        # orientation, a 5' PAM puts the two paddings on the OTHER genomic sides (read
+        # from the run's PAM file or the table's run of N's -- SpCas9 is never assumed,
+        # and an asymmetric window on a run that cannot say is refused), a DNA bulge
+        # lengthens the window and an RNA bulge shortens it under the default anchored
+        # policy while --length-policy fixed-total holds the total and says which
+        # padding moved, the column mode writes the REF and primary ALT sequences and
+        # the TRUE count of distinct ALTs onto both table shapes (the extras kept in the
+        # companion files, not dropped and not crammed into a cell), --filter is a safe
+        # expression over the table's own columns with the CRISPR-Bulge operating point
+        # by name, and a preset is a config entry a flag still beats. One MUTANT each:
+        # an always-symmetric window, the strand ignored, a 5' PAM read as 3', the
+        # footprint assumed nominal, the ALT column filled from the reference, the ALT
+        # count taken from what was written, a missing value read as a number, the
+        # threshold frozen as a literal, and a preset that beats the flag.
+        # And the five rules a wrong answer would be SILENT in: the table is read one
+        # row per PHYSICAL LINE (a quote character cannot move one row's sequence onto
+        # another's, and the reader and the --annotate-table writer refuse if they ever
+        # count lines differently); a haplotype that DELETES the whole window says so,
+        # writes no empty FASTA record and keeps its place in the '|' list by a
+        # placeholder; a '-' is the VALUE of a Strand or a Gene_region and still
+        # MISSING in a score column; a flag on the command line overrides the preset's
+        # other form of the window (both forms are refused only from one source); and
+        # the PAM side read off the table WITH the motif's length known -- the branch a
+        # results folder copied without its PAMs/ takes -- puts the paddings on the
+        # right genomic sides. A mutant each, including the two the suite missed
+        # before: the ALT list written backwards and its carriers taken from the
+        # reference entry.
+        working-directory: PostProcess
+        run: python -m unittest test_extract_flanks -v
+
       - name: "Dict-less bulge cap + defaults + 0-bulge indel routing (v2.3.3)"
         working-directory: PostProcess
         run: python -m unittest test_bulge_cap -v
@@ -527,6 +591,53 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_risk_card -v
 
+      - name: "PR figures the risk card embeds are reproducible from committed curve data (no negative sampling, CRISPR-Bulge panels held out)"
+        # Both PNGs under PostProcess/calibration/ were rendered out of tree, which is how
+        # they drifted: pr_curves.png drew CRISPR-Bulge precision from a 300k-negative
+        # sample of 2.7 M, and pr_bulge_stratified.png called a panel "(in-domain)" while
+        # filtering on a benchmark column that is true for every row, so it included the 6
+        # guides CRISPR-Bulge was trained on. scripts/render_pr_figures.py now draws them
+        # from a committed curve-data file; this re-derives every number they print, checks
+        # the sha256 chain data -> PNGs, and re-renders byte-for-byte when matplotlib and
+        # freetype match the versions recorded in PostProcess/calibration/pr_figures.sha256.
+        working-directory: PostProcess
+        run: python -m unittest test_pr_figures -v
+
+      - name: "The off-target METHODS document quotes the calibration artifacts that ship (no pre-2.7.11 phi, coverage or band support)"
+        # docs/offtarget_risk_summary_METHODS.md travels with the off-target risk report.
+        # Its phi values, decision-band phi, per-held-out-guide coverage table, >=0.2
+        # aggregate phi and global LOGO residual were still the superseded
+        # cfd_calibration.npz.pre2711's long after the CFD column was refitted, because
+        # nothing read the prose against the .npz. This re-reads every one of those
+        # numbers from PostProcess/calibration/*.npz at run time, and cross-checks the
+        # on-target disclosure, the rescue-arm counts and the 95%->99% list ratio between
+        # the document and risk_card's modal so the two cannot drift apart. It also pins
+        # the four statements the re-verification found inverted or mis-attributed: which
+        # term dominates the 0.613-vs-0.62 AUPR gap (the stored column's PAM-internal-bulge
+        # defect, 54%), that bulge=1 AP ~0.01 is not "the prevalence floor", that the
+        # on-target refit moves the CFD >=0.5 expected total DOWN, and that the benchmark's
+        # scope and assay-detection floor reach the modal and not just the document.
+        working-directory: PostProcess
+        run: python -m unittest test_methods_calibration_numbers -v
+
+      - name: "One quantity, one source: every off-target number that appears on more than one surface agrees with the artifact that owns it"
+        # Each surface used to be reviewed on its own, so the same quantity ended up
+        # stated differently in different places: the 95%->99% validation-list ratio read
+        # 6x in the modal, ~6x in cb_operating_point's docstring and 7.1x in the methods
+        # document where the benchmark's own figure is 16.4x; the CRISPR-Bulge bulge=1 AP
+        # read 0.25 where the figure that measures it says 0.285; the sites-per-validated-
+        # site column read 9 / 21 / 354 / 790 where the committed curve data gives
+        # 9.05 / 22.15 / 348.79 / 786.08; METHODS.md and README.md still called the
+        # shipped map a leave-one-guide-out FIT and CFD's AUPR "held-out"; and the
+        # retired "~+0.66" cross-band correlation outlived its retirement in two runtime
+        # docstrings. This suite re-reads each shared quantity from the one artifact that
+        # owns it -- pr_figure_data.npz for the curves, list sizes and marked points,
+        # {cfd,crispr_bulge}_calibration.npz for the AUPRs, CIs, phi, band support and
+        # coverage, cb_operating_point for the thresholds and labels -- and fails when
+        # any copy of it, prose included, disagrees.
+        working-directory: PostProcess
+        run: python -m unittest test_shared_numbers -v
+
       - name: "Top-1000 and Personal Risk Card plots draw every site (perfect matches starred, 1-edit sites kept, one site too); the report says what its top-1000 views leave out"
         # CRISPRme_plots.py / CRISPRme_plots_personal.py dropped every site with
         # mismatches+bulges <= 1, the on-target and any variant-created perfect match
@@ -535,6 +646,15 @@ jobs:
         # matplotlib + pandas only.
         working-directory: PostProcess
         run: python -m unittest test_top_plots -v
+
+      - name: "How the report SHOWS a CRISPR-Bulge score (6 significant digits in the curated tables, log10 score panels with the operating point and the zeros kept)"
+        # The curated tables printed 4 decimals, which cannot place a site against the
+        # 1.9e-4 sensitive operating point, and the score panels used a linear 0-1 axis,
+        # where every point of a genome-wide run lies on the bottom rule. Text and axis
+        # now come from cb_operating_point, so they cannot drift from the threshold.
+        # matplotlib + pandas only; the search tables are not touched.
+        working-directory: PostProcess
+        run: python -m unittest test_cb_report_display -v
 
       - name: "Observed-haplotypes sidecar (make_oh_sidecar: alt-origin superset, byte-identical rows, safe degrade)"
         working-directory: PostProcess
@@ -604,6 +724,18 @@ jobs:
         # an in-memory registry built with compile_registry (reuses tier0_registry only).
         working-directory: PostProcess
         run: python -m unittest test_targets_scoring -v
+
+      - name: "CRISPR-Bulge guide-PAM normalization keeps a PAM-internal DNA bulge (both scoring paths)"
+        # cbulge_rows.mask_guide_pam is the ONE normalizer the post-analysis path and the
+        # targets-scoring CLI share. The slice it replaced (crrna[:-3]+"NGG") deleted the
+        # gap of a DNA bulge that lands inside the PAM (...NG-G), so the null rules counted
+        # 0 gaps on a 1-bulge row and the model was handed a gapless 24-mer with a phantom
+        # base -- a fabricated score, always too HIGH (30,131 such rows in the external
+        # CRISPR-Bulge benchmark; a CRISPRme search anchors the PAM and makes none). This
+        # pins both the fix and its no-op half: byte-identical to the old slice wherever no
+        # gap sits in the PAM columns. Stubs the scorer; no cbulge env or TensorFlow.
+        working-directory: PostProcess
+        run: python -m unittest test_cb_pam_bulge -v
 
       - name: "CFD clean-room scorer + position-aware bulge penalty (mismatch/PAM/gap/IUPAC/T->U + DNA/RNA/terminal/PAM-proximal bulge)"
         working-directory: PostProcess

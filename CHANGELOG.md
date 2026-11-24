@@ -13,7 +13,217 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+- **`crisprme.py extract-flanks`: the genomic sequence around an off-target, per observed
+  haplotype, to order validation oligos from.** A shortlist says where a site is;
+  validating one in the lab needs what is there. For a site in a variant region that is
+  not one sequence: the reference has one, each distinct haplotype observed in the panel
+  the search read has another, and the haplotype that carries the variant MAKING the
+  off-target is usually not the reference one, so primers designed off the reference can
+  measure the wrong locus. Given a results table (the report's top-N download or an
+  `integrated_results.tsv`), the command writes, per row, the reference flank and one
+  flank per distinct observed haplotype -- deduplicated by sequence, each with the samples
+  and, where the VCF is phased, the haplotype side that carries it; `--max-haplotypes`
+  caps how many are written, 10 by default and every one at `--max-haplotypes 0`, with
+  `n_haplotypes` always the row's true total -- as a FASTA plus a
+  TSV index that joins back by the input's line number and rank. The protospacer+PAM's
+  offset and length are marked inside every flank, read from that haplotype's own
+  coordinates, so an indel that shifts the site reads as a shifted offset rather than as a
+  miscount, and a `target_found` column says whether the haplotype reads the row's
+  protospacer at all. The window is cut on the reference, so every haplotype of a site
+  covers one genomic interval and an indel inside it shows as a longer or shorter
+  `flank_len`. It never invents a haplotype: an
+  unphased heterozygous call, a missing allele, a slot whose records describe the same
+  bases twice, two genotyped VCFs that share a sample, a target near a contig end and an
+  input the run's records name but that is gone are each reported or refused BY NAME. With
+  `--results` the reference, the VCFs and the samples list come from the run's own
+  sidecars. `--anonymise` writes no sample identity anywhere (FASTA names never carry one);
+  `--max-haplotypes` (default 10) keeps the output readable without hiding anything -- the
+  haplotypes that hold the off-target come first, `n_haplotypes` always gives the true
+  total and the notes count what was left out. What each column may CLAIM is held to what
+  was read: the reference entry says `no-vcf-covers-this-contig` where VCFs were read but
+  none holds the contig (chrY, `_alt`, `_random`, `chrUn` under a typical panel: 46 contigs
+  and 54 rows of one real 1,000-row shortlist), `reference-only` where no VCF was read at
+  all and `no-genotyped-vcf-for-this-contig` for a sites-only dataset, rather than claiming
+  every sample reads as the reference there, and the contigs
+  nobody was read for are named once in the log; `n_samples` is the UNION of the samples
+  written and those unresolved, so a sample with one copy written and one unresolvable is
+  counted once (two rows of a real run printed more samples than the panel has); a slot
+  whose records overlap is set aside only where the overlap meets the target's own span,
+  so a clash elsewhere in the window no longer costs the row its protospacer and shifts
+  every coordinate it prints; `--include-filtered` marks what it writes (the note becomes
+  `filtered-records-written:N` and each non-PASS record carries its `FILTER` in the
+  `variants` column), so no low-quality base reaches an oligo unmarked; and the `guide`
+  column is filled for the report's curated download, which names the guide
+  `Aligned_spacer+PAM` (the alignment's gap taken out, so the column is the same guide on
+  every line and several guides' files merge on it). Index the VCFs (`tabix -p vcf`)
+  first -- without a `.tbi` each is read end to end once to find its contigs, which is
+  minutes per panel-sized file before the first flank is written: the README says so.
+  THE WINDOW IS ANCHORED AND PARAMETRIC, so one command serves a 32-mer oligo assay and
+  an amplicon design without an edit to it: it is the target plus a padding at each of its
+  two ends, each named for what it sits beside, in the GUIDE's orientation --
+  `--upstream N` beyond the protospacer (default 3), `--downstream M` beyond the PAM
+  (default 6), a 32-mer for a 20-nt spacer with a 3-nt PAM, with the protospacer+PAM at
+  `target_offset 3`. The anchored form is the default because it is the general one (its
+  meaning does not depend on the target's length) and because a short oligo read straight
+  off the site has no primer slack to absorb a padding error; the symmetric form is
+  `--window W`, which IS `--upstream W --downstream W` (giving both forms in ONE PLACE --
+  both on the command line, or both in one preset section -- is refused, not resolved),
+  and `--preset amplicon` is 200 beyond each end. A `--preset` is a NAME for a set of
+  these flags, read from `PostProcess/flank_presets.conf`, `$CRISPRME_FLANK_PRESETS` and
+  `--preset-file`, listed by `--help`, and always beaten by a flag on the command line
+  -- including by the other FORM of the window, since a preset's `window = 200` is 200
+  beyond each end, so `--preset my-assay --window 200` is 200 at both ends and
+  `--preset amplicon --upstream 5` replaces that one end: an assay with its own
+  geometry is a line of configuration, not a change to CRISPRme.
+  STRAND AND PAM SIDE ARE READ, NEVER ASSUMED: on a minus-strand row the bases beyond
+  the PAM are at the genomic left, and on a 5' PAM (Cas12a TTTV, PAM then protospacer)
+  the target's two ends swap, so the same two numbers land on the OPPOSITE genomic
+  sides -- taken from the PAM file the run's own command line names (whose signed
+  length carries the side), else its `Params.txt` `Pam` with the side read off the
+  table's `Aligned_spacer+PAM` run of N's, else `--pam-file` / `--pam-motif
+  --pam-side`; where none of them answers and the two paddings differ, the command
+  refuses rather than guess SpCas9. Sequences are written as the GUIDE reads them by
+  default, `--orientation genome` writes the reference's plus strand instead, and
+  `orientation` and `emitted_strand` are on every line with the coordinates genomic
+  either way. BULGES ARE HANDLED EXPLICITLY, not assumed away: a 32-mer assumes
+  protospacer+PAM is 23 genomic bases, which fails wherever the alignment carries a
+  bulge (a DNA bulge is one genomic base more, an RNA bulge one less -- and
+  bulge-carrying sites are the class CRISPR-Bulge under-detects, so they are
+  over-represented in any sensitive-threshold fill-in). The default keeps the paddings
+  and lets the total vary, which keeps the sequence genomically true;
+  `--length-policy fixed-total` holds the reference interval at
+  upstream+spacer+PAM+downstream and takes the difference out of the padding (beyond
+  the PAM first, never below zero). Either way the row says its own: `flank_len`,
+  `target_span_ref`, `nominal_target_len`, `bulge_type`, `pad_upstream`/`pad_downstream`
+  as applied, `window_spec`, `pam_side`, `length_policy`, and the greppable notes
+  `target-span-not-nominal:<span>/<nominal>` and
+  `padding-moved-to-hold-the-total:<+-n>`. `--annotate-table` writes the INPUT TABLE
+  back out with the sequences added as columns -- `flank_ref`, `flank_alt` (the primary
+  ALT: the one that HOLDS the off-target, most carried first), `flank_alt_count` (how
+  many DISTINCT ALT sequences the row has, the true total whatever `--max-haplotypes`
+  wrote), the length and the target's offset and length inside each, and
+  `flank_row_id` to join -- on the report's top-N download and on an
+  `integrated_results.tsv` alike. A row with several distinct ALTs keeps them in the
+  companion FASTA/TSV -- the ten most useful by default and EVERY one at
+  `--max-haplotypes 0`, that cap applying to those two files and not only to the cell,
+  with `flank_alt_count` always the true total and `flank_notes` counting what was left
+  out (on the 1,000-row shortlist above it binds on 11 rows at the 32-mer). None is
+  crammed into a cell unless `--alt-list` asks -- and that cell is POSITIONAL, element
+  k being `hapK` and the first element `flank_alt`. A haplotype that DELETES the whole window (one entry
+  of 4,017 at the 32-mer on that shortlist, none of its 10,354 at `--window 200`) holds
+  no bases at all there: it keeps its TSV line with `flank_len 0`, its carriers and the
+  note `window-deleted-on-this-haplotype`, writes NO FASTA record (a header with no
+  bases shifts every record after it for a reader pairing them by position) with a
+  blank `fasta_id`, and takes the placeholder `(window-deleted)` in the list cell and
+  in `flank_alt`, so an empty `flank_alt` keeps its one meaning: no ALT entry at all.
+  The input table is read as plain tab-separated text, ONE ROW PER PHYSICAL LINE -- a
+  double quote in a cell is a double quote -- and `--annotate-table` refuses to write
+  anything if its own count of the data lines ever differs from the reader's, because
+  one row's sequence on another row's line looks exactly like a right answer.
+  `--filter` selects rows by an expression over the TABLE'S
+  OWN columns (a name Python cannot hold is written with underscores, `CRISPR-Bulge` as
+  `CRISPR_Bulge`, or as `col("...")`), with the CRISPR-Bulge sensitive operating point
+  available BY NAME as `CB_SENSITIVE` from `cb_operating_point` rather than copied as a
+  number, so a filter written today still means "the sensitive threshold" after a
+  re-fit: both alignments above it is
+  `--filter 'CRISPR_Bulge >= CB_SENSITIVE and CRISPR_Bulge_ref >= CB_SENSITIVE'`. A row
+  is kept when the expression is true AND every cell it read AS A NUMBER had one -- a
+  missing cell is not zero, and a negated test would otherwise select exactly the rows
+  nobody measured; `has("col")` asks about presence without reading the value, and the
+  count of such rows is printed. Compared with a STRING a cell is its own text, because
+  the same characters are data in another column: `Strand == "-"` selects the
+  minus-strand rows and `Gene_region == "-"` the intergenic ones, while `-` in a score
+  column is still missing. A row the filter dropped still keeps its line in the
+  annotated table (`flank_notes filtered-out`) unless
+  `--filter-drop`. THE WINDOW DOMINATES HOW MANY ALT SEQUENCES A SITE HAS, which is what
+  an assay sizes its extra targets from, so every such figure is labelled with the
+  window it belongs to: on the 1,000-site shortlist of a genome-wide HGDP+1000G run
+  (4,091 samples), `--window 200` gave 940 of 1,000 sites with at least one ALT flank
+  distinct from the reference and 939 with MORE THAN ONE (median 22 per site, max
+  4,263, 10,354 sequences), while the 32-mer default gave 803 and 546 (median 2, max
+  837, 3,069 sequences) -- fewer, but still more than half the sites with more than one
+  distinct ALT 32-mer, so a plan that assumes one ALT sequence per site is wrong on
+  about half of them at either window.
+  Haplotypes are written by the SAME code the
+  independent indel-row check is built on, now in `scripts/variant_haplotypes.py` (the VCF,
+  reference and haplotype readers) and `scripts/run_records.py` (a run's own sidecars),
+  both moved whole out of `scripts/check_indel_rows.py` and both standard library only:
+  two readers of one VCF that disagreed would be two answers to "what does this individual
+  hold here?", and one of them would send a user's oligos to the wrong sequence. The
+  checker's behaviour is unchanged (its full suite passes, and it still runs standalone and
+  imports no CRISPRme module). README section 2.2.12, METHODS section 7.1,
+  `docs/offtarget_risk_summary_METHODS.md` section 3.6, and a new CI suite
+  (`PostProcess/test_extract_flanks.py`, 156 tests) with a mutant for every rule.
+
 ### Changed
+- **The report's curated tables write a CRISPR-Bulge score with 6 significant digits, not 4
+  decimals.** The in-report top-1000 table and every download (`top1000.tsv`,
+  `top1000_crispr_bulge.tsv`, `panel_top100.tsv`, the per-tier TSVs) printed the score with
+  `"{:.4f}"`, whose floor is 5e-5: the sensitive operating point, 1.9e-4 at the default
+  95% recall, printed `0.0002` and so did every score from 1.5e-4 to 2.5e-4, on either side of
+  it, while everything below 5e-5 — nearly every row of a top 1,000 ranked BY CRISPR-Bulge —
+  printed `0.0000`. A reader could not tell from the column which side of the threshold a site
+  was on. The cells now carry `cb_operating_point.score_text`, `"{:.6g}"`: the same text the
+  post-analyses have written into the search's own tables since 2.8.0 (`cbulge_rows`,
+  `targets_scoring`), so the report re-formats the value it reads rather than rounding it a
+  second time, and the format lives beside the threshold it has to make readable. Six
+  SIGNIFICANT digits keep a plain decimal where one is legible (`0.00019`) and turn to
+  scientific notation only below 1e-4 (`2.35e-39`), and are inside the precision of the model's
+  float32 output (~7 digits), so no digit printed is noise. A row the model does not score
+  keeps its `-`, and a true zero reads `0`. **CFD is unchanged, at 4 decimals**: it is
+  calibrated, uses the whole 0-1 range, and its thresholds (0.05 / 0.2 / 0.5) are far from any
+  display floor. **The search's result tables are not touched.**
+- **The report's curated tables carry both alignments of a site.** They had one protospacer
+  column, `Aligned_protospacer+PAM`, which holds the variant (ALT) sequence and falls back to
+  the reference one on a row no variant creates — so the table never showed what the variant
+  changed, and a collaborator designing a validation assay had to go back to the raw results
+  for the reference sequence. A column of its own, `Aligned_protospacer+PAM_REF`, now sits
+  between `Aligned_spacer+PAM` and it, so the three read top to bottom as the alignment of the
+  site. The other column is unchanged, fallback included. A variant-created site that is absent
+  from the reference has no reference alignment and shows `-` there; a run with no variant
+  off-target (a reference-only search, an `assembly-search` combined report) drops the new
+  column instead of repeating the other one on every row, as it drops `Observed`. The in-report
+  table shows all three in a monospace cell, so their columns line up.
+- **The report's CRISPR-Bulge score panels are log10, with the operating point drawn on them.**
+  Panels (c) and (d) of Section 2, and the results page's and Personal Risk Card's top plots
+  (`CRISPRme_plots.py`, `CRISPRme_plots_personal.py`), drew this score on a linear 0-1 y-axis:
+  with the sensitive operating point at 1.9e-4 and a genome-wide run's sites orders of magnitude
+  below it, every point lay on the bottom rule and the threshold could not be drawn at all. The
+  axis is now log10, with that operating point (from `cb_operating_point`, never a number
+  written in the plot) as a labelled dashed line. A log axis cannot show 0 and the model's
+  float32 output underflows to exactly 0 for a few percent of the rows of a genome-wide run: a
+  floor is set one full decade below the smallest non-zero score the panel has to show, the
+  zeros are drawn ON it inside a shaded band that the legend and the caption name as "0", and
+  the axis always reaches down far enough for the threshold line — so no point is dropped and
+  none is mistaken for a real small score. A panel whose own sites all scored above 0 — a
+  top-N ranked BY the score, typically — has no such band, and its caption says so instead of
+  promising one. The -1 the pipeline writes for a row it does not
+  score is not a zero and is drawn nowhere, as it fell outside the 0-1 window before. The
+  ref->alt arrows are drawn from one data point to the other (the old +0.02/-0.04 trims were
+  lengths of a 0-1 axis), the allele-frequency sizing and the perfect-match stars are unchanged,
+  and a panel with no valid score still raises for its labelled placeholder. **CFD's panels keep
+  the linear 0-1 axis**, and the search's result tables are not touched.
+- **A score panel's legends go below the panel, not on top of its points.** Both boxes — the
+  allele-frequency size key and the colours — sat inside the axes, at "upper center" and "upper
+  right". On the linear 0-1 CFD axis that was survivable, because a top-1000 CFD curve falls away
+  from the top-right corner; on the CRISPR-Bulge log10 axis it is the opposite, since the axis
+  reaches down tens of decades to the zero floor and so presses every well-scoring site into the
+  top band of the panel, right under the two boxes — and the threshold and "= 0" entries the log
+  axis adds had made the colour box taller still. On a real genome-wide run's top 1000 (axis
+  1e-31 to 1) the colour box alone covered 1,481 of the 2,000 drawn points, scores 1.5e-9 to
+  1.1e-3, i.e. the whole neighbourhood of the sensitive operating point the panel exists to show;
+  both boxes together covered 79% of the points. They are now drawn in one row BELOW the axes —
+  size key left, colours right — by `cb_operating_point.legend_below`, which every panel of all
+  three drawing paths (the report's Section-2 panels, `CRISPRme_plots.py`,
+  `CRISPRme_plots_personal.py`) calls, so they cannot drift apart. Below rather than beside: the
+  panels are wide and short and the Personal Risk Card prints two side by side, so a right-hand
+  column cost 32% of the data area's width against ~0.4 in of height for a row underneath. Every
+  entry and its wording are unchanged, and the data area keeps the size it had — the figure grows
+  by the height of the row (8.0x3.2 to 8.0x3.57 in; 7.5x2.25 to 7.5x2.62 in) instead of the axes
+  shrinking to pay for it. The plot scripts now save with `bbox_inches="tight"` so a legend
+  outside the axes is not cut off, and the size key is no longer clipped to the axes box, which
+  kept it out of the saved area.
 - **The Docker image keeps no conda or pip package cache.** The Dockerfile's `micromamba clean
   --all --yes`, at the end of each RUN that installs an environment, removes the cached packages
   no environment uses, but keeps the folder of every package one uses, and in it each file the
@@ -30,7 +240,8 @@ and the `release-crisprme` skill.
   measures its own (`docs/RELEASE_CHECKLIST.md`, D).
 - **The report generator's version is 2.5** (`REPORT_GENERATOR_VERSION`, which the report's
   footer prints). It had been 2.4 since CRISPRme+ 2.4.0, through the generator's changes of
-  2.10.0. The website's example report, 2.10.0's, keeps its "report generator v2.4".
+  2.10.0. The website's example report, rebuilt here from the same search (Fixed, below),
+  prints it: its footer said "report generator v2.4" and now says v2.5.
 - **A search lists the reference genome's chromosomes without a `basename` process per FASTA
   file** (PR 107, Tim Barry). `submit_job_automated_new_multiple_vcfs.sh` named each chromosome
   after its file with `$(basename $file_chr)`, once per variant dataset of a search: on hg38 with
@@ -42,8 +253,48 @@ and the `release-crisprme` skill.
   twice); those now list as named.
   PR 107's other fix, the package specs after the channels in `scorer-env create`'s command, was
   made the same way in 2.8.1.
+- **"95% recall" now says which population it is measured over, and every document gives the
+  deployment-matched figure beside it. The threshold itself is unchanged.** The sensitive
+  operating point is a quantile of the held-out benchmark's 287 validated positives — and 40 of
+  those 287 are each guide's own **on-target**, perfect 0-mismatch matches, while the ranked list
+  a reader acts on excludes perfect matches. So the published 95.12% is recall over a population
+  the deployed ranking does not contain. Re-measured on the same benchmark: over off-targets only
+  (247 positives) `CB ≥ 1.9e-4` recovers 233 of 247, **94.33%** (guide-cluster 95% CI [0.902,
+  0.994]), and under the best-CRISPR-Bulge alignment the report's own tables are ranked by, 241 of
+  247, **97.57%**. The value **stays at 1.9e-4**: recomputing the quantile on off-targets only
+  moves it to 3.8e-5 (5.1× lower) on the assay's alignment but to 1.1e-3 (5.7× higher) under the
+  best-alignment view, and higher again weighting each guide equally, so the correction has no
+  determinate sign; the two candidate points lie inside each other's bootstrap intervals (p =
+  0.375 / 0.447), 0.705 decades apart in an interval 2.72 decades wide; the 40 on-targets buy
+  **two** permitted misses at the 95% target, not forty (`ceil(0.95×287) = 273` permits 14,
+  `ceil(0.95×247) = 235` permits 12); and the 99%-recall point, 1.5e-8, is the *same number* on
+  both populations, so the question does not reach that target at all. Dropping the on-targets is
+  also not the noisier estimate it was described as: the off-target-only 95% interval is narrower
+  than the published one, and re-running the bootstrap over the full 40-guide frame (15 guides
+  contribute no off-target positive) returns a bitwise identical interval.
+  `PostProcess/cb_operating_point.py`'s docstring, `docs/offtarget_risk_summary_METHODS.md` §3.5,
+  `METHODS.md` §8 and the README feature list now all carry the population with the number.
 
 ### Fixed
+- **The website's example report is this branch's report, not the one the defective figures
+  shipped in.** `docs/example-report.html`, which the website links ("See an example report"),
+  is generated: it still carried the PRE-FIX precision-recall PNGs and the prose the
+  explanation corrections replaced -- an AUPR row headed "held-out" over a CFD column that
+  holds nothing out, 359 positives printed as "sites", "bulge=1 AP ~ 0.01, essentially the
+  prevalence floor", and a caption sending higher recall "left-and-down" on an axis where
+  recall is x. It is rebuilt the way the release path builds it (`generate-report
+  --result-dir`, the run folder of the website's own example search, read only), so the
+  SEARCH is the same one: the bundled `run_manifest.json`, `Params.txt`,
+  `indexes_searched.txt`, `observed_haplotypes.tsv` and `indel_snp_cooc.tsv` come out byte
+  for byte as the shipped page's, 183,207 sites and 67,115 variant-created among them.
+  What moved is the report: the two embedded figures are now the committed
+  `calibration/pr_curves.png` and `calibration/pr_bulge_stratified.png` byte for byte (the
+  page had the 55,852 B and 124,588 B pre-fix pair), the risk-card modal is byte-identical
+  to the one this tree renders, the CRISPR-Bulge cells carry the `{:.6g}` text, the curated
+  tables carry `Aligned_protospacer+PAM_REF`, and the footer prints report generator v2.5.
+  `PostProcess/test_shared_numbers.py` now holds the page to the modal the code renders, so
+  it cannot fall behind again silently -- but it is a generated file: a change to the
+  rendered card or to the curated tables means regenerating it.
 - **An indel row whose reference alignment is shorter than its alignment gets a reference CFD of
   0, and each chromosome's notes count such rows.** The indel post-analysis reads a row's
   reference alignment from the plain reference, from the row's start, as many bases as its target
@@ -144,6 +395,177 @@ and the `release-crisprme` skill.
   reading needs fails; each test but its controls fails on the code before) and
   `test_indel_haplotype_resolution` (the search keeps both carriers on hg38's bases, and takes
   each off with another base past the junction).
+- **A DNA bulge that falls inside the PAM is no longer deleted before CRISPR-Bulge scores the
+  site** (`PostProcess/cbulge_rows.py`, `PostProcess/targets_scoring.py`). Both scoring paths
+  normalised the guide's PAM with a fixed three-character slice, `crrna[:-3] + "NGG"`. An
+  in-place DNA bulge makes the alignment one column longer than the guide, so where the bulge
+  falls inside the PAM (`...NG-G`) the slice deleted the gap: the "at most one gap" null rule
+  then counted 0 gaps on a row that has one, and the model was handed a gapless 24-mer with a
+  phantom base instead of that site's alignment. The fabricated score is always the higher one
+  -- on the external CRISPR-Bulge benchmark it is higher on 28,704 of the 30,131 rows of that
+  shape, by up to 0.633 against a true maximum of 0.00115, and it lifts 167 rows over the
+  sensitive operating point, 25 over 0.1, 22 over 0.2 and 1 over 0.5 while pushing nothing
+  down. `mask_guide_pam()` now overwrites the last PAM-length NON-GAP columns: it is
+  byte-identical to the old slice wherever no gap sits in them, both paths share it so they
+  cannot drift, and where the PAM length does not match the mask's width the old slice is kept,
+  so a non-SpCas9 PAM still nulls as it did. **No result a CRISPRme search has produced moves**:
+  a search anchors the PAM, so the aligner never puts a gap inside it -- over a genome-wide run
+  and seven release-gate baselines, 52,153,776 aligned spacer+PAM strings across three
+  alignment views, the old mask and the new one differ on none, and a gap never comes closer
+  than 3 columns to the 3' end. What was exposed is an externally supplied
+  list scored through `crisprme.py targets-scoring`, which is how the calibration benchmark was
+  scored: 1.0% of its 2,940,588 rows carry the shape. 9 tests
+  (`PostProcess/test_cb_pam_bulge.py`, the scorer stubbed, no TensorFlow) and a disclosure in
+  `docs/offtarget_risk_summary_METHODS.md` section 2 of what the stored benchmark column
+  therefore holds.
+- **Both precision-recall figures the risk card embeds are drawn over the whole space they
+  claim, and are generated in the repository.** `pr_curves.png` took CRISPR-Bulge precision
+  from a weighted 300,000-negative sample of the 2,703,582 held-out negatives, so each
+  precision it printed was one draw: over 20 further samples the AUPR it would have shown
+  spans 0.5990 to 0.6734 and the precision at >=0.5 spans 0.6365 to 0.8874. Drawn over all of
+  them it is exact -- the panel's AUPR reads 0.62 (0.622080) where it read 0.61 (0.605430), and
+  its three marked points read precision 0.044931 (sensitive), 0.443099 (>=0.2) and 0.728205
+  (>=0.5) where they read 0.048062, 0.411841 and 0.692401. No recall moves: the positives were
+  never sampled. `pr_bulge_stratified.png` titled its CRISPR-Bulge panel "(in-domain)" and
+  filtered on a benchmark column that is true on every one of the 2,940,588 rows, so the panel
+  included the 6 guides the model was trained on; it is now restricted to the 40 held-out
+  guides (287 positives of 2,703,869 sites) and says so. Every AP in it rises -- all <=1-gap
+  0.591 to 0.622, bulge=0 0.658 to 0.684, bulge=1 0.252 to 0.285 -- because those 6 guides are
+  the harder subset (AP 0.483 / 0.551 / 0.236 on their own, 72 positives), so the leak had been
+  flattering nothing: it was costing the model. The CFD panel keeps all 46 guides, CFD having
+  no training set, and is retitled to say which population it is; its "all <=1-gap" AP moves
+  0.172 to 0.168 with the tie rule alone. Both figures now take the tie-grouped average
+  precision instead of ranking equally scored rows by their position in the benchmark file,
+  and the stratified panel re-scores CRISPR-Bulge at full precision, which makes its "all
+  <=1-gap" AP (0.622080) the same number as `pr_curves.png`'s CRISPR-Bulge AUPR rather than
+  0.007 away from it for no stated reason. Generation comes in-tree:
+  `scripts/build_offtarget_benchmark.py` rebuilds the benchmark table (byte for byte against
+  the file the figures were made from, once its constant `in_domain` column is cut),
+  `scripts/render_pr_figures.py` builds the curve data and renders both PNGs from it with no
+  RNG anywhere, `PostProcess/calibration/pr_figure_data.npz` ships with a sha256 manifest
+  chaining it to the two PNGs, and `PostProcess/test_pr_figures.py` re-derives every number
+  they print. `scripts/fit_calibration.py` reads its columns by header name with that: it took
+  `cb_heldout` as column 11, the one after `in_domain`, so dropping the column positionally
+  would have moved the read onto a sequence column and fitted the CRISPR-Bulge artifact on an
+  empty set without a word. The two shipped calibration artifacts are unchanged, and the
+  name-based read is verified to return the same arrays as the positional one on all 2,940,588
+  rows.
+- **The off-target explanation modal and `docs/offtarget_risk_summary_METHODS.md` are corrected
+  against the benchmark they describe.** Eleven claims a reader acts on were contradicted by
+  the measurements; every replacement was re-measured from the benchmark and from the shipped
+  calibration artifacts, and nothing was refitted. The positives include each guide's own
+  on-target (46 of CFD's 359, 40 of CRISPR-Bulge's 287) while the card's score arrays exclude
+  perfect matches, so every published discrimination figure is measured on a population the
+  deployed ranking does not contain: that is now disclosed where the numbers are read, with
+  the deployment-matched values beside them (CFD AUPR 0.168306 to 0.025146, CRISPR-Bulge
+  0.622080 to 0.520929) rather than restated, since restating needs a refit. METHODS' CFD
+  calibration block was the superseded pre-2.7.11 fit, proven by rebuilding it, and carries the
+  shipped one instead (phi 1.4653 / 0.9849 / 0.8869, decision-band phi 0.2769, coverage 89.1 /
+  95.7 / 95.7 / 100). "About 90% coverage for a single novel guide" is replaced by the one band
+  that falls short and by what coverage is and is not validated for. The two CFD rescue arms
+  are given their measurement -- they add 9,660 and 614 sites to the 6,076-site sensitive tier,
+  2.7x the panel, and recover 1 of the 14 validated off-targets it misses, the bulge arm none
+  of the 10 of those 14 that carry a bulge -- in place of the opposite claim. A reversed
+  caption, positives printed as site counts, and "held-out" applied to CFD are fixed, and the
+  support behind each operating point is shown, the row that counts the whole held-out support
+  labelled as such rather than as the sensitive tier (which carries 273 of the 287 positives at
+  full precision). Four further statements the re-verification found inverted or
+  mis-attributed are corrected with them: the 0.613-vs-0.62 held-out CRISPR-Bulge AUPR gap is
+  attributed to its measured main term -- 54% the stored column's PAM-internal-bulge defect
+  above, 26% the figure's full-precision rescoring, 20% its tie-grouped AP rule -- and no
+  longer to score precision and the AP rule alone, which named the two minority terms and
+  contradicted the same document's account of that defect; CFD's bulge=1 AP of about 0.01 is no
+  longer called "essentially the prevalence floor" (it is about 160x a 5.75e-5 floor, while the
+  same page calls CFD's own 0.168 "far above" its 1.22e-4 no-skill baseline, a 1,379x gap) but
+  set against CRISPR-Bulge's 0.285 as section 3.5
+  does; the refit without the on-target rows is said to LOWER the CFD >=0.5 expected total by
+  about 8% (x0.92), the direction having read backwards; and the modal carries the benchmark's
+  scope and its assay-detection floor, which only the document had.
+  `PostProcess/test_risk_card.py` and the new `PostProcess/test_methods_calibration_numbers.py`
+  read both documents against `PostProcess/calibration/*.npz` at run time and against each
+  other, so the page and the document cannot drift apart again.
+- **Every off-target number that appears on more than one surface now has one source, and a
+  test that fails when a surface stops stating it** (and, where the test counts spellings or
+  occurrences, when one copy of it drifts while another survives). Each surface had been reviewed on its own, which
+  is how the same quantity kept ending up stated three ways: the 95%->99% validation-list
+  ratio read 6x in the modal, ~6x in `cb_operating_point`'s docstring and 7.1x in the methods
+  document, where the benchmark's own figure is 16.4x; the CRISPR-Bulge bulge=1 average
+  precision read 0.25 where the figure that measures it says 0.285; 287 and 359 -- counts of
+  validated POSITIVES -- were printed as counts of SITES. Reading the surfaces together
+  rather than one at a time found six more. **`docs/offtarget_risk_summary_METHODS.md` 3.5**
+  gave sites-listed-per-validated-site as "9 / 21 / 354 / 790" where the committed curve data
+  gives **9.05 / 22.15 / 348.79 / 786.08** (22.26 at the shipped threshold), and gave the cost of
+  3-decimal rounding as "~7% of validated off-targets", which is the TOTAL miss at a 5e-4
+  floor (267 of 287) and not the part the rounding causes (**6 sites, 2.1 points**, 273 ->
+  267); `PostProcess/cbulge_rows.py` carried the same fused "~7%". **`cb_operating_point`'s
+  docstring** carried a third version of the list-growth claim, "~6x ... 206 -> 1,286 loci",
+  whose worked-example counts also contradicted the methods document's measured 162 -> 1,158;
+  it now gives the benchmark's own list column (2,343 / 6,048 / 99,406 sites, 9.0 / 22.2 /
+  348.8 per true off-target) and leaves the worked example to the one place that states it.
+  **`METHODS.md` and `README.md`** still called the shipped calibration map a "fit
+  leave-one-guide-out" -- it is fit on all 46 guides at once and leave-one-guide-out is the
+  validation -- still called CFD's AUPR "held-out" when CFD has no training set, and still
+  rounded the coverage check to "about 90%" instead of the artifacts' 89.1% to 100% with the
+  one band that falls short named. **`PostProcess/offtarget_calibration.py` and
+  `scripts/fit_calibration.py`** still stated the retired "~+0.66" cross-band correlation that
+  section 7 replaced with +0.91 / +0.73 / +0.79, and still equated a held-out benchmark guide
+  with a novel one, which section 5 exists to deny. All are corrected. The new
+  `PostProcess/test_shared_numbers.py` (39 tests) re-reads each shared quantity from the
+  artifact that owns it -- `calibration/pr_figure_data.npz` for the curves, their average
+  precisions, their supports and the marked operating points; `calibration/*_calibration.npz`
+  for the AUPRs, their intervals, phi, the band support and the coverage;
+  `cb_operating_point` for the thresholds and the label text -- and matches it against every
+  copy, prose included. The list sizes and ratios are not quoted but **re-derived** from the
+  curve data at run time. It also holds `docs/example-report.html` to the modal this tree
+  renders, so the page a reader meets first cannot fall behind the code that produces it.
+  Every one of the 14 ways these surfaces have actually drifted was reintroduced one at a
+  time and the suite caught all 14 -- each of those reintroductions changes the only copy
+  of a value on the surface it touches, so what is demonstrated is that a value cannot
+  silently LEAVE a surface; a quantity a surface states twice is held by the two helpers
+  that count spellings and occurrences, not by the plain assertion.
+- **`extract-flanks` promised one flank per observed haplotype in NINE places and named
+  the cap in none of them; the default writes ten.** `README.md`, this changelog's `--annotate-table`
+  entry above and `PostProcess/extract_flanks.py`'s own docstring each said a row with
+  several distinct ALTs "keeps every one of them in the companion FASTA/TSV: none is
+  dropped", and mentioned `--max-haplotypes` only as something that trims the `--alt-list`
+  CELL. The two surfaces a user meets FIRST made the same promise and named no cap at all:
+  the opening summary of `extract-flanks --help`, and the subcommand's description in
+  `crisprme.py`, both of which said the tool writes "one flank per DISTINCT observed
+  haplotype" while listing `[--max-haplotypes 10]` in the usage line above it. It trims the files: `site_entries` truncates the haplotype list to
+  `--max-haplotypes` (default 10) before anything is written, which the tool's own
+  `test_the_cap_keeps_the_count_and_says_what_it_left_out` asserts -- three sequences
+  written of six at `--max-haplotypes 2`. On the 1,000-row shortlist those surfaces quote,
+  the cap binds on 11 rows at the 32-mer and on most of them at `--window 200`, where the
+  median site has 22 distinct ALT sequences; someone ordering oligos off the companion
+  files would have been short on exactly the busiest sites. `METHODS.md` section 7.1, whose
+  column is headed "sequences written", was the one surface that already had it right. All
+  three now say that the cap is on those two files, that `--max-haplotypes 0` writes every
+  one, and that `flank_alt_count` / `n_haplotypes` is the true total either way;
+  `PostProcess/test_extract_flanks.py` holds all of them to it (5 tests, 161 in the suite).
+  The check that matters is made per OCCURRENCE and not per file: every "one flank per
+  distinct observed haplotype" in the tree has to name `--max-haplotypes` within a
+  paragraph of itself. A per-file check -- "the README mentions the flag somewhere" --
+  passes while the sentence a reader actually meets says none of it, which is how most of
+  the nine survived a pass that was looking for them. Two smaller versions of the same
+  mistake were caught by the check itself: an earlier `--help` assertion that the usage
+  line's `[--max-haplotypes 10]` satisfied, and a plain-substring form of the pattern that
+  missed three occurrences outright because Markdown puts `**` inside that phrase and the
+  line wraps there. The pattern now tolerates emphasis and wrapping, and a test pins that
+  it still matches the plain form.
+- **Two assertions of the shared-number suite could not fail, and one guard missed the
+  occurrence it was written for.** `test_the_ninety_nine_percent_ratio_is_sixteen_fold_on_
+  every_surface` ended in `assertIn(f"{round(ratio)}", surface)` -- the two characters "16",
+  which the modal's own "0.168" contains; and the support counts were asserted bare as "46"
+  and "40" against a 260,999-character modal of which 249,128 are the base64 of two PNGs,
+  where "16" occurs 146 times, "46" 75 and "40" 41. The modal is now stripped of its image
+  payloads before any prose assertion (the images are checked as images, by sha256), the
+  ratio is asserted in the spelling each surface writes, and the support counts in their own
+  phrases. `assertOnEvery` counts occurrences and takes `times=n`. **`scripts/
+  fit_calibration.py`** still called the per-held-out-guide coverage "(one novel guide)" 118
+  lines below the docstring that says it is NOT the novel-guide case; the guard added with
+  that docstring banned two spellings with an "=" and missed this one, so it is now a rule
+  about the claim: in both calibration modules every line that mentions a novel guide has to
+  deny it.
 
 ## [2.10.0] - 2026-11-19
 

@@ -51,6 +51,10 @@ from typing import Dict, List, Optional, Tuple
 # ---------------------------------------------------------------------------
 from cfd_score import cfd as _cfd_clean, cfd_tables as _cfd_tables
 
+# The ONE gap-preserving guide-PAM normalizer the pipeline and this CLI share, so the
+# two paths cannot drift again (cbulge_rows imports nothing at module load).
+from cbulge_rows import mask_guide_pam
+
 
 # ---------------------------------------------------------------------------
 # Site model + scoring
@@ -137,8 +141,14 @@ _CB_OFF_DUMMY = "A" * 20 + "AGG"
 
 def _cb_pair(site, index, null_index):
     # mask the guide PAM to NGG exactly as the pipeline does (model scores spacer;
-    # PAM normalized), keep the off-target's real PAM + any bulge gaps.
-    sg = site.crrna[: len(site.crrna) - site.pam_len] + "NGG"
+    # PAM normalized), keep the off-target's real PAM + any bulge gaps -- and the
+    # guide's own, which an externally supplied list does put inside the PAM
+    # (``...NG-G``): cbulge_rows.mask_guide_pam overwrites the last pam_len NON-GAP
+    # columns, so a PAM-internal DNA bulge survives the mask and is scored (or
+    # nulled) as the alignment it is, instead of reaching the model as a gapless
+    # 24-mer with a phantom base. Byte-identical to the old slice form on every row
+    # without a gap in those columns, which is every row a CRISPRme search produces.
+    sg = mask_guide_pam(site.crrna, site.pam_len)
     off = site.dna
     total_gaps = sg.count("-") + off.count("-")
     if (("N" in off) or (len(off) != len(sg)) or total_gaps > 1
