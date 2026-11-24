@@ -258,9 +258,10 @@ What holds wherever you run it, since 2.10.0:
   name leads nowhere the web app writes. A link is followed only where no one else can have
   put it: a link of yours in a folder only you can write (or a sticky one of yours), such as
   a genome linked to a shared copy, a VCF dataset registered from a server folder, or
-  `Results/` or `Settings/` linked onto a volume (but in 2.10.0 the History page answers HTTP 500
-  where `Results/` itself is a link, to be fixed in 2.10.1, [ROADMAP](ROADMAP.md); until then keep
-  `Results/` a folder: in Docker, mount the volume there, `-v <volume>:/DATA/Results`); in a
+  `Results/` or `Settings/` linked onto a volume (but up to and including 2.10.1 the History page
+  answers HTTP 500 where `Results/` itself is a link, to be fixed in a later release,
+  [ROADMAP](ROADMAP.md); until then keep `Results/` a folder: in Docker, mount the volume there,
+  `-v <volume>:/DATA/Results`); in a
   folder your group can write, the web app refuses those too, and below `Results/` and `Settings/`
   it follows none. A Settings
   job's folder is writable by you alone, and the cache of the results tables, pickles that
@@ -561,10 +562,10 @@ after the search removes that cost.
 
 **Fix.** Keep 1 DNA + 1 RNA bulge, the default, and raise `--mm` first for a wider search; or
 keep `--max-total-edits` at 3 or less, which bounds the alignments; or search the reference
-alone, or a chromosome that holds none of those loci. CRISPRme 2.10.1 is planned to search, in
-those regions, the samples' own haplotypes, indels included, in place of the variant genome's
-combinations, in a per-sample search (the haplotype scan); the indexes of 2.10.0 serve it as they
-are.
+alone, or a chromosome that holds none of those loci. A later release of CRISPRme+ is planned to
+search, in those regions, the samples' own haplotypes, indels included, in place of the variant
+genome's combinations, in a per-sample search (the haplotype scan); the indexes of 2.10.0 serve it
+as they are.
 
 ## 15. A row that looks wrong: the known limits of 2.10.0
 
@@ -584,7 +585,7 @@ rules behind them.
   repeat-rich guides per sample list 6 carriers so, at 8 sites of HGDP + 1000 Genomes (HGDP00655,
   HG01432, HG01883, HGDP00465 and NA19475 on VEGFA site 3, in GT repeats, and NA20888 on EMX1, in an
   AAG repeat), through one or two more indels in the repeat. No fix is planned yet: the haplotype
-  scan planned for 2.10.1 writes, as the search does, one indel per window.
+  scan planned for a later release writes, as the search does, one indel per window.
 - **An off-target missing for a carrier of two indels.** A target that an individual's haplotype
   holds only through two indels or more is not generated (a fake-indel window holds one), so no row
   lists that individual for it, and where no other carrier holds it, no row reports it at all. How
@@ -664,13 +665,14 @@ rules behind them.
   read. The release gate found one: NA19185 on HPRC, left off the SNP rows at chrX:1,408,064 and
   1,408,065 (+), beside a deletion of 1,365 bases of whole repeat units; none on HGDP + 1000
   Genomes. To check a carrier, read its genotypes in the dataset's VCF over the row's target.
-  CRISPRme 2.10.1 is planned to read the store as far as a haplotype's own indels need.
+  A later release of CRISPRme+ is planned to read the store as far as a haplotype's own indels
+  need; 2.10.1 does not.
 - **One target written as two rows, or twice, in a microsatellite.** In a tandem repeat that
   holds a whole target, the merge places each row by its own bases, and the target's
   alignments can fit different places of the repeat: they can then go to two rows, or the
   target be written twice (in 10,000 trials of a model of microsatellites at 1 + 1 bulges and
   `--merge` 3, 134 targets split and 15 were written twice). No row is lost or wrong, and no search
-  of real data checked has such a target. To be fixed in 2.10.1.
+  of real data checked has such a target. To be fixed in a later release; 2.10.1 does not fix it.
 - **An unphased carrier of two ALTs on a row that needs the reference there.** A carrier whose
   call is unphased (`/`) is listed, PUTATIVE, on every subset of its variants a target can hold.
   For a call of two ALTs at one position (`1/2`), that includes a row that needs the reference

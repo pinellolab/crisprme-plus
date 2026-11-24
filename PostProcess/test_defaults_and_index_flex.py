@@ -1398,7 +1398,7 @@ class FutureWorkSaysTheShareOfIndelsInCisAsMethodsDoes(unittest.TestCase):
 
 
 class TheHaplotypeScanIsNotTheTwoIndelLimitsFix(unittest.TestCase):
-    """The docs said that the haplotype scan planned for 2.10.1 would lift the two-indel limit,
+    """The docs said that the haplotype scan planned after 2.10.1 would lift the two-indel limit,
     reading each carrier's own bases. The scan writes, per sample and in the dense regions
     only, the lines the IUPAC search writes there, one indel per fake-indel window (its design,
     sections 2.1 and 4.2), and 16 of the 435 sites of the limit on the release gate's B10 lie
@@ -1423,14 +1423,15 @@ class TheHaplotypeScanIsNotTheTwoIndelLimitsFix(unittest.TestCase):
     def test_the_docs_say_no_fix_is_planned_and_why(self):
         methods = self._flat("METHODS.md")
         self.assertIn("so it leaves the two-indel limit as it is", methods)
-        self.assertIn("No fix is planned yet: the haplotype scan planned for 2.10.1 writes the lines "
-                      "the search writes, one indel per window.", methods)
+        self.assertIn("No fix is planned yet: the haplotype scan planned for a later release "
+                      "writes the lines the search writes, one indel per window.", methods)
         self.assertIn("No fix is planned yet: the haplotype scan planned for 2.10.1 writes the lines "
                       "the search writes, one indel per window.", self._flat("CHANGELOG.md"))
         self.assertIn("No fix is planned yet: the haplotype scan writes, as the search does, one "
                       "indel per window.", self._flat("docs/release-notes-2.10.0.md"))
-        self.assertIn("No fix is planned yet: the haplotype scan planned for 2.10.1 writes, as the "
-                      "search does, one indel per window.", self._flat("docs/TROUBLESHOOTING.md"))
+        self.assertIn("No fix is planned yet: the haplotype scan planned for a later release "
+                      "writes, as the search does, one indel per window.",
+                      self._flat("docs/TROUBLESHOOTING.md"))
         self.assertIn("The haplotype scan does not lift it: it writes, as the search does, one "
                       "indel per window.", self._flat("docs/ROADMAP.md"))
 
@@ -1858,7 +1859,8 @@ class TheReleaseCandidatesGateInTheDocs(unittest.TestCase):
     bound below the maximum measured, as c96a1737's 1.8e-5 and 1.4e-4 were, ff-review-r1 FF-R1-3;
     and one tie of 632 rows shown with its other alignment), where the README and METHODS section 8
     said the images score identically. A SIGINT to crisprme.py alone, under Apptainer, left the
-    worker of the Settings page's jobs holding the web interface's port (ROADMAP's 2.10.1). And
+    worker of the Settings page's jobs holding the web interface's port (the ROADMAP's next
+    release). And
     RELEASE_CHECKLIST step 4c says where the check finds the indexes of a search run with the
     install at /DATA, which d8c8dc25 wrote with the fix, and in which library. All four fail on
     05df5d78's docs and on ac843ba6's, and the second and the last on c96a1737's. A fifth fails on
@@ -1911,7 +1913,7 @@ class TheReleaseCandidatesGateInTheDocs(unittest.TestCase):
 
     def test_the_roadmap_plans_the_web_apps_stop_and_the_images_near_ties(self):
         roadmap = self._flat("docs/ROADMAP.md")
-        plan = roadmap[roadmap.index("## CRISPRme+ 2.10.1 (planned)"):
+        plan = roadmap[roadmap.index("## The next CRISPRme+ release (planned)"):
                        roadmap.index("## Open, no release named")]
         self.assertIn("a SIGINT sent to the `crisprme.py` process alone (as a script or a service "
                       "manager sends it) left the worker process of the Settings page's jobs "
