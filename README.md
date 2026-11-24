@@ -19,32 +19,45 @@ genome analyses. CRISPRme automates the entire workflow, from data download to
 executing the search, and delivers detailed reports complete with tables and figures 
 through an interactive web-based interface.
 
-### What's new in 2.10.0
+### What CRISPRme+ adds over classic CRISPRme
 
-CRISPRme+ 2.10.0 runs on CRISPRitz 2.10.0; from this release the two share their major.minor
-version. The full list is in the [release notes](docs/release-notes-2.10.0.md) and the
-[CHANGELOG](CHANGELOG.md).
+If you know CRISPRme 2.1.x, this is what the "+" line does that it did not. What *changed* in
+behaviour, and what to pass to get the old behaviour back, is the [migration
+guide](#what-changed-vs-stock-crisprme-migration-guide) below; each item here is spelled out in
+[Highlights](#-highlights) and in [METHODS](METHODS.md).
 
-- **Every published index is built again**, in index format 2, in its own Hugging Face repo,
-  [`lucapinello/crisprme_plus_indices`](https://huggingface.co/datasets/lucapinello/crisprme_plus_indices),
-  under names that give the guide length and the side of the PAM
-  (`20-NRR_3_hg38+hg38_HGDP1kGP`). 2.8.1's archives stay in `lucapinello/crisprme-data`.
-- **Every allele of a split multi-allelic site is coded.** Up to 2.9.1 only the last record's ALT
-  was, so an off-target that needs an earlier ALT was missed, or reported lower without its
-  carriers (1.95 % of HGDP + 1000 Genomes' SNP records). The new indexes also hold the sites at
-  contig ends and `N` runs, and search each indel in a window of 30 bases on either side. HPRC is
-  built from its graph v2.1.
-- **SpCas9 NRR is the default PAM and index**, every search defaults to 1 DNA + 1 RNA bulge, and an
-  index serves any PAM its own holds, pruned (an NRR index serves NGG, NAG, NGA and NRG).
-- **Speed and checks.** Per-sample searches of the new indexes take 0.9 to 1.3 times 2.8.1's time
-  (population-level ones of HGDP + 1000 Genomes up to 2.2 times:
-  [Known limitations](#known-limitations-and-roadmap)). The mega is rebuilt, the carrier gate
-  checks a population-level row's variants against phased haplotypes, and an independent check of
-  the indel rows on real data is a release gate.
-- **Ubuntu 26.04 and security.** A search of a Bioconda or source install on Ubuntu 26.04 no
-  longer stops at "Integrating results". The web app is hardened: if you serve it to other people,
-  upgrade.
-- **Upgrading from 2.8.1**: [below](#upgrading-from-281).
+- **Off-targets no one variant reveals.** A site that needs two nearby variants on the *same*
+  chromosome copy is found and reported — SNP+SNP or SNP+indel, **CONFIRMED** where phasing proves
+  *cis* or **PUTATIVE** where it cannot, with the joint allele frequency and, on a genotyped panel,
+  the individuals who carry it by name. The search resolves per sample wherever the index supports
+  it, and otherwise falls back to a worst-case screen that is lossless for detection, in which a
+  carrier gate marks the top-ranked rows no real haplotype holds.
+- **Indexes you download instead of build.** The variant index carries its own allele-frequency
+  registry and genotype store, so there are no per-sample dictionaries to build and a first
+  genome-wide variant search is a download away, not a day. Three panels to pick by what you need —
+  phased **HGDP + 1000 Genomes** (4,091 samples, named carriers; the default), the **HPRC
+  pangenome**, and the sites-only five-source **mega** — plus your own cohort, built and published
+  with the same commands. One index answers many PAMs, pruned as results are emitted.
+- **A score with a threshold you can defend.** **CRISPR-Bulge** replaces CRISTA as the ML scorer,
+  and CFD now penalises a bulge by its position instead of ignoring it, so a PAM-proximal bulge no
+  longer scores as though it were not there. "Assay down to here" is a stated operating point — the
+  95 %-recall threshold on a 40-guide held-out benchmark, with its confidence interval and its
+  90 %/99 % alternatives — rather than a round number.
+- **A run that ends in a validation plan.** Every search writes a self-contained HTML report to
+  hand to a collaborator or a reviewer: risk card, precision-recall curves, top hits annotated for
+  function and for cancer-driver genes, per-tier downloads, and a **recommended validation panel**.
+  `extract-flanks` then gives the sequence around a site **per observed haplotype**, so primers for
+  a site that exists only on an ALT haplotype are not ordered off the reference.
+- **A personal genome, as assembled.** `assembly-search` searches a diploid assembly — two
+  haplotype FASTAs — directly, lifts each to hg38 and reconciles them. No variant calling, no VCF.
+- **Grounds for believing a genome-wide number.** Every change to the pipeline is checked against a
+  committed brute-force ground truth over a whole chromosome; an independent checker re-derives the
+  indel rows from the VCFs and the reference, on real data, as a release gate; and what the tool
+  still gets wrong is stated, with its measured size, under [Known
+  limitations](#known-limitations-and-roadmap).
+
+Which release brought what, and every fix along the way, is in the [CHANGELOG](CHANGELOG.md) and,
+for 2.10.0, its [release notes](docs/release-notes-2.10.0.md).
 
 ### ✨ Highlights
 
@@ -537,7 +550,7 @@ so the search above works out of the box on a fresh install.
 <br>5 [Contacts](#5-contacts)
 <br>6 [License](#6-license)
 <br>• [Methods &amp; validation](METHODS.md) — the self-contained technical reference (variant-aware data model, haplotype scanning, worst-case scoring, annotation, report, scoring assumptions &amp; limitations)
-<br>• [What's new in 2.10.0](#whats-new-in-2100) and [Upgrading from 2.8.1](#upgrading-from-281) — the release's changes, its [release notes](docs/release-notes-2.10.0.md), and how to move a 2.8.1 install to 2.10.0's indexes
+<br>• [What CRISPRme+ adds over classic CRISPRme](#what-crisprme-adds-over-classic-crisprme) and [Upgrading from 2.8.1](#upgrading-from-281) — everything the "+" line brought over CRISPRme 2.1.x in one list (release by release: the [CHANGELOG](CHANGELOG.md)), and how to move a 2.8.1 install to the current indexes
 <br>• [Known limitations and roadmap](#known-limitations-and-roadmap) — what 2.10.0 does not do yet, with its measured size, and what 2.10.1 is to do
 
 ## 0 System Requirements
