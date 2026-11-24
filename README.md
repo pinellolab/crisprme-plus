@@ -30,8 +30,9 @@ guide](#what-changed-vs-stock-crisprme-migration-guide) below; the detail behind
   *same* chromosome copy is found and reported — SNP+SNP or SNP+indel, **CONFIRMED** where phasing
   proves *cis* or **PUTATIVE** where it cannot, with the joint allele frequency and, on a
   genotyped panel, the individuals who carry it by name. The search resolves per sample wherever
-  the index supports it, and otherwise falls back to a worst-case screen that is lossless for
-  detection, in which a carrier gate marks the top-ranked rows no real haplotype holds.
+  the index supports it and otherwise screens each variant window for its worst case, lossless
+  for detection; on a genotyped panel a carrier gate then ranks last the combinations no phased
+  haplotype carries, so a row at the top is one somebody could have.
 - **Indexes you download instead of build.** The variant index carries its own allele-frequency
   registry and genotype store, so there are no per-sample dictionaries to build and a first
   genome-wide variant search is a download away, not a day. Three production panels, chosen by
