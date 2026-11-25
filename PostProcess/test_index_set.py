@@ -1414,6 +1414,32 @@ class TheReleaseDocsOfTheSet(unittest.TestCase):
         self.assertLess(abs(int(total.group(3).replace(",", "")) - hub), 23 * 10)
         self.assertIn("the Hub's sizes are -3 to +9 bytes from those, the times `manifest.json` "
                       "and a bundle's record give", _flat(section))
+        # The two user-facing tables give what the Hub serves TODAY, which is this
+        # section's sizes overlaid with any archive a later release packed again. 2.10.1
+        # re-packed three of HPRC's, so for those the 2.10.0 row is the historical record
+        # and the re-pack is what a user downloads. Comparing the user-facing tables
+        # against the 2.10.0 row alone would force them to advertise bytes the Hub no
+        # longer has.
+        repacked = {}
+        if "## The HPRC archives re-packed for CRISPRme 2.10.1" in prov:
+            later = prov[prov.index("## The HPRC archives re-packed for CRISPRme 2.10.1"):]
+            later = later[:later.index("## The indexes of CRISPRme 2.10.0")]
+            # that section also carries a fingerprint before/after table of the same width,
+            # so take only the rows under the archive table's own header
+            later = later[later.index("| file | bytes | SHA-256 |"):]
+            later = later[:later.index("\n\n")]
+            for line in later.splitlines():
+                cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                if not line.startswith("| `") or len(cells) != 3:
+                    continue
+                archive = re.search(r"`([^`]+)`", cells[0]).group(1)
+                self.assertRegex(cells[1], r"^\d{1,3}(,\d{3})+$", line)
+                self.assertRegex(cells[2], r"^`[0-9a-f]{64}`$", line)
+                archive = re.sub(r"\.tar\.gz$", "", archive)
+                self.assertIn(archive, sizes, f"re-packed archive not in the set: {archive}")
+                repacked[archive] = int(cells[1].replace(",", ""))
+            self.assertTrue(repacked, "the 2.10.1 section lists no re-packed archive")
+        current = {**sizes, **repacked}
         # each archive's GB in the other docs' tables (GB = 10^9 bytes, two decimals)
         for name, doc, heading in (
                 ("PRECOMPUTED_INDEXES", ("docs", "PRECOMPUTED_INDEXES.md"),
@@ -1430,9 +1456,9 @@ class TheReleaseDocsOfTheSet(unittest.TestCase):
                 for a, gb in zip(cells[0::2], cells[1::2]):
                     archive = re.search(r"`([^`]+)`", a).group(1)
                     given[re.sub(r"^indexes/", "", archive)] = gb
-            self.assertEqual(set(given), set(sizes), name)
+            self.assertEqual(set(given), set(current), name)
             for archive, gb in given.items():
-                self.assertEqual(gb, f"{sizes[archive] / 1e9:.2f}", f"{name}: {archive}")
+                self.assertEqual(gb, f"{current[archive] / 1e9:.2f}", f"{name}: {archive}")
         self.assertIn("after the publish, the size and SHA-256 of each of the 23 index and "
                       "companion archives, from the Hub",
                       self.gate("Published-index provenance recorded"))

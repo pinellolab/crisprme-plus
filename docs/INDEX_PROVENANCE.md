@@ -267,7 +267,10 @@ index (each rewrites the registry's `variant_count.json` and the samplesID list,
 counts: Gate A). Each kit's size is its tarball's (`stat -c %s`) and its SHA-256 the one its row
 wrote in `<dataset>.SHA256SUMS`.
 
-The size and SHA-256 of each index and companion archive are the Hub's. Its SHA-256 exists only
+The size and SHA-256 of each index and companion archive are the Hub's **at `a4d4bc00`**, the
+2.10.0 publish. Three of HPRC's were packed again for 2.10.1 and now carry the bytes and SHA-256
+[that section](#the-hprc-archives-re-packed-for-crisprme-2101) gives; the rows below are what
+2.10.0's own publish produced, which is what reproducing that build checks against. Its SHA-256 exists only
 once it is packed for the upload: `publish-index` packs each archive at the publish, its manifest
 dated then, uploads it and deletes it, so no build log holds it, and a tarball packed by hand would
 not be the Hub's. Both were filled in after the publish, from the Hub at its commit `a4d4bc00`
