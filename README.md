@@ -19,32 +19,49 @@ genome analyses. CRISPRme automates the entire workflow, from data download to
 executing the search, and delivers detailed reports complete with tables and figures 
 through an interactive web-based interface.
 
-### What's new in 2.10.0
+### What CRISPRme+ adds over classic CRISPRme
 
-CRISPRme+ 2.10.0 runs on CRISPRitz 2.10.0; from this release the two share their major.minor
-version. The full list is in the [release notes](docs/release-notes-2.10.0.md) and the
-[CHANGELOG](CHANGELOG.md).
+If you know CRISPRme 2.1.x, this is what the "+" line does that it did not. What *changed* in
+behavior, and what to pass to get the old behavior back, is the [migration
+guide](#what-changed-vs-stock-crisprme-migration-guide) below; the detail behind each item is in
+[Highlights](#-highlights) below it and in [METHODS](METHODS.md).
 
-- **Every published index is built again**, in index format 2, in its own Hugging Face repo,
-  [`lucapinello/crisprme_plus_indices`](https://huggingface.co/datasets/lucapinello/crisprme_plus_indices),
-  under names that give the guide length and the side of the PAM
-  (`20-NRR_3_hg38+hg38_HGDP1kGP`). 2.8.1's archives stay in `lucapinello/crisprme-data`.
-- **Every allele of a split multi-allelic site is coded.** Up to 2.9.1 only the last record's ALT
-  was, so an off-target that needs an earlier ALT was missed, or reported lower without its
-  carriers (1.95 % of HGDP + 1000 Genomes' SNP records). The new indexes also hold the sites at
-  contig ends and `N` runs, and search each indel in a window of 30 bases on either side. HPRC is
-  built from its graph v2.1.
-- **SpCas9 NRR is the default PAM and index**, every search defaults to 1 DNA + 1 RNA bulge, and an
-  index serves any PAM its own holds, pruned (an NRR index serves NGG, NAG, NGA and NRG).
-- **Speed and checks.** Per-sample searches of the new indexes take 0.9 to 1.3 times 2.8.1's time
-  (population-level ones of HGDP + 1000 Genomes up to 2.2 times:
-  [Known limitations](#known-limitations-and-roadmap)). The mega is rebuilt, the carrier gate
-  checks a population-level row's variants against phased haplotypes, and an independent check of
-  the indel rows on real data is a release gate.
-- **Ubuntu 26.04 and security.** A search of a Bioconda or source install on Ubuntu 26.04 no
-  longer stops at "Integrating results". The web app is hardened: if you serve it to other people,
-  upgrade.
-- **Upgrading from 2.8.1**: [below](#upgrading-from-281).
+- **Whole haplotypes, not one variant at a time.** A site that needs two nearby variants on the
+  *same* chromosome copy is found and reported — SNP+SNP or SNP+indel, **CONFIRMED** where phasing
+  proves *cis* or **PUTATIVE** where it cannot, with the joint allele frequency and, on a
+  genotyped panel, the individuals who carry it by name. The search resolves per sample wherever
+  the index supports it and otherwise screens each variant window for its worst case, lossless
+  for detection; on a genotyped panel a carrier gate then ranks last the combinations no phased
+  haplotype carries, so a row at the top is one somebody could have.
+- **Indexes you download instead of build.** The variant index carries its own allele-frequency
+  registry and genotype store, so there are no per-sample dictionaries to build and a first
+  genome-wide variant search is a download away, not a day. Three production panels, chosen by
+  what you need — phased **HGDP + 1000 Genomes** (4,091 samples, named carriers; the default),
+  the **HPRC pangenome**, and the sites-only five-source **mega** — plus your own cohort, built
+  and published with the same commands. One index answers many PAMs, pruned as results are
+  emitted.
+- **A score with a threshold you can defend.** **CRISPR-Bulge** replaces CRISTA as the ML scorer,
+  and CFD now penalizes a bulge by its position instead of ignoring it, so a PAM-proximal bulge no
+  longer scores as though it were not there. "Assay down to here" is a stated operating point —
+  the 95 %-recall threshold on a 40-guide held-out benchmark, with its confidence interval and
+  its 90 %/99 % alternatives — rather than a round number.
+- **A run that ends in a validation plan.** Every search writes a self-contained HTML report to
+  hand to a collaborator or a reviewer: risk card, precision-recall curves, top hits annotated
+  for function and for cancer-driver genes, per-tier downloads, and a **recommended validation
+  panel**. `extract-flanks` then gives the sequence around a site for the reference and for **each
+  distinct haplotype observed** in the panel (10 by default, all of them on request), so primers
+  for a site that exists only on an ALT haplotype are not ordered off the reference.
+- **An assembled personal genome, searched directly.** `assembly-search` takes a diploid
+  assembly — two haplotype FASTAs — lifts each to hg38 and reconciles them. No variant calling,
+  no VCF.
+- **Grounds for believing a genome-wide number.** Every change to the pipeline is checked against
+  a committed brute-force ground truth over a whole chromosome; an independent checker re-derives
+  the indel rows from the VCFs and the reference, on real data, as a release gate; and what the
+  tool still gets wrong is stated, with its measured size, under [Known
+  limitations](#known-limitations-and-roadmap).
+
+Which release brought what, and every fix along the way, is in the [CHANGELOG](CHANGELOG.md) and,
+for 2.10.0, its [release notes](docs/release-notes-2.10.0.md).
 
 ### ✨ Highlights
 
@@ -55,7 +72,7 @@ version. The full list is in the [release notes](docs/release-notes-2.10.0.md) a
 - **Context-aware analysis mode: per-sample on phased indexes by default; `--population-level` to opt out** — as of 2.8.0 `complete-search` auto-selects **per-sample** (CONFIRMED cis phasing + named carriers + exact joint AF) on a genotyped + **PHASED** index (e.g. the HGDP + 1000 Genomes default) and **population-level** (worst-possible representatives per variant window, lossless for detection) otherwise (sites-only / unphased / hybrid / reference-only). Add **`--population-level`** (CLI) or pick **Population-level** in the web form to force the worst-case screen on a phased index; add **`--per-sample`** to force resolution on any genotyped index (on a sites-only index, which has no genotypes, it runs the population-level analysis, with a warning). This is a **genotype-resolution** dial, not a speed dial: which mode is faster depends on the panel. On the indexes CRISPRitz 2.10.0 builds, which code every allele, per-sample is the faster on a dense panel of many samples such as the default HGDP + 1000 Genomes one (its haplotype pre-check skips the dense windows' raw targets nobody carries), and population-level can be on a small panel such as HPRC ([Search speed](METHODS.md#search-speed-on-indexes-that-code-every-allele-the-haplotype-pre-check-the-k-skip-and-the-post-analysis-in-pieces)). The report states which mode was used. ([methods](METHODS.md#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis))
 - **Lean default output** — the report, tables, mismatch/bulge matrix and validation panel are built from the **best alignment per locus**. The exhaustive *alternative-alignments* file (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments per locus — expensive on large searches) is emitted by mode: **off** in population-level runs (`--population-level` on a genotyped index, or the default on sites-only/unphased indexes), **on** in per-sample runs (the default on genotyped+phased indexes, or under `--per-sample`) — on **both the CLI and the web**; override on the CLI with **`--alt-alignments`** / **`--no-alt-alignments`**. Each index also self-describes its `data_type` (sites-only / genotyped-unphased / genotyped-phased / hybrid), shown in the web variant-dataset selector.
 - **Cancer-gene annotations: IntOGen by default, COSMIC by licence** — off-targets in cancer-driver genes are flagged via **IntOGen** (CC0, on by default); **COSMIC** (Cancer Gene Census) is licence-gated and **excluded by default** — enable it in **Settings** or with `crisprme.py cosmic-license enable`. Alongside ENCODE SCREEN v4, GENCODE and DHS. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
-- **Shareable off-target report** — every run auto-generates a self-contained HTML report (summary, calibrated per-scorer risk card, precision-recall curves, **recommended validation panel**, annotated top hits, per-tier downloads, legend). The panel keys bulges on **CRISPR-Bulge at a principled sensitive threshold** — the **95%-recall operating point** on a 40-guide held-out benchmark (`CB ≥ 1.9×10⁻⁴`; selectable to 90 % / 95 % / 99 % recall via `CRISPRME_CB_RECALL_TARGET`; that 95% is recall over the benchmark's 287 held-out positives, which include each guide's own on-target — over off-targets only, the population a ranked list contains, the same threshold recovers 94.33%, and 97.57% under the best-CRISPR-Bulge alignment the tables are ranked by: [§3.5](docs/offtarget_risk_summary_METHODS.md)) — plus a high-CFD rescue for no-/single-bulge sites and all perfect/near-perfect and functional / cancer-gene hits, so the shipped panel *is* the recommended default set. ([methods](METHODS.md#7-shareable-off-target-assessment-report))
+- **Shareable off-target report** — every run auto-generates a self-contained HTML report (summary, calibrated per-scorer risk card, precision-recall curves, **recommended validation panel**, annotated top hits, per-tier downloads, legend). The panel keys bulges on **CRISPR-Bulge at a principled sensitive threshold** — the **95%-recall operating point** on a 40-guide held-out benchmark (`CB ≥ 1.9×10⁻⁴`; selectable to 90 % / 95 % / 99 % recall via `CRISPRME_CB_RECALL_TARGET`; that 95% is recall over the benchmark's 287 held-out positives, which include each guide's own on-target — over off-targets only, the population a ranked list contains, the same threshold recovers 94.33%, and 97.57% under the best-CRISPR-Bulge alignment the tables are ranked by: [§3.5](docs/offtarget_risk_summary_METHODS.md)) — plus a high-CFD rescue for no-/single-bulge sites and all perfect/near-perfect matches, so the shipped panel *is* the recommended default set. It is selected on scores and edit distance alone: **a site is never added to the panel for being in a functional or cancer-driver gene** — those are flagged in the annotated top hits for you to add. ([methods](METHODS.md#7-shareable-off-target-assessment-report))
 - **One-command Docker web interface + indexes on demand** — no conda, no giant build; pull reference data + prebuilt indexes from the HuggingFace CDN (`crisprme.py download`), or **build & publish your own** dict-less indexes (`build-index-only` / `publish-index --dictless`), and manage genomes / indexes / VCFs / annotations / PAMs from the browser **Data Manager**. ([protocol](docs/PRECOMPUTED_INDEXES.md))
 - **Personal-assembly search (CLI + web)** — `assembly-search` scans a fully assembled diploid genome (paternal + maternal haplotype FASTAs) directly, lifts each haplotype to hg38, and reconciles them (homozygous- / heterozygous-equivalent + haplotype-non-mappable sites) — no VCF inference. Each individual is stored as one self-contained `Assemblies/<individual>/` folder + a `metadata.json` (fetch an HPRC individual, or bring your own as a `.zip`/`.tar.gz` bundle); `--assembly-individual <name>` runs a registered one from the CLI. Available on the website (a "Personal assembly" tab + a Settings card) with a combined report. An optional `--gene_annotation` adds the nearest gene + signed distance (`Gene` / `Gene_distance_kb`) to every hg38-mapped site. ([web guide](docs/crisprme_web_interface_user_guide.md#searching-a-personal-assembly-genome-assembly-search))
 - **Also** — merged multi-dataset VCF panels (per-dataset provenance + per-haplotype phasing), PAM-geometry-aware (pamless) indexes, bounded-complexity controls (`--max-total-edits` + a high-variant-density skip), and optional email notifications.
@@ -542,7 +559,7 @@ so the search above works out of the box on a fresh install.
 <br>5 [Contacts](#5-contacts)
 <br>6 [License](#6-license)
 <br>• [Methods &amp; validation](METHODS.md) — the self-contained technical reference (variant-aware data model, haplotype scanning, worst-case scoring, annotation, report, scoring assumptions &amp; limitations)
-<br>• [What's new in 2.10.0](#whats-new-in-2100) and [Upgrading from 2.8.1](#upgrading-from-281) — the release's changes, its [release notes](docs/release-notes-2.10.0.md), and how to move a 2.8.1 install to 2.10.0's indexes
+<br>• [What CRISPRme+ adds over classic CRISPRme](#what-crisprme-adds-over-classic-crisprme) and [Upgrading from 2.8.1](#upgrading-from-281) — everything the "+" line brought over CRISPRme 2.1.x in one list (release by release: the [CHANGELOG](CHANGELOG.md)), and how to move a 2.8.1 install to the current indexes
 <br>• [Known limitations and roadmap](#known-limitations-and-roadmap) — what 2.10.1 does not do yet, with its measured size, and what is to come after it
 
 ## 0 System Requirements
@@ -2935,6 +2952,17 @@ sequences that **hold** the off-target first, then by how many haplotypes carry 
 The list is **positional**: element *k* is `hapK` of `<prefix>.tsv` and the first
 element is `flank_alt`.
 
+> **`hap1` is not the highest-scoring haplotype.** The order is by string-identity with
+> the row's *displayed* protospacer and then by carrier count — nothing in it reads a
+> score, and a variant that makes the site a *better* target stops the haplotype
+> spelling that exact string and so demotes it. On the 187-site panel this was measured
+> on, the haplotype carrying the row's reported score is `hap1` on 66 of the 81
+> ALT-origin rows and **not** on 8 (at chr2:174719314, 0.195 against `flank_alt`'s
+> 0.0032); on the remaining 7 no haplotype in the window reproduces the row's score at
+> all, so those are unknown rather than agreeing. To order one oligo per site *by
+> score*, join on the score instead of taking
+> `flank_alt`; `--alt-list` and the FASTA carry every haplotype written.
+
 > **A haplotype can delete the whole window.** At a 32-mer it happens (one entry of
 > 4,017 on a 1,000-row shortlist; none of the 10,354 of that shortlist at `--window
 > 200`, because a 423 bp window does not fit inside those deletions): that genome holds
@@ -3088,8 +3116,9 @@ so a fixed total fixes the reference interval, not every carrier's base count.
   (default `10`; `0` writes every one). How many a row has depends strongly on the
   window: a 400 bp one over a panel of thousands holds dozens of distinct haplotypes,
   nearly all differing from each other far from the target, while a 32-mer spans too
-  little to hold many. The most useful come first — the ones that **hold** the
-  off-target, then by carrier count. The `n_haplotypes` column always gives the true
+  little to hold many. The ones that **hold** the off-target come first, then by carrier
+  count — an order that reads no score, so the cap can drop a higher-scoring haplotype
+  before a lower-scoring one. The `n_haplotypes` column always gives the true
   total (and so does `flank_alt_count`) and the notes say how many were left out.
 - `--anonymise` (`--anonymize`) — write no sample identity anywhere: the `carriers`
   column is blank and only the counts are kept. FASTA record names never carry a sample

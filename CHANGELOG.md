@@ -15,9 +15,6 @@ and the `release-crisprme` skill.
 
 ## [2.10.1] - 2026-11-24
 
-<!-- The date is the day this section was finished on main. The release is tagged after review:
-     if the tag is cut on a later day, set this date to the day of the tag and delete this note. -->
-
 CRISPRme 2.10.1 runs on CRISPRitz 2.10.0 and on the indexes of 2.10.0: no index is built again.
 HPRC's `Dictionaries` are, for the MNVs' phase, and `download --what indel-genotypes` puts them
 into an install of 2.10.0 without the index being downloaded again. The main changes, each told
@@ -30,7 +27,9 @@ in its entry below:
   independent real-data check all read it; three rules say how an MNV and another record that
   overlap on one slot are read. HGDP + 1000 Genomes and the mega hold no MNV, and the release's
   gates moved no row of theirs over seventeen searches, five genome-wide and twelve of chr22; the
-  other two of the gates' nineteen are the HPRC searches whose rows the fix is meant to move.
+  other two of the gates' nineteen are the HPRC searches the fix is meant to move, and it moved
+  them: the three classes of wrongly listed carrier fall from 1,163, 558 and 3,334 listings to
+  none, and the two genome-wide tables lose 1,345 and 1,133 of their rows.
 - **Validation sequences.** `crisprme.py extract-flanks` writes, for each row of a results table,
   the reference flank and one per distinct observed haplotype, with the protospacer+PAM marked in
   each, to order validation oligos from.
@@ -191,13 +190,16 @@ in its entry below:
   wrote), the length and the target's offset and length inside each, and
   `flank_row_id` to join -- on the report's top-N download and on an
   `integrated_results.tsv` alike. A row with several distinct ALTs keeps them in the
-  companion FASTA/TSV -- the ten most useful by default and EVERY one at
+  companion FASTA/TSV -- the ten most carried that hold the off-target by default (an
+  order that reads no score, so the cap can drop a higher-scoring haplotype before a
+  lower-scoring one) and EVERY one at
   `--max-haplotypes 0`, that cap applying to those two files and not only to the cell,
   with `flank_alt_count` always the true total and `flank_notes` counting what was left
   out (on the 1,000-row shortlist above it binds on 11 rows at the 32-mer). None is
   crammed into a cell unless `--alt-list` asks -- and that cell is POSITIONAL, element
-  k being `hapK` and the first element `flank_alt`. A haplotype that DELETES the whole window (one entry
-  of 4,017 at the 32-mer on that shortlist, none of its 10,354 at `--window 200`) holds
+  k being `hapK` and the first element `flank_alt`. A haplotype that DELETES the whole window (one of
+  the 4,017 entries the 32-mer wrote on that shortlist -- entries, not the 3,069 distinct ALT
+  sequences counted below; none of the 10,354 at `--window 200`) holds
   no bases at all there: it keeps its TSV line with `flank_len 0`, its carriers and the
   note `window-deleted-on-this-haplotype`, writes NO FASTA record (a header with no
   bases shifts every record after it for a reader pairing them by position) with a
@@ -243,23 +245,25 @@ in its entry below:
   (`PostProcess/test_extract_flanks.py`, 162 tests) with a mutant for every rule.
 
 ### Changed
-- **HPRC's Dictionaries are published again, with the MNV files. Pending: the upload**, which the
-  release's gates have cleared; nothing of it is on the Hub yet. Only
+- **HPRC's Dictionaries are published again, with the MNV files**, on 2026-11-24, in one Hub
+  commit (`1a3593e8`, above its pinned parent `a4d4bc00`: 6 files, 32,620,221,147 bytes). Only
   `Dictionaries/indel_genotypes_hg38_HPRC/` changes: it gains 24 `gt_mnv_<chrom>.tsv.gz` and their
   markers (about 19.3 MB). Its indel files, the registry, the indel logs, the genotype store, the
   index and its INDELS index stay byte for byte. `dictionaries-bundle_hg38_HPRC` and
   `indel_genotypes_hg38_HPRC` are packed again. So is `20-NRR_3_hg38+hg38_HPRC` (29.55 GB): its
   index files are the same, but its manifest names the bundle by its fingerprint, and a download
   refuses a bundle the manifest does not name. `genotypes_hg38_HPRC` stays as it is (the same
-  fingerprint). The three archives, the two companions' records and `indexes/SHA256SUMS` go up in
-  one Hub commit (`publish-index --replace-companions --stage-only`, then the commands it prints:
+  fingerprint). The three archives, the two companions' records and `indexes/SHA256SUMS` went up
+  in that one commit (`publish-index --replace-companions --stage-only`, then the commands it prints:
   `scripts/hf_one_commit.py`, one `HfApi.create_commit` request pinned to the head it was staged
   against, not `hf upload`, which can split a folder this size into two or three commits).
-  No index name, index format or catalog entry changes. At the publish, `docs/INDEX_PROVENANCE.md`
-  gets the new archives' sizes, SHA-256 and Hub commit (2.10.1), in a section of its own; until
-  then it says "2.10.1: pending". 2.10.0's stay in the Hub's history. CRISPRme 2.10.0 reads no MNV
-  file, so it gives the same rows on the new archives. A download of HPRC in flight at that
-  commit can fail once, and works when run again (`docs/TROUBLESHOOTING.md` §15).
+  No index name, index format or catalog entry changes. Each archive's size, SHA-256 and that Hub
+  commit are in `docs/INDEX_PROVENANCE.md`, in a section of its own. 2.10.0's stay in the Hub's
+  history. CRISPRme 2.10.0 reads no MNV file, so it gives the same rows on the new archives —
+  measured, not assumed: a clean-room install of the released v2.10.0 image, running only its own
+  code, installed from these archives with no `DownloadIntegrityError` and reproduced its
+  pre-republish table byte for byte. A download of HPRC in flight at that commit can fail once,
+  and works when run again (`docs/TROUBLESHOOTING.md` §15).
 - **The real-data checker reads the MNVs as the search does** (`scripts/check_indel_rows.py`). A
   run of 2.10.1 says in its `log_verbose.txt`, for each chromosome whose indel log lists an MNV,
   whether it read the MNVs from the store's MNV file (Fixed). The check takes its model from those
