@@ -13,7 +13,7 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
-## [2.10.1] - 2026-11-24
+## [2.10.1] - 2026-11-25
 
 CRISPRme 2.10.1 runs on CRISPRitz 2.10.0 and on the indexes of 2.10.0: no index is built again.
 HPRC's `Dictionaries` are, for the MNVs' phase, and `download --what indel-genotypes` puts them
