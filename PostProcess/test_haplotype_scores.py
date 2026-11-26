@@ -104,12 +104,21 @@ class HaplotypeScoresFixture(unittest.TestCase):
     # -- the reconciliation signal ------------------------------------------ #
 
     def _targets(self, rows):
-        """A curated table naming each site's OWN reported alignment."""
+        """A curated table naming each site's OWN reported haplotype.
+
+        Reconciliation keys on the VARIANT SET, not the alignment string: the curated
+        alignment is the representative's own, while a per-haplotype row carries the
+        haplotype's bases in the candidate's alignment shape. The curated notation is
+        ``chr;pos;REF;ALT (rsID)`` against the per-row ``chr_pos_REF_ALT``, so both are
+        reduced to a canonical key.
+        """
         path = os.path.join(self.dir, "targets.tsv")
         with io.open(path, "w", encoding="utf-8") as fh:
-            fh.write("Chromosome\tPosition\tAligned_protospacer+PAM\tCRISPR-Bulge\n")
-            for chrom, pos, aln in rows:
-                fh.write("%s\t%s\t%s\t0.01\n" % (chrom, pos, aln))
+            fh.write("Chromosome\tPosition\tVariant\tREF/ALT_origin\t"
+                     "Aligned_protospacer+PAM\tCRISPR-Bulge\n")
+            for chrom, pos, variant, origin in rows:
+                fh.write("%s\t%s\t%s\t%s\t%s\t0.01\n"
+                         % (chrom, pos, variant, origin, REPORTED))
         return path
 
     def test_a_site_whose_reported_alignment_is_on_no_haplotype_is_flagged(self):
@@ -120,7 +129,7 @@ class HaplotypeScoresFixture(unittest.TestCase):
         """
         rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C"),
                 _row("chr1", 100, HAP_TWO, 0.4, 0.003, "chr1_100_A_G")]
-        tgt = self._targets([("chr1", "100", REPORTED)])   # on NEITHER haplotype
+        tgt = self._targets([("chr1", "100", "chr1;100;A;T (rs9)", "ALT")])  # on NEITHER
         (_n, _s, unreconciled), text, msgs = self._run(rows, targets=tgt)
         self.assertEqual(unreconciled, ["chr1:100:+:%s" % SPACER],
                          "the site must be reported as unreconciled")
@@ -133,7 +142,7 @@ class HaplotypeScoresFixture(unittest.TestCase):
 
     def test_a_site_whose_reported_alignment_is_present_reconciles(self):
         rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C")]
-        tgt = self._targets([("chr1", "100", HAP_ONE)])    # IS one of the haplotypes
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT")])  # IS one of them
         (_n, _s, unreconciled), text, _msgs = self._run(rows, targets=tgt)
         self.assertEqual(unreconciled, [], "it reconciles")
         body = [l for l in text.splitlines() if l and not l.startswith("#")]
@@ -153,7 +162,7 @@ class HaplotypeScoresFixture(unittest.TestCase):
         for i in range(12):
             pos = 1000 + i
             rows.append(_row("chr1", pos, HAP_ONE, 0.5, 0.004, "chr1_%d_A_C" % pos))
-            tgt_rows.append(("chr1", str(pos), REPORTED))   # matches no haplotype
+            tgt_rows.append(("chr1", str(pos), "chr1;%d;A;T (rs9)" % pos, "ALT"))
         tgt = self._targets(tgt_rows)
         (_n, _s, unreconciled), text, msgs = self._run(rows, targets=tgt)
         self.assertEqual(unreconciled, [], "a mis-keyed comparison reports no failures")
@@ -168,7 +177,7 @@ class HaplotypeScoresFixture(unittest.TestCase):
         """The guard needs evidence: below its floor, a real failure still reports."""
         rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C"),
                 _row("chr1", 100, HAP_TWO, 0.4, 0.003, "chr1_100_A_G")]
-        tgt = self._targets([("chr1", "100", REPORTED)])
+        tgt = self._targets([("chr1", "100", "chr1;100;A;T (rs9)", "ALT")])
         (_n, _s, unreconciled), _text, msgs = self._run(rows, targets=tgt)
         self.assertEqual(len(unreconciled), 1, "a lone genuine failure must survive")
         self.assertFalse(any("mis-keyed" in m for m in msgs))
@@ -186,7 +195,7 @@ class HaplotypeScoresFixture(unittest.TestCase):
         rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C"),
                 _row("chr1", 100, HAP_TWO, 0.4, 0.003, "chr1_100_A_G")]
         self._write_source(rows)
-        tgt = self._targets([("chr1", "100", REPORTED)])
+        tgt = self._targets([("chr1", "100", "chr1;100;A;T (rs9)", "ALT")])
         out = os.path.join(self.dir, "out.tsv")
         rc = hs.main(["--results", self.dir, "--out", out, "--targets", tgt])
         self.assertEqual(rc, 0, "default is warn, never fail")
@@ -195,7 +204,7 @@ class HaplotypeScoresFixture(unittest.TestCase):
         rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C"),
                 _row("chr1", 100, HAP_TWO, 0.4, 0.003, "chr1_100_A_G")]
         self._write_source(rows)
-        tgt = self._targets([("chr1", "100", REPORTED)])
+        tgt = self._targets([("chr1", "100", "chr1;100;A;T (rs9)", "ALT")])
         out = os.path.join(self.dir, "out.tsv")
         rc = hs.main(["--results", self.dir, "--out", out, "--targets", tgt, "--strict"])
         self.assertEqual(rc, 1, "--strict opts in to failing")

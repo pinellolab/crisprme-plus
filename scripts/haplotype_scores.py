@@ -399,7 +399,7 @@ class Site(object):
 
     __slots__ = ("key", "chrom", "start", "strand", "spacer", "rows",
                  "haplotypes", "above", "scored_any", "max_cb",
-                 "reported_alignments", "seen_alignments")
+                 "reported_alignments", "seen_alignments", "applicable", "has_report")
 
     def __init__(self, key, chrom, start, strand, spacer):
         self.key = key
@@ -414,6 +414,8 @@ class Site(object):
         self.max_cb = None
         self.reported_alignments = set()
         self.seen_alignments = set()
+        self.applicable = False
+        self.has_report = False
 
     def add(self, row, cb_value, above, scored, aligned, hap_key):
         self.haplotypes.add(hap_key)                # COUNT first, and by haplotype
@@ -447,8 +449,15 @@ class Site(object):
         The only mechanism that distinguishes "these are all the haplotypes" from "these
         are the ones we could reconstruct". It fires in real data.
         """
-        if not self.reported_alignments:
+        # Three distinct answers, never collapsed:
+        #   unknown -- nothing told us what this site reported (no --targets)
+        #   n/a     -- it reported a REFERENCE haplotype, so there is no ALT haplotype
+        #              for it to appear among; the check does not apply
+        #   yes/no  -- it reported an ALT haplotype, and it is or is not among them
+        if not self.has_report:
             return "unknown"
+        if not self.applicable:
+            return "n/a"
         return "yes" if (self.reported_alignments & self.seen_alignments) else "no"
 
 
@@ -545,14 +554,53 @@ def file_header(source_path, source_kind, budget, threshold, recall, cap, strict
 # driver
 
 
-def read_reported(targets_path):
-    """``{(chrom, start): {alignment, ...}}`` -- each site's OWN reported alignment.
+_RSID = re.compile(r"\([^)]*\)")
 
-    Taken from the curated table the report ships (``Chromosome``, ``Position``,
-    ``Aligned_protospacer+PAM``). Without it the reconciliation cannot be evaluated and
-    every row says ``unknown`` -- which is honest, and never "yes".
+
+def canonical_variants(text):
+    """A comparable key for a variant set, whatever notation wrote it.
+
+    THE RECONCILIATION CANNOT USE THE ALIGNMENT STRING. The curated table's
+    ``Aligned_protospacer+PAM`` is the REPRESENTATIVE's own alignment; the per-haplotype
+    rows carry the haplotype's bases re-inserted into the CANDIDATE's alignment shape.
+    They are different objects by construction, and measurement agrees: over the
+    delivering run's ALT-origin sites the two strings are equal on 6 of 52, and no
+    normalisation (case, gaps, either column, any of the three blocks) lifts it above 9.
+    Matching on them would report ~90% of sites as unreconciled, which is noise.
+
+    The variant SET is comparable -- the same records, written in two notations:
+        curated  ``chr11;6482966;T;G (rs10136)``
+        per-row  ``chr11_6482966_T_G``
+    so both are reduced to a sorted tuple of ``chrom:pos:REF:ALT``.
     """
-    out = collections.defaultdict(set)
+    if not text:
+        return ()
+    text = _RSID.sub("", text).replace(" ", "")
+    out = []
+    for piece in text.split(","):
+        piece = piece.strip()
+        if not piece or piece.upper() == "NA":
+            continue
+        parts = re.split(r"[;_]", piece)
+        if len(parts) >= 4:
+            out.append("%s:%s:%s:%s" % (parts[0], parts[1],
+                                        parts[2].upper(), parts[3].upper()))
+    return tuple(sorted(out))
+
+
+Reported = collections.namedtuple("Reported", "variants origin")
+
+
+def read_reported(targets_path):
+    """``{(chrom, start): Reported}`` -- each site's own reported haplotype.
+
+    Keyed on the VARIANT SET (see ``canonical_variants``), and carrying the row's
+    REF/ALT origin: a REF-origin site's representative is the reference sequence, so it
+    has no ALT haplotype to appear among and reconciliation does not apply to it. Over
+    the delivering run that is 115 of 187 sites -- checking them would manufacture
+    failures.
+    """
+    out = {}
     with io.open(targets_path, "r", encoding="utf-8", errors="replace") as fh:
         reader = csv.reader(fh, delimiter="\t")
         try:
@@ -561,15 +609,18 @@ def read_reported(targets_path):
             return out
         idx = {n: i for i, n in enumerate(header)}
         c_i, p_i = idx.get("Chromosome"), idx.get("Position")
-        a_i = idx.get("Aligned_protospacer+PAM")
-        if c_i is None or p_i is None or a_i is None:
+        v_i, o_i = idx.get("Variant"), idx.get("REF/ALT_origin")
+        if c_i is None or p_i is None or v_i is None:
             raise HaplotypeScoreError(
                 "%s is not a curated results table: it needs Chromosome, Position and "
-                "Aligned_protospacer+PAM to say what each site's own reported alignment "
-                "is." % targets_path)
+                "Variant to say which haplotype each site reported." % targets_path)
         for row in reader:
-            if max(c_i, p_i, a_i) < len(row):
-                out[(row[c_i].strip(), row[p_i].strip())].add(row[a_i].strip())
+            if max(c_i, p_i, v_i) >= len(row):
+                continue
+            origin = (row[o_i].strip().lower()
+                      if o_i is not None and o_i < len(row) else "")
+            out[(row[c_i].strip(), row[p_i].strip())] = Reported(
+                variants=canonical_variants(row[v_i]), origin=origin)
     return out
 
 
@@ -608,7 +659,13 @@ def build(results_dir, out_path, cap=0, score_source="harvest", strict=False,
             site = sites.get(obs.site)
             if site is None:
                 site = Site(obs.site, obs.chrom, obs.start, obs.strand, obs.spacer)
-                site.reported_alignments = set(reported.get((obs.chrom, obs.start), ()))
+                rep = reported.get((obs.chrom, obs.start))
+                site.has_report = rep is not None
+                if rep is not None:
+                    # REF-origin: the representative IS the reference sequence, so it has
+                    # no ALT haplotype to appear among. Not applicable, not a failure.
+                    site.applicable = (rep.origin == "alt") and bool(rep.variants)
+                    site.reported_alignments = {rep.variants} if site.applicable else set()
                 sites[obs.site] = site
             cfd, cb, status = classify(obs, budget, obs.block)
             above = cb is not None and cb >= threshold
@@ -635,7 +692,8 @@ def build(results_dir, out_path, cap=0, score_source="harvest", strict=False,
                 "max_af": obs.maf or "NA",
                 "scope_reason": source_kind,
             }
-            site.add(row, cb, above, status == ST_SCORED, obs.aligned_alt,
+            site.add(row, cb, above, status == ST_SCORED,
+                     canonical_variants(obs.variants),
                      hap_key=obs.variants or obs.aligned_alt or "-")
 
     # A mis-keyed comparison looks exactly like a catastrophic finding. Before reporting
