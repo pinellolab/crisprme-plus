@@ -97,7 +97,8 @@ COLUMNS = [
     "cfd", "crispr_bulge", "score_status",
     "above_threshold", "in_top1000_cfd", "in_top1000_cb",
     "rank_in_site_by_score", "score_vs_site_reported",
-    "n_carriers", "carriers",
+    "n_carriers", "carriers_homozygous", "carriers_heterozygous",
+    "carrier_panels", "carriers",
     "oligo_seq", "oligo_len", "oligo_status",
     "oligo_group_id", "oligo_group_size", "oligo_group_carriers",
     "variants_in_window_n", "max_af",
@@ -192,6 +193,65 @@ def budget_text(budget):
     alignment says which budget failed to find one."""
     return "%dmm/%dDNA/%dRNA/%dtotal" % (
         budget["mismatches"], budget["dna"], budget["rna"], budget["max_total"])
+
+
+# --------------------------------------------------------------------------- #
+# carriers -- a reagent list, reported plainly
+
+
+PANEL_1000G = re.compile(r"^(NA|HG)\d")
+PANEL_HGDP = re.compile(r"^HGDP\d")
+
+
+def carrier_breakdown(text):
+    """``(n, homozygous, heterozygous, panels)`` from a ``SAMPLE:slot`` carrier string.
+
+    WHY THIS IS A COLUMN AND NOT A NOTE. 1000G and HGDP lines are commercially available, so
+    a carrier id is something a reader can act on: test the haplotype in a genome that
+    already has it instead of engineering it. Zygosity decides how they QUANTIFY, not
+    whether they can test -- allele-specific quantification handles a heterozygote fine.
+    So this is REPORTED, never ranked on and never used to filter or warn.
+
+    A sample appearing on both slots is homozygous for that haplotype. ``panels`` says
+    which collection an id belongs to: not every carrier id is a standard accession
+    (1,177 of 39,446 tokens on the delivering run were neither 1000G- nor HGDP-shaped),
+    so the reader can see what they are looking at rather than be told it is orderable.
+    """
+    per = collections.defaultdict(set)
+    any_slot = False
+    for token in (text or "").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if ":" in token:
+            sample, slot = token.rsplit(":", 1)
+            any_slot = True
+        else:
+            sample, slot = token, "?"
+        per[sample.strip()].add(slot.strip())
+    if not per:
+        return 0, "0", "0", "-"
+    if not any_slot:
+        # THE SOURCE DOES NOT SAY. Only the SAMPLE:slot form (extract-flanks) records which
+        # chromosome copy carries the haplotype; the per-haplotype results columns give bare
+        # sample names. Printing 0 homozygous here would read as "none are", which is the
+        # exact failure this file exists to prevent: a not-measured cell that looks like a
+        # measured zero.
+        return len(per), "unknown", "unknown", _panel_text(per)
+    hom = sum(1 for slots in per.values() if len(slots) >= 2)
+    return len(per), str(hom), str(len(per) - hom), _panel_text(per)
+
+
+def _panel_text(per):
+    panels = collections.Counter()
+    for sample in per:
+        if PANEL_HGDP.match(sample):
+            panels["HGDP"] += 1
+        elif PANEL_1000G.match(sample):
+            panels["1000G"] += 1
+        else:
+            panels["other"] += 1
+    return ",".join("%s:%d" % (k, panels[k]) for k in sorted(panels)) or "-"
 
 
 # --------------------------------------------------------------------------- #
@@ -668,6 +728,7 @@ def build(results_dir, out_path, cap=0, score_source="harvest", strict=False,
                     site.reported_alignments = {rep.variants} if site.applicable else set()
                 sites[obs.site] = site
             cfd, cb, status = classify(obs, budget, obs.block)
+            _cb = carrier_breakdown(obs.samples)
             above = cb is not None and cb >= threshold
             row = {
                 "site_key": obs.site, "chrom": obs.chrom, "site_start": obs.start,
@@ -683,7 +744,10 @@ def build(results_dir, out_path, cap=0, score_source="harvest", strict=False,
                 "in_top1000_cfd": "unknown", "in_top1000_cb": "unknown",
                 "rank_in_site_by_score": "",
                 "score_vs_site_reported": "",
-                "n_carriers": str(len([s for s in obs.samples.split(",") if s.strip()])),
+                "n_carriers": str(_cb[0]),
+                "carriers_homozygous": _cb[1],
+                "carriers_heterozygous": _cb[2],
+                "carrier_panels": _cb[3],
                 "carriers": "" if anonymise else obs.samples,
                 "oligo_seq": "", "oligo_len": "0", "oligo_status": "no-geometry",
                 "oligo_group_id": "", "oligo_group_size": "", "oligo_group_carriers": "",

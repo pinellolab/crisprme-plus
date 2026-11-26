@@ -289,3 +289,46 @@ class HaplotypeScoresFixture(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class CarrierReporting(unittest.TestCase):
+    """Carriers are a reagent list: 1000G and HGDP lines can be bought, so a carrier id is
+    something a reader acts on. Zygosity is REPORTED so they can plan the quantification --
+    allele-specific quantification handles a heterozygote, so it is never a filter, a
+    warning, or a reason to prefer one line over another."""
+
+    def test_a_sample_on_both_slots_is_homozygous(self):
+        n, hom, het, _panels = hs.carrier_breakdown("S1:0,S1:1,S2:0")
+        self.assertEqual((n, hom, het), (2, "1", "1"))
+
+    def test_zygosity_is_counted_not_ranked(self):
+        """A haplotype carried only heterozygously is reported, never flagged."""
+        n, hom, het, _p = hs.carrier_breakdown("S1:0,S2:1,S3:0")
+        self.assertEqual((n, hom, het), (3, "0", "3"))
+
+    def test_a_source_without_slots_says_unknown_not_zero(self):
+        """THE BUG THIS PINS. Only the SAMPLE:slot form records which chromosome copy
+        carries the haplotype; the per-haplotype results columns give bare sample names.
+        Printing 0 homozygous there reads as 'none are', when the truth is 'this source
+        does not say' -- a not-measured cell wearing the clothes of a measured zero, which
+        is the exact failure this file exists to prevent. Seen on real data: 690 rows all
+        reporting 0 homozygous."""
+        n, hom, het, panels = hs.carrier_breakdown("S1,S2,S3")
+        self.assertEqual(n, 3, "the carriers are still counted")
+        self.assertEqual(hom, "unknown")
+        self.assertEqual(het, "unknown")
+        self.assertNotEqual(hom, "0", "never a measured-looking zero")
+        self.assertTrue(panels, "the panel breakdown still works without slots")
+
+    def test_panels_are_named_so_nothing_implies_orderability(self):
+        """Not every carrier id is a standard accession; say which collection it is from
+        rather than implying every one can be bought."""
+        _n, _hom, _het, panels = hs.carrier_breakdown(
+            "NA19144:0,HG01052:1,HGDP00197:0,LP6005441-DNA_A11:1,SS6004474:0")
+        self.assertIn("1000G:2", panels)
+        self.assertIn("HGDP:1", panels)
+        self.assertIn("other:2", panels)
+
+    def test_no_carriers_is_zero_not_a_crash(self):
+        self.assertEqual(hs.carrier_breakdown(""), (0, "0", "0", "-"))
+        self.assertEqual(hs.carrier_breakdown(None), (0, "0", "0", "-"))
