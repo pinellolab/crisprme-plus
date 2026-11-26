@@ -98,7 +98,8 @@ COLUMNS = [
     "above_threshold", "in_top1000_cfd", "in_top1000_cb",
     "rank_in_site_by_score", "score_vs_site_reported",
     "n_carriers", "carriers_homozygous", "carriers_heterozygous",
-    "carrier_panels", "carriers",
+    "carrier_panels", "carrier_populations", "carrier_superpopulations",
+    "carriers",
     "oligo_seq", "oligo_len", "oligo_status",
     "oligo_group_id", "oligo_group_size", "oligo_group_carriers",
     "variants_in_window_n", "max_af",
@@ -203,7 +204,7 @@ PANEL_1000G = re.compile(r"^(NA|HG)\d")
 PANEL_HGDP = re.compile(r"^HGDP\d")
 
 
-def carrier_breakdown(text):
+def carrier_breakdown(text, ancestry=None):
     """``(n, homozygous, heterozygous, panels)`` from a ``SAMPLE:slot`` carrier string.
 
     WHY THIS IS A COLUMN AND NOT A NOTE. 1000G and HGDP lines are commercially available, so
@@ -230,16 +231,60 @@ def carrier_breakdown(text):
             sample, slot = token, "?"
         per[sample.strip()].add(slot.strip())
     if not per:
-        return 0, "0", "0", "-"
+        return 0, "0", "0", "-", "unknown", "unknown"
     if not any_slot:
         # THE SOURCE DOES NOT SAY. Only the SAMPLE:slot form (extract-flanks) records which
         # chromosome copy carries the haplotype; the per-haplotype results columns give bare
         # sample names. Printing 0 homozygous here would read as "none are", which is the
         # exact failure this file exists to prevent: a not-measured cell that looks like a
         # measured zero.
-        return len(per), "unknown", "unknown", _panel_text(per)
+        return (len(per), "unknown", "unknown", _panel_text(per),
+                _ancestry_text(per, ancestry, "population"),
+                _ancestry_text(per, ancestry, "superpopulation"))
     hom = sum(1 for slots in per.values() if len(slots) >= 2)
-    return len(per), str(hom), str(len(per) - hom), _panel_text(per)
+    return (len(per), str(hom), str(len(per) - hom), _panel_text(per),
+            _ancestry_text(per, ancestry, "population"),
+            _ancestry_text(per, ancestry, "superpopulation"))
+
+
+def read_ancestry(results_dir):
+    """``{sample: {...}}`` from the run's own ``.sampleID.txt``, or ``{}``.
+
+    The run writes the ancestry of every individual it searched, and no delivered file
+    carries it: the report keeps only the superpopulation for one embedded chart, and the
+    shared panel reader keeps only the sample id. Reading it here costs one small file and
+    turns a carrier id into something a reader can reason about. An absent file means
+    absent columns, never an invented label.
+    """
+    path = os.path.join(results_dir, ".sampleID.txt")
+    if not os.path.isfile(path):
+        return {}
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.append(here)
+    try:
+        from run_records import read_panel_meta
+    except ImportError:
+        return {}
+    try:
+        return read_panel_meta([path])
+    except (OSError, ValueError):
+        return {}
+
+
+def _ancestry_text(per, ancestry, field):
+    """``EUR:12,AFR:3`` over the carriers, or ``unknown`` when the panel file is absent.
+
+    'unknown', never blank and never an empty count: an absent panel file must not read
+    as an undiverse panel.
+    """
+    if not ancestry:
+        return "unknown"
+    counts = collections.Counter()
+    for sample in per:
+        label = (ancestry.get(sample) or {}).get(field) or "unlabelled"
+        counts[label] += 1
+    return ",".join("%s:%d" % (k, counts[k]) for k in sorted(counts)) or "-"
 
 
 def _panel_text(per):
@@ -691,6 +736,9 @@ def build(results_dir, out_path, cap=0, score_source="harvest", strict=False,
     budget = read_budget(results_dir)
     source_path, source_kind = probe_source(results_dir)
     reported = read_reported(targets) if targets else {}
+    ancestry = read_ancestry(results_dir)
+    say("haplotype-scores: ancestry for %s individual(s) from the run's .sampleID.txt"
+        % (len(ancestry) if ancestry else "no"))
     if targets:
         say("haplotype-scores: reported alignments for %d site(s) from %s"
             % (len(reported), os.path.basename(targets)))
@@ -728,7 +776,7 @@ def build(results_dir, out_path, cap=0, score_source="harvest", strict=False,
                     site.reported_alignments = {rep.variants} if site.applicable else set()
                 sites[obs.site] = site
             cfd, cb, status = classify(obs, budget, obs.block)
-            _cb = carrier_breakdown(obs.samples)
+            _cb = carrier_breakdown(obs.samples, ancestry)
             above = cb is not None and cb >= threshold
             row = {
                 "site_key": obs.site, "chrom": obs.chrom, "site_start": obs.start,
@@ -748,6 +796,8 @@ def build(results_dir, out_path, cap=0, score_source="harvest", strict=False,
                 "carriers_homozygous": _cb[1],
                 "carriers_heterozygous": _cb[2],
                 "carrier_panels": _cb[3],
+                "carrier_populations": _cb[4],
+                "carrier_superpopulations": _cb[5],
                 "carriers": "" if anonymise else obs.samples,
                 "oligo_seq": "", "oligo_len": "0", "oligo_status": "no-geometry",
                 "oligo_group_id": "", "oligo_group_size": "", "oligo_group_carriers": "",

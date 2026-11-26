@@ -298,12 +298,12 @@ class CarrierReporting(unittest.TestCase):
     warning, or a reason to prefer one line over another."""
 
     def test_a_sample_on_both_slots_is_homozygous(self):
-        n, hom, het, _panels = hs.carrier_breakdown("S1:0,S1:1,S2:0")
+        n, hom, het = hs.carrier_breakdown("S1:0,S1:1,S2:0")[:3]
         self.assertEqual((n, hom, het), (2, "1", "1"))
 
     def test_zygosity_is_counted_not_ranked(self):
         """A haplotype carried only heterozygously is reported, never flagged."""
-        n, hom, het, _p = hs.carrier_breakdown("S1:0,S2:1,S3:0")
+        n, hom, het = hs.carrier_breakdown("S1:0,S2:1,S3:0")[:3]
         self.assertEqual((n, hom, het), (3, "0", "3"))
 
     def test_a_source_without_slots_says_unknown_not_zero(self):
@@ -313,7 +313,7 @@ class CarrierReporting(unittest.TestCase):
         does not say' -- a not-measured cell wearing the clothes of a measured zero, which
         is the exact failure this file exists to prevent. Seen on real data: 690 rows all
         reporting 0 homozygous."""
-        n, hom, het, panels = hs.carrier_breakdown("S1,S2,S3")
+        n, hom, het, panels = hs.carrier_breakdown("S1,S2,S3")[:4]
         self.assertEqual(n, 3, "the carriers are still counted")
         self.assertEqual(hom, "unknown")
         self.assertEqual(het, "unknown")
@@ -323,12 +323,37 @@ class CarrierReporting(unittest.TestCase):
     def test_panels_are_named_so_nothing_implies_orderability(self):
         """Not every carrier id is a standard accession; say which collection it is from
         rather than implying every one can be bought."""
-        _n, _hom, _het, panels = hs.carrier_breakdown(
-            "NA19144:0,HG01052:1,HGDP00197:0,LP6005441-DNA_A11:1,SS6004474:0")
+        panels = hs.carrier_breakdown(
+            "NA19144:0,HG01052:1,HGDP00197:0,LP6005441-DNA_A11:1,SS6004474:0")[3]
         self.assertIn("1000G:2", panels)
         self.assertIn("HGDP:1", panels)
         self.assertIn("other:2", panels)
 
     def test_no_carriers_is_zero_not_a_crash(self):
-        self.assertEqual(hs.carrier_breakdown(""), (0, "0", "0", "-"))
-        self.assertEqual(hs.carrier_breakdown(None), (0, "0", "0", "-"))
+        self.assertEqual(hs.carrier_breakdown("")[:4], (0, "0", "0", "-"))
+        self.assertEqual(hs.carrier_breakdown(None)[:4], (0, "0", "0", "-"))
+
+    # -- ancestry ----------------------------------------------------------- #
+
+    def test_ancestry_is_summarised_per_carrier_set(self):
+        """The run knows the ancestry of everyone it searched; no delivered file says so."""
+        anc = {"S1": {"population": "Yoruba", "superpopulation": "AFR", "sex": "male"},
+               "S2": {"population": "Tuscan", "superpopulation": "EUR", "sex": "female"},
+               "S3": {"population": "Yoruba", "superpopulation": "AFR", "sex": "female"}}
+        out = hs.carrier_breakdown("S1:0,S2:0,S3:1", ancestry=anc)
+        self.assertIn("Yoruba:2", out[4])
+        self.assertIn("Tuscan:1", out[4])
+        self.assertIn("AFR:2", out[5])
+        self.assertIn("EUR:1", out[5])
+
+    def test_no_panel_file_says_unknown_not_an_undiverse_panel(self):
+        """An absent ancestry file must not read as 'this panel has no diversity'."""
+        out = hs.carrier_breakdown("S1:0,S2:1", ancestry={})
+        self.assertEqual(out[4], "unknown")
+        self.assertEqual(out[5], "unknown")
+
+    def test_a_carrier_missing_from_the_panel_is_unlabelled_not_dropped(self):
+        anc = {"S1": {"population": "Yoruba", "superpopulation": "AFR", "sex": ""}}
+        out = hs.carrier_breakdown("S1:0,MYSTERY:1", ancestry=anc)
+        self.assertIn("unlabelled:1", out[4])
+        self.assertIn("Yoruba:1", out[4])
