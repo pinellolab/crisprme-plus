@@ -49,6 +49,8 @@ import glob
 import gzip
 import inspect
 import shutil
+import unittest.mock as mock
+import builtins
 import io
 import json
 import os
@@ -5047,11 +5049,7 @@ class TestPhaseLabelJoin(unittest.TestCase):
             ("chr1", "100", "+", "GGG-TTT", "AAA-CCC", "chr1_100_A_C", "CONFIRMED"),
             ("chr1", "200", "-", "GGGTTT", "AAACCC", "chr1_200_G_T", "PUTATIVE"),
         ])
-        want = {
-            gr._phase_key("chr1", "100", "+", "GGG-TTT", "AAA-CCC", "chr1_100_A_C"),
-            gr._phase_key("chr1", "200", "-", "GGGTTT", "AAACCC", "chr1_200_G_T"),
-        }
-        got = gr.load_phase_labels(d, want)
+        got = gr.load_phase_labels(d, {("chr1", "100"), ("chr1", "200")})
         self.assertEqual(len(got), 2)
         self.assertEqual(set(got.values()), {"CONFIRMED", "PUTATIVE"})
 
@@ -5060,10 +5058,10 @@ class TestPhaseLabelJoin(unittest.TestCase):
         PUTATIVE, and must not read blank."""
         d = tempfile.mkdtemp(prefix="phasejoin_")
         self.addCleanup(shutil.rmtree, d, True)
-        self.assertIsNone(gr.load_phase_labels(d, {("chr1", "1", "+", "x", "y", "z")}),
+        self.assertIsNone(gr.load_phase_labels(d, {("chr1", "1")}),
                           "no companion at all -> None, which renders not-computed")
         self._companion(d, [("chr1", "100", "+", "G", "A", "chr1_100_A_C", "CONFIRMED")])
-        got = gr.load_phase_labels(d, {gr._phase_key("chr9", "9", "+", "G", "A", "chr9_9_A_C")})
+        got = gr.load_phase_labels(d, {("chr9", "9")})
         self.assertEqual(got, {}, "a companion that does not name the row -> empty, "
                                   "which renders not-recorded")
         self.assertNotEqual(gr.PHASE_NOT_COMPUTED, gr.PHASE_NOT_RECORDED)
@@ -5076,7 +5074,7 @@ class TestPhaseLabelJoin(unittest.TestCase):
         self._companion(d, [("chr1", "100", "+", "G", "A",
                              "chr1_200_G_T,chr1_100_A_C", "CONFIRMED")])
         key = gr._phase_key("chr1", "100", "+", "G", "A", "chr1_100_A_C,chr1_200_G_T")
-        self.assertEqual(gr.load_phase_labels(d, {key}), {key: "CONFIRMED"})
+        self.assertEqual(gr.load_phase_labels(d, {("chr1", "100")}), {key: "CONFIRMED"})
 
     def test_several_per_chromosome_companions_are_all_read(self):
         d = tempfile.mkdtemp(prefix="phasejoin_")
@@ -5085,9 +5083,7 @@ class TestPhaseLabelJoin(unittest.TestCase):
                         name="x_chr1.phase_confirmation.tsv")
         self._companion(d, [("chr2", "2", "+", "G", "A", "chr2_2_A_C", "PUTATIVE")],
                         name="x_chr2.phase_confirmation.tsv")
-        want = {gr._phase_key("chr1", "1", "+", "G", "A", "chr1_1_A_C"),
-                gr._phase_key("chr2", "2", "+", "G", "A", "chr2_2_A_C")}
-        self.assertEqual(len(gr.load_phase_labels(d, want)), 2)
+        self.assertEqual(len(gr.load_phase_labels(d, {("chr1", "1"), ("chr2", "2")})), 2)
 
     def test_only_the_keys_asked_for_are_kept(self):
         """The companion can be gigabytes; the report needs a few thousand rows. The
@@ -5097,6 +5093,61 @@ class TestPhaseLabelJoin(unittest.TestCase):
         rows = [("chr1", str(i), "+", "G", "A", "chr1_%d_A_C" % i, "CONFIRMED")
                 for i in range(500)]
         self._companion(d, rows)
-        want = {gr._phase_key("chr1", "7", "+", "G", "A", "chr1_7_A_C")}
-        got = gr.load_phase_labels(d, want)
+        got = gr.load_phase_labels(d, {("chr1", "7")})
         self.assertEqual(len(got), 1, "500 rows streamed, one kept")
+
+
+class TestPhaseCompanionIsReadOnce(unittest.TestCase):
+    """The companions total several GB on a genome-wide run, so the report must read them
+    ONCE, not once per site. The first version called the loader inside the per-site loop,
+    which re-reads every file for every site -- quadratic in the worst possible place.
+    """
+
+    def test_the_loader_reads_each_companion_exactly_once_per_call(self):
+        d = tempfile.mkdtemp(prefix="phaseonce_")
+        self.addCleanup(shutil.rmtree, d, True)
+        for n in ("a", "b"):
+            with open(os.path.join(d, "x_%s.phase_confirmation.tsv" % n), "w") as fh:
+                fh.write("#Chromosome\tPosition\tDirection\tcrRNA\tDNA\tSNP\t"
+                         "Phase_Confirmation\n")
+                fh.write("chr1\t100\t+\tG\tA\tchr1_100_A_C\tCONFIRMED\n")
+
+        opened = []
+        real_open = builtins.open
+
+        def counting_open(path, *a, **k):
+            if str(path).endswith("phase_confirmation.tsv"):
+                opened.append(str(path))
+            return real_open(path, *a, **k)
+
+        with mock.patch.object(builtins, "open", counting_open):
+            gr.load_phase_labels(d, {("chr1", "100")})
+        self.assertEqual(len(opened), 2, "two companions, opened once each")
+        self.assertEqual(len(set(opened)), 2)
+
+    def test_the_coarse_filter_rejects_before_building_a_key(self):
+        """The pre-filter is what bounds memory: rows at sites this report never shows
+        must be rejected on a cheap tuple, not parsed into a full identity key."""
+        d = tempfile.mkdtemp(prefix="phaseonce_")
+        self.addCleanup(shutil.rmtree, d, True)
+        with open(os.path.join(d, "x.phase_confirmation.tsv"), "w") as fh:
+            fh.write("#Chromosome\tPosition\tDirection\tcrRNA\tDNA\tSNP\t"
+                     "Phase_Confirmation\n")
+            for i in range(2000):
+                fh.write("chr1\t%d\t+\tG\tA\tchr1_%d_A_C\tCONFIRMED\n" % (i, i))
+        got = gr.load_phase_labels(d, {("chr1", "1500")})
+        self.assertEqual(len(got), 1, "2000 rows streamed, one kept")
+
+    def test_a_shifted_crispr_bulge_start_is_still_matched(self):
+        """A row whose CRISPR-Bulge alignment sits at a different start than its CFD
+        alignment must still find its label -- those differ on about 6% of real rows, and
+        a pre-filter keyed on one axis alone would drop exactly those."""
+        d = tempfile.mkdtemp(prefix="phaseonce_")
+        self.addCleanup(shutil.rmtree, d, True)
+        with open(os.path.join(d, "x.phase_confirmation.tsv"), "w") as fh:
+            fh.write("#Chromosome\tPosition\tDirection\tcrRNA\tDNA\tSNP\t"
+                     "Phase_Confirmation\n")
+            fh.write("chr1\t203\t+\tG\tA\tchr1_203_A_C\tPUTATIVE\n")
+        # the CFD start is 200; only the CB start (203) matches this companion row
+        got = gr.load_phase_labels(d, {("chr1", "200"), ("chr1", "203")})
+        self.assertEqual(list(got.values()), ["PUTATIVE"])

@@ -446,10 +446,16 @@ PHASE_NOT_COMPUTED = "not-computed-on-this-path"
 PHASE_NOT_RECORDED = "not-recorded"
 
 
-def load_phase_labels(folder, wanted):
-    """``{key: "CONFIRMED"|"PUTATIVE"}`` for the keys asked for, or ``None``.
+def load_phase_labels(folder, coarse):
+    """``{key: "CONFIRMED"|"PUTATIVE"}`` for the sites asked for, or ``None``.
 
-    ``wanted`` is a set of identity keys as ``_phase_key`` builds them. ``None`` means no
+    CALL THIS ONCE PER REPORT, NEVER PER SITE. The companions total several GB on a
+    genome-wide run; calling it inside the per-site loop re-reads all of them for every
+    site, which is quadratic in the worst place possible.
+
+    ``coarse`` is a set of ``(chrom, position)`` pairs -- a cheap pre-filter that bounds
+    memory to the rows this report can display, taken from the integrated frame before any
+    clustering. Full identity keys are built only for rows that survive it. ``None`` means no
     companion was found at all, which the caller must render as a DIFFERENT state from "a
     companion exists and does not name this row": the first says the run never computed
     phase (an older build, a reference-only search, a path where the dict-less branch did
@@ -473,9 +479,9 @@ def load_phase_labels(folder, wanted):
                     f = line.rstrip("\n").split("\t")
                     if len(f) < 7:
                         continue
-                    key = _phase_key(f[0], f[1], f[2], f[3], f[4], f[5])
-                    if key in wanted:
-                        found[key] = f[6].strip()
+                    if (f[0].strip(), f[1].strip()) not in coarse:
+                        continue        # cheap reject before building a key
+                    found[_phase_key(f[0], f[1], f[2], f[3], f[4], f[5])] = f[6].strip()
         except OSError as exc:
             sys.stderr.write(
                 f"generate-report: phase companion unreadable ({exc}); the rows it would "
@@ -6295,6 +6301,26 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
         # companion row dicts for that SITE (so a report table row, keyed by its raw
         # (Chromosome, Start_coordinate_(highest_CFD)), can find every observed
         # haplotype at its site to populate the per-site modal).
+        # ONE read of the phase companions for the whole report. The coarse set is every
+        # (chromosome, start) the integrated frame names on any axis, so a row whose
+        # CRISPR-Bulge alignment sits at a different start than its CFD alignment is still
+        # matched -- those differ on about 6% of rows, and keying the pre-filter on one
+        # axis alone would drop exactly those.
+        _coarse = set()
+        for _c in ("Chromosome",):
+            if _c not in df.columns:
+                break
+        else:
+            _chroms = df["Chromosome"].astype(str).tolist()
+            for _startcol in ("Start_coordinate_(highest_CFD)",
+                              "Start_coordinate_(fewest_mm+b)",
+                              "Start_coordinate_(highest_CRISPR_BULGE)"):
+                if _startcol in df.columns:
+                    for _ch, _st in zip(_chroms, df[_startcol].astype(str).tolist()):
+                        _coarse.add((_ch.strip(), _st.strip()))
+        _phase = load_phase_labels(
+            result_dir or os.path.dirname(os.path.abspath(integrated_tsv)), _coarse)
+
         site_map = {}
         for cluster in sites:
             site_start = min(o["start"] for o in cluster)
@@ -6355,15 +6381,6 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
 
             if len(by_varset) < 2:
                 continue  # need >=2 DISTINCT variant haplotypes to be interesting
-
-            # Key every row we are about to emit, then look the labels up in one pass.
-            # The small side is indexed and the big side streamed -- see load_phase_labels.
-            _want = set()
-            for _r in by_varset.values():
-                _want.add(_phase_key(_r["chrom"], _r.get("row_start", ""), _r["strand"],
-                                     _r.get("aln_spacer", "NA"), _r["aligned"], _r["varset"]))
-            _phase = load_phase_labels(
-                result_dir or os.path.dirname(os.path.abspath(integrated_tsv)), _want)
 
             emitted = []
             for rec in by_varset.values():
