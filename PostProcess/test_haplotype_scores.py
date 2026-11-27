@@ -1123,5 +1123,140 @@ class TestABudgetLabelIsNotAGate(HaplotypeScoresMixin, unittest.TestCase):
                          "6mm/1DNA/1RNA/?total")
 
 
+class TestAContigNameWithAnUnderscoreKeepsItsAlleles(unittest.TestCase):
+    """hg38 ships ~500 contigs whose NAME contains the field separator --
+    chr1_KI270706v1_random, chrUn_KI270302v1. Splitting left-to-right took the first
+    four pieces, so chr1_KI270706v1_random_12345_A_T reduced to
+    chr1:KI270706v1:RANDOM:12345 with THE ALLELES DROPPED, and two different variants at
+    that position compared EQUAL -- a site reconciling 'yes' against a haplotype it does
+    not carry. A false yes is the one answer this file must never give."""
+
+    def test_two_variants_at_one_position_on_an_alt_contig_do_not_collide(self):
+        a = hs.canonical_variants("chr1_KI270706v1_random_12345_A_T")
+        b = hs.canonical_variants("chr1_KI270706v1_random_12345_G_C")
+        self.assertNotEqual(a, b, "different variants reduced to the same key")
+
+    def test_the_alleles_survive(self):
+        got = hs.canonical_variants("chr1_KI270706v1_random_12345_A_T")[0]
+        self.assertTrue(got.endswith(":12345:A:T"), got)
+        self.assertTrue(got.startswith("chr1_KI270706v1_random:"), got)
+
+    def test_the_two_notations_still_agree_on_a_plain_contig(self):
+        self.assertEqual(hs.canonical_variants("chr11_6482966_T_G"),
+                         hs.canonical_variants("chr11;6482966;T;G (rs10136)"))
+
+    def test_a_shape_it_cannot_read_is_kept_whole_not_invented(self):
+        """Position must be numeric. If it is not, this is not the shape we think, and a
+        made-up key could collide with a real one."""
+        got = hs.canonical_variants("something_odd_here_now")
+        self.assertEqual(got, ("SOMETHING_ODD_HERE_NOW",))
+
+
+class TestTheTargetsAccountingKnowsTheGuide(HaplotypeScoresMixin, unittest.TestCase):
+    """read_reported and site_key went per-guide when the multi-guide collision was
+    fixed, but wanted/seen_anchors/ref_only_anchors stayed keyed on (chrom, start) -- so
+    one guide's rows marked the coordinate 'seen' for every other guide curated at it,
+    and a requested (locus, guide) that produced nothing vanished from a file whose
+    header promises such sites are counted and named."""
+
+    OTHER = "TTTTGGGGCCCCAAAATTTTNNN"
+
+    def test_a_second_guide_at_the_same_locus_is_reported_as_a_gap(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT", SPACER),
+                             ("chr1", "100", "chr1;100;A;T (rs9)", "ALT", self.OTHER)])
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        gap = [m for m in msgs if "NO rows" in m]
+        self.assertTrue(gap, "the second guide's site vanished silently: %s" % msgs)
+        self.assertIn(self.OTHER, gap[0])
+
+    def test_the_counts_in_the_two_log_lines_agree(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT", SPACER),
+                             ("chr1", "100", "chr1;100;A;T (rs9)", "ALT", self.OTHER)])
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        restricted = [m for m in msgs if "restricted to the" in m][0]
+        self.assertIn("2 site(s)", restricted,
+                      "two curated (locus,guide) pairs were counted as one")
+
+    def test_a_guideless_table_is_unchanged(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT")])
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        self.assertFalse([m for m in msgs if "NO rows" in m], msgs)
+
+
+class TestTheAltVsRefVerdictDoesNotDependOnRowOrder(HaplotypeScoresMixin,
+                                                    unittest.TestCase):
+    """The ALT-in-targets / REF-only-in-source bucket used a lookup that fell back to
+    'any curated row at this coordinate', so at a locus curated under two guides the
+    verdict was whichever row the dict happened to yield: the SAME data gave 'GAP' or
+    'no variant haplotype here' depending on the order of lines in the table."""
+
+    OTHER = "TTTTGGGGCCCCAAAATTTTNNN"
+
+    def _verdict(self, order):
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C", origin="ref")]
+        tgt = self._targets(order)
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        return ("GAP" if [m for m in msgs if "ALT-origin in the curated table" in m]
+                else ("CLEAN" if [m for m in msgs if "carry only reference rows" in m]
+                      else "NONE"))
+
+    def test_both_orders_give_the_same_answer(self):
+        a = [("chr1", "100", "chr1;100;A;C (rs1)", "ALT", SPACER),
+             ("chr1", "100", "chr1;100;A;T (rs9)", "REF", self.OTHER)]
+        self.assertEqual(self._verdict(a), self._verdict(list(reversed(a))),
+                         "the verdict flipped with the order of lines")
+
+    def test_the_guide_that_was_curated_alt_is_the_one_reported(self):
+        a = [("chr1", "100", "chr1;100;A;C (rs1)", "ALT", SPACER)]
+        self.assertEqual(self._verdict(a), "GAP")
+
+    def test_an_ambiguous_locus_is_in_neither_bucket(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C", origin="ref")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT"),
+                             ("chr1", "100", "chr1;100;A;T (rs9)", "REF")])
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        self.assertTrue([m for m in msgs if "incompatibly" in m], msgs)
+        self.assertFalse([m for m in msgs if "carry only reference rows" in m
+                          and "incompatibly" not in m],
+                         "an unknown was rendered as a measured clean")
+
+
+class TestACutFileIsNotAnUnmeasuredRow(HaplotypeScoresMixin, unittest.TestCase):
+
+    def test_a_row_cut_mid_line_refuses(self):
+        path = os.path.join(self.dir, "x_observed_haplotypes_raw.tsv")
+        full = "\t".join(_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C"))
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("\t".join(_header()) + "\n")
+            fh.write(full + "\n")
+            fh.write("\t".join(full.split("\t")[:9]) + "\n")       # cut mid-row
+        with self.assertRaises(hs.HaplotypeScoreError) as cm:
+            hs.build(self.dir, os.path.join(self.dir, "o.tsv"), log=lambda m: None)
+        self.assertIn("truncated", str(cm.exception))
+
+
+class TestANegativeCapMeansNoCap(HaplotypeScoresMixin, unittest.TestCase):
+    """-1 is CRISPRme's own 'off' (--max-total-edits, --max-degeneracy), so a user asking
+    for no cap got ranked[:-1]: every site truncated by one row, a single-row site
+    emptied, silently, exit 0."""
+
+    def test_minus_one_writes_every_row(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C")]
+        _res, text, msgs = self._run(rows, cap=-1)
+        self.assertTrue(self._parse(text), "a single-row site was emptied")
+        self.assertTrue([m for m in msgs if "means NO cap" in m], msgs)
+
+    def test_minus_one_matches_zero(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C"),
+                _row("chr1", 100, HAP_TWO, 0.4, 0.003, "chr1_100_A_G")]
+        a = len(self._parse(self._run(rows, cap=-1)[1]))
+        self.setUp()
+        b = len(self._parse(self._run(rows, cap=0)[1]))
+        self.assertEqual(a, b)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

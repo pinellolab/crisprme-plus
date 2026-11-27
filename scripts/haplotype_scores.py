@@ -566,9 +566,20 @@ def harvest_rows(stream, spacer_hint=None):
             return ""
         return row[i].strip()
 
+    width = len(header)
     for row in reader:
         if not row or len(row) < 3:
             continue
+        if len(row) < width:
+            # A SOURCE CUT MID-ROW IS NOT A ROW WITH NO SCORES. Short rows used to fall
+            # through cell()'s bounds check and emit a complete-looking NA/unknown row,
+            # so "the file was truncated here" rendered as "this haplotype was never
+            # measured" -- two different absences, one of them invented.
+            raise HaplotypeScoreError(
+                "this table is truncated: a row has %d of %d fields (first cells: %s). "
+                "Rows after the cut would be written as never-measured, which is a "
+                "different fact from a damaged file. Refusing rather than reporting a "
+                "cut as a result." % (len(row), width, ",".join(row[:3])))
         chrom = row[chrom_i].strip() if chrom_i is not None and chrom_i < len(row) else ""
         spacer = (row[spacer_i].strip() if spacer_i is not None and spacer_i < len(row)
                   else (spacer_hint or ""))
@@ -807,8 +818,10 @@ def file_header(source_path, source_kind, budget, threshold, recall, cap, strict
         "#     n/a                        -- the curated table SAYS ref, so there is no",
         "#                                   ALT for it to appear among. A measured fact;",
         "#                                   never used for an absence.",
-        "#     unknown                    -- no --targets, so nothing said what it",
-        "#                                   reported",
+        "#     unknown                    -- nothing said what this site reported:",
+        "#                                   either no --targets, or --targets names the",
+        "#                                   locus only under a DIFFERENT guide (stderr",
+        "#                                   says which; this file cannot)",
         "#     unknown(origin-not-in-targets)        -- the curated table has no",
         "#                                   REF/ALT_origin column, so ref was never read",
         "#     unknown(unparsable-variant-in-targets) -- an ALT row whose Variant cell",
@@ -911,6 +924,16 @@ def canonical_variants(text):
         curated  ``chr11;6482966;T;G (rs10136)``
         per-row  ``chr11_6482966_T_G``
     so both are reduced to a sorted tuple of ``chrom:pos:REF:ALT``.
+
+    THE FIELDS ARE TAKEN FROM THE RIGHT. hg38 ships ~500 contigs whose NAME contains the
+    same underscore that separates the fields -- chr1_KI270706v1_random, chrUn_KI270302v1
+    -- and splitting left-to-right took the first four pieces, so
+    ``chr1_KI270706v1_random_12345_A_T`` reduced to ``chr1:KI270706v1:RANDOM:12345`` with
+    THE ALLELES DROPPED. Two different variants at that position then compared EQUAL, and
+    a site reconciled 'yes' against a haplotype it does not carry. A false yes is the one
+    answer this file must never give, because it says the enumeration is complete when it
+    is not. Position/REF/ALT are the last three fields; everything before them is the
+    contig, however many separators it contains.
     """
     if not text:
         return ()
@@ -922,8 +945,15 @@ def canonical_variants(text):
             continue
         parts = re.split(r"[;_]", piece)
         if len(parts) >= 4:
-            out.append("%s:%s:%s:%s" % (parts[0], parts[1],
-                                        parts[2].upper(), parts[3].upper()))
+            # from the RIGHT: pos, REF, ALT are the last three; the rest is the contig
+            pos, ref, alt = parts[-3], parts[-2], parts[-1]
+            chrom = "_".join(parts[:-3])
+            if not pos.isdigit():
+                # Not the shape we think it is. Keep the whole piece verbatim rather than
+                # inventing a key that might collide with a real one.
+                out.append(piece.upper())
+                continue
+            out.append("%s:%s:%s:%s" % (chrom, pos, ref.upper(), alt.upper()))
     return tuple(sorted(out))
 
 
@@ -999,6 +1029,16 @@ def read_reported(targets_path, say=None):
     return out
 
 
+def _acct_key(reported, obs):
+    """The key the --targets accounting counts this observation against.
+
+    Guide-qualified when the curated table named this (locus, guide); otherwise the
+    guide-less key, so a table with no guide column behaves exactly as before.
+    """
+    exact = (obs.chrom, obs.anchor_start, obs.spacer)
+    return exact if exact in reported else (obs.chrom, obs.anchor_start, "")
+
+
 def lookup_reported(reported, chrom, start, spacer):
     """The curated row for this site, matching on the guide when the table named one."""
     if not reported:
@@ -1013,6 +1053,13 @@ def build(results_dir, out_path, cap=0, strict=False,
           anonymise=False, pad_up=3, pad_down=6, log=None, targets=None):
     """Write the companion. Returns ``(n_rows, n_sites, unreconciled)``."""
     say = log or (lambda m: print(m, file=sys.stderr))
+    if cap is not None and cap < 0:
+        # -1 is CRISPRme's own "off" (--max-total-edits, --max-degeneracy), so a user
+        # asking for no cap got ranked[:-1] -- every site truncated by one row and a
+        # single-row site emptied, silently, exit 0. Same meaning as 0 here, and said.
+        say("haplotype-scores: --max-haplotypes %d means NO cap (as elsewhere in "
+            "CRISPRme); writing every haplotype." % cap)
+        cap = 0
     budget = read_budget(results_dir)
     source_path, source_kind = probe_source(results_dir, say)
     reported = read_reported(targets, say) if targets else {}
@@ -1041,10 +1088,23 @@ def build(results_dir, out_path, cap=0, strict=False,
 
     threshold, recall = _threshold()
     sites = collections.OrderedDict()
-    # The FILTER is coarse (chrom, start) on purpose: the precise match, which also
-    # takes the guide into account, happens in lookup_reported.
+    # THE ACCOUNTING IS PER (LOCUS, GUIDE), NOT PER LOCUS.
+    #
+    # read_reported and site_key have been per-guide since the multi-guide collision was
+    # fixed, but these sets were left keyed on (chrom, start) -- so one guide's rows
+    # marked the coordinate "seen" for EVERY other guide curated at it, and a requested
+    # (locus, guide) that produced nothing was silently absent from a file whose header
+    # promises such sites are counted and named. It also made the ALT-vs-REF check below
+    # pick an arbitrary curated row per coordinate, so that verdict flipped with the
+    # ORDER OF LINES in the curated table.
+    #
+    # The FILTER stays coarse on (chrom, start): a row is read if its coordinate was
+    # asked for at all, and the guide decides what is SAID about it. Narrowing the filter
+    # would silently drop rows whose guide spelling differs, which is a warning
+    # (guide_mismatch), not a drop.
     # Keyed on whether --targets was GIVEN, not on whether it yielded anything.
-    wanted = set((c, p) for c, p, _ in reported) if targets else None
+    wanted = set(reported) if targets else None
+    wanted_coarse = (set((c, pp) for c, pp, _ in reported) if targets else None)
     seen_anchors = set()        # anchors that produced an ALT haplotype row
     ref_only_anchors = set()    # anchors the source DOES hold, but only as reference
     guide_mismatch = set()      # the locus is in --targets, but under a different guide
@@ -1054,23 +1114,23 @@ def build(results_dir, out_path, cap=0, strict=False,
     with open_table(source_path) as stream:
         for obs in harvest_rows(stream):
             is_ref = bool(obs.origin) and obs.origin.lower() == "ref"
-            if wanted is not None and is_ref and (obs.chrom, obs.anchor_start) in wanted:
+            if wanted is not None and is_ref and (obs.chrom, obs.anchor_start) in wanted_coarse:
                 # RECORDED BEFORE THE REF FILTER. A curated table is mostly REF-origin
                 # (115 of 187 sites on the delivering run), and those sites are PRESENT in
                 # the source -- they simply carry no ALT haplotype. Dropping them before
                 # the anchor was noted made the gap warning call them "not enumerated
                 # here", which is false and would have mislabelled most of a real list.
-                ref_only_anchors.add((obs.chrom, obs.anchor_start))
+                ref_only_anchors.add(_acct_key(reported, obs))
             if is_ref:
                 continue                       # reference rows are not variant haplotypes
-            if wanted is not None and (obs.chrom, obs.anchor_start) not in wanted:
+            if wanted is not None and (obs.chrom, obs.anchor_start) not in wanted_coarse:
                 # Bounds memory to the sites actually asked for. Without --targets every
                 # site of the run is held at once, which a genome-wide sidecar (millions
                 # of rows x three blocks) will not fit in. Streaming with cluster close-out
                 # is the next step; see the note in the PR.
                 continue
             if wanted is not None:
-                seen_anchors.add((obs.chrom, obs.anchor_start))
+                seen_anchors.add(_acct_key(reported, obs))
             site = sites.get(obs.site)
             if site is None:
                 site = Site(obs.site, obs.chrom, obs.start, obs.strand, obs.spacer)
@@ -1172,26 +1232,46 @@ def build(results_dir, out_path, cap=0, strict=False,
         # A curated row that says ALT while the source holds only REF rows is NOT "no
         # variant haplotype here". The user's own table says there is one; this source
         # does not have it. Calling that a clean is the worst answer available.
-        contradicted = sorted(
-            k for k in ref_all
-            if (lambda r: r is not None and r is not _AMBIGUOUS and r.origin == "alt")(
-                reported.get((k[0], k[1], "")) or next(
-                    (v for (c, pp, _g), v in reported.items() if (c, pp) == k), None)))
-        ref_only = sorted(ref_all - set(contradicted))
+        #
+        # The lookup is EXACT on the accounting key. It used to fall back to "any curated
+        # row at this coordinate", so at a locus curated under two guides the verdict was
+        # whichever row the dict happened to yield -- the same data gave "GAP" or "no
+        # variant haplotype here" depending on the ORDER OF LINES in the table.
+        contradicted, ref_only, ambiguous_ref = [], [], []
+        for k in sorted(ref_all):
+            rep = reported.get(k)
+            if rep is _AMBIGUOUS:
+                # Nothing is known about what this locus reported, so it belongs in
+                # neither "gap" nor "clean". A bucket that asserts is worse than one
+                # that says it does not know.
+                ambiguous_ref.append(k)
+            elif rep is not None and rep.origin == "alt":
+                contradicted.append(k)
+            else:
+                ref_only.append(k)
+        if ambiguous_ref:
+            say("haplotype-scores: %d of the %d site(s) --targets names carry only "
+                "reference rows in %s AND are described more than once, incompatibly, in "
+                "the curated table -- so whether an ALT haplotype was expected there is "
+                "unknown. Not counted as a gap and NOT as 'no variant haplotype here'. "
+                "First: %s"
+                % (len(ambiguous_ref), len(wanted), os.path.basename(source_path),
+                   ", ".join("%s:%s" % (m[0], m[1]) for m in ambiguous_ref[:5])))
         if ref_only:
             say("haplotype-scores: %d of the %d site(s) --targets names are PRESENT in "
                 "%s but carry only reference rows, and the curated table agrees they are "
                 "REF-origin, so they have no ALT haplotype to list. That is 'no variant "
                 "haplotype here', NOT 'not enumerated'. First: %s"
                 % (len(ref_only), len(wanted), os.path.basename(source_path),
-                   ", ".join("%s:%s" % m for m in ref_only[:5])))
+                   ", ".join("%s:%s" % (m[0], m[1]) for m in ref_only[:5])))
         if contradicted:
             say("haplotype-scores: WARNING %d of the %d site(s) --targets names are "
                 "ALT-origin in the curated table but carry ONLY reference rows in %s. "
                 "The ALT haplotype the curated row reports is NOT in this source -- this "
                 "is a GAP, not 'no variant haplotype here'. First: %s"
                 % (len(contradicted), len(wanted), os.path.basename(source_path),
-                   ", ".join("%s:%s" % m for m in contradicted[:5])))
+                   ", ".join("%s:%s%s" % (m[0], m[1], (" guide %s" % m[2]) if m[2] else "")
+                             for m in contradicted[:5])))
         missing = sorted(wanted - seen_anchors - ref_all)
         if missing:
             say("haplotype-scores: WARNING %d of the %d site(s) --targets names produced "
@@ -1202,7 +1282,8 @@ def build(results_dir, out_path, cap=0, strict=False,
                 "they are NOT fuzzy-matched because a window would merge distinct sites. "
                 "First missing: %s"
                 % (len(missing), len(wanted), os.path.basename(source_path),
-                   ", ".join("%s:%s" % m for m in missing[:5])))
+                   ", ".join("%s:%s%s" % (m[0], m[1], (" guide %s" % m[2]) if m[2] else "")
+                             for m in missing[:5])))
 
     # A mis-keyed comparison looks exactly like a catastrophic finding. Before reporting
     # per-site failures, ask whether the reported alignments resemble the haplotype
@@ -1375,8 +1456,9 @@ def main(argv=None):
     p.add_argument("--results", required=True, help="a finished run's Results/<job> folder")
     p.add_argument("--out", required=True, help="the .tsv to write")
     p.add_argument("--max-haplotypes", type=int, default=0, dest="cap",
-                   help="cap rows written per site (0 = every one). Counts are always "
-                        "the true totals.")
+                   help="cap rows written per site (0 or a negative number = every one, "
+                        "matching CRISPRme's --max-total-edits/-1 'off' convention). "
+                        "Counts are always the true totals.")
     p.add_argument("--targets", default=None,
                    help="the run's curated results table (Chromosome, Position, "
                         "Aligned_protospacer+PAM), so each site's own reported alignment "
