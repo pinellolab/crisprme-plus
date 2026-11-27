@@ -70,6 +70,11 @@ import zipfile
 # score_status -- the vocabulary. A cell is NEVER blank and NEVER -1.0.
 
 ST_SCORED = "scored"
+# A row can be BOTH scored and have had an axis decline it. Two previous attempts let one
+# of those facts erase the other: making the refusal win counted a haplotype scoring 20x
+# the operating point as never scored, and then making the score win rendered a reached-
+# and-declined axis identically to one that has no column at all. The status says both.
+ST_SCORED_REFUSED = "scored(%s-model-refused)"
 ST_OUT_OF_DOMAIN = "out-of-domain:%s"          # the model's own refusal rule
 ST_NEEDS_REALIGN = "needs-realignment:%s"       # site_key; Tier 2 would resolve it
 
@@ -318,7 +323,7 @@ RAW_SIDECAR_RE = re.compile(r"_observed_haplotypes_raw\.(tsv|zip)$")
 ALT_TABLE_RE = re.compile(r"_all_results_with_alternative_alignments\.(tsv|zip)$")
 
 
-def probe_source(results_dir):
+def probe_source(results_dir, say=None):
     """``(path, kind)`` for the richest haplotype source present.
 
     Order matters. ``*_observed_haplotypes_raw`` is written at search time and filters
@@ -348,17 +353,31 @@ def probe_source(results_dir):
     # An unreadable candidate costs ITS OWN turn, not the fallback's. Raising here aborted
     # probe_source before the alt table was ever looked at, so a corrupt raw sidecar beside
     # a complete alt table refused the whole run.
+    say = say or (lambda m: None)
     unreadable = []
     for paths, kind in ((raw, "observed_haplotypes_raw"),
                         (alt, "all_results_with_alternative_alignments")):
         for path in paths:
             try:
                 if has_data_row(path):
+                    # A SILENT FALLBACK IS STILL A DATA PROBLEM. An interrupted search
+                    # leaves a truncated sidecar beside a complete alt table; using the
+                    # second without a word would let a damaged file sit there unnoticed
+                    # in a module whose whole doctrine is that an absence is stated.
+                    for msg in unreadable:
+                        say("haplotype-scores: WARNING %s" % msg)
+                    if unreadable:
+                        say("haplotype-scores: fell back to %s. The run SUCCEEDED, but "
+                            "the preferred source above is damaged and should be "
+                            "regenerated." % os.path.basename(path))
                     return path, kind
             except HaplotypeScoreError as exc:
                 unreadable.append(str(exc))
-    if unreadable and not (raw or alt):
-        raise HaplotypeScoreError("; ".join(unreadable))
+    if unreadable and len(unreadable) == len(raw) + len(alt):
+        raise HaplotypeScoreError(
+            "no haplotype source in %s can be read. %s Refusing to write: an unreadable "
+            "file is a different problem from an empty run."
+            % (results_dir, " ".join(unreadable)))
     if unreadable:
         raise HaplotypeScoreError(
             "no haplotype source in %s could be used. %s%s Refusing to write: an "
@@ -419,11 +438,15 @@ def open_table(path):
         if not names:
             zf.close()
             raise HaplotypeScoreError("%s holds no .tsv member" % path)
+        handle = None
         try:
             handle = zf.open(names[0])
             wrapper = io.TextIOWrapper(handle, encoding="utf-8", errors="replace")
         except Exception:
-            zf.close()          # a truncated member or bad CRC header leaked it otherwise
+            # ZipFile.close() does not close an already-open member, so both are needed.
+            if handle is not None:
+                handle.close()
+            zf.close()
             raise
         # Closing the wrapper must close the archive too: probe_source now opens one per
         # candidate, so a leaked ZipFile per call is a real descriptor leak.
@@ -613,6 +636,10 @@ def classify(obs, budget, axis_named):
     # only score_status=scored discarded the one row above the threshold. Out-of-domain is
     # for a row where nothing survived.
     if cfd is not None or cb is not None:
+        # Scored -- and if the OTHER axis was reached and declined, the status says which.
+        declined = [n for n, r in (("cb", cb_refused), ("cfd", cfd_refused)) if r]
+        if declined:
+            return cfd, cb, ST_SCORED_REFUSED % "+".join(declined)
         return cfd, cb, ST_SCORED
     if cb_refused or cfd_refused:
         return None, None, ST_OUT_OF_DOMAIN % "model-refused(n/length/multi-gap)"
@@ -751,7 +778,18 @@ def file_header(source_path, source_kind, budget, threshold, recall, cap, strict
         "# NEVER A BLANK. score_status is always set. A never-scored cell and the",
         "#   CRISPR-Bulge out-of-domain sentinel both used to render 'NA', so filtering",
         "#   on the score silently discarded them and the site looked clean. -1.0 is never",
-        "#   printed, never sorted on.",
+        "#   printed, never sorted on. Its values:",
+        "#     scored                     -- at least one axis produced a number",
+        "#     scored(cb-model-refused)   -- scored, AND the named axis was reached and",
+        "#       scored(cfd-model-refused)   declined by the model's own rule. Both facts,",
+        "#                                   because one erasing the other is how two",
+        "#                                   earlier versions of this file were wrong.",
+        "#     out-of-domain:model-refused(n/length/multi-gap) -- reached, declined, and",
+        "#                                   NO axis produced a number",
+        "#     needs-realignment:<site>   -- the fixed frame cannot hold it; no number,",
+        "#                                   and none invented",
+        "#   above_threshold reads unknown(model-refused) where the CRISPR-Bulge axis was",
+        "#   reached and declined, as against a bare unknown for never measured.",
         "#",
         "# COUNT BEFORE CAP. n_haplotypes_at_site / n_above_threshold / n_not_scored are",
         "#   computed on the full stream before any cap (cap=%s). A cap may hide a" % (
@@ -916,7 +954,7 @@ def build(results_dir, out_path, cap=0, strict=False,
     """Write the companion. Returns ``(n_rows, n_sites, unreconciled)``."""
     say = log or (lambda m: print(m, file=sys.stderr))
     budget = read_budget(results_dir)
-    source_path, source_kind = probe_source(results_dir)
+    source_path, source_kind = probe_source(results_dir, say)
     reported = read_reported(targets, say) if targets else {}
     ancestry = read_ancestry(results_dir)
     say("haplotype-scores: ancestry for %s individual(s) from the run's .sampleID.txt"
@@ -990,7 +1028,9 @@ def build(results_dir, out_path, cap=0, strict=False,
             # measured -- reviving, inside this file, the exact silent discard the file
             # exists to stop. Three values, like every other absence here.
             above = ("yes" if (cb is not None and cb >= threshold)
-                     else ("no" if cb is not None else "unknown"))
+                     else ("no" if cb is not None
+                           else ("unknown(model-refused)"
+                                 if "cb-model-refused" in status else "unknown")))
             row = {
                 "site_key": obs.site, "chrom": obs.chrom, "site_start": obs.start,
                 "strand": obs.strand, "spacer": obs.spacer,
@@ -1016,9 +1056,15 @@ def build(results_dir, out_path, cap=0, strict=False,
                 "max_af": _max_af(obs.maf),
                 "scope_reason": source_kind,
             }
-            site.add(row, cb, above == "yes", status == ST_SCORED,
-                     canonical_variants(obs.variants),
-                     hap_key=obs.variants or obs.aligned_alt or "-")
+            hap_key = obs.variants or obs.aligned_alt or "-"
+            # Carried, not reconstructed. _hap() used to rebuild this from the WRITTEN
+            # variant_set, which is a lossy rendering of it ("-" means both "no variants"
+            # and "the source wrote a literal dash"), so the cap's idea of a haplotype
+            # disagreed with the counters' and a site reported 1 haplotype, wrote 1, and
+            # said 1 was hidden. extrasaction="ignore" keeps this out of the file.
+            row["_hap_key"] = hap_key
+            site.add(row, cb, above.startswith("yes"), status.startswith(ST_SCORED),
+                     canonical_variants(obs.variants), hap_key=hap_key)
 
     # A --targets SITE THAT PRODUCED NOTHING IS A GAP, AND GAPS ARE SAID OUT LOUD.
     #
@@ -1136,14 +1182,8 @@ def build(results_dir, out_path, cap=0, strict=False,
             # counting dropped ROWS reported "2 haplotype(s) not written" for a site whose
             # own rows said n_haplotypes_at_site=1.
             def _hap(r):
-                """The SAME identity Site.add counts on (``obs.variants or
-                obs.aligned_alt or "-"``). ``variant_set`` is written as
-                ``obs.variants or "-"``, so testing it for truthiness never fell through
-                to the sequence -- two variantless haplotypes with different sequences
-                collapsed to one and the cap reported 0 hidden while hiding a whole
-                haplotype."""
-                vs = r["variant_set"]
-                return (vs if vs != "-" else "") or r["aligned_protospacer_pam"] or "-"
+                """The identity Site.add counted on, carried on the row itself."""
+                return r["_hap_key"]
             hidden_haplotypes = len(set(_hap(r) for r in ranked)
                                     - set(_hap(r) for r in kept))
             hidden_rows = len(ranked) - len(kept)

@@ -777,11 +777,16 @@ class TestOneAxisRefusingIsNotTheRowRefusing(HaplotypeScoresMixin, unittest.Test
     """
 
     def test_a_refused_cfd_beside_a_real_cb_is_still_scored(self):
+        """BOTH facts. The row has a number AND an axis declined it -- two earlier
+        versions let one erase the other."""
         rows = [_row("chr1", 100, HAP_ONE, -1.0, 0.004, "chr1_100_A_C")]
         _res, text, _msgs = self._run(rows)
         scored = [r for r in self._parse(text) if r["crispr_bulge"] != "NA"]
         self.assertEqual(len(scored), 1)
-        self.assertEqual(scored[0]["score_status"], "scored")
+        self.assertTrue(scored[0]["score_status"].startswith("scored"),
+                        scored[0]["score_status"])
+        self.assertIn("cfd-model-refused", scored[0]["score_status"],
+                      "the refusal was erased by the surviving score")
         self.assertEqual(scored[0]["above_threshold"], "yes")
 
     def test_a_row_is_never_both_above_threshold_and_never_scored(self):
@@ -846,6 +851,92 @@ class TestHiddenCountsTheSameHaplotypeTheCountersDo(HaplotypeScoresMixin,
         self.assertTrue(note, msgs)
         self.assertNotIn("0 haplotype(s)", note[0],
                          "a whole haplotype was hidden and the message said 0")
+
+
+class TestARefusalIsNeverErased(HaplotypeScoresMixin, unittest.TestCase):
+    """The file's first invariant, re-broken twice while fixing it.
+
+    Round 2 let a refusal on one axis mark the whole row unscored, so a haplotype 20x
+    over the operating point counted as never measured. Round 3 let the surviving score
+    erase the refusal, so a reached-and-declined axis rendered EXACTLY like one that has
+    no column at all. The status now carries both.
+    """
+
+    def test_a_declined_cb_does_not_look_like_an_absent_column(self):
+        declined = self._run([_row("chr1", 100, HAP_ONE, 0.6, -1.0, "chr1_100_A_C")])[1]
+        rows = {r["alignment_frame"] + r["site_start"]: r for r in self._parse(declined)}
+        cb_row = [r for r in self._parse(declined)
+                  if "CRISPR_BULGE" in r["haplotype_id"]][0]
+        self.assertIn("cb-model-refused", cb_row["score_status"],
+                      "declined renders the same as never-measured")
+        self.assertEqual(cb_row["above_threshold"], "unknown(model-refused)")
+
+    def test_an_axis_with_no_column_still_says_plain_unknown(self):
+        """The contrast that makes the value above mean something."""
+        text = self._run([_row("chr1", 100, HAP_ONE, 0.6, 0.004, "chr1_100_A_C")])[1]
+        plain = [r for r in self._parse(text)
+                 if "CRISPR_BULGE" not in r["haplotype_id"]]
+        self.assertTrue(plain)
+        for r in plain:
+            self.assertEqual(r["above_threshold"], "unknown")
+            self.assertEqual(r["score_status"], "scored")
+
+    def test_a_scored_with_refusal_row_counts_as_scored(self):
+        text = self._run([_row("chr1", 100, HAP_ONE, -1.0, 0.004, "chr1_100_A_C")])[1]
+        for r in self._parse(text):
+            if r["crispr_bulge"] != "NA":
+                self.assertEqual(r["n_not_scored"], "0")
+
+
+class TestTheHaplotypeKeyIsCarriedNotRebuilt(HaplotypeScoresMixin, unittest.TestCase):
+    """A source cell holding a literal "-" is truthy, so Site.add keyed on "-" while
+    _hap mapped the written "-" back to empty and fell through to the sequence. A site
+    then reported 1 haplotype, wrote 1, and said 1 was hidden."""
+
+    def test_a_literal_dash_variant_cell_does_not_split_the_count(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "-"),
+                _row("chr1", 100, HAP_TWO, 0.3, 0.8, "-")]
+        _res, text, msgs = self._run(rows, cap=1)
+        body = self._parse(text)
+        total = int(body[0]["n_haplotypes_at_site"])
+        note = [m for m in msgs if "not written" in m]
+        hidden = int(note[0].split("covering ")[1].split(" haplotype")[0]) if note else 0
+        self.assertEqual(total, len(body) + hidden,
+                         "the site's own numbers do not add up: %d total, %d written, "
+                         "%d hidden" % (total, len(body), hidden))
+
+    def test_the_key_never_reaches_the_file(self):
+        text = self._run([_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")])[1]
+        self.assertNotIn("_hap_key", text.splitlines()[
+            next(i for i, l in enumerate(text.splitlines())
+                 if l.startswith("site_key"))])
+
+
+class TestADamagedPreferredSourceIsAnnounced(HaplotypeScoresMixin, unittest.TestCase):
+    """An interrupted search leaves a truncated sidecar beside a complete alt table.
+    Falling back silently leaves a damaged file sitting there unnoticed."""
+
+    def test_the_fallback_says_the_preferred_source_is_damaged(self):
+        with io.open(os.path.join(self.dir, "x_observed_haplotypes_raw.zip"), "wb") as fh:
+            fh.write(b"this is not a zip file")
+        path = os.path.join(self.dir, "x_all_results_with_alternative_alignments.tsv")
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("\t".join(_header()) + "\n")
+            fh.write("\t".join(_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")) + "\n")
+        msgs = []
+        _p, kind = hs.probe_source(self.dir, msgs.append)
+        self.assertEqual(kind, "all_results_with_alternative_alignments")
+        self.assertTrue([m for m in msgs if "cannot be read" in m], msgs)
+        self.assertTrue([m for m in msgs if "should be" in m and "regenerated" in m], msgs)
+
+    def test_a_clean_run_says_nothing(self):
+        path = os.path.join(self.dir, "x_observed_haplotypes_raw.tsv")
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("\t".join(_header()) + "\n")
+            fh.write("\t".join(_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")) + "\n")
+        msgs = []
+        hs.probe_source(self.dir, msgs.append)
+        self.assertEqual(msgs, [])
 
 
 if __name__ == "__main__":
