@@ -64,7 +64,16 @@ def write_companion(out_path, rows):
             "#   CFD / CRISPR_Bulge = score from whichever axis named this haplotype (NA if none).\n"
             "#   Origin             = always 'alt' (reference sites are not variant haplotypes).\n"
             "#   AF                 = variant allele frequency (NA if unknown).\n"
-            "#   Phase              = NA (integrated_results carries no phase column).\n"
+            "#   Phase              = the scan's own cis-phase verdict for this haplotype.\n"
+            "#     CONFIRMED  a real phased same-phase-set cis haplotype.\n"
+            "#     PUTATIVE   >=1 carrier unphased, cross-phase-set, or PS-absent: the\n"
+            "#                haplotype is flagged phase-unconfirmed, never dropped.\n"
+            "#     not-recorded              the run wrote a phase companion and it does\n"
+            "#                not name this row.\n"
+            "#     not-computed-on-this-path the run wrote no phase companion at all (an\n"
+            "#                older build, a reference-only search, or a path where the\n"
+            "#                dict-less branch never ran). NOT the same as PUTATIVE, and\n"
+            "#                not a statement that the haplotype is unphased.\n"
             "#   N_carriers/Carriers = observed carrier count + sample list (0/NA if none).\n"
         )
         fh.write(COMPANION_HEADER + "\n")

@@ -5151,3 +5151,116 @@ class TestPhaseCompanionIsReadOnce(unittest.TestCase):
         # the CFD start is 200; only the CB start (203) matches this companion row
         got = gr.load_phase_labels(d, {("chr1", "200"), ("chr1", "203")})
         self.assertEqual(list(got.values()), ["PUTATIVE"])
+
+
+class TestPhaseEndToEnd(unittest.TestCase):
+    """The join, exercised through the real builder rather than against itself.
+
+    The first version of these tests compared _phase_key to _phase_key, which would pass
+    even if the builder never called the loader -- and it would have hidden both the
+    per-site re-read and the mixed-axis key. These drive
+    build_observed_haplotypes_companion and read the emitted rows.
+    """
+
+    def _frame(self):
+        import pandas as pd
+        # two haplotypes at one site, so the companion emits (it needs >=2 variant sets).
+        # The CRISPR-Bulge block sits at a DIFFERENT start from the CFD block, which is
+        # what the per-axis key has to handle.
+        base = {
+            "Chromosome": ["chr1", "chr1"],
+            "Spacer+PAM": ["GGGG", "GGGG"],
+            "Start_coordinate_(highest_CFD)": ["200", "200"],
+            "Strand_(highest_CFD)": ["+", "+"],
+            "Aligned_spacer+PAM_(highest_CFD)": ["GGGG", "GGGG"],
+            "Aligned_protospacer+PAM_ALT_(highest_CFD)": ["AAAA", "TTTT"],
+            "REF/ALT_origin_(highest_CFD)": ["alt", "alt"],
+            "Variant_info_genome_(highest_CFD)": ["chr1_200_A_C", "chr1_201_G_T"],
+            "CFD_score_(highest_CFD)": ["0.6", "0.5"],
+            "Variant_rsID_(highest_CFD)": ["rs1", "rs2"],
+            "Variant_MAF_(highest_CFD)": ["0.01", "0.02"],
+            "Variant_samples_(highest_CFD)": ["S1", "S2"],
+            "Mismatches_(highest_CFD)": ["1", "1"],
+            "Bulges_(highest_CFD)": ["0", "0"],
+            "Bulge_type_(highest_CFD)": ["NA", "NA"],
+            "Start_coordinate_(highest_CRISPR_BULGE)": ["203", "200"],
+            "Strand_(highest_CRISPR_BULGE)": ["+", "+"],
+            "Aligned_spacer+PAM_(highest_CRISPR_BULGE)": ["GGGG", "GGGG"],
+            "Aligned_protospacer+PAM_ALT_(highest_CRISPR_BULGE)": ["AAAA", "TTTT"],
+            "REF/ALT_origin_(highest_CRISPR_BULGE)": ["alt", "alt"],
+            "Variant_info_genome_(highest_CRISPR_BULGE)": ["chr1_200_A_C", "chr1_201_G_T"],
+            "CRISPR_BULGE_score_(highest_CRISPR_BULGE)": ["0.9", "0.1"],
+            "Variant_rsID_(highest_CRISPR_BULGE)": ["rs1", "rs2"],
+            "Variant_MAF_(highest_CRISPR_BULGE)": ["0.01", "0.02"],
+            "Variant_samples_(highest_CRISPR_BULGE)": ["S1", "S2"],
+            "Mismatches_(highest_CRISPR_BULGE)": ["1", "1"],
+            "Bulges_(highest_CRISPR_BULGE)": ["0", "0"],
+            "Bulge_type_(highest_CRISPR_BULGE)": ["NA", "NA"],
+        }
+        return pd.DataFrame(base)
+
+    def _build(self, folder, companion_rows=None):
+        if companion_rows is not None:
+            with open(os.path.join(folder, "x.phase_confirmation.tsv"), "w") as fh:
+                fh.write("#Chromosome\tPosition\tDirection\tcrRNA\tDNA\tSNP\t"
+                         "Phase_Confirmation\n")
+                for r in companion_rows:
+                    fh.write("\t".join(r) + "\n")
+        itsv = os.path.join(folder, "x_integrated_results.tsv")
+        with open(itsv, "w") as fh:
+            fh.write("placeholder\n")
+        staging = os.path.join(folder, "staging")
+        os.makedirs(staging, exist_ok=True)
+        name, rows, _site_map = gr.build_observed_haplotypes_companion(
+            self._frame(), itsv, folder, staging, 100, report_full=True)
+        return rows or []
+
+    def test_the_label_reaches_an_emitted_row(self):
+        d = tempfile.mkdtemp(prefix="phase_e2e_")
+        self.addCleanup(shutil.rmtree, d, True)
+        rows = self._build(d, [
+            ("chr1", "200", "+", "GGGG", "AAAA", "chr1_200_A_C", "CONFIRMED"),
+            ("chr1", "200", "+", "GGGG", "TTTT", "chr1_201_G_T", "PUTATIVE"),
+        ])
+        got = {r["Variant_info_genome"]: r["Phase"] for r in rows}
+        self.assertEqual(got.get("chr1_200_A_C"), "CONFIRMED")
+        self.assertEqual(got.get("chr1_201_G_T"), "PUTATIVE")
+
+    def test_a_label_on_the_crispr_bulge_axis_coordinate_is_found(self):
+        """The mixed-axis bug: this haplotype's CB alignment is at 203 while its CFD
+        alignment is at 200. Keying the record by one axis renders the row
+        'not-recorded' even though the scan labelled it."""
+        d = tempfile.mkdtemp(prefix="phase_e2e_")
+        self.addCleanup(shutil.rmtree, d, True)
+        rows = self._build(d, [
+            ("chr1", "203", "+", "GGGG", "AAAA", "chr1_200_A_C", "CONFIRMED"),
+            ("chr1", "200", "+", "GGGG", "TTTT", "chr1_201_G_T", "PUTATIVE"),
+        ])
+        got = {r["Variant_info_genome"]: r["Phase"] for r in rows}
+        self.assertEqual(got.get("chr1_200_A_C"), "CONFIRMED",
+                         "a label written at the CRISPR-Bulge coordinate must be found")
+
+    def test_no_companion_renders_not_computed_end_to_end(self):
+        d = tempfile.mkdtemp(prefix="phase_e2e_")
+        self.addCleanup(shutil.rmtree, d, True)
+        rows = self._build(d, None)
+        self.assertTrue(rows, "the fixture must emit rows")
+        for r in rows:
+            self.assertEqual(r["Phase"], gr.PHASE_NOT_COMPUTED)
+
+    def test_a_companion_without_this_row_renders_not_recorded(self):
+        d = tempfile.mkdtemp(prefix="phase_e2e_")
+        self.addCleanup(shutil.rmtree, d, True)
+        rows = self._build(d, [
+            ("chr9", "999", "+", "GGGG", "AAAA", "chr9_999_A_C", "CONFIRMED")])
+        for r in rows:
+            self.assertEqual(r["Phase"], gr.PHASE_NOT_RECORDED)
+
+    def test_a_corrupt_companion_costs_only_its_labels(self):
+        """An additive companion must never destroy the bundle it decorates."""
+        d = tempfile.mkdtemp(prefix="phase_e2e_")
+        self.addCleanup(shutil.rmtree, d, True)
+        with open(os.path.join(d, "x.phase_confirmation.tsv"), "wb") as fh:
+            fh.write(b"#Chromosome\tPosition\n\xff\xfe not a table \x00\x00\n")
+        rows = self._build(d)
+        self.assertTrue(rows, "the companion bundle still builds")
