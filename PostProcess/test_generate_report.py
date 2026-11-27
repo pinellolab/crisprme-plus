@@ -48,6 +48,7 @@ import contextlib
 import glob
 import gzip
 import inspect
+import shutil
 import io
 import json
 import os
@@ -3669,7 +3670,10 @@ class TestGenerateReport(unittest.TestCase):
         for r in recs:
             self.assertNotEqual(r["CFD"], "NA")
             self.assertEqual(r["Origin"], "alt")
-            self.assertEqual(r["Phase"], "NA")
+            # No phase companion in this fixture, so the run never computed one.
+            # That is NOT the same as "computed and this row was not in it", and
+            # neither is "NA" -- see TestPhaseLabelJoin below.
+            self.assertEqual(r["Phase"], gr.PHASE_NOT_COMPUTED)
         self.assertEqual(by_vs["chrX_400_T_A"]["CRISPR_Bulge"], "0.77")
         self.assertEqual(by_vs["chrX_402_C_G"]["CRISPR_Bulge"], "NA")
         # carriers counted from the CFD-axis samples
@@ -5009,3 +5013,90 @@ class TestTheReportSaysWhatTheDensityGuardWithheld(unittest.TestCase):
         self.assertNotIn("data/sites_only_density_guard.bed", names)
         self.assertNotIn("Sites-only density guard",
                          self._read(self._dpath(extract, "report.html")))
+
+
+class TestPhaseLabelJoin(unittest.TestCase):
+    """The scan's CONFIRMED/PUTATIVE label, merged in the report layer.
+
+    CONFIRMED means a real phased same-phase-set cis haplotype; PUTATIVE means at least
+    one carrier was unphased or cross-phase-set. It is the real-versus-inferred
+    distinction somebody needs before trusting a haplotype enough to order a cell line or
+    design an amplicon -- and it used to be written to disk and then discarded, with this
+    report hardcoding "NA" into every Phase cell.
+
+    Joined, never added as a column: the per-block row is pasted three times into the
+    bestMerge, so a column at the end of a block lands mid-row, and the scorers address
+    the row's tail by negative index. Joining here leaves every byte the search wrote
+    untouched.
+    """
+
+    def _companion(self, folder, rows, name="x_chr1.phase_confirmation.tsv"):
+        path = os.path.join(folder, name)
+        with open(path, "w") as fh:
+            fh.write("# synthetic phase companion\n")
+            fh.write("#Chromosome\tPosition\tDirection\tcrRNA\tDNA\tSNP\t"
+                     "Phase_Confirmation\n")
+            for r in rows:
+                fh.write("\t".join(r) + "\n")
+        return path
+
+    def test_a_real_label_is_joined_from_the_companion(self):
+        d = tempfile.mkdtemp(prefix="phasejoin_")
+        self.addCleanup(shutil.rmtree, d, True)
+        self._companion(d, [
+            ("chr1", "100", "+", "GGG-TTT", "AAA-CCC", "chr1_100_A_C", "CONFIRMED"),
+            ("chr1", "200", "-", "GGGTTT", "AAACCC", "chr1_200_G_T", "PUTATIVE"),
+        ])
+        want = {
+            gr._phase_key("chr1", "100", "+", "GGG-TTT", "AAA-CCC", "chr1_100_A_C"),
+            gr._phase_key("chr1", "200", "-", "GGGTTT", "AAACCC", "chr1_200_G_T"),
+        }
+        got = gr.load_phase_labels(d, want)
+        self.assertEqual(len(got), 2)
+        self.assertEqual(set(got.values()), {"CONFIRMED", "PUTATIVE"})
+
+    def test_no_companion_is_a_different_state_from_not_in_it(self):
+        """The failure this guards: a run that never computed phase must not read as
+        PUTATIVE, and must not read blank."""
+        d = tempfile.mkdtemp(prefix="phasejoin_")
+        self.addCleanup(shutil.rmtree, d, True)
+        self.assertIsNone(gr.load_phase_labels(d, {("chr1", "1", "+", "x", "y", "z")}),
+                          "no companion at all -> None, which renders not-computed")
+        self._companion(d, [("chr1", "100", "+", "G", "A", "chr1_100_A_C", "CONFIRMED")])
+        got = gr.load_phase_labels(d, {gr._phase_key("chr9", "9", "+", "G", "A", "chr9_9_A_C")})
+        self.assertEqual(got, {}, "a companion that does not name the row -> empty, "
+                                  "which renders not-recorded")
+        self.assertNotEqual(gr.PHASE_NOT_COMPUTED, gr.PHASE_NOT_RECORDED)
+
+    def test_the_variant_set_is_normalised_on_both_sides(self):
+        """A set written in a different order must still join. Comparing raw strings
+        would silently miss those rows -- a bug that looks like a finding."""
+        d = tempfile.mkdtemp(prefix="phasejoin_")
+        self.addCleanup(shutil.rmtree, d, True)
+        self._companion(d, [("chr1", "100", "+", "G", "A",
+                             "chr1_200_G_T,chr1_100_A_C", "CONFIRMED")])
+        key = gr._phase_key("chr1", "100", "+", "G", "A", "chr1_100_A_C,chr1_200_G_T")
+        self.assertEqual(gr.load_phase_labels(d, {key}), {key: "CONFIRMED"})
+
+    def test_several_per_chromosome_companions_are_all_read(self):
+        d = tempfile.mkdtemp(prefix="phasejoin_")
+        self.addCleanup(shutil.rmtree, d, True)
+        self._companion(d, [("chr1", "1", "+", "G", "A", "chr1_1_A_C", "CONFIRMED")],
+                        name="x_chr1.phase_confirmation.tsv")
+        self._companion(d, [("chr2", "2", "+", "G", "A", "chr2_2_A_C", "PUTATIVE")],
+                        name="x_chr2.phase_confirmation.tsv")
+        want = {gr._phase_key("chr1", "1", "+", "G", "A", "chr1_1_A_C"),
+                gr._phase_key("chr2", "2", "+", "G", "A", "chr2_2_A_C")}
+        self.assertEqual(len(gr.load_phase_labels(d, want)), 2)
+
+    def test_only_the_keys_asked_for_are_kept(self):
+        """The companion can be gigabytes; the report needs a few thousand rows. The
+        small side is indexed and the big side streamed."""
+        d = tempfile.mkdtemp(prefix="phasejoin_")
+        self.addCleanup(shutil.rmtree, d, True)
+        rows = [("chr1", str(i), "+", "G", "A", "chr1_%d_A_C" % i, "CONFIRMED")
+                for i in range(500)]
+        self._companion(d, rows)
+        want = {gr._phase_key("chr1", "7", "+", "G", "A", "chr1_7_A_C")}
+        got = gr.load_phase_labels(d, want)
+        self.assertEqual(len(got), 1, "500 rows streamed, one kept")

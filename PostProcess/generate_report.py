@@ -422,6 +422,80 @@ def load_carrier_gate(result_dir, integrated_tsv, df):
     return df, gate
 
 
+# The phase-confirmation companion the SCAN already writes, merged in this layer.
+#
+# CONFIRMED means a real phased same-phase-set cis haplotype; PUTATIVE means at least one
+# carrier was unphased, cross-phase-set, or in a PS-absent single block. That is the
+# real-versus-inferred distinction somebody needs before they trust a haplotype enough to
+# order a cell line or design an amplicon against it -- and until now it never reached a
+# user: this file wrote "NA" into every Phase cell while the labels sat on disk beside it.
+#
+# WHY A JOIN AND NOT A COLUMN ON THE ROW. The per-block row is pasted three times into the
+# 72-column bestMerge, so a column added at the end of a block lands in the MIDDLE of the
+# merged row; and the scorers address the row's tail by negative index (cbulge_rows.py
+# t[-2], target[-3]). There is no position in that row that is both scorer-safe and
+# merge-safe. Joining here touches nothing upstream, so every byte the search wrote --
+# the best files, bestMerge, integrated_results, the sqlite db -- is unchanged.
+#
+# THE JOIN IS INVERTED ON PURPOSE. The companion is per-chromosome and can reach several
+# GB on a genome-wide run, while the rows that need a label are the few thousand this
+# report displays. So the SMALL side is indexed and the big side is streamed, keeping only
+# keys that were asked for. Memory is the size of the report, not of the run.
+_PHASE_GLOB = "*phase_confirmation.tsv"
+PHASE_NOT_COMPUTED = "not-computed-on-this-path"
+PHASE_NOT_RECORDED = "not-recorded"
+
+
+def load_phase_labels(folder, wanted):
+    """``{key: "CONFIRMED"|"PUTATIVE"}`` for the keys asked for, or ``None``.
+
+    ``wanted`` is a set of identity keys as ``_phase_key`` builds them. ``None`` means no
+    companion was found at all, which the caller must render as a DIFFERENT state from "a
+    companion exists and does not name this row": the first says the run never computed
+    phase (an older build, a reference-only search, a path where the dict-less branch did
+    not run), the second says it did and this row was not among its rows. Collapsing them
+    would be the familiar failure -- a not-measured cell wearing the clothes of a measured
+    one.
+    """
+    try:
+        paths = sorted(glob.glob(os.path.join(folder, _PHASE_GLOB)))
+    except OSError:
+        return None
+    if not paths:
+        return None
+    found = {}
+    for path in paths:
+        try:
+            with open(path) as fh:
+                for line in fh:
+                    if line.startswith("#"):
+                        continue
+                    f = line.rstrip("\n").split("\t")
+                    if len(f) < 7:
+                        continue
+                    key = _phase_key(f[0], f[1], f[2], f[3], f[4], f[5])
+                    if key in wanted:
+                        found[key] = f[6].strip()
+        except OSError as exc:
+            sys.stderr.write(
+                f"generate-report: phase companion unreadable ({exc}); the rows it would "
+                f"have labelled say {PHASE_NOT_RECORDED}\n")
+            continue
+    return found
+
+
+def _phase_key(chrom, pos, direction, crrna, dna, snp):
+    """The companion's own identity key, normalised identically on both sides.
+
+    The variant set is put through ``_oh_norm_varset`` on BOTH sides rather than compared
+    as written: the same set can be ordered differently between the companion and the
+    integrated row, and comparing the raw strings would silently miss those rows -- a join
+    that looks like a finding instead of a bug.
+    """
+    return (str(chrom).strip(), str(pos).strip(), str(direction).strip(),
+            str(crrna).strip(), str(dna).strip(), _oh_norm_varset(snp))
+
+
 def _gate_panels(gate):
     """The panels the gate read, "hg38_HGDP1kGP (4,091 samples, 8,182 haplotypes)", each
     as HTML."""
@@ -5914,6 +5988,8 @@ _OH_CFD_BULGES = "Bulges_(highest_CFD)"
 _OH_CFD_BTYPE = "Bulge_type_(highest_CFD)"
 _OH_CFD_SCORE = "CFD_score_(highest_CFD)"
 _OH_CFD_ALNALT = "Aligned_protospacer+PAM_ALT_(highest_CFD)"
+_OH_CFD_ALNSP = "Aligned_spacer+PAM_(highest_CFD)"
+_OH_CB_ALNSP = "Aligned_spacer+PAM_(highest_CRISPR_BULGE)"
 _OH_CB_ORIGIN = "REF/ALT_origin_(highest_CRISPR_BULGE)"
 _OH_CB_VARSET = "Variant_info_genome_(highest_CRISPR_BULGE)"
 _OH_CB_SAMPLES = "Variant_samples_(highest_CRISPR_BULGE)"
@@ -6138,6 +6214,7 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         "bulges": _oh_get(_rec, _OH_CFD_BULGES, "NA"),
                         "bulge_type": _oh_get(_rec, _OH_CFD_BTYPE, "NA"),
                         "aligned": _oh_get(_rec, _OH_CFD_ALNALT, "NA"),
+                        "aln_spacer": _oh_get(_rec, _OH_CFD_ALNSP, "NA"),
                         "cfd": _oh_get(_rec, _OH_CFD_SCORE, None),
                         "crispr_bulge": None,
                         "axis": "cfd",
@@ -6158,6 +6235,7 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         "bulges": _oh_get(_rec, _OH_CB_BULGES, "NA"),
                         "bulge_type": _oh_get(_rec, _OH_CB_BTYPE, "NA"),
                         "aligned": _oh_get(_rec, _OH_CB_ALNALT, "NA"),
+                        "aln_spacer": _oh_get(_rec, _OH_CB_ALNSP, "NA"),
                         "cfd": None,
                         "crispr_bulge": _oh_get(_rec, _OH_CB_SCORE, None),
                         "axis": "cb",
@@ -6250,6 +6328,8 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                     rec["bulges"] = obs["bulges"]
                     rec["bulge_type"] = obs["bulge_type"]
                     rec["aligned"] = obs["aligned"]
+                    rec["aln_spacer"] = obs.get("aln_spacer", "NA")
+                    rec["row_start"] = obs.get("start", "")
                     rec["_has_cfd_axis"] = True
                 elif obs["axis"] == "cb" and not rec["_has_cfd_axis"]:
                     # fill only what is still unset (so a later CFD obs can override).
@@ -6270,9 +6350,20 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         rec["bulge_type"] = obs["bulge_type"]
                     if str(rec["aligned"]).lower() in _OH_NA:
                         rec["aligned"] = obs["aligned"]
+                        rec.setdefault("aln_spacer", obs.get("aln_spacer", "NA"))
+                        rec.setdefault("row_start", obs.get("start", ""))
 
             if len(by_varset) < 2:
                 continue  # need >=2 DISTINCT variant haplotypes to be interesting
+
+            # Key every row we are about to emit, then look the labels up in one pass.
+            # The small side is indexed and the big side streamed -- see load_phase_labels.
+            _want = set()
+            for _r in by_varset.values():
+                _want.add(_phase_key(_r["chrom"], _r.get("row_start", ""), _r["strand"],
+                                     _r.get("aln_spacer", "NA"), _r["aligned"], _r["varset"]))
+            _phase = load_phase_labels(
+                result_dir or os.path.dirname(os.path.abspath(integrated_tsv)), _want)
 
             emitted = []
             for rec in by_varset.values():
@@ -6300,7 +6391,21 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         "NA" if _DROP_MAF
                         else (rec["maf"] if str(rec["maf"]).lower() not in _OH_NA else "NA")
                     ),
-                    "Phase": "NA",  # integrated_results carries no phase column
+                    # The scan's own CONFIRMED/PUTATIVE label, joined from the
+                    # companion it already writes. Three distinct states, never
+                    # collapsed: the real label; "not-recorded" when a companion exists
+                    # but does not name this row; and "not-computed-on-this-path" when
+                    # the run wrote none at all (an older build, a reference-only search,
+                    # a path where the dict-less branch never ran). A run that never
+                    # computed phase must not read as PUTATIVE, and must not read blank.
+                    "Phase": (
+                        PHASE_NOT_COMPUTED if _phase is None
+                        else _phase.get(
+                            _phase_key(rec["chrom"], rec.get("row_start", ""),
+                                       rec["strand"], rec.get("aln_spacer", "NA"),
+                                       rec["aligned"], rec["varset"]),
+                            PHASE_NOT_RECORDED)
+                    ),
                     "N_carriers": _oh_count_carriers(rec["samples"]),
                     "Carriers": (
                         rec["samples"]
