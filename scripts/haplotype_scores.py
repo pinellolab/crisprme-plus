@@ -70,6 +70,7 @@ import zlib
 # --------------------------------------------------------------------------- #
 # score_status -- the vocabulary. A cell is NEVER blank and NEVER -1.0.
 
+ANONYMISED = "anonymised"       # --anonymise: counts kept, identities withheld
 ST_SCORED = "scored"
 # A row can be BOTH scored and have had an axis decline it. Two previous attempts let one
 # of those facts erase the other: making the refusal win counted a haplotype scoring 20x
@@ -1308,7 +1309,12 @@ def build(results_dir, out_path, cap=0, strict=False,
                 "carrier_panels": _cb[3],
                 "carrier_populations": _cb[4],
                 "carrier_superpopulations": _cb[5],
-                "carriers": "" if anonymise else obs.samples,
+                # NEVER A BLANK -- including under --anonymise. A blank cell is an
+                # absence with no stated reason, which is the one thing this file does
+                # not do; it also failed the project's own gate
+                # (scripts/check_haplotype_scores.py) on every row of an anonymised run.
+                # The counts beside it are still real, so the cell says WHY it is empty.
+                "carriers": ANONYMISED if anonymise else (obs.samples or "-"),
                 "variants_in_window_n": str(len([
                     v for v in obs.variants.split(",")
                     if v.strip() and v.strip().upper() not in ("NA", "N", "-", ".")])),
@@ -1589,7 +1595,9 @@ def main(argv=None):
                    help="exit non-zero if any site's reported alignment is on none of "
                         "its written haplotypes (default: warn loudly, exit 0).")
     p.add_argument("--anonymise", "--anonymize", action="store_true", dest="anonymise",
-                   help="write carrier counts but no sample identities.")
+                   help="write carrier counts but no sample identities: the carriers "
+                        "column reads 'anonymised', never blank, so the absence has a "
+                        "stated reason like every other absence in the file.")
     args = p.parse_args(argv)
 
     try:

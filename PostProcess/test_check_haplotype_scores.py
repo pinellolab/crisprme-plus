@@ -43,14 +43,23 @@ COLS = ["site_key", "variant_set", "cfd", "crispr_bulge", "score_status",
 
 
 def _row(**kw):
+    """A consistent row by default.
+
+    site_max_crispr_bulge used to be hard-coded "NA" here while callers set
+    crispr_bulge="1", so the gate's own suite BLESSED the shape the gate was failing to
+    catch -- a per-site roll-up saying nothing was measured on a site whose rows carry
+    twenty times the operating point. A fixture that encodes the defect is why the hole
+    survived: it now defaults to the row's own score, and a test that wants them
+    inconsistent must say so explicitly.
+    """
     base = {
         "site_key": "chr1:100:+:GUIDE", "variant_set": "chr1_100_A_C",
         "cfd": "0.5", "crispr_bulge": "NA", "score_status": "scored",
         "above_threshold": "unknown", "row_reported_alignment_found": "unknown",
         "n_haplotypes_at_site": "1", "n_above_threshold": "0", "n_not_scored": "0",
-        "site_max_crispr_bulge": "NA",
     }
     base.update(kw)
+    base.setdefault("site_max_crispr_bulge", base["crispr_bulge"])
     return base
 
 
@@ -84,18 +93,21 @@ class TestACorrectFilePasses(GateFixture):
         """The real-data false alarm. n_above_threshold counts HAPLOTYPES; the same
         variant set appears once per frame that named it, and twice on one frame under
         different alignments, so rows legitimately outnumber the counter."""
-        rows = [_row(crispr_bulge="1", above_threshold="yes", n_above_threshold="1"),
-                _row(crispr_bulge="0.9", above_threshold="yes", n_above_threshold="1"),
-                _row(crispr_bulge="0.5", above_threshold="yes", n_above_threshold="1")]
+        rows = [_row(crispr_bulge="1", above_threshold="yes", n_above_threshold="1",
+                     site_max_crispr_bulge="1"),
+                _row(crispr_bulge="0.9", above_threshold="yes", n_above_threshold="1",
+                     site_max_crispr_bulge="1"),
+                _row(crispr_bulge="0.5", above_threshold="yes", n_above_threshold="1",
+                     site_max_crispr_bulge="1")]
         self.assertEqual(self._names(rows), set())
 
     def test_two_distinct_haplotypes_above_with_a_counter_of_two(self):
         rows = [_row(variant_set="chr1_100_A_C", crispr_bulge="1",
                      above_threshold="yes", n_haplotypes_at_site="2",
-                     n_above_threshold="2"),
+                     n_above_threshold="2", site_max_crispr_bulge="1"),
                 _row(variant_set="chr1_101_G_T", crispr_bulge="0.9",
                      above_threshold="yes", n_haplotypes_at_site="2",
-                     n_above_threshold="2")]
+                     n_above_threshold="2", site_max_crispr_bulge="1")]
         self.assertEqual(self._names(rows), set())
 
 
@@ -196,6 +208,56 @@ class TestTheGateSaysWhenItCannotCheck(GateFixture):
         names = set(v.name for v in chk.check(path, threshold=0.00019))
         self.assertNotIn("threshold-not-stated", names)
         self.assertIn("verdict-disagrees", names)
+
+
+class TestTheRollUpMustMatchTheRows(GateFixture):
+    """A cap only ever REMOVES rows, so the per-site CRISPR-Bulge roll-up can never say
+    less than the rows under it. This was checked nowhere: on a site whose rows carry
+    0.004 -- twenty times the operating point -- setting site_max_crispr_bulge to NA
+    passed with "OK: every invariant holds"."""
+
+    def test_a_roll_up_of_na_over_scored_rows_fails(self):
+        got = self._names([_row(crispr_bulge="0.004", above_threshold="yes",
+                                n_above_threshold="1", site_max_crispr_bulge="NA")])
+        self.assertIn("site-max-missing", got)
+
+    def test_a_roll_up_below_the_rows_fails(self):
+        got = self._names([_row(crispr_bulge="0.004", above_threshold="yes",
+                                n_above_threshold="1",
+                                site_max_crispr_bulge="0.000001")])
+        self.assertIn("site-max-below-rows", got)
+
+    def test_a_roll_up_above_the_rows_is_fine(self):
+        """A cap legitimately hides the higher-scoring haplotype."""
+        got = self._names([_row(crispr_bulge="0.004", above_threshold="yes",
+                                n_haplotypes_at_site="2", n_above_threshold="2",
+                                site_max_crispr_bulge="0.9")])
+        self.assertEqual(got, set())
+
+    def test_a_site_with_no_numbers_is_not_flagged(self):
+        self.assertEqual(self._names([_row(crispr_bulge="NA",
+                                           site_max_crispr_bulge="NA")]), set())
+
+
+class TestTheSentinelCheckFiresOnEverySpelling(GateFixture):
+    """It tested the literal "-1.0" while %.6g renders -1.0 as "-1" and the pipeline
+    writes "-1.000" -- so it could not fire on anything anything actually produces."""
+
+    def test_each_spelling_is_caught(self):
+        for spelling in ("-1", "-1.0", "-1.000", "-1.0000"):
+            got = self._names([_row(crispr_bulge=spelling,
+                                    site_max_crispr_bulge=spelling)])
+            self.assertIn("sentinel-printed", got, "missed %r" % spelling)
+
+    def test_a_real_low_score_is_not_mistaken_for_it(self):
+        got = self._names([_row(crispr_bulge="0.000001",
+                                site_max_crispr_bulge="0.000001")])
+        self.assertNotIn("sentinel-printed", got)
+
+    def test_a_non_numeric_score_is_flagged(self):
+        got = self._names([_row(crispr_bulge="probably",
+                                site_max_crispr_bulge="probably")])
+        self.assertIn("score-not-a-number", got)
 
 
 if __name__ == "__main__":

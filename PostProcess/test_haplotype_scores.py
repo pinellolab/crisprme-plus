@@ -324,13 +324,34 @@ class HaplotypeScoresFixture(HaplotypeScoresMixin, unittest.TestCase):
             self.assertIn(needle, text, "the header must carry %r" % needle)
 
     def test_carrier_identities_can_be_withheld(self):
+        """Withheld, and SAID to be withheld.
+
+        This test used to assert the cell was EMPTY -- encoding the bug as the contract.
+        A blank is an absence with no stated reason, which is the one thing this file
+        does not do, and an anonymised run therefore failed the project's own gate
+        (scripts/check_haplotype_scores.py) on every row. Asserted as the invariant now,
+        not as a literal: not blank, no identity in it, count still real.
+        """
         rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C", samples="a,b,c")]
         _res, text, _msgs = self._run(rows, anonymise=True)
-        body = [l for l in text.splitlines() if l and not l.startswith("#")]
-        head, data = body[0].split("\t"), [l.split("\t") for l in body[1:]]
-        c_i, n_i = head.index("carriers"), head.index("n_carriers")
-        self.assertEqual(data[0][c_i], "", "identities withheld under --anonymise")
-        self.assertEqual(data[0][n_i], "3", "the count is still reported")
+        body = self._parse(text)
+        self.assertNotEqual(body[0]["carriers"], "",
+                            "a blank cell is an absence with no stated reason")
+        for identity in ("a", "b", "c"):
+            self.assertNotIn(identity, body[0]["carriers"].split(","),
+                             "an identity survived --anonymise")
+        self.assertEqual(body[0]["n_carriers"], "3", "the count is still reported")
+
+    def test_an_anonymised_file_passes_the_projects_own_gate(self):
+        """The gate ships with this file; a shipped flag must not produce a file it
+        fails."""
+        import check_haplotype_scores as chk
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C", samples="a,b,c")]
+        self._write_source(rows)
+        out = os.path.join(self.dir, "anon.tsv")
+        hs.build(self.dir, out, log=lambda m: None, anonymise=True)
+        self.assertEqual([v.name for v in chk.check(out)], [],
+                         "an anonymised run fails the gate shipped beside it")
 
 
 
@@ -1275,16 +1296,39 @@ class TestEveryCombinationUpholdsTheInvariants(HaplotypeScoresMixin, unittest.Te
     ORIGINS = ("alt", "ref", "")
     CAPS = (0, 1, -1)
 
-    def _one(self, cfd, cb, origin, cap, variants):
+    # Every case records whether it produced rows, so a build that REFUSES everything
+    # cannot look like a clean pass. Swallowing the refusal silently meant 6 of these 9
+    # tests passed against a build whose first statement was `raise` -- two thirds of an
+    # "exhaustive" suite proving nothing.
+    def setUp(self):
+        HaplotypeScoresMixin.setUp(self)
+        self._produced = getattr(self, "_produced", 0)
+        self._refused = getattr(self, "_refused", 0)
+
+    def _one(self, cfd, cb, origin, cap, variants, targets=None):
         self.setUp()
         rows = [_row("chr1", 100, HAP_ONE, cfd, cb, variants, origin=origin),
                 _row("chr1", 100, HAP_TWO, cfd, cb, variants + ",chr1_101_G_T",
                      origin=origin)]
+        kw = {"cap": cap}
+        if targets is not None:
+            kw["targets"] = self._targets(targets)
         try:
-            _res, text, _msgs = self._run(rows, cap=cap)
+            _res, text, _msgs = self._run(rows, **kw)
         except hs.HaplotypeScoreError:
-            return None                      # a refusal is always an allowed outcome
-        return self._parse(text)
+            self._refused += 1
+            return None                      # a refusal is an allowed outcome, counted
+        body = self._parse(text)
+        if body:
+            self._produced += 1
+        return body
+
+    def _assert_the_enumeration_actually_ran(self, minimum=40):
+        """A test over an enumeration that produced nothing is not a passing test."""
+        self.assertGreaterEqual(
+            self._produced, minimum,
+            "only %d of %d case(s) produced any rows (%d refused): this test proved "
+            "nothing" % (self._produced, self._produced + self._refused, self._refused))
 
     def _cases(self):
         for cfd in self.SCORES:
@@ -1310,8 +1354,10 @@ class TestEveryCombinationUpholdsTheInvariants(HaplotypeScoresMixin, unittest.Te
         for case in self._cases():
             body = self._one(*case) or []
             for r in body:
-                self.assertNotEqual(r["cfd"], "-1.0", case)
-                self.assertNotEqual(r["crispr_bulge"], "-1.0", case)
+                for col in ("cfd", "crispr_bulge"):
+                    self.assertNotIn(r[col], ("-1.0", "-1", "-1.000"),
+                                     "the sentinel reached the file as %r" % r[col])
+        self._assert_the_enumeration_actually_ran()
 
     def test_every_written_value_is_declared_in_the_table(self):
         for case in self._cases():
@@ -1320,6 +1366,7 @@ class TestEveryCombinationUpholdsTheInvariants(HaplotypeScoresMixin, unittest.Te
                 for col in ("score_status", "above_threshold",
                             "row_reported_alignment_found"):
                     hs._verdict(col, r[col])     # raises if undeclared
+        self._assert_the_enumeration_actually_ran()
 
     def test_a_row_is_never_both_above_threshold_and_unscored(self):
         for case in self._cases():
@@ -1328,6 +1375,7 @@ class TestEveryCombinationUpholdsTheInvariants(HaplotypeScoresMixin, unittest.Te
                 if r["above_threshold"] == "yes":
                     self.assertTrue(r["score_status"].startswith("scored"),
                                     "%s on case %r" % (r["score_status"], (case,)))
+        self._assert_the_enumeration_actually_ran()
 
     def test_the_site_counters_add_up(self):
         """n_haplotypes_at_site is the TRUE total, so it must equal what was written
@@ -1341,10 +1389,12 @@ class TestEveryCombinationUpholdsTheInvariants(HaplotypeScoresMixin, unittest.Te
             try:
                 _res, text, msgs = self._run(rows, cap=cap)
             except hs.HaplotypeScoreError:
+                self._refused += 1
                 continue
             body = self._parse(text)
             if not body:
                 continue
+            self._produced += 1
             total = int(body[0]["n_haplotypes_at_site"])
             shown = len(set(r["variant_set"] for r in body))
             note = [m for m in msgs if "not written" in m]
@@ -1353,6 +1403,7 @@ class TestEveryCombinationUpholdsTheInvariants(HaplotypeScoresMixin, unittest.Te
             self.assertEqual(total, shown + hidden,
                              "case %r: total %d, shown %d, hidden %d"
                              % ((case,), total, shown, hidden))
+        self._assert_the_enumeration_actually_ran()
 
     def test_above_threshold_agrees_with_the_number_beside_it(self):
         thr = hs._threshold()[0]
@@ -1366,6 +1417,7 @@ class TestEveryCombinationUpholdsTheInvariants(HaplotypeScoresMixin, unittest.Te
                 else:
                     want = "yes" if float(r["crispr_bulge"]) >= thr else "no"
                     self.assertEqual(r["above_threshold"], want, (case,))
+        self._assert_the_enumeration_actually_ran()
 
     def test_the_composite_status_is_unreachable_today(self):
         """Mutation testing found no test could tell whether scored(<axis>-model-refused)
@@ -1385,6 +1437,7 @@ class TestEveryCombinationUpholdsTheInvariants(HaplotypeScoresMixin, unittest.Te
                 produced.add(r["score_status"])
         self.assertFalse([v for v in produced if v.startswith("scored(")],
                          "the composite fired: %s" % produced)
+        self._assert_the_enumeration_actually_ran()
 
     def test_declined_and_never_measured_never_render_alike(self):
         """The class behind four of the five rounds' findings.

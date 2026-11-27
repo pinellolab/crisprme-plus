@@ -128,10 +128,25 @@ def check(path, threshold=None):
                  "a blank cell: an absence with no stated reason").hit(r)
 
         # 2. The -1 sentinel is never printed and never sortable.
-        if r.get("cfd") == "-1.0" or r.get("crispr_bulge") == "-1.0":
-            mark("sentinel-printed",
-                 "the model's -1 sentinel reached the file, where a numeric filter "
-                 "treats it as a very low score").hit(r)
+        #    Compared NUMERICALLY. This tested the literal "-1.0" while %.6g renders
+        #    -1.0 as "-1" and the pipeline writes "-1.000", so it could not fire on any
+        #    spelling anything actually produces -- the third check found here that
+        #    reported success for work it did not do.
+        for _col in ("cfd", "crispr_bulge"):
+            _raw = r.get(_col, "NA")
+            if _raw in ("NA", "", "-", None):
+                continue
+            try:
+                _val = float(_raw)
+            except ValueError:
+                mark("score-not-a-number",
+                     "a score column holds something that is neither a number nor a "
+                     "stated absence, so no filter can treat it correctly").hit(r)
+                continue
+            if _val <= -1.0:
+                mark("sentinel-printed",
+                     "the model's refusal sentinel reached the file, where a numeric "
+                     "filter reads it as a very low score").hit(r)
 
         # 3. A row is never simultaneously above the threshold and never scored.
         if r.get("above_threshold") == "yes" and not str(
@@ -185,6 +200,34 @@ def check(path, threshold=None):
                 mark("undeclared-verdict",
                      "a value the file's own header does not explain, so a reader "
                      "has nothing to interpret it with").hit(r)
+
+    # 7b. The per-site CRISPR-Bulge roll-up must not contradict the rows under it.
+    #     A cap only ever REMOVES rows, so site_max_crispr_bulge can never read NA while
+    #     a row shows a number, and can never be below the largest shown. This was
+    #     checked NOWHERE: setting it to NA on a site whose rows carry 0.004 -- twenty
+    #     times the operating point -- passed with "OK: every invariant holds".
+    for key, rows in per_site.items():
+        nums = []
+        for r in rows:
+            try:
+                nums.append(float(r.get("crispr_bulge", "NA")))
+            except ValueError:
+                pass
+        if not nums:
+            continue
+        stated = rows[0].get("site_max_crispr_bulge", "NA")
+        try:
+            stated_v = float(stated)
+        except ValueError:
+            mark("site-max-missing",
+                 "site_max_crispr_bulge says nothing was measured on a site whose own "
+                 "rows carry a CRISPR-Bulge score").hit(rows[0])
+            continue
+        if stated_v < max(nums):
+            mark("site-max-below-rows",
+                 "site_max_crispr_bulge is below the largest score on the site's own "
+                 "rows; a cap only removes rows, so the roll-up cannot be lower"
+                 ).hit(rows[0])
 
     # 7. COUNT BEFORE CAP: the site's stated totals must not contradict its rows.
     for key, rows in per_site.items():
