@@ -563,6 +563,17 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_haplotype_scores -v
 
+      - name: "The companion's standing gate: its own invariants, asserted on a real file"
+        # scripts/check_haplotype_scores.py is what makes the companion trustworthy to a
+        # reader who did not generate it -- it asserts, mechanically, the things the file
+        # promises about itself. A checker nobody checks is a rubber stamp, so every
+        # invariant is exercised BOTH ways here: a violating file must fail AND a correct
+        # one must pass. On its first real run it failed a CORRECT 460,714-row file by
+        # comparing rows to haplotypes, and its threshold parser silently skipped the
+        # score-vs-verdict check on every real header; both are pinned.
+        working-directory: PostProcess
+        run: python -m unittest test_check_haplotype_scores -v
+
       - name: "SNP rows drop a carrier whose SNP haplotype holds an indel changing the target"
         working-directory: PostProcess
         run: python -m unittest test_snp_row_indel_carriers -v

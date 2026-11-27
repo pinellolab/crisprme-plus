@@ -1258,5 +1258,177 @@ class TestANegativeCapMeansNoCap(HaplotypeScoresMixin, unittest.TestCase):
         self.assertEqual(a, b)
 
 
+class TestEveryCombinationUpholdsTheInvariants(HaplotypeScoresMixin, unittest.TestCase):
+    """EXHAUSTIVE, not hand-picked.
+
+    Five review rounds found the same class of defect over and over: two genuinely
+    different situations rendering as the same cell, or a counter contradicting the rows
+    beside it. Every one was found by a person noticing, which does not scale and did not
+    converge -- rounds 4 and 5 each found defects inside the previous round's fixes.
+
+    The input space is small and finite, so it is enumerated instead. Each case is built,
+    run, and checked against the invariants the file states about itself. A defect of this
+    class now fails here on the next run rather than waiting for a reviewer.
+    """
+
+    SCORES = ("0.5", "NA", "-1.0")          # measured / absent / model-refused sentinel
+    ORIGINS = ("alt", "ref", "")
+    CAPS = (0, 1, -1)
+
+    def _one(self, cfd, cb, origin, cap, variants):
+        self.setUp()
+        rows = [_row("chr1", 100, HAP_ONE, cfd, cb, variants, origin=origin),
+                _row("chr1", 100, HAP_TWO, cfd, cb, variants + ",chr1_101_G_T",
+                     origin=origin)]
+        try:
+            _res, text, _msgs = self._run(rows, cap=cap)
+        except hs.HaplotypeScoreError:
+            return None                      # a refusal is always an allowed outcome
+        return self._parse(text)
+
+    def _cases(self):
+        for cfd in self.SCORES:
+            for cb in self.SCORES:
+                for origin in self.ORIGINS:
+                    for cap in self.CAPS:
+                        for variants in ("chr1_100_A_C", "-", "NA"):
+                            yield cfd, cb, origin, cap, variants
+
+    def test_no_cell_is_ever_blank(self):
+        n = 0
+        for case in self._cases():
+            body = self._one(*case)
+            if not body:
+                continue
+            n += 1
+            for r in body:
+                blank = [k for k, v in r.items() if v == ""]
+                self.assertFalse(blank, "blank %s on case %r" % (blank, (case,)))
+        self.assertGreater(n, 50, "the enumeration produced almost no rows")
+
+    def test_the_sentinel_is_never_printed(self):
+        for case in self._cases():
+            body = self._one(*case) or []
+            for r in body:
+                self.assertNotEqual(r["cfd"], "-1.0", case)
+                self.assertNotEqual(r["crispr_bulge"], "-1.0", case)
+
+    def test_every_written_value_is_declared_in_the_table(self):
+        for case in self._cases():
+            body = self._one(*case) or []
+            for r in body:
+                for col in ("score_status", "above_threshold",
+                            "row_reported_alignment_found"):
+                    hs._verdict(col, r[col])     # raises if undeclared
+
+    def test_a_row_is_never_both_above_threshold_and_unscored(self):
+        for case in self._cases():
+            body = self._one(*case) or []
+            for r in body:
+                if r["above_threshold"] == "yes":
+                    self.assertTrue(r["score_status"].startswith("scored"),
+                                    "%s on case %r" % (r["score_status"], (case,)))
+
+    def test_the_site_counters_add_up(self):
+        """n_haplotypes_at_site is the TRUE total, so it must equal what was written
+        plus what the cap hid -- the contradiction found twice by hand."""
+        for case in self._cases():
+            self.setUp()
+            cfd, cb, origin, cap, variants = case
+            rows = [_row("chr1", 100, HAP_ONE, cfd, cb, variants, origin=origin),
+                    _row("chr1", 100, HAP_TWO, cfd, cb, variants + ",chr1_101_G_T",
+                         origin=origin)]
+            try:
+                _res, text, msgs = self._run(rows, cap=cap)
+            except hs.HaplotypeScoreError:
+                continue
+            body = self._parse(text)
+            if not body:
+                continue
+            total = int(body[0]["n_haplotypes_at_site"])
+            shown = len(set(r["variant_set"] for r in body))
+            note = [m for m in msgs if "not written" in m]
+            hidden = (int(note[0].split("covering ")[1].split(" haplotype")[0])
+                      if note else 0)
+            self.assertEqual(total, shown + hidden,
+                             "case %r: total %d, shown %d, hidden %d"
+                             % ((case,), total, shown, hidden))
+
+    def test_above_threshold_agrees_with_the_number_beside_it(self):
+        thr = hs._threshold()[0]
+        for case in self._cases():
+            body = self._one(*case) or []
+            for r in body:
+                if r["crispr_bulge"] == "NA":
+                    self.assertTrue(r["above_threshold"].startswith("unknown"),
+                                    "%s with no number, case %r"
+                                    % (r["above_threshold"], (case,)))
+                else:
+                    want = "yes" if float(r["crispr_bulge"]) >= thr else "no"
+                    self.assertEqual(r["above_threshold"], want, (case,))
+
+    def test_the_composite_status_is_unreachable_today(self):
+        """Mutation testing found no test could tell whether scored(<axis>-model-refused)
+        existed. That is not a gap in the tests -- it is unreachable with the schema
+        CRISPRme writes, because each block carries exactly one score column. Stated as a
+        fact so it stays true: if a future schema puts both columns on one block, this
+        fails and whoever does it has to decide deliberately."""
+        cols = _header()
+        for b in _BLOCKS:
+            scores = [c for c in cols if "_score_" in c and c.endswith("(%s)" % b)]
+            self.assertEqual(len(scores), 1,
+                             "%s now has %s -- the composite status becomes REACHABLE "
+                             "and needs a test of its own" % (b, scores))
+        produced = set()
+        for case in self._cases():
+            for r in (self._one(*case) or []):
+                produced.add(r["score_status"])
+        self.assertFalse([v for v in produced if v.startswith("scored(")],
+                         "the composite fired: %s" % produced)
+
+    def test_declined_and_never_measured_never_render_alike(self):
+        """The class behind four of the five rounds' findings.
+
+        Asserted PER COLUMN, not on the row as a whole. A first version of this test
+        compared the (score, above_threshold, status) tuple -- which still differed when
+        above_threshold alone collapsed, so planting the exact round-3 regression left it
+        green. A reader partitions on ONE column; the invariant has to hold there.
+        """
+        declined = self._one("0.5", "-1.0", "alt", 0, "chr1_100_A_C") or []
+        absent = self._one("0.5", "NA", "alt", 0, "chr1_100_A_C") or []
+
+        def cb_rows(body):
+            return [r for r in body if "CRISPR_BULGE" in r["haplotype_id"]]
+
+        d, a = cb_rows(declined), cb_rows(absent)
+        self.assertTrue(d and a)
+        # above_threshold is the column the header says tells these two apart.
+        self.assertNotEqual(set(r["above_threshold"] for r in d),
+                            set(r["above_threshold"] for r in a),
+                            "above_threshold renders declined and never-measured alike")
+        self.assertNotEqual(set(r["score_status"] for r in d),
+                            set(r["score_status"] for r in a),
+                            "score_status renders declined and never-measured alike")
+
+    def test_each_verdict_column_distinguishes_what_its_table_says_it_does(self):
+        """Generalises the above: for every pair of situations the VERDICTS table gives
+        DIFFERENT meanings to, the column must actually differ between them."""
+        cases = {
+            "declined": self._one("0.5", "-1.0", "alt", 0, "chr1_100_A_C") or [],
+            "never-measured": self._one("0.5", "NA", "alt", 0, "chr1_100_A_C") or [],
+            "measured-below": self._one("0.5", "1e-09", "alt", 0, "chr1_100_A_C") or [],
+            "measured-above": self._one("0.5", "0.5", "alt", 0, "chr1_100_A_C") or [],
+        }
+        seen = {}
+        for name, body in cases.items():
+            cb = [r for r in body if "CRISPR_BULGE" in r["haplotype_id"]]
+            self.assertTrue(cb, name)
+            val = cb[0]["above_threshold"]
+            self.assertNotIn(val, seen,
+                             "%s and %s both render above_threshold=%r"
+                             % (name, seen.get(val), val))
+            seen[val] = name
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

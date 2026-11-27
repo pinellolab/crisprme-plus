@@ -208,6 +208,112 @@ def budget_text(budget):
                     v("rna", "RNA/"), v("max_total", "total")))
 
 
+# =========================================================================== #
+# ONE VERDICT TABLE. Every value these three columns can hold, with the condition that
+# produces it and what it means -- declared ONCE and rendered into the file header from
+# this same table.
+#
+# Three of five review rounds found the header promising a value the code cannot emit, or
+# defining one in terms that were no longer true, because the legend was prose written
+# beside the code rather than generated from it. And four rounds found two genuinely
+# different absences rendering alike -- which is hard to notice when the possible values
+# are scattered across a dozen return statements and easy to see when they are a table.
+#
+# A value that is not in this table cannot reach the file: _verdict() asserts it.
+
+VERDICTS = (
+    # column, value, meaning (rendered into the header verbatim)
+    ("score_status", ST_SCORED,
+     "at least one axis produced a number"),
+    ("score_status", "scored(<axis>-model-refused)",
+     "scored, AND the named axis was reached and declined. UNREACHABLE with the schema "
+     "CRISPRme writes today -- each block carries exactly one score column, so no "
+     "observation can have a number on one axis and a refusal on the other. Kept "
+     "because it is the correct answer if that ever changes, and listed here so the "
+     "value is never a surprise; see test_the_composite_status_is_unreachable_today"),
+    ("score_status", "out-of-domain:model-refused(n/length/multi-gap)",
+     "reached, declined, and NO axis produced a number"),
+    ("score_status", "needs-realignment:<site>",
+     "the fixed alignment frame cannot hold it; no number, and none invented"),
+
+    ("above_threshold", "yes",
+     "measured, and at or above the CRISPR-Bulge operating point"),
+    ("above_threshold", "no",
+     "measured, and below it"),
+    ("above_threshold", "unknown",
+     "NOT measured: this frame carries no CRISPR-Bulge column at all"),
+    ("above_threshold", "unknown(model-refused)",
+     "measured in the sense that the model reached it, and DECLINED it. A different "
+     "fact from never measured, and on a real run the commoner one"),
+
+    ("row_reported_alignment_found", "yes",
+     "the site's own reported haplotype is among those written"),
+    ("row_reported_alignment_found", "no",
+     "it is not -- this list is what could be reconstructed, not necessarily all"),
+    ("row_reported_alignment_found", "n/a",
+     "the curated table SAYS ref, so there is no ALT haplotype for it to appear "
+     "among. A measured fact, never used for an absence"),
+    ("row_reported_alignment_found", "unknown",
+     "nothing said what this site reported: either no --targets, or --targets names "
+     "the locus only under a DIFFERENT guide (stderr says which; this file cannot)"),
+    ("row_reported_alignment_found", "unknown(origin-not-in-targets)",
+     "the curated table has no REF/ALT_origin column, so ref was never read"),
+    ("row_reported_alignment_found", "unknown(unparsable-variant-in-targets)",
+     "an ALT row whose Variant cell this file cannot reduce to records"),
+    ("row_reported_alignment_found", "unknown(ambiguous-in-targets)",
+     "the curated table described that locus twice, incompatibly"),
+    ("row_reported_alignment_found", "unknown(key-looks-wrong)",
+     "the comparison looks mis-keyed across the run, so a 'no' is not reported as one"),
+    ("row_reported_alignment_found", "yes(among-all-haplotypes-not-all-shown)",
+     "found, but a cap hid the matching haplotype from this file"),
+)
+
+_VERDICT_VALUES = {}
+for _col, _val, _why in VERDICTS:
+    _VERDICT_VALUES.setdefault(_col, []).append(_val)
+
+
+def _verdict(column, value):
+    """Return ``value``, having checked the table declares it for ``column``.
+
+    Values carrying a variable part are declared with a <placeholder>; the check is on
+    the fixed prefix. The point is that adding a value to the code without adding it to
+    the table -- and so to the header a reader is handed -- fails here, loudly, instead
+    of shipping a cell nothing explains.
+    """
+    for declared in _VERDICT_VALUES.get(column, ()):
+        if declared == value:
+            return value
+        head = declared.split("<")[0]
+        if "<" in declared and value.startswith(head):
+            return value
+    raise HaplotypeScoreError(
+        "internal: %r is not a declared value of %s. Add it to VERDICTS (with what it "
+        "means) so the file header explains it, or do not write it." % (value, column))
+
+
+def verdict_legend(column, width=86):
+    """The header legend for one column, generated FROM the table.
+
+    Every line starts with '#': the whole header is comment lines, and a continuation
+    that did not would be read as data by anything skipping comments.
+    """
+    out = []
+    for col, val, why in VERDICTS:
+        if col != column:
+            continue
+        head = "#     %-40s -- " % val
+        pad = "#" + " " * (len(head) - 1)
+        cur = head
+        for w in why.split():
+            if len(cur) + 1 + len(w) > width and cur not in (head,):
+                out.append(cur.rstrip())
+                cur = pad + w
+            else:
+                cur = (cur + w) if cur in (head,) else (cur + " " + w)
+        out.append(cur.rstrip())
+    return out
+
 # --------------------------------------------------------------------------- #
 # carriers -- a reagent list, reported plainly
 
@@ -802,35 +908,14 @@ def file_header(source_path, source_kind, budget, threshold, recall, cap, strict
         "#   this interval is not. Scores are written %.6g, never 3 dp -- at 3 dp the",
         "#   threshold itself rounds to 0.000.",
         "#",
-        "# THREE VALUES, NOT TWO. above_threshold is yes / no / UNKNOWN, and unknown is",
-        "#   the common case (443,659 of 460,714 rows on the validation run): only the",
-        "#   CRISPR-Bulge block carries a CRISPR-Bulge column, so the other two frames",
-        "#   were never measured against the operating point. 'no' means measured and",
-        "#   below; 'unknown' means not measured. Filtering above_threshold != 'yes'",
-        "#   therefore keeps rows nobody scored -- that is deliberate.",
-        "#   MEASURED on a real NRR run: of 460,714 rows, 139,656 read",
-        "#   unknown(model-refused) and 304,003 a bare unknown. Before they were one",
-        "#   value, so 30% of the file said 'never measured' about rows the model had",
-        "#   reached and declined.",
-        "#   row_reported_alignment_found is one of:",
-        "#     yes / no                   -- it reported an ALT haplotype, and it is or",
-        "#                                   is not among the ones written",
-        "#     n/a                        -- the curated table SAYS ref, so there is no",
-        "#                                   ALT for it to appear among. A measured fact;",
-        "#                                   never used for an absence.",
-        "#     unknown                    -- nothing said what this site reported:",
-        "#                                   either no --targets, or --targets names the",
-        "#                                   locus only under a DIFFERENT guide (stderr",
-        "#                                   says which; this file cannot)",
-        "#     unknown(origin-not-in-targets)        -- the curated table has no",
-        "#                                   REF/ALT_origin column, so ref was never read",
-        "#     unknown(unparsable-variant-in-targets) -- an ALT row whose Variant cell",
-        "#                                   this file cannot reduce to records",
-        "#     unknown(ambiguous-in-targets)         -- the table described that locus",
-        "#                                   twice, incompatibly",
-        "#     unknown(key-looks-wrong)   -- the comparison looks mis-keyed across the",
-        "#                                   run, so a 'no' here is not reported as one",
-        "#     yes(among-all-haplotypes-not-all-shown) -- a cap hid the matching one",
+        "# THREE VALUES, NOT TWO -- and the third is the common one. MEASURED on a real",
+        "#   NRR run: of 460,714 rows, 139,656 read unknown(model-refused) and 304,003 a",
+        "#   bare unknown. Before they were one value, so 30% of the file said it had",
+        "#   never measured rows the model had reached and declined.",
+    ] + verdict_legend("above_threshold") + [
+        "#",
+        "#   row_reported_alignment_found:",
+    ] + verdict_legend("row_reported_alignment_found") + [
         "#",
         "# RANK IS ONE ORDERING, NOT ONE PER AXIS. rank_in_site_by_score numbers the",
         "#   site's rows 1..n in the order a cap takes them: CRISPR-Bulge-bearing rows",
@@ -844,16 +929,9 @@ def file_header(source_path, source_kind, budget, threshold, recall, cap, strict
         "# NEVER A BLANK. score_status is always set. A never-scored cell and the",
         "#   CRISPR-Bulge out-of-domain sentinel both used to render 'NA', so filtering",
         "#   on the score silently discarded them and the site looked clean. -1.0 is never",
-        "#   printed, never sorted on. Its values:",
-        "#     scored                     -- at least one axis produced a number",
-        "#     scored(cb-model-refused)   -- scored, AND the named axis was reached and",
-        "#       scored(cfd-model-refused)   declined by the model's own rule. Both facts,",
-        "#                                   because one erasing the other is how two",
-        "#                                   earlier versions of this file were wrong.",
-        "#     out-of-domain:model-refused(n/length/multi-gap) -- reached, declined, and",
-        "#                                   NO axis produced a number",
-        "#     needs-realignment:<site>   -- the fixed frame cannot hold it; no number,",
-        "#                                   and none invented",
+        "#   printed, never sorted on. Its values (generated from VERDICTS, so this",
+        "#   legend cannot drift from what the code can write):",
+    ] + verdict_legend("score_status") + [
         "#   above_threshold reads unknown(model-refused) where the CRISPR-Bulge axis was",
         "#   reached and declined, as against a bare unknown for never measured.",
         "#",
@@ -1010,7 +1088,7 @@ def read_reported(targets_path, say=None):
             origin = (row[o_i].strip().lower()
                       if o_i is not None and o_i < len(row) else "")
             spacer = (row[s_i].strip() if s_i is not None and s_i < len(row) else "")
-            key = (row[c_i].strip(), row[p_i].strip(), spacer)
+            key = target_key(row[c_i], row[p_i], spacer)
             rep = Reported(variants=canonical_variants(row[v_i]), origin=origin,
                            origin_known=(o_i is not None and origin in ("ref", "alt")))
             prev = out.get(key)
@@ -1029,24 +1107,64 @@ def read_reported(targets_path, say=None):
     return out
 
 
-def _acct_key(reported, obs):
-    """The key the --targets accounting counts this observation against.
+# =========================================================================== #
+# ONE IDENTITY. Built in one place, used by every set, lookup and dict.
+#
+# This file previously held SIX parallel notions of "the same site": site_key, an ad-hoc
+# (chrom, pos) tuple for `wanted`, another for `seen_anchors`, another for
+# `ref_only_anchors`, a (chrom, pos, spacer) tuple for `reported`, and `_acct_key`.
+# EVERY --targets defect found in five review rounds was two of them disagreeing:
+#   - `reported` kept the guide while the accounting dropped it, so one guide's rows
+#     marked a coordinate "seen" for every other guide curated at it;
+#   - `wanted` used the anchor while the filter used the block start, so the
+#     CRISPR-Bulge observation was discarded;
+#   - the ALT-vs-REF check fell back to "any curated row here", so its verdict flipped
+#     with the order of lines in the table.
+# None of those is subtle once the key is ONE object. They were only possible because it
+# was six.
+#
+# There are genuinely TWO keys, because the curated table has no strand column and the
+# sites dict needs one. They are separate TYPES with one documented projection between
+# them, not six tuples that happen to look alike.
 
-    Guide-qualified when the curated table named this (locus, guide); otherwise the
-    guide-less key, so a table with no guide column behaves exactly as before.
+TargetKey = collections.namedtuple("TargetKey", "chrom start spacer")
+
+
+def target_key(chrom, start, spacer=""):
+    """THE key for anything that talks to the curated table. Built nowhere else."""
+    return TargetKey(str(chrom or "").strip(), str(start or "").strip(),
+                     str(spacer or "").strip())
+
+
+def coarse_key(k):
+    """The guide-blind (chrom, start) projection, used ONLY for the read filter.
+
+    Deliberately coarse: a row is read if its coordinate was asked for at all, and the
+    guide then decides what is SAID about it. Narrowing this would silently DROP rows
+    whose guide spelling differs from the table's, which is a warning (guide_mismatch),
+    not a drop.
     """
-    exact = (obs.chrom, obs.anchor_start, obs.spacer)
-    return exact if exact in reported else (obs.chrom, obs.anchor_start, "")
+    return (k.chrom, k.start)
+
+
+def obs_target_key(reported, obs):
+    """This observation's key, guide-qualified when the table named that (locus, guide).
+
+    The one place an Observation becomes a TargetKey. A table with no guide column
+    resolves to the guide-less key, so it behaves exactly as it always did.
+    """
+    exact = target_key(obs.chrom, obs.anchor_start, obs.spacer)
+    return exact if exact in reported else target_key(obs.chrom, obs.anchor_start)
 
 
 def lookup_reported(reported, chrom, start, spacer):
     """The curated row for this site, matching on the guide when the table named one."""
     if not reported:
         return None
-    rep = reported.get((chrom, start, spacer))
+    rep = reported.get(target_key(chrom, start, spacer))
     if rep is not None:
         return rep
-    return reported.get((chrom, start, ""))
+    return reported.get(target_key(chrom, start))
 
 
 def build(results_dir, out_path, cap=0, strict=False,
@@ -1104,7 +1222,7 @@ def build(results_dir, out_path, cap=0, strict=False,
     # (guide_mismatch), not a drop.
     # Keyed on whether --targets was GIVEN, not on whether it yielded anything.
     wanted = set(reported) if targets else None
-    wanted_coarse = (set((c, pp) for c, pp, _ in reported) if targets else None)
+    wanted_coarse = set(coarse_key(k) for k in wanted) if targets else None
     seen_anchors = set()        # anchors that produced an ALT haplotype row
     ref_only_anchors = set()    # anchors the source DOES hold, but only as reference
     guide_mismatch = set()      # the locus is in --targets, but under a different guide
@@ -1114,23 +1232,24 @@ def build(results_dir, out_path, cap=0, strict=False,
     with open_table(source_path) as stream:
         for obs in harvest_rows(stream):
             is_ref = bool(obs.origin) and obs.origin.lower() == "ref"
-            if wanted is not None and is_ref and (obs.chrom, obs.anchor_start) in wanted_coarse:
+            obs_key = obs_target_key(reported, obs) if wanted is not None else None
+            if wanted is not None and is_ref and coarse_key(obs_key) in wanted_coarse:
                 # RECORDED BEFORE THE REF FILTER. A curated table is mostly REF-origin
                 # (115 of 187 sites on the delivering run), and those sites are PRESENT in
                 # the source -- they simply carry no ALT haplotype. Dropping them before
                 # the anchor was noted made the gap warning call them "not enumerated
                 # here", which is false and would have mislabelled most of a real list.
-                ref_only_anchors.add(_acct_key(reported, obs))
+                ref_only_anchors.add(obs_key)
             if is_ref:
                 continue                       # reference rows are not variant haplotypes
-            if wanted is not None and (obs.chrom, obs.anchor_start) not in wanted_coarse:
+            if wanted is not None and coarse_key(obs_key) not in wanted_coarse:
                 # Bounds memory to the sites actually asked for. Without --targets every
                 # site of the run is held at once, which a genome-wide sidecar (millions
                 # of rows x three blocks) will not fit in. Streaming with cluster close-out
                 # is the next step; see the note in the PR.
                 continue
             if wanted is not None:
-                seen_anchors.add(_acct_key(reported, obs))
+                seen_anchors.add(obs_key)
             site = sites.get(obs.site)
             if site is None:
                 site = Site(obs.site, obs.chrom, obs.start, obs.strand, obs.spacer)
@@ -1142,7 +1261,8 @@ def build(results_dir, out_path, cap=0, strict=False,
                     # Spacer+PAM includes it, so an innocent column-name choice silently
                     # turned reconciliation off for the whole run: every row 'unknown',
                     # no failures, nothing said. Say it.
-                    guide_mismatch.add((obs.chrom, obs.anchor_start, obs.spacer))
+                    guide_mismatch.add(target_key(obs.chrom, obs.anchor_start,
+                                                  obs.spacer))
                 site.has_report = rep is not None and rep is not _AMBIGUOUS
                 if rep is _AMBIGUOUS:
                     site.ambiguous = True
@@ -1179,8 +1299,8 @@ def build(results_dir, out_path, cap=0, strict=False,
                 "aligned_protospacer_pam": obs.aligned_alt,
                 "alignment_frame": FRAME_CANDIDATE,
                 "cfd": fmt_score(cfd), "crispr_bulge": fmt_score(cb),
-                "score_status": status,
-                "above_threshold": above,
+                "score_status": _verdict("score_status", status),
+                "above_threshold": _verdict("above_threshold", above),
                 "rank_in_site_by_score": "", "rank_score_axis": "",
                 "n_carriers": str(_cb[0]),
                 "carriers_homozygous": _cb[1],
@@ -1390,7 +1510,8 @@ def build(results_dir, out_path, cap=0, strict=False,
                 row["n_above_threshold"] = str(site.n_above)
                 row["n_not_scored"] = str(site.n_not_scored)
                 row["site_max_crispr_bulge"] = fmt_score(site.max_cb)
-                row["row_reported_alignment_found"] = found
+                row["row_reported_alignment_found"] = _verdict(
+                    "row_reported_alignment_found", found)
                 writer.writerow(row)
                 n_rows += 1
             if hidden_rows:
