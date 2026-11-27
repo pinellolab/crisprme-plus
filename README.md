@@ -3152,6 +3152,51 @@ so a fixed total fixes the reference interval, not every carrier's base count.
 > orientation, and `target_offset` is 0-based into the sequence **as emitted**, as a
 > Python slice reads it.
 
+##### A score on every haplotype: `scripts/haplotype_scores.py`
+---
+
+`--max-haplotypes` above orders by whether the haplotype holds the off-target, then by
+carrier count — an order that **reads no score**, so the cap can drop a higher-scoring
+haplotype before a lower-scoring one. Every other per-site product has the same shape for
+the same reason: `integrated_results` keeps one representative per axis, the
+observed-haplotypes companion keys on the variant set, `extract-flanks` on carrier count.
+None of them attaches a score to a haplotype, so "give me every ALT above a threshold"
+could not be asked.
+
+`scripts/haplotype_scores.py` writes that file — one row per **site × haplotype ×
+alignment frame**, each with its score and a never-blank `score_status`:
+
+```bash
+python3 scripts/haplotype_scores.py \
+  --results Results/<your-job> \
+  --out <your-job>.haplotype_scores.tsv
+```
+
+Inside the container the tree lives under `/opt/conda/opt/crisprme`, so the same run is
+`python3 /opt/conda/opt/crisprme/scripts/haplotype_scores.py --results …`.
+
+It reads the scores the pipeline already wrote, so it **cannot disagree with the report**;
+the caveat ships as a column (`alignment_frame=candidate_frame` — the haplotype's bases in
+the candidate's alignment shape). Useful flags:
+
+- `--targets <curated table>` — restrict the file to a curated shortlist and reconcile
+  each site's own reported haplotype against the ones written
+  (`row_reported_alignment_found`). Sites the source does not hold are **counted and
+  named** rather than silently absent. Without it the whole run is written, which a
+  genome-wide search will not fit in memory.
+- `--max-haplotypes N` — cap rows per site. Counters are computed before the cap, so a
+  capped file still reports the true totals, and `rank_score_axis` says which score the
+  rank used: CRISPR-Bulge-bearing rows rank first, then CFD-only — the two scales are
+  never compared.
+- `--anonymise` — counts without sample identities.
+- `--strict` — exit non-zero when a site's reported alignment is on none of its
+  haplotypes (default: warn, exit 0).
+
+Carriers are reported, **never ranked on**: a heterozygous carrier is as orderable as a
+homozygous one. `carriers_homozygous`/`heterozygous` read `unknown` when the source does
+not record which allele — which these sidecars do not, so for zygosity use
+`extract-flanks`, whose `SAMPLE:slot` form carries it.
+
 ## 3 Test
 
 This section covers CRISPRme testing. This ensures that the software is 
