@@ -92,7 +92,13 @@ def _row(chrom, start, alt, cfd, cb, variants, samples="s1,s2", origin="alt",
     return out
 
 
-class HaplotypeScoresFixture(unittest.TestCase):
+class HaplotypeScoresMixin(object):
+    """setUp and helpers ONLY -- never a TestCase.
+
+    This used to be a TestCase carrying its own tests, and every class that reused the
+    helpers inherited and re-ran them. Five subclasses turned ~35 real tests into 109
+    collected, multiplying runtime and inflating the count.
+    """
 
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="hapscores_")
@@ -108,6 +114,14 @@ class HaplotypeScoresFixture(unittest.TestCase):
                 fh.write("\t".join(r) + "\n")
         return path
 
+    @staticmethod
+    def _parse(text):
+        """Body rows as dicts keyed by the header. NEVER index a column by position:
+        adding rank_score_axis silently shifted every later index."""
+        lines = [l for l in text.splitlines() if l and not l.startswith("#")]
+        hdr = lines[0].split("\t")
+        return [dict(zip(hdr, l.split("\t"))) for l in lines[1:]]
+
     def _run(self, rows, **kw):
         self._write_source(rows)
         out = os.path.join(self.dir, "out.tsv")
@@ -116,8 +130,6 @@ class HaplotypeScoresFixture(unittest.TestCase):
         with io.open(out, "r", encoding="utf-8") as fh:
             text = fh.read()
         return res, text, msgs
-
-    # -- the reconciliation signal ------------------------------------------ #
 
     def _targets(self, rows):
         """A curated table naming each site's OWN reported haplotype.
@@ -141,6 +153,10 @@ class HaplotypeScoresFixture(unittest.TestCase):
                          % (chrom, pos, variant, origin, REPORTED,
                             ("\t%s" % (guide or "")) if named else ""))
         return path
+
+
+class HaplotypeScoresFixture(HaplotypeScoresMixin, unittest.TestCase):
+    """The reconciliation signal and the file's invariants."""
 
     def test_a_site_whose_reported_alignment_is_on_no_haplotype_is_flagged(self):
         """The signal separating 'all the haplotypes' from 'the ones we could get'.
@@ -378,7 +394,7 @@ class CarrierReporting(unittest.TestCase):
         self.assertIn("Yoruba:1", out[4])
 
 
-class TestSiteIdentityAcrossDivergentBlocks(HaplotypeScoresFixture):
+class TestSiteIdentityAcrossDivergentBlocks(HaplotypeScoresMixin, unittest.TestCase):
     """The three alignment blocks place the same physical off-target at DIFFERENT starts.
 
     Measured on real runs: 2.1% of 73,994 rows genome-wide per-sample, 2.6% of 31,502 on a
@@ -400,17 +416,14 @@ class TestSiteIdentityAcrossDivergentBlocks(HaplotypeScoresFixture):
         self.assertEqual(n_sites, 1,
                          "one physical off-target must be one site, whatever each block "
                          "calls its start:\n" + text)
-        keys = set(l.split("\t")[0] for l in text.splitlines()
-                   if l and not l.startswith("#") and not l.startswith("site_key"))
-        self.assertEqual(len(keys), 1, keys)
+        self.assertEqual(len(set(r["site_key"] for r in self._parse(text))), 1)
 
     def test_each_row_still_reports_its_own_blocks_coordinate(self):
         """Anchoring site IDENTITY must not rewrite the coordinate a block actually used."""
         rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C", cb_start=97)]
         _res, text, _msgs = self._run(rows)
-        body = [l.split("\t") for l in text.splitlines()
-                if l and not l.startswith("#") and not l.startswith("site_key")]
-        starts = set(r[2] for r in body)           # site_start
+        body = self._parse(text)
+        starts = set(r["site_start"] for r in body)
         self.assertEqual(starts, {"100", "97"},
                          "each observation reports its own block's start: %s" % starts)
 
@@ -422,13 +435,12 @@ class TestSiteIdentityAcrossDivergentBlocks(HaplotypeScoresFixture):
         rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C", cb_start=97)]
         tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT")])
         _res, text, _msgs = self._run(rows, targets=tgt)
-        body = [l.split("\t") for l in text.splitlines()
-                if l and not l.startswith("#") and not l.startswith("site_key")]
+        body = self._parse(text)
         self.assertTrue(body, "the CRISPR-Bulge observation was dropped entirely")
-        cb = set(r[11] for r in body)              # crispr_bulge
+        cb = set(r["crispr_bulge"] for r in body)
         self.assertIn("0.9", cb,
                       "the CRISPR-Bulge score was lost with the block it lives on: %s" % cb)
-        self.assertEqual(set(r[28] for r in body), {"0.9"},
+        self.assertEqual(set(r["site_max_crispr_bulge"] for r in body), {"0.9"},
                          "site_max_crispr_bulge must see the score too")
 
     def test_reconciliation_survives_the_divergence(self):
@@ -440,7 +452,7 @@ class TestSiteIdentityAcrossDivergentBlocks(HaplotypeScoresFixture):
         self.assertIn("\tyes", text)
 
 
-class TestTargetsKeyIsPerGuide(HaplotypeScoresFixture):
+class TestTargetsKeyIsPerGuide(HaplotypeScoresMixin, unittest.TestCase):
     """Two guides can report at the SAME locus. Keying --targets on (chrom, position)
     alone let the later curated row overwrite the earlier one, so one guide was quietly
     reconciled against the other guide's haplotype."""
@@ -520,7 +532,7 @@ class TestTheFixtureMatchesTheRealSchema(unittest.TestCase):
             sorted("CFD_score_(%s)" % b for b in _BLOCKS))
 
 
-class TestAnEmptySourceNeverWins(HaplotypeScoresFixture):
+class TestAnEmptySourceNeverWins(HaplotypeScoresMixin, unittest.TestCase):
     """Found on real data, not by reading the code.
 
     The raw sidecar is gated on a Tier-1 dict-less genotype store. A run without that
@@ -577,7 +589,7 @@ class TestAnEmptySourceNeverWins(HaplotypeScoresFixture):
                          "a refusal must leave no file to be mistaken for an answer")
 
 
-class TestTargetsGapsAreNamed(HaplotypeScoresFixture):
+class TestTargetsGapsAreNamed(HaplotypeScoresMixin, unittest.TestCase):
     """A --targets site that produced nothing must be SAID, not silently absent.
 
     Measured on a real NRR run: of 200 curated top-CFD ALT sites, only 97 appear at that
@@ -619,6 +631,139 @@ class TestTargetsGapsAreNamed(HaplotypeScoresFixture):
         gap = [m for m in msgs if "NO rows" in m][0]
         self.assertIn("not enumerated", gap)
         self.assertIn("NOT fuzzy-matched", gap)
+
+
+class TestACapNeverDiscardsTheScoredAxis(HaplotypeScoresMixin, unittest.TestCase):
+    """CFD and CRISPR-Bulge are different scales and were ordered in one sequence.
+
+    CFD runs 0..1; the CRISPR-Bulge operating point is 1.9e-4. Only the CRISPR-Bulge
+    block carries a CB column, so every CFD-only row sorted above every CB row -- and
+    cap=1 on a site with CFD 0.6 and CB 0.004 (20x the operating point) wrote the CFD
+    row and DISCARDED the only haplotype above the threshold, on a line that still said
+    n_above_threshold=1.
+    """
+
+    def test_the_above_threshold_row_survives_a_cap_of_one(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.6, 0.004, "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows, cap=1)
+        body = self._parse(text)
+        self.assertEqual(len(body), 1)
+        self.assertEqual(body[0]["crispr_bulge"], "0.004",
+                         "the cap kept the CFD row and dropped the scored one")
+        self.assertEqual(body[0]["above_threshold"], "yes")
+
+    def test_the_file_never_claims_more_above_threshold_than_it_shows(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.6, 0.004, "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows, cap=1)
+        body = self._parse(text)
+        shown = len([r for r in body if r["above_threshold"] == "yes"])
+        self.assertEqual(int(body[0]["n_above_threshold"]), shown)
+
+    def test_rank_says_which_score_it_used(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.6, 0.004, "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        axes = set(r["rank_score_axis"] for r in self._parse(text))
+        self.assertTrue(axes <= {"crispr_bulge", "cfd", "none"}, axes)
+        self.assertIn("crispr_bulge", axes)
+
+    def test_hidden_is_counted_in_haplotypes_not_rows(self):
+        """One haplotype across three frames is ONE haplotype. The message said 2 were
+        not written while the rows said n_haplotypes_at_site=1."""
+        rows = [_row("chr1", 100, HAP_ONE, 0.6, 0.004, "chr1_100_A_C")]
+        _res, text, msgs = self._run(rows, cap=1)
+        note = [m for m in msgs if "not written" in m]
+        self.assertTrue(note, msgs)
+        self.assertIn("0 haplotype(s)", note[0])
+        self.assertEqual(self._parse(text)[0]["n_haplotypes_at_site"], "1")
+
+
+class TestARefusedCfdIsNotCalledUnalignable(HaplotypeScoresMixin, unittest.TestCase):
+    """new_simple_analysis.py writes -1.000 into the CFD column when it computes no
+    score. CFD is the one column on all three blocks, so on the two with no CB column a
+    refused CFD left both None and typed the row 'needs-realignment' -- saying the frame
+    could not hold it when the scorer reached it and declined."""
+
+    def test_a_minus_one_cfd_types_as_refused_not_needs_realignment(self):
+        rows = [_row("chr1", 100, HAP_ONE, -1.0, -1.0, "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        statuses = set(r["score_status"] for r in self._parse(text))
+        self.assertTrue(all("model-refused" in st for st in statuses), statuses)
+        self.assertFalse([st for st in statuses if "needs-realignment" in st], statuses)
+
+    def test_the_sentinel_is_still_never_printed(self):
+        rows = [_row("chr1", 100, HAP_ONE, -1.0, -1.0, "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        for r in self._parse(text):
+            self.assertNotIn("-1.0", (r["cfd"], r["crispr_bulge"]))
+
+
+class TestRefOnlySitesAreNotCalledAbsent(HaplotypeScoresMixin, unittest.TestCase):
+    """A curated table is mostly REF-origin (115 of 187 sites on the delivering run).
+    Those sites ARE in the source; they just carry no ALT haplotype. The gap warning
+    skipped ref rows before noting the anchor, so it called them 'not enumerated here'."""
+
+    def test_a_ref_only_site_is_reported_as_present_with_no_alt(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C", origin="ref")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "REF")])
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        present = [m for m in msgs if "carry only reference rows" in m]
+        self.assertTrue(present, msgs)
+        self.assertFalse([m for m in msgs if "NO rows" in m],
+                         "a ref-only site must not be called absent")
+
+    def test_a_genuinely_absent_site_is_still_called_absent(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C", origin="ref")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "REF"),
+                             ("chr9", "777", "chr9;777;G;T (rs7)", "ALT")])
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        gap = [m for m in msgs if "NO rows" in m]
+        self.assertTrue(gap, msgs)
+        self.assertIn("chr9:777", gap[0])
+        self.assertNotIn("chr1:100", gap[0])
+
+
+class TestAGuideMismatchIsNotSilent(HaplotypeScoresMixin, unittest.TestCase):
+    """A curated 'crRNA'/'Guide' column holds the 20-mer WITHOUT the PAM while the
+    source's Spacer+PAM includes it. The locus passes the coarse filter, no guide-keyed
+    entry matches, and reconciliation goes 'unknown' on every row with nothing said."""
+
+    def _targets_named(self, guide):
+        path = os.path.join(self.dir, "targets_g.tsv")
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("Chromosome\tPosition\tVariant\tREF/ALT_origin\tcrRNA\n")
+            fh.write("chr1\t100\tchr1;100;A;C (rs1)\tALT\t%s\n" % guide)
+        return path
+
+    def test_a_guide_that_does_not_match_the_source_is_warned_about(self):
+        rows = [_row("chr1", 100, REPORTED, 0.4, 0.9, "chr1_100_A_C")]
+        tgt = self._targets_named(SPACER[:20])          # the 20-mer, no PAM
+        _res, text, msgs = self._run(rows, targets=tgt)
+        warn = [m for m in msgs if "DIFFERENT guide" in m]
+        self.assertTrue(warn, msgs)
+        self.assertIn("WITHOUT the PAM", warn[0])
+        self.assertEqual(set(r["row_reported_alignment_found"]
+                             for r in self._parse(text)), {"unknown"})
+
+    def test_a_matching_guide_says_nothing_and_reconciles(self):
+        rows = [_row("chr1", 100, REPORTED, 0.4, 0.9, "chr1_100_A_C")]
+        tgt = self._targets_named(SPACER)
+        _res, text, msgs = self._run(rows, targets=tgt)
+        self.assertFalse([m for m in msgs if "DIFFERENT guide" in m], msgs)
+        self.assertEqual(set(r["row_reported_alignment_found"]
+                             for r in self._parse(text)), {"yes"})
+
+
+class TestAnUnreadableSourceIsNotCalledEmpty(HaplotypeScoresMixin, unittest.TestCase):
+
+    def test_a_corrupt_archive_raises_instead_of_reading_as_header_only(self):
+        path = os.path.join(self.dir, "x_observed_haplotypes_raw.zip")
+        with io.open(path, "wb") as fh:
+            fh.write(b"this is not a zip file")
+        with self.assertRaises(hs.HaplotypeScoreError) as cm:
+            hs.probe_source(self.dir)
+        msg = str(cm.exception)
+        self.assertIn("cannot be read", msg)
+        self.assertNotIn("header-only", msg)
 
 
 if __name__ == "__main__":

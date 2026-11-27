@@ -71,15 +71,9 @@ import zipfile
 
 ST_SCORED = "scored"
 ST_OUT_OF_DOMAIN = "out-of-domain:%s"          # the model's own refusal rule
-ST_NO_ALIGNMENT = "no-in-budget-alignment(%s)"  # budget quoted INSIDE the string
 ST_NEEDS_REALIGN = "needs-realignment:%s"       # site_key; Tier 2 would resolve it
-ST_UNRESOLVED = "unresolved-copy:%s"            # overlapping-records | unphased-genotype | ...
-ST_WINDOW_DELETED = "window-deleted"
-ST_NOT_CHECKED = "not-checked:no-vcf-on-contig"
-ST_CAPPED = "capped-out"
 
 FRAME_CANDIDATE = "candidate_frame"
-FRAME_OWN = "haplotype_own"
 
 # The CRISPR-Bulge null sentinel. It must never reach a column or a sort.
 CB_NULL = -1.0
@@ -91,7 +85,7 @@ COLUMNS = [
     "alignment_frame",
     "cfd", "crispr_bulge", "score_status",
     "above_threshold",
-    "rank_in_site_by_score",
+    "rank_in_site_by_score", "rank_score_axis",
     "n_carriers", "carriers_homozygous", "carriers_heterozygous",
     "carrier_panels", "carrier_populations", "carrier_superpopulations",
     "carriers",
@@ -380,15 +374,23 @@ def probe_source(results_dir):
 
 
 def has_data_row(path):
-    """True if the table has at least one non-blank line after its header."""
+    """True if the table has at least one non-blank line after its header.
+
+    An UNREADABLE source raises. Swallowing the error returned False, and probe_source
+    then called a corrupt archive "header-only" and sent the operator off to re-run the
+    search with per-sample enumeration -- for a bad zip.
+    """
     try:
         with open_table(path) as stream:
             next(stream, None)                     # the header
             for line in stream:
                 if line.strip():
                     return True
-    except (HaplotypeScoreError, OSError, zipfile.BadZipFile):
-        return False
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise HaplotypeScoreError(
+            "%s cannot be read (%s). This is not an empty run: the file is there and "
+            "unreadable, which is a different problem from 'nothing was enumerated'. "
+            "Refusing to guess which." % (path, exc))
     return False
 
 
@@ -398,9 +400,21 @@ def open_table(path):
         zf = zipfile.ZipFile(path)
         names = [n for n in zf.namelist() if n.endswith(".tsv")]
         if not names:
+            zf.close()
             raise HaplotypeScoreError("%s holds no .tsv member" % path)
         handle = zf.open(names[0])
-        return io.TextIOWrapper(handle, encoding="utf-8", errors="replace")
+        wrapper = io.TextIOWrapper(handle, encoding="utf-8", errors="replace")
+        # Closing the wrapper must close the archive too: probe_source now opens one per
+        # candidate, so a leaked ZipFile per call is a real descriptor leak.
+        _close = wrapper.close
+
+        def close_both():
+            try:
+                _close()
+            finally:
+                zf.close()
+        wrapper.close = close_both
+        return wrapper
     return io.open(path, "r", encoding="utf-8", errors="replace")
 
 
@@ -564,11 +578,16 @@ def classify(obs, budget, axis_named):
             return None, True
         return v, False
 
-    cfd, _cfd_refused = num(obs.cfd)
+    cfd, cfd_refused = num(obs.cfd)
     cb, cb_refused = num(obs.crispr_bulge)
-    if cb_refused:
-        # reached and declined: the CFD number still stands and is written beside it
-        return cfd, None, ST_OUT_OF_DOMAIN % "model-refused(n/length/multi-gap)"
+    # The CFD writer ALSO emits the -1 sentinel ("no score calculated, append -1" --
+    # new_simple_analysis.py), and CFD is the one column present on all three blocks. On
+    # the two blocks with no CB column a refused CFD left cfd=None, cb=None and typed the
+    # row "needs-realignment", which says the frame could not hold it; the truth is the
+    # scorer reached it and declined. Same conflation, on the commoner axis.
+    if cb_refused or cfd_refused:
+        # reached and declined: whichever number DID survive is still written beside it
+        return cfd, cb, ST_OUT_OF_DOMAIN % "model-refused(n/length/multi-gap)"
     if cfd is None and cb is None:
         return None, None, ST_NEEDS_REALIGN % obs.site
     return cfd, cb, ST_SCORED
@@ -683,6 +702,23 @@ def file_header(source_path, source_kind, budget, threshold, recall, cap, strict
         "#   this interval is not. Scores are written %.6g, never 3 dp -- at 3 dp the",
         "#   threshold itself rounds to 0.000.",
         "#",
+        "# THREE VALUES, NOT TWO. above_threshold is yes / no / UNKNOWN, and unknown is",
+        "#   the common case (443,659 of 460,714 rows on the validation run): only the",
+        "#   CRISPR-Bulge block carries a CRISPR-Bulge column, so the other two frames",
+        "#   were never measured against the operating point. 'no' means measured and",
+        "#   below; 'unknown' means not measured. Filtering above_threshold != 'yes'",
+        "#   therefore keeps rows nobody scored -- that is deliberate.",
+        "#   row_reported_alignment_found likewise has unknown, n/a,",
+        "#   unknown(ambiguous-in-targets) when --targets described a locus twice",
+        "#   incompatibly, and yes(among-all-haplotypes-not-all-shown) when a cap hid the",
+        "#   matching haplotype.",
+        "#",
+        "# RANK IS WITHIN AN AXIS. rank_score_axis says which score rank_in_site_by_score",
+        "#   used. CRISPR-Bulge-bearing rows rank first, then CFD-only, then unscored --",
+        "#   the two scales are never compared (CFD runs 0..1; the CB operating point is",
+        "#   1.9e-4), so a cap can never discard a CRISPR-Bulge row in favour of a",
+        "#   larger-looking CFD one.",
+        "#",
         "# NEVER A BLANK. score_status is always set. A never-scored cell and the",
         "#   CRISPR-Bulge out-of-domain sentinel both used to render 'NA', so filtering",
         "#   on the score silently discarded them and the site looked clean. -1.0 is never",
@@ -698,10 +734,12 @@ def file_header(source_path, source_kind, budget, threshold, recall, cap, strict
         "#   such a run would mean 'never enumerated', not 'nothing above threshold' -- this",
         "#   command refuses to write rather than let that ambiguity ship.",
         "#",
-        "# alignment_frame=candidate_frame means the score is the haplotype's bases in the",
-        "#   CANDIDATE's alignment shape (the pipeline re-inserts gap columns at fixed",
-        "#   positions and counts mismatches positionally). haplotype_own means the",
-        "#   haplotype was re-aligned on its own, anchored to the row's published alignment.",
+        "# alignment_frame is ALWAYS candidate_frame: the score is the haplotype's bases",
+        "#   in the CANDIDATE's alignment shape (the pipeline re-inserts gap columns at",
+        "#   fixed positions and counts mismatches positionally). Anchored re-alignment on",
+        "#   the haplotype's own sequence is designed and NOT implemented, so no row here",
+        "#   carries a haplotype_own frame; rows the fixed frame cannot hold say",
+        "#   score_status=needs-realignment and carry no invented number.",
         "#",
         "# CARRIERS ARE A REAGENT LIST, REPORTED, NEVER RANKED. A heterozygous carrier is",
         "#   as orderable as a homozygous one -- allele-specific quantification handles it",
@@ -868,13 +906,23 @@ def build(results_dir, out_path, cap=0, strict=False,
     # The FILTER is coarse (chrom, start) on purpose: the precise match, which also
     # takes the guide into account, happens in lookup_reported.
     wanted = set((c, p) for c, p, _ in reported) if reported else None
-    seen_anchors = set()
+    seen_anchors = set()        # anchors that produced an ALT haplotype row
+    ref_only_anchors = set()    # anchors the source DOES hold, but only as reference
+    guide_mismatch = set()      # the locus is in --targets, but under a different guide
     if wanted is not None:
         say("haplotype-scores: restricted to the %d site(s) --targets names" % len(wanted))
 
     with open_table(source_path) as stream:
         for obs in harvest_rows(stream):
-            if obs.origin and obs.origin.lower() == "ref":
+            is_ref = bool(obs.origin) and obs.origin.lower() == "ref"
+            if wanted is not None and is_ref and (obs.chrom, obs.anchor_start) in wanted:
+                # RECORDED BEFORE THE REF FILTER. A curated table is mostly REF-origin
+                # (115 of 187 sites on the delivering run), and those sites are PRESENT in
+                # the source -- they simply carry no ALT haplotype. Dropping them before
+                # the anchor was noted made the gap warning call them "not enumerated
+                # here", which is false and would have mislabelled most of a real list.
+                ref_only_anchors.add((obs.chrom, obs.anchor_start))
+            if is_ref:
                 continue                       # reference rows are not variant haplotypes
             if wanted is not None and (obs.chrom, obs.anchor_start) not in wanted:
                 # Bounds memory to the sites actually asked for. Without --targets every
@@ -888,6 +936,14 @@ def build(results_dir, out_path, cap=0, strict=False,
             if site is None:
                 site = Site(obs.site, obs.chrom, obs.start, obs.strand, obs.spacer)
                 rep = lookup_reported(reported, obs.chrom, obs.anchor_start, obs.spacer)
+                if rep is None and reported:
+                    # The locus passed the coarse filter, so --targets DOES name it -- but
+                    # no entry matched this guide. A curated table whose guide column is
+                    # crRNA/Guide holds the 20-mer without the PAM while the source's
+                    # Spacer+PAM includes it, so an innocent column-name choice silently
+                    # turned reconciliation off for the whole run: every row 'unknown',
+                    # no failures, nothing said. Say it.
+                    guide_mismatch.add((obs.chrom, obs.anchor_start, obs.spacer))
                 site.has_report = rep is not None and rep is not _AMBIGUOUS
                 if rep is _AMBIGUOUS:
                     site.ambiguous = True
@@ -917,7 +973,7 @@ def build(results_dir, out_path, cap=0, strict=False,
                 "cfd": fmt_score(cfd), "crispr_bulge": fmt_score(cb),
                 "score_status": status,
                 "above_threshold": above,
-                "rank_in_site_by_score": "",
+                "rank_in_site_by_score": "", "rank_score_axis": "",
                 "n_carriers": str(_cb[0]),
                 "carriers_homozygous": _cb[1],
                 "carriers_heterozygous": _cb[2],
@@ -946,8 +1002,27 @@ def build(results_dir, out_path, cap=0, strict=False,
     #
     # They are NOT fuzzy-matched to recover the near misses: a 5 bp window would merge
     # genuinely distinct sites and manufacture identity, which is worse than a named gap.
+    if guide_mismatch:
+        say("haplotype-scores: WARNING %d site(s) are named in --targets at this "
+            "coordinate but under a DIFFERENT guide than the source carries, so their "
+            "reconciliation is 'unknown' rather than yes/no. A curated 'crRNA'/'Guide' "
+            "column usually holds the spacer WITHOUT the PAM while the source's "
+            "Spacer+PAM includes it; if that is the case here, drop the guide column "
+            "from --targets or write it as Spacer+PAM. First: %s"
+            % (len(guide_mismatch),
+               ", ".join("%s:%s (source guide %s)" % m
+                         for m in sorted(guide_mismatch)[:3])))
+
     if wanted is not None:
-        missing = sorted(wanted - seen_anchors)
+        ref_only = sorted((wanted - seen_anchors) & ref_only_anchors)
+        if ref_only:
+            say("haplotype-scores: %d of the %d site(s) --targets names are PRESENT in "
+                "%s but carry only reference rows, so they have no ALT haplotype to "
+                "list. That is 'no variant haplotype here', NOT 'not enumerated'. "
+                "First: %s"
+                % (len(ref_only), len(wanted), os.path.basename(source_path),
+                   ", ".join("%s:%s" % m for m in ref_only[:5])))
+        missing = sorted(wanted - seen_anchors - ref_only_anchors)
         if missing:
             say("haplotype-scores: WARNING %d of the %d site(s) --targets names produced "
                 "NO rows and are absent from this file: they are not in %s at that "
@@ -993,34 +1068,65 @@ def build(results_dir, out_path, cap=0, strict=False,
         writer.writeheader()
         for site in sites.values():
             def _rank_key(r):
-                """Rank on whichever score the row carries.
+                """Rank WITHIN an axis. The two scores are never compared.
 
-                Ranking on CRISPR-Bulge alone put every CFD-only row at the bottom, so a
-                cap discarded the CFD-bearing rows FIRST -- dropping exactly the rows
-                whose score the report ranks on. Rows with no score at all sort last, and
-                never above a measured one.
+                CFD and CRISPR-Bulge live on different scales -- CFD runs 0..1 while the
+                CRISPR-Bulge operating point is 1.9e-4 -- and only the CRISPR-Bulge block
+                carries a CB column. Ordering them in one sequence put every CFD-only row
+                above every CB row, so cap=1 on a site with CFD 0.6 and CB 0.004 (twenty
+                times the operating point) wrote the CFD row and DISCARDED the only
+                haplotype that was above the threshold, while the same line still said
+                n_above_threshold=1. A false clean produced by the cap.
+
+                So: CB-bearing rows first, ordered by CB; then CFD-only rows, ordered by
+                CFD; then the unscored. A cap takes from the bottom, and the rows this
+                file exists to surface are never the ones it takes.
                 """
-                for col in ("crispr_bulge", "cfd"):
-                    if r[col] not in ("NA", ""):
-                        try:
-                            return (0, -float(r[col]), r["variant_set"])
-                        except ValueError:
-                            pass
-                return (1, 0.0, r["variant_set"])
+                def val(col):
+                    if r[col] in ("NA", ""):
+                        return None
+                    try:
+                        return float(r[col])
+                    except ValueError:
+                        return None
+                cb, cfd = val("crispr_bulge"), val("cfd")
+                if cb is not None:
+                    return (0, -cb, r["variant_set"])
+                if cfd is not None:
+                    return (1, -cfd, r["variant_set"])
+                return (2, 0.0, r["variant_set"])
+
+            def _rank_axis(r):
+                if r["crispr_bulge"] not in ("NA", ""):
+                    return "crispr_bulge"
+                return "cfd" if r["cfd"] not in ("NA", "") else "none"
 
             ranked = sorted(site.rows, key=_rank_key)
             kept = ranked if not cap else ranked[:cap]
-            hidden = len(ranked) - len(kept)
+            # HAPLOTYPES, not rows. One haplotype appears once per frame that named it, so
+            # counting dropped ROWS reported "2 haplotype(s) not written" for a site whose
+            # own rows said n_haplotypes_at_site=1.
+            def _hap(r):
+                return r["variant_set"] or r["aligned_protospacer_pam"] or "-"
+            hidden_haplotypes = len(set(_hap(r) for r in ranked)
+                                    - set(_hap(r) for r in kept))
+            hidden_rows = len(ranked) - len(kept)
+            hidden = hidden_haplotypes
             # The reconciliation speaks about the haplotypes THIS FILE SHOWS. If a cap
             # removed some, a "yes" earned by a hidden row would be a claim the reader
             # cannot check against anything in front of them.
             found = "unknown" if mis_keyed else site.row_reported_alignment_found
-            if found == "yes" and hidden:
-                found = "yes(among-all-haplotypes-not-all-shown)"
+            # Only downgrade when the matching haplotype is actually out of sight. A cap
+            # that hid other FRAMES of a shown haplotype hides nothing the reader needs.
+            if found == "yes" and hidden_haplotypes:
+                shown = set(canonical_variants(r["variant_set"]) for r in kept)
+                if not (site.reported_alignments & shown):
+                    found = "yes(among-all-haplotypes-not-all-shown)"
             if found == "no":
                 unreconciled.append(site.key)
             for rank, row in enumerate(kept, 1):
                 row["rank_in_site_by_score"] = str(rank)
+                row["rank_score_axis"] = _rank_axis(row)
                 row["n_haplotypes_at_site"] = str(site.n_haplotypes)   # the TRUE total
                 row["n_above_threshold"] = str(site.n_above)
                 row["n_not_scored"] = str(site.n_not_scored)
@@ -1028,9 +1134,10 @@ def build(results_dir, out_path, cap=0, strict=False,
                 row["row_reported_alignment_found"] = found
                 writer.writerow(row)
                 n_rows += 1
-            if hidden:
-                say("haplotype-scores: %s: %d haplotype(s) not written (cap=%d); the "
-                    "counts above are the true totals" % (site.key, hidden, cap))
+            if hidden_rows:
+                say("haplotype-scores: %s: %d row(s) covering %d haplotype(s) not "
+                    "written (cap=%d counts ROWS); the counts in the file are the true "
+                    "totals" % (site.key, hidden_rows, hidden_haplotypes, cap))
 
     for key in unreconciled:
         say("haplotype-scores: WARNING %s: the site's own reported alignment is on none "
