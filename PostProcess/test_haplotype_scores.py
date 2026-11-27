@@ -55,6 +55,13 @@ _BLOCKS = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
 
 
 def _header():
+    """The REAL per-block schema.
+
+    CFD_score_(...) exists on every block; CRISPR_BULGE_score_(...) exists ONLY on the
+    CRISPR-Bulge block. The first version of this fixture invented a CRISPR-Bulge column
+    on all three, so the suite exercised a shape the pipeline never writes -- and the
+    rows that matter most, the ones carrying a score on one axis only, were never tested.
+    """
     cols = ["Spacer+PAM", "Chromosome"]
     for b in _BLOCKS:
         cols += ["Start_coordinate_(%s)" % b, "Strand_(%s)" % b,
@@ -62,17 +69,26 @@ def _header():
                  "Aligned_protospacer+PAM_REF_(%s)" % b,
                  "Aligned_protospacer+PAM_ALT_(%s)" % b,
                  "REF/ALT_origin_(%s)" % b,
-                 "CFD_score_(%s)" % b, "CRISPR_BULGE_score_(%s)" % b,
-                 "Variant_info_genome_(%s)" % b, "Variant_MAF_(%s)" % b,
+                 "CFD_score_(%s)" % b]
+        if b == "highest_CRISPR_BULGE":
+            cols += ["CRISPR_BULGE_score_(%s)" % b]
+        cols += ["Variant_info_genome_(%s)" % b, "Variant_MAF_(%s)" % b,
                  "Variant_samples_(%s)" % b]
     return cols
 
 
-def _row(chrom, start, alt, cfd, cb, variants, samples="s1,s2", origin="alt"):
+def _row(chrom, start, alt, cfd, cb, variants, samples="s1,s2", origin="alt",
+         cb_start=None):
+    """One results row. ``cb_start`` places the CRISPR-Bulge block at a DIFFERENT
+    coordinate, which about 2% of real rows do (measured) and what the site-identity
+    anchor has to survive."""
     out = [SPACER, chrom]
-    for _ in _BLOCKS:
-        out += [str(start), "+", SPACER, REPORTED, alt, origin,
-                str(cfd), str(cb), variants, "0.01", samples]
+    for b in _BLOCKS:
+        st = cb_start if (b == "highest_CRISPR_BULGE" and cb_start is not None) else start
+        out += [str(st), "+", SPACER, REPORTED, alt, origin, str(cfd)]
+        if b == "highest_CRISPR_BULGE":
+            out += [str(cb)]
+        out += [variants, "0.01", samples]
     return out
 
 
@@ -113,12 +129,17 @@ class HaplotypeScoresFixture(unittest.TestCase):
         reduced to a canonical key.
         """
         path = os.path.join(self.dir, "targets.tsv")
+        guides = [r[4] if len(r) > 4 else None for r in rows]
+        named = any(g is not None for g in guides)
         with io.open(path, "w", encoding="utf-8") as fh:
             fh.write("Chromosome\tPosition\tVariant\tREF/ALT_origin\t"
-                     "Aligned_protospacer+PAM\tCRISPR-Bulge\n")
-            for chrom, pos, variant, origin in rows:
-                fh.write("%s\t%s\t%s\t%s\t%s\t0.01\n"
-                         % (chrom, pos, variant, origin, REPORTED))
+                     "Aligned_protospacer+PAM\tCRISPR-Bulge"
+                     + ("\tSpacer+PAM\n" if named else "\n"))
+            for row, guide in zip(rows, guides):
+                chrom, pos, variant, origin = row[:4]
+                fh.write("%s\t%s\t%s\t%s\t%s\t0.01%s\n"
+                         % (chrom, pos, variant, origin, REPORTED,
+                            ("\t%s" % (guide or "")) if named else ""))
         return path
 
     def test_a_site_whose_reported_alignment_is_on_no_haplotype_is_flagged(self):
@@ -287,8 +308,6 @@ class HaplotypeScoresFixture(unittest.TestCase):
         self.assertEqual(data[0][n_i], "3", "the count is still reported")
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
 
 
 class CarrierReporting(unittest.TestCase):
@@ -357,3 +376,250 @@ class CarrierReporting(unittest.TestCase):
         out = hs.carrier_breakdown("S1:0,MYSTERY:1", ancestry=anc)
         self.assertIn("unlabelled:1", out[4])
         self.assertIn("Yoruba:1", out[4])
+
+
+class TestSiteIdentityAcrossDivergentBlocks(HaplotypeScoresFixture):
+    """The three alignment blocks place the same physical off-target at DIFFERENT starts.
+
+    Measured on real runs: 2.1% of 73,994 rows genome-wide per-sample, 2.6% of 31,502 on a
+    three-chromosome run, almost all a 1-2 bp shift. Before the anchor, the site key was
+    built from
+    whichever block was being read, so one site split into up to three and every "per-site"
+    roll-up was really per-FRAME. With --targets it was worse than cosmetic: the filter
+    compared the per-block start against a curated Position that is always the highest-CFD
+    start, so the CRISPR-Bulge observation was DROPPED -- and the only axis carrying a
+    CRISPR-Bulge score disappeared, rendering a scored haplotype as unscored.
+
+    The old fixture could not catch any of this: it wrote the same start into all three
+    blocks, so divergence was never exercised.
+    """
+
+    def test_divergent_block_starts_are_one_site_not_three(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C", cb_start=97)]
+        (_n, n_sites, _u), text, _msgs = self._run(rows)
+        self.assertEqual(n_sites, 1,
+                         "one physical off-target must be one site, whatever each block "
+                         "calls its start:\n" + text)
+        keys = set(l.split("\t")[0] for l in text.splitlines()
+                   if l and not l.startswith("#") and not l.startswith("site_key"))
+        self.assertEqual(len(keys), 1, keys)
+
+    def test_each_row_still_reports_its_own_blocks_coordinate(self):
+        """Anchoring site IDENTITY must not rewrite the coordinate a block actually used."""
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C", cb_start=97)]
+        _res, text, _msgs = self._run(rows)
+        body = [l.split("\t") for l in text.splitlines()
+                if l and not l.startswith("#") and not l.startswith("site_key")]
+        starts = set(r[2] for r in body)           # site_start
+        self.assertEqual(starts, {"100", "97"},
+                         "each observation reports its own block's start: %s" % starts)
+
+    def test_targets_does_not_drop_the_block_that_sits_elsewhere(self):
+        """The false clean. --targets names the highest-CFD start; the CRISPR-Bulge block
+        sits 3 bp away and is the ONLY axis carrying a CRISPR-Bulge score. If the filter
+        keys on the per-block start, that score vanishes and a haplotype thousands of
+        times over the operating point renders as never scored."""
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C", cb_start=97)]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT")])
+        _res, text, _msgs = self._run(rows, targets=tgt)
+        body = [l.split("\t") for l in text.splitlines()
+                if l and not l.startswith("#") and not l.startswith("site_key")]
+        self.assertTrue(body, "the CRISPR-Bulge observation was dropped entirely")
+        cb = set(r[11] for r in body)              # crispr_bulge
+        self.assertIn("0.9", cb,
+                      "the CRISPR-Bulge score was lost with the block it lives on: %s" % cb)
+        self.assertEqual(set(r[28] for r in body), {"0.9"},
+                         "site_max_crispr_bulge must see the score too")
+
+    def test_reconciliation_survives_the_divergence(self):
+        """The reported haplotype is found even though one block sits at another start."""
+        rows = [_row("chr1", 100, REPORTED, 0.4, 0.9, "chr1_100_A_C", cb_start=97)]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT")])
+        (_n, _s, unreconciled), text, _msgs = self._run(rows, targets=tgt)
+        self.assertEqual(unreconciled, [], text)
+        self.assertIn("\tyes", text)
+
+
+class TestTargetsKeyIsPerGuide(HaplotypeScoresFixture):
+    """Two guides can report at the SAME locus. Keying --targets on (chrom, position)
+    alone let the later curated row overwrite the earlier one, so one guide was quietly
+    reconciled against the other guide's haplotype."""
+
+    def test_two_guides_at_one_locus_are_kept_apart(self):
+        rep = hs.read_reported(self._targets([
+            ("chr1", "100", "chr1;100;A;C (rs1)", "ALT", "GUIDE_ONE"),
+            ("chr1", "100", "chr1;100;A;T (rs9)", "ALT", "GUIDE_TWO"),
+        ]))
+        self.assertEqual(len(rep), 2, rep)
+        self.assertNotEqual(rep[("chr1", "100", "GUIDE_ONE")].variants,
+                            rep[("chr1", "100", "GUIDE_TWO")].variants)
+
+    def test_lookup_prefers_the_matching_guide(self):
+        rep = hs.read_reported(self._targets([
+            ("chr1", "100", "chr1;100;A;C (rs1)", "ALT", "GUIDE_ONE"),
+            ("chr1", "100", "chr1;100;A;T (rs9)", "ALT", "GUIDE_TWO"),
+        ]))
+        got = hs.lookup_reported(rep, "chr1", "100", "GUIDE_TWO")
+        self.assertEqual(got.variants, ("chr1:100:A:T",))
+
+    def test_a_table_with_no_guide_column_still_works(self):
+        """Every curated table shipped so far has no guide column. It must keep working."""
+        rep = hs.read_reported(self._targets(
+            [("chr1", "100", "chr1;100;A;C (rs1)", "ALT")]))
+        got = hs.lookup_reported(rep, "chr1", "100", SPACER)
+        self.assertIsNotNone(got)
+        self.assertEqual(got.variants, ("chr1:100:A:C",))
+
+    def test_an_incompatible_duplicate_is_refused_not_guessed(self):
+        """Same locus, same (or absent) guide, two DIFFERENT reported haplotypes. There is
+        no right answer, so the answer is 'unknown', loudly -- never the last row read."""
+        msgs = []
+        rep = hs.read_reported(self._targets([
+            ("chr1", "100", "chr1;100;A;C (rs1)", "ALT"),
+            ("chr1", "100", "chr1;100;A;T (rs9)", "ALT"),
+        ]), say=msgs.append)
+        self.assertIs(rep[("chr1", "100", "")], hs._AMBIGUOUS)
+        self.assertTrue(any("named more than once" in m for m in msgs), msgs)
+
+    def test_an_ambiguous_locus_never_claims_yes_or_no(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")]
+        tgt = self._targets([
+            ("chr1", "100", "chr1;100;A;C (rs1)", "ALT"),
+            ("chr1", "100", "chr1;100;A;T (rs9)", "ALT"),
+        ])
+        (_n, _s, unreconciled), text, _msgs = self._run(rows, targets=tgt)
+        self.assertIn("unknown(ambiguous-in-targets)", text)
+        self.assertEqual(unreconciled, [],
+                         "an ambiguous locus is not a reconciliation FAILURE")
+
+    def test_an_identical_duplicate_row_is_not_ambiguous(self):
+        """Curated tables repeat a site across guides/rows; identical repeats are fine."""
+        msgs = []
+        rep = hs.read_reported(self._targets([
+            ("chr1", "100", "chr1;100;A;C (rs1)", "ALT"),
+            ("chr1", "100", "chr1;100;A;C (rs1)", "ALT"),
+        ]), say=msgs.append)
+        self.assertIsNot(rep[("chr1", "100", "")], hs._AMBIGUOUS)
+        self.assertFalse([m for m in msgs if "named more than once" in m], msgs)
+
+
+class TestTheFixtureMatchesTheRealSchema(unittest.TestCase):
+    """The fixture is itself under test. It once invented a CRISPR-Bulge column on all
+    three blocks -- a shape the pipeline never writes -- so the suite was green against a
+    file that does not exist."""
+
+    def test_crispr_bulge_is_only_on_the_crispr_bulge_block(self):
+        cols = _header()
+        cb = [c for c in cols if c.startswith("CRISPR_BULGE_score_")]
+        self.assertEqual(cb, ["CRISPR_BULGE_score_(highest_CRISPR_BULGE)"], cb)
+
+    def test_cfd_is_on_every_block(self):
+        cols = _header()
+        self.assertEqual(
+            sorted(c for c in cols if c.startswith("CFD_score_")),
+            sorted("CFD_score_(%s)" % b for b in _BLOCKS))
+
+
+class TestAnEmptySourceNeverWins(HaplotypeScoresFixture):
+    """Found on real data, not by reading the code.
+
+    The raw sidecar is gated on a Tier-1 dict-less genotype store. A run without that
+    store writes the header and NO rows. probe_source preferred it unconditionally, so a
+    run whose integrated table held 16,208 ALT rows with real carriers produced a 0-row
+    companion and exited 0 -- a false clean, from the file written to stop false cleans.
+    """
+
+    def _write(self, name, rows):
+        path = os.path.join(self.dir, name)
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("\t".join(_header()) + "\n")
+            for r in rows:
+                fh.write("\t".join(r) + "\n")
+        return path
+
+    def test_a_header_only_raw_falls_through_to_the_alt_table(self):
+        self._write("x_observed_haplotypes_raw.tsv", [])                      # header only
+        self._write("x_all_results_with_alternative_alignments.tsv",
+                    [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")])
+        path, kind = hs.probe_source(self.dir)
+        self.assertEqual(kind, "all_results_with_alternative_alignments", path)
+
+    def test_the_fallthrough_actually_produces_rows(self):
+        self._write("x_observed_haplotypes_raw.tsv", [])
+        self._write("x_all_results_with_alternative_alignments.tsv",
+                    [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")])
+        out = os.path.join(self.dir, "out.tsv")
+        (n_rows, n_sites, _u) = hs.build(self.dir, out, log=lambda m: None)
+        self.assertTrue(n_rows > 0 and n_sites == 1, (n_rows, n_sites))
+
+    def test_a_populated_raw_is_still_preferred(self):
+        """The fall-through must not demote the richer source when it HAS rows."""
+        self._write("x_observed_haplotypes_raw.tsv",
+                    [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")])
+        self._write("x_all_results_with_alternative_alignments.tsv",
+                    [_row("chr1", 100, HAP_TWO, 0.4, 0.9, "chr1_100_A_G")])
+        _path, kind = hs.probe_source(self.dir)
+        self.assertEqual(kind, "observed_haplotypes_raw")
+
+    def test_all_sources_empty_refuses_rather_than_writing_a_clean_looking_file(self):
+        self._write("x_observed_haplotypes_raw.tsv", [])
+        self._write("x_all_results_with_alternative_alignments.tsv", [])
+        with self.assertRaises(hs.HaplotypeScoreError) as cm:
+            hs.probe_source(self.dir)
+        self.assertIn("header-only", str(cm.exception))
+
+    def test_the_refusal_is_a_non_zero_exit(self):
+        self._write("x_observed_haplotypes_raw.tsv", [])
+        rc = hs.main(["--results", self.dir,
+                      "--out", os.path.join(self.dir, "out.tsv")])
+        self.assertNotEqual(rc, 0)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "out.tsv")),
+                         "a refusal must leave no file to be mistaken for an answer")
+
+
+class TestTargetsGapsAreNamed(HaplotypeScoresFixture):
+    """A --targets site that produced nothing must be SAID, not silently absent.
+
+    Measured on a real NRR run: of 200 curated top-CFD ALT sites, only 97 appear at that
+    exact start in the haplotype source (14 more at another block's start, 47 within 5 bp,
+    42 absent). Returning 97 rows with no further word lets a reader believe the other
+    103 were examined and found clean.
+    """
+
+    def test_a_requested_site_that_produced_nothing_is_reported(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT"),
+                             ("chr9", "777", "chr9;777;G;T (rs7)", "ALT")])   # absent
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        gap = [m for m in msgs if "produced" in m and "NO rows" in m]
+        self.assertTrue(gap, msgs)
+        self.assertIn("chr9:777", gap[0])
+        self.assertIn("1 of the 2 site(s)", gap[0])
+
+    def test_nothing_is_said_when_every_requested_site_produced_rows(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT")])
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        self.assertFalse([m for m in msgs if "NO rows" in m], msgs)
+
+    def test_a_divergent_block_is_not_miscounted_as_a_gap(self):
+        """The gap is measured against the ANCHOR, not the block that created the site.
+        Comparing against the creating block's own start would invent a gap on the ~2% of
+        rows whose blocks diverge."""
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C", cb_start=97)]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT")])
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        self.assertFalse([m for m in msgs if "NO rows" in m], msgs)
+
+    def test_the_gap_message_refuses_to_call_it_clean(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT"),
+                             ("chr9", "777", "chr9;777;G;T (rs7)", "ALT")])
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        gap = [m for m in msgs if "NO rows" in m][0]
+        self.assertIn("not enumerated", gap)
+        self.assertIn("NOT fuzzy-matched", gap)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

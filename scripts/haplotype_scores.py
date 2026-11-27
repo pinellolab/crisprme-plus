@@ -33,18 +33,13 @@ TWO TIERS.
   harvested score is the haplotype's bases IN THE CANDIDATE'S ALIGNMENT FRAME, not the
   haplotype's own best alignment. Every harvested row says ``alignment_frame=candidate_frame``.
 
-  Tier 2, ANCHORED RE-ALIGNMENT (opt-in, ``--score-source realign|auto``).  Only for rows
-  the fixed frame cannot hold: an indel inside the scored footprint, ``target_found=no``,
-  or no harvested score. ``scan_sequence`` (``scripts/check_indel_rows.py``) generates the
-  in-budget candidates and we keep THE ONE MATCHING THE ROW'S PUBLISHED ALIGNMENT --
-  never an argmax. A 32-base flank admits a median of ~190 in-budget alignments, and
-  argmax CFD reproduces the published reference CFD on 4 of 186 rows while OVERSTATING it
-  on 74. Containment does not license selection. Such rows say
-  ``alignment_frame=haplotype_own``.
-
-  Tier 2 is built but DEFAULT OFF. Measured on the delivering run: of 46 distinct indel
-  variants among a 187-site shortlist, only 9 have their own independently scored row.
-  That does not justify ``auto``.
+  NOT BUILT, AND NOT CLAIMED: anchored re-alignment. Rows the fixed frame cannot hold
+  (an indel inside the scored footprint, the target not on this haplotype, no harvested
+  score) would need re-aligning on the haplotype's own sequence, anchored to the row's
+  published alignment -- never an argmax, which reproduces the published reference CFD on
+  4 of 186 rows while OVERSTATING it on 74. That is designed and NOT implemented here.
+  This file says so rather than shipping a flag that accepts the word and does nothing;
+  such rows carry score_status=needs-realignment:<site> and no invented number.
 
 TWO INVARIANTS.
 
@@ -95,13 +90,11 @@ COLUMNS = [
     "aligned_spacer_pam", "aligned_protospacer_pam",   # make every number re-verifiable
     "alignment_frame",
     "cfd", "crispr_bulge", "score_status",
-    "above_threshold", "in_top1000_cfd", "in_top1000_cb",
-    "rank_in_site_by_score", "score_vs_site_reported",
+    "above_threshold",
+    "rank_in_site_by_score",
     "n_carriers", "carriers_homozygous", "carriers_heterozygous",
     "carrier_panels", "carrier_populations", "carrier_superpopulations",
     "carriers",
-    "oligo_seq", "oligo_len", "oligo_status",
-    "oligo_group_id", "oligo_group_size", "oligo_group_carriers",
     "variants_in_window_n", "max_af",
     "scope_reason",
     # per-site roll-up, repeated on each of the site's rows so one row is self-contained
@@ -222,7 +215,10 @@ def carrier_breakdown(text, ancestry=None):
     any_slot = False
     for token in (text or "").split(","):
         token = token.strip()
-        if not token:
+        # The pipeline writes a no-carrier cell as one of these, not as an empty string.
+        # Counting them gave every reference-only or unlabelled row exactly 1 carrier --
+        # a fabricated individual, in the column a reader would use to order a cell line.
+        if not token or token.upper() in ("NA", "N", "-", ".", "NO_SAMPLES", "NONE"):
             continue
         if ":" in token:
             sample, slot = token.rsplit(":", 1)
@@ -287,6 +283,27 @@ def _ancestry_text(per, ancestry, field):
     return ",".join("%s:%d" % (k, counts[k]) for k in sorted(counts)) or "-"
 
 
+def _max_af(text):
+    """The LARGEST allele frequency in the cell, not the cell.
+
+    The column is named max_af and was the raw comma-joined per-variant list, so a
+    haplotype of three variants printed "0.01,0.4,0.02" where a reader expected one
+    number -- and any numeric filter on it silently matched nothing.
+    """
+    best = None
+    for piece in str(text or "").split(","):
+        piece = piece.strip()
+        if not piece or piece.upper() in ("NA", "N", "-", "."):
+            continue
+        try:
+            v = float(piece)
+        except ValueError:
+            continue
+        if best is None or v > best:
+            best = v
+    return "NA" if best is None else "%.6g" % best
+
+
 def _panel_text(per):
     panels = collections.Counter()
     for sample in per:
@@ -315,6 +332,13 @@ def probe_source(results_dir):
     additionally restricted to within 50 bp of a CFD-top-1000 site. Falling back to the
     full alt table is correct but larger and slower.
 
+    A HEADER-ONLY candidate is skipped, not preferred. The raw sidecar is gated on a
+    Tier-1 dict-less genotype store, so a run without that store writes the header and no
+    rows -- and preferring it reported 0 haplotypes for a run holding 16,208 ALT rows with
+    real carriers (measured on the chr1/7/22 NRG validation run). That is a FALSE CLEAN
+    produced by the file written to prevent false cleans, so emptiness disqualifies a
+    source rather than silencing the next one.
+
     Neither present is NOT "nothing found": it means this run cannot answer the question,
     and saying so loudly is the whole point.
     """
@@ -327,10 +351,25 @@ def probe_source(results_dir):
             raw.append(full)
         elif ALT_TABLE_RE.search(name):
             alt.append(full)
-    if raw:
-        return raw[0], "observed_haplotypes_raw"
-    if alt:
-        return alt[0], "all_results_with_alternative_alignments"
+    for paths, kind in ((raw, "observed_haplotypes_raw"),
+                        (alt, "all_results_with_alternative_alignments")):
+        for path in paths:
+            if has_data_row(path):
+                return path, kind
+    if raw or alt:
+        raise HaplotypeScoreError(
+            "every haplotype source in %s is header-only (%s). A source with no data "
+            "rows cannot distinguish 'this run found no variant haplotypes' from 'the "
+            "writer never ran', and an empty companion would be read as the first. "
+            "Refusing to write.\n"
+            "The run's integrated_results.tsv is NOT a substitute: it carries one row "
+            "per site holding each axis's single best representative, not every "
+            "haplotype, so building this file from it would report three sequences per "
+            "site and call that the enumeration. If the report shows variant rows but "
+            "this refuses, the search ran without the Tier-1 dict-less genotype store "
+            "(or in population-level fast mode) and the haplotypes were never written "
+            "down; re-run the search with per-sample enumeration enabled."
+            % (results_dir, ", ".join(os.path.basename(p) for p in (raw + alt))))
     raise HaplotypeScoreError(
         "neither *_observed_haplotypes_raw.(tsv|zip) nor "
         "*_all_results_with_alternative_alignments.(tsv|zip) is in %s. Per-haplotype "
@@ -338,6 +377,19 @@ def probe_source(results_dir):
         "ENTIRELY in population-level fast mode, so an empty companion here would read "
         "as 'no extra high-scoring haplotypes' when the truth is 'this run never "
         "enumerated any'. Refusing to write." % results_dir)
+
+
+def has_data_row(path):
+    """True if the table has at least one non-blank line after its header."""
+    try:
+        with open_table(path) as stream:
+            next(stream, None)                     # the header
+            for line in stream:
+                if line.strip():
+                    return True
+    except (HaplotypeScoreError, OSError, zipfile.BadZipFile):
+        return False
+    return False
 
 
 def open_table(path):
@@ -357,6 +409,9 @@ def open_table(path):
 
 
 BLOCKS = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
+# The axis that defines a site's identity. The curated tables publish this block's
+# coordinate as "Position", so a --targets list and these rows agree by construction.
+ANCHOR_BLOCK = "highest_CFD"
 
 
 def block_columns(header):
@@ -402,8 +457,8 @@ def site_key(chrom, start, strand, spacer):
 
 Observation = collections.namedtuple(
     "Observation",
-    "site chrom start strand spacer block variants aligned_spacer aligned_alt "
-    "cfd crispr_bulge samples maf origin")
+    "site chrom start anchor_start strand spacer block variants aligned_spacer "
+    "aligned_alt cfd crispr_bulge samples maf origin")
 
 
 def harvest_rows(stream, spacer_hint=None):
@@ -439,6 +494,25 @@ def harvest_rows(stream, spacer_hint=None):
         chrom = row[chrom_i].strip() if chrom_i is not None and chrom_i < len(row) else ""
         spacer = (row[spacer_i].strip() if spacer_i is not None and spacer_i < len(row)
                   else (spacer_hint or ""))
+        # SITE IDENTITY COMES FROM ONE AXIS, FOR EVERY BLOCK OF THE ROW.
+        #
+        # The three blocks are independent projections and place the same physical
+        # off-target at different starts: MEASURED at 2.1% of 73,994 rows on a genome-wide
+        # per-sample run and 2.6% of 31,502 on a three-chromosome one, almost all of them
+        # a 1-2 bp shift. Keying the site on the block being read split one site into
+        # up to three, so the "per-site"
+        # roll-ups were per-FRAME -- and worse, with --targets the filter keyed on the
+        # per-block start while the curated table's Position is the highest-CFD start, so
+        # the CRISPR-Bulge observation was dropped and a haplotype scoring 0.9, thousands
+        # of times the operating point, rendered as having no CRISPR-Bulge score at all.
+        # A false clean, inside the file written to prevent false cleans.
+        #
+        # The anchor is the highest-CFD block because that is what the curated tables
+        # publish as Position, so --targets and these rows agree by construction. Each
+        # observation still reports its OWN block's coordinate in site_start.
+        anchor = blocks.get(ANCHOR_BLOCK) or {}
+        anchor_start = cell(row, anchor, "start") if anchor else ""
+        anchor_strand = cell(row, anchor, "strand") if anchor else ""
         for block, cols in blocks.items():
             start = cell(row, cols, "start")
             if not start:
@@ -447,8 +521,10 @@ def harvest_rows(stream, spacer_hint=None):
             variants = cell(row, cols, "variants")
             origin = cell(row, cols, "origin")
             yield Observation(
-                site=site_key(chrom, start, strand, spacer),
-                chrom=chrom, start=start, strand=strand, spacer=spacer, block=block,
+                site=site_key(chrom, anchor_start or start,
+                              anchor_strand or strand, spacer),
+                chrom=chrom, start=start, anchor_start=anchor_start or start,
+                strand=strand, spacer=spacer, block=block,
                 variants=variants,
                 aligned_spacer=cell(row, cols, "aligned_spacer"),
                 aligned_alt=cell(row, cols, "aligned_alt") or cell(row, cols, "aligned_ref"),
@@ -470,23 +546,31 @@ def classify(obs, budget, axis_named):
     and says so -- never a blank, never a borrowed value.
     """
     def num(text):
-        if text in ("", "NA", "n", "-"):
-            return None
+        """``(value, refused)``. ``refused`` is True ONLY for the model's -1 sentinel.
+
+        A cell that is blank or NA was never measured; a cell holding the sentinel WAS
+        reached and the model declined it by its own rule (N in the target, a length
+        mismatch, more than one gap column, over-length). Those are different facts and
+        the old code collapsed both to None, which made the out-of-domain branch
+        unreachable and typed a refusal as "needs-realignment".
+        """
+        if text in ("", "NA", "n", "-", "."):
+            return None, False
         try:
             v = float(text)
         except ValueError:
-            return None
-        if v <= CB_NULL:      # the model's null sentinel
-            return None
-        return v
+            return None, False
+        if v <= CB_NULL:
+            return None, True
+        return v, False
 
-    cfd = num(obs.cfd)
-    cb = num(obs.crispr_bulge)
+    cfd, _cfd_refused = num(obs.cfd)
+    cb, cb_refused = num(obs.crispr_bulge)
+    if cb_refused:
+        # reached and declined: the CFD number still stands and is written beside it
+        return cfd, None, ST_OUT_OF_DOMAIN % "model-refused(n/length/multi-gap)"
     if cfd is None and cb is None:
         return None, None, ST_NEEDS_REALIGN % obs.site
-    if cb is None and axis_named == "highest_CRISPR_BULGE":
-        # the scorer refused this alignment by its own rule
-        return cfd, None, ST_OUT_OF_DOMAIN % "multi-gap-or-length"
     return cfd, cb, ST_SCORED
 
 
@@ -504,7 +588,8 @@ class Site(object):
 
     __slots__ = ("key", "chrom", "start", "strand", "spacer", "rows",
                  "haplotypes", "above", "scored_any", "max_cb",
-                 "reported_alignments", "seen_alignments", "applicable", "has_report")
+                 "reported_alignments", "seen_alignments", "applicable", "has_report",
+                 "ambiguous")
 
     def __init__(self, key, chrom, start, strand, spacer):
         self.key = key
@@ -521,6 +606,7 @@ class Site(object):
         self.seen_alignments = set()
         self.applicable = False
         self.has_report = False
+        self.ambiguous = False
 
     def add(self, row, cb_value, above, scored, aligned, hap_key):
         self.haplotypes.add(hap_key)                # COUNT first, and by haplotype
@@ -555,47 +641,18 @@ class Site(object):
         are the ones we could reconstruct". It fires in real data.
         """
         # Three distinct answers, never collapsed:
-        #   unknown -- nothing told us what this site reported (no --targets)
+        #   unknown -- nothing told us what this site reported (no --targets), or the
+        #              curated table described this locus twice, incompatibly
         #   n/a     -- it reported a REFERENCE haplotype, so there is no ALT haplotype
         #              for it to appear among; the check does not apply
         #   yes/no  -- it reported an ALT haplotype, and it is or is not among them
+        if self.ambiguous:
+            return "unknown(ambiguous-in-targets)"
         if not self.has_report:
             return "unknown"
         if not self.applicable:
             return "n/a"
         return "yes" if (self.reported_alignments & self.seen_alignments) else "no"
-
-
-# --------------------------------------------------------------------------- #
-# the oligo column -- a second geometry, not a post-hoc slice
-
-
-def oligo_from(sequence, offset, length, pad_up, pad_down):
-    """The short orderable sequence around the scored footprint.
-
-    NOT called a 32-mer: under the anchored policy the delivered "32-mer" file is 32 bases
-    on 859 of 1,258 lines and ranges 22..34, because the target's reference span moves
-    with bulges and indels. ``oligo_len`` is written beside it for that reason.
-    """
-    if sequence is None or offset is None or length is None:
-        return "", 0, "no-geometry"
-    try:
-        offset, length = int(offset), int(length)
-    except (TypeError, ValueError):
-        return "", 0, "no-geometry"
-    if not sequence:
-        return "", 0, ST_WINDOW_DELETED
-    lo = max(0, offset - pad_up)
-    hi = min(len(sequence), offset + length + pad_down)
-    if lo >= hi:
-        return "", 0, "window-edge-unsafe"
-    piece = sequence[lo:hi]
-    status = "ok"
-    if lo == 0 and offset - pad_up < 0:
-        status = "window-edge-unsafe"
-    elif hi == len(sequence) and offset + length + pad_down > len(sequence):
-        status = "window-edge-unsafe"
-    return piece, len(piece), status
 
 
 # --------------------------------------------------------------------------- #
@@ -619,9 +676,12 @@ def file_header(source_path, source_kind, budget, threshold, recall, cap, strict
         "# THRESHOLD. above_threshold is the CRISPR-Bulge sensitive operating point,",
         "#   %s at %d%% recall, taken BY NAME from cb_operating_point.py." % (
             fmt_score(threshold), recall),
-        "#   Its guide-cluster bootstrap 95%% CI is [5.8e-06, 3.1e-03]: it is an operating",
-        "#   point, NOT a safe/unsafe line. Scores are written %.6g, never 3 dp -- at 3 dp",
-        "#   the threshold itself rounds to 0.000.",
+        "#   It is an operating point, NOT a safe/unsafe line: at the shipped 95%% recall",
+        "#   target its guide-cluster bootstrap CI spans [5.8e-06, 3.1e-03], three orders",
+        "#   of magnitude. That interval belongs to the DEFAULT target; if",
+        "#   CRISPRME_CB_RECALL_TARGET moved it, the threshold above is re-resolved and",
+        "#   this interval is not. Scores are written %.6g, never 3 dp -- at 3 dp the",
+        "#   threshold itself rounds to 0.000.",
         "#",
         "# NEVER A BLANK. score_status is always set. A never-scored cell and the",
         "#   CRISPR-Bulge out-of-domain sentinel both used to render 'NA', so filtering",
@@ -643,12 +703,28 @@ def file_header(source_path, source_kind, budget, threshold, recall, cap, strict
         "#   positions and counts mismatches positionally). haplotype_own means the",
         "#   haplotype was re-aligned on its own, anchored to the row's published alignment.",
         "#",
+        "# CARRIERS ARE A REAGENT LIST, REPORTED, NEVER RANKED. A heterozygous carrier is",
+        "#   as orderable as a homozygous one -- allele-specific quantification handles it",
+        "#   -- so zygosity is written beside each haplotype and never used to filter or",
+        "#   to order. carriers_homozygous/heterozygous say 'unknown' when THE SOURCE DOES",
+        "#   NOT SAY: only the SAMPLE:slot form records which allele, and the search",
+        "#   sidecars write bare sample names (measured: 153,879 rows with real carriers",
+        "#   on an NRR run, 0 of them slot-encoded). 'unknown' is that fact; 0 would read",
+        "#   as 'none are homozygous'. For zygosity, use the extract-flanks output.",
+        "#",
         "# RE-VERIFY ANY ROW: aligned_spacer_pam + aligned_protospacer_pam feed",
         "#   'crisprme.py targets-scoring' directly.",
         "#",
+        "# --targets NAMES SITES THIS FILE MAY NOT HOLD. The curated Position is the",
+        "#   merged representative's start; this source is written pre-merge, so some",
+        "#   sites sit a few bp away and some were never enumerated. Sites that produced",
+        "#   no rows are COUNTED AND NAMED on stderr, never fuzzy-matched -- a window",
+        "#   would merge distinct sites. Absent here is 'not enumerated', not 'clean'.",
+        "#",
         "# row_reported_alignment_found=no means the site's OWN reported alignment is on",
         "#   none of the haplotypes written: the list is what we could reconstruct, not",
-        "#   necessarily all of them.%s" % (
+        "#   necessarily all of them. Measured on an NRR run over 97 curated sites: 75",
+        "#   yes, 22 no -- so this is a routine finding, not a rare alarm.%s" % (
             " --strict makes this a non-zero exit." if strict else
             " (warned, not fatal; --strict makes it a non-zero exit.)"),
     ]
@@ -695,9 +771,16 @@ def canonical_variants(text):
 
 Reported = collections.namedtuple("Reported", "variants origin")
 
+# a locus the curated table describes twice, incompatibly: never reconciled against
+_AMBIGUOUS = Reported(variants=(), origin="ambiguous")
 
-def read_reported(targets_path):
-    """``{(chrom, start): Reported}`` -- each site's own reported haplotype.
+
+# the curated table's guide column, under any of the names it has shipped with
+_TARGET_SPACER_COLS = ("Spacer+PAM", "Spacer+PAM_(highest_CFD)", "crRNA", "Guide")
+
+
+def read_reported(targets_path, say=None):
+    """``{(chrom, start, spacer): Reported}`` -- each site's own reported haplotype.
 
     Keyed on the VARIANT SET (see ``canonical_variants``), and carrying the row's
     REF/ALT origin: a REF-origin site's representative is the reference sequence, so it
@@ -705,7 +788,9 @@ def read_reported(targets_path):
     the delivering run that is 115 of 187 sites -- checking them would manufacture
     failures.
     """
+    say = say or (lambda m: None)
     out = {}
+    ambiguous = set()
     with io.open(targets_path, "r", encoding="utf-8", errors="replace") as fh:
         reader = csv.reader(fh, delimiter="\t")
         try:
@@ -715,27 +800,57 @@ def read_reported(targets_path):
         idx = {n: i for i, n in enumerate(header)}
         c_i, p_i = idx.get("Chromosome"), idx.get("Position")
         v_i, o_i = idx.get("Variant"), idx.get("REF/ALT_origin")
+        s_i = next((idx[n] for n in _TARGET_SPACER_COLS if n in idx), None)
         if c_i is None or p_i is None or v_i is None:
             raise HaplotypeScoreError(
                 "%s is not a curated results table: it needs Chromosome, Position and "
                 "Variant to say which haplotype each site reported." % targets_path)
+        if s_i is None:
+            say("haplotype-scores: NOTE %s names no guide column (%s), so two guides "
+                "reporting at the same locus cannot be told apart; any such locus is "
+                "left 'unknown(ambiguous-in-targets)' rather than guessed"
+                % (os.path.basename(targets_path), "/".join(_TARGET_SPACER_COLS)))
         for row in reader:
             if max(c_i, p_i, v_i) >= len(row):
                 continue
             origin = (row[o_i].strip().lower()
                       if o_i is not None and o_i < len(row) else "")
-            out[(row[c_i].strip(), row[p_i].strip())] = Reported(
-                variants=canonical_variants(row[v_i]), origin=origin)
+            spacer = (row[s_i].strip() if s_i is not None and s_i < len(row) else "")
+            key = (row[c_i].strip(), row[p_i].strip(), spacer)
+            rep = Reported(variants=canonical_variants(row[v_i]), origin=origin)
+            prev = out.get(key)
+            if prev is not None and prev != rep:
+                # Two curated rows claim the same (locus, guide) with DIFFERENT reported
+                # haplotypes. Last-one-wins would silently reconcile against whichever
+                # row happened to be later in the file, so neither is used.
+                ambiguous.add(key)
+            out[key] = rep
+    for key in ambiguous:
+        out[key] = _AMBIGUOUS
+        say("haplotype-scores: WARNING %s:%s%s is named more than once in --targets with "
+            "different reported haplotypes; reconciliation for it is "
+            "'unknown(ambiguous-in-targets)'"
+            % (key[0], key[1], (" guide %s" % key[2]) if key[2] else ""))
     return out
 
 
-def build(results_dir, out_path, cap=0, score_source="harvest", strict=False,
+def lookup_reported(reported, chrom, start, spacer):
+    """The curated row for this site, matching on the guide when the table named one."""
+    if not reported:
+        return None
+    rep = reported.get((chrom, start, spacer))
+    if rep is not None:
+        return rep
+    return reported.get((chrom, start, ""))
+
+
+def build(results_dir, out_path, cap=0, strict=False,
           anonymise=False, pad_up=3, pad_down=6, log=None, targets=None):
     """Write the companion. Returns ``(n_rows, n_sites, unreconciled)``."""
     say = log or (lambda m: print(m, file=sys.stderr))
     budget = read_budget(results_dir)
     source_path, source_kind = probe_source(results_dir)
-    reported = read_reported(targets) if targets else {}
+    reported = read_reported(targets, say) if targets else {}
     ancestry = read_ancestry(results_dir)
     say("haplotype-scores: ancestry for %s individual(s) from the run's .sampleID.txt"
         % (len(ancestry) if ancestry else "no"))
@@ -750,7 +865,10 @@ def build(results_dir, out_path, cap=0, score_source="harvest", strict=False,
 
     threshold, recall = _threshold()
     sites = collections.OrderedDict()
-    wanted = set(reported) if reported else None
+    # The FILTER is coarse (chrom, start) on purpose: the precise match, which also
+    # takes the guide into account, happens in lookup_reported.
+    wanted = set((c, p) for c, p, _ in reported) if reported else None
+    seen_anchors = set()
     if wanted is not None:
         say("haplotype-scores: restricted to the %d site(s) --targets names" % len(wanted))
 
@@ -758,18 +876,22 @@ def build(results_dir, out_path, cap=0, score_source="harvest", strict=False,
         for obs in harvest_rows(stream):
             if obs.origin and obs.origin.lower() == "ref":
                 continue                       # reference rows are not variant haplotypes
-            if wanted is not None and (obs.chrom, obs.start) not in wanted:
+            if wanted is not None and (obs.chrom, obs.anchor_start) not in wanted:
                 # Bounds memory to the sites actually asked for. Without --targets every
                 # site of the run is held at once, which a genome-wide sidecar (millions
                 # of rows x three blocks) will not fit in. Streaming with cluster close-out
                 # is the next step; see the note in the PR.
                 continue
+            if wanted is not None:
+                seen_anchors.add((obs.chrom, obs.anchor_start))
             site = sites.get(obs.site)
             if site is None:
                 site = Site(obs.site, obs.chrom, obs.start, obs.strand, obs.spacer)
-                rep = reported.get((obs.chrom, obs.start))
-                site.has_report = rep is not None
-                if rep is not None:
+                rep = lookup_reported(reported, obs.chrom, obs.anchor_start, obs.spacer)
+                site.has_report = rep is not None and rep is not _AMBIGUOUS
+                if rep is _AMBIGUOUS:
+                    site.ambiguous = True
+                if site.has_report:
                     # REF-origin: the representative IS the reference sequence, so it has
                     # no ALT haplotype to appear among. Not applicable, not a failure.
                     site.applicable = (rep.origin == "alt") and bool(rep.variants)
@@ -777,7 +899,13 @@ def build(results_dir, out_path, cap=0, score_source="harvest", strict=False,
                 sites[obs.site] = site
             cfd, cb, status = classify(obs, budget, obs.block)
             _cb = carrier_breakdown(obs.samples, ancestry)
-            above = cb is not None and cb >= threshold
+            # NEVER ASSERT "no" ABOUT A ROW NOBODY SCORED. Two of the three frames never
+            # carry a CRISPR-Bulge score at all, so a bare "no" here told a reader the
+            # haplotype is below the operating point when the truth is that it was never
+            # measured -- reviving, inside this file, the exact silent discard the file
+            # exists to stop. Three values, like every other absence here.
+            above = ("yes" if (cb is not None and cb >= threshold)
+                     else ("no" if cb is not None else "unknown"))
             row = {
                 "site_key": obs.site, "chrom": obs.chrom, "site_start": obs.start,
                 "strand": obs.strand, "spacer": obs.spacer,
@@ -788,10 +916,8 @@ def build(results_dir, out_path, cap=0, score_source="harvest", strict=False,
                 "alignment_frame": FRAME_CANDIDATE,
                 "cfd": fmt_score(cfd), "crispr_bulge": fmt_score(cb),
                 "score_status": status,
-                "above_threshold": "yes" if above else "no",
-                "in_top1000_cfd": "unknown", "in_top1000_cb": "unknown",
+                "above_threshold": above,
                 "rank_in_site_by_score": "",
-                "score_vs_site_reported": "",
                 "n_carriers": str(_cb[0]),
                 "carriers_homozygous": _cb[1],
                 "carriers_heterozygous": _cb[2],
@@ -799,16 +925,39 @@ def build(results_dir, out_path, cap=0, score_source="harvest", strict=False,
                 "carrier_populations": _cb[4],
                 "carrier_superpopulations": _cb[5],
                 "carriers": "" if anonymise else obs.samples,
-                "oligo_seq": "", "oligo_len": "0", "oligo_status": "no-geometry",
-                "oligo_group_id": "", "oligo_group_size": "", "oligo_group_carriers": "",
-                "variants_in_window_n": str(len([v for v in obs.variants.split(",")
-                                                 if v.strip()])),
-                "max_af": obs.maf or "NA",
+                "variants_in_window_n": str(len([
+                    v for v in obs.variants.split(",")
+                    if v.strip() and v.strip().upper() not in ("NA", "N", "-", ".")])),
+                "max_af": _max_af(obs.maf),
                 "scope_reason": source_kind,
             }
-            site.add(row, cb, above, status == ST_SCORED,
+            site.add(row, cb, above == "yes", status == ST_SCORED,
                      canonical_variants(obs.variants),
                      hap_key=obs.variants or obs.aligned_alt or "-")
+
+    # A --targets SITE THAT PRODUCED NOTHING IS A GAP, AND GAPS ARE SAID OUT LOUD.
+    #
+    # The curated table's Position is the merged representative's start; the haplotype
+    # source is written pre-merge, so the two agree on most sites but not all. Measured
+    # on a real NRR run: of 200 curated top-CFD ALT sites, 97 appear at that exact start
+    # in the source, 14 more appear only at another block's start, 47 only within 5 bp,
+    # and 42 are absent entirely. Silently returning 97 lets a reader believe the other
+    # 103 were examined and found clean.
+    #
+    # They are NOT fuzzy-matched to recover the near misses: a 5 bp window would merge
+    # genuinely distinct sites and manufacture identity, which is worse than a named gap.
+    if wanted is not None:
+        missing = sorted(wanted - seen_anchors)
+        if missing:
+            say("haplotype-scores: WARNING %d of the %d site(s) --targets names produced "
+                "NO rows and are absent from this file: they are not in %s at that "
+                "coordinate. This is not 'no haplotypes there' -- it is 'not enumerated "
+                "here'. The curated Position is the merged representative's start while "
+                "this source is written pre-merge, so some sites sit a few bp away, and "
+                "they are NOT fuzzy-matched because a window would merge distinct sites. "
+                "First missing: %s"
+                % (len(missing), len(wanted), os.path.basename(source_path),
+                   ", ".join("%s:%s" % m for m in missing[:5])))
 
     # A mis-keyed comparison looks exactly like a catastrophic finding. Before reporting
     # per-site failures, ask whether the reported alignments resemble the haplotype
@@ -843,14 +992,31 @@ def build(results_dir, out_path, cap=0, score_source="harvest", strict=False,
                                 lineterminator="\n", extrasaction="ignore")
         writer.writeheader()
         for site in sites.values():
-            ranked = sorted(
-                site.rows,
-                key=lambda r: (-(float(r["crispr_bulge"])
-                                 if r["crispr_bulge"] not in ("NA", "") else -1.0),
-                               r["variant_set"]))
+            def _rank_key(r):
+                """Rank on whichever score the row carries.
+
+                Ranking on CRISPR-Bulge alone put every CFD-only row at the bottom, so a
+                cap discarded the CFD-bearing rows FIRST -- dropping exactly the rows
+                whose score the report ranks on. Rows with no score at all sort last, and
+                never above a measured one.
+                """
+                for col in ("crispr_bulge", "cfd"):
+                    if r[col] not in ("NA", ""):
+                        try:
+                            return (0, -float(r[col]), r["variant_set"])
+                        except ValueError:
+                            pass
+                return (1, 0.0, r["variant_set"])
+
+            ranked = sorted(site.rows, key=_rank_key)
             kept = ranked if not cap else ranked[:cap]
             hidden = len(ranked) - len(kept)
+            # The reconciliation speaks about the haplotypes THIS FILE SHOWS. If a cap
+            # removed some, a "yes" earned by a hidden row would be a claim the reader
+            # cannot check against anything in front of them.
             found = "unknown" if mis_keyed else site.row_reported_alignment_found
+            if found == "yes" and hidden:
+                found = "yes(among-all-haplotypes-not-all-shown)"
             if found == "no":
                 unreconciled.append(site.key)
             for rank, row in enumerate(kept, 1):
@@ -926,11 +1092,6 @@ def main(argv=None):
     p.add_argument("--max-haplotypes", type=int, default=0, dest="cap",
                    help="cap rows written per site (0 = every one). Counts are always "
                         "the true totals.")
-    p.add_argument("--score-source", choices=("harvest", "realign", "auto"),
-                   default="harvest",
-                   help="harvest (default) reads the scores the pipeline already wrote. "
-                        "realign/auto additionally re-align the rows the fixed frame "
-                        "cannot hold; measured coverage does not yet justify auto.")
     p.add_argument("--targets", default=None,
                    help="the run's curated results table (Chromosome, Position, "
                         "Aligned_protospacer+PAM), so each site's own reported alignment "
@@ -945,7 +1106,7 @@ def main(argv=None):
 
     try:
         n_rows, n_sites, unreconciled = build(
-            args.results, args.out, cap=args.cap, score_source=args.score_source,
+            args.results, args.out, cap=args.cap,
             strict=args.strict, anonymise=args.anonymise, targets=args.targets)
     except HaplotypeScoreError as exc:
         print("Error: %s" % exc, file=sys.stderr)
