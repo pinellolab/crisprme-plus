@@ -55,12 +55,20 @@ _BLOCKS = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
 
 
 def _header():
-    """The REAL per-block schema.
+    """The REAL per-block schema, read off a real run rather than assumed.
 
-    CFD_score_(...) exists on every block; CRISPR_BULGE_score_(...) exists ONLY on the
-    CRISPR-Bulge block. The first version of this fixture invented a CRISPR-Bulge column
-    on all three, so the suite exercised a shape the pipeline never writes -- and the
-    rows that matter most, the ones carrying a score on one axis only, were never tested.
+    Measured on ml008, nrr281/N3 observed_haplotypes_raw.tsv:
+        CFD_score_(highest_CFD)                  CFD_score_(fewest_mm+b)
+        CRISPR_BULGE_score_(highest_CRISPR_BULGE)
+    and NO CFD_score_(highest_CRISPR_BULGE). So NO observation ever carries both a CFD
+    and a CRISPR-Bulge number: each block has exactly one score column.
+
+    This fixture has now been wrong twice. First it wrote one start into all three blocks
+    and invented a CRISPR-Bulge column on each, hiding five defects. Then it was
+    "corrected" to put CFD on all three -- still a column no writer emits, which made the
+    composite scored(cb-model-refused) status it was green on UNREACHABLE in production.
+    A fixture that is not the real shape is not coverage; it is a second implementation
+    nobody runs.
     """
     cols = ["Spacer+PAM", "Chromosome"]
     for b in _BLOCKS:
@@ -68,10 +76,9 @@ def _header():
                  "Aligned_spacer+PAM_(%s)" % b,
                  "Aligned_protospacer+PAM_REF_(%s)" % b,
                  "Aligned_protospacer+PAM_ALT_(%s)" % b,
-                 "REF/ALT_origin_(%s)" % b,
-                 "CFD_score_(%s)" % b]
-        if b == "highest_CRISPR_BULGE":
-            cols += ["CRISPR_BULGE_score_(%s)" % b]
+                 "REF/ALT_origin_(%s)" % b]
+        cols += (["CRISPR_BULGE_score_(%s)" % b] if b == "highest_CRISPR_BULGE"
+                 else ["CFD_score_(%s)" % b])
         cols += ["Variant_info_genome_(%s)" % b, "Variant_MAF_(%s)" % b,
                  "Variant_samples_(%s)" % b]
     return cols
@@ -85,9 +92,8 @@ def _row(chrom, start, alt, cfd, cb, variants, samples="s1,s2", origin="alt",
     out = [SPACER, chrom]
     for b in _BLOCKS:
         st = cb_start if (b == "highest_CRISPR_BULGE" and cb_start is not None) else start
-        out += [str(st), "+", SPACER, REPORTED, alt, origin, str(cfd)]
-        if b == "highest_CRISPR_BULGE":
-            out += [str(cb)]
+        out += [str(st), "+", SPACER, REPORTED, alt, origin,
+                str(cb) if b == "highest_CRISPR_BULGE" else str(cfd)]
         out += [variants, "0.01", samples]
     return out
 
@@ -203,12 +209,15 @@ class HaplotypeScoresFixture(HaplotypeScoresMixin, unittest.TestCase):
         tgt = self._targets(tgt_rows)
         (_n, _s, unreconciled), text, msgs = self._run(rows, targets=tgt)
         self.assertEqual(unreconciled, [], "a mis-keyed comparison reports no failures")
-        self.assertTrue(any("mis-keyed comparison" in m for m in msgs),
-                        "it must say the key is wrong")
+        self.assertTrue(any("LOOKS like a mis-keyed comparison" in m for m in msgs),
+                        "it must say the key looks wrong")
+        self.assertTrue(any("Variant column" in m for m in msgs),
+                        "it must name the column actually compared, not the alignment")
         body = [l for l in text.splitlines() if l and not l.startswith("#")]
         head, data = body[0].split("\t"), [l.split("\t") for l in body[1:]]
         i = head.index("row_reported_alignment_found")
-        self.assertTrue(all(r[i] == "unknown" for r in data))
+        self.assertTrue(all(r[i] == "unknown(key-looks-wrong)" for r in data), 
+                        set(r[i] for r in data))
 
     def test_one_genuine_failure_is_not_suppressed_by_that_guard(self):
         """The guard needs evidence: below its floor, a real failure still reports."""
@@ -525,11 +534,20 @@ class TestTheFixtureMatchesTheRealSchema(unittest.TestCase):
         cb = [c for c in cols if c.startswith("CRISPR_BULGE_score_")]
         self.assertEqual(cb, ["CRISPR_BULGE_score_(highest_CRISPR_BULGE)"], cb)
 
-    def test_cfd_is_on_every_block(self):
+    def test_cfd_is_not_on_the_crispr_bulge_block(self):
+        """Measured on a real run: CFD is on highest_CFD and fewest_mm+b ONLY."""
         cols = _header()
         self.assertEqual(
             sorted(c for c in cols if c.startswith("CFD_score_")),
-            sorted("CFD_score_(%s)" % b for b in _BLOCKS))
+            sorted(["CFD_score_(highest_CFD)", "CFD_score_(fewest_mm+b)"]))
+
+    def test_no_observation_can_carry_both_scores(self):
+        """The consequence that matters: each block has exactly one score column, so a
+        row with a CFD number AND a CRISPR-Bulge number is not a shape that exists."""
+        cols = _header()
+        for b in _BLOCKS:
+            here = [c for c in cols if c.endswith("(%s)" % b) and "_score_" in c]
+            self.assertEqual(len(here), 1, (b, here))
 
 
 class TestAnEmptySourceNeverWins(HaplotypeScoresMixin, unittest.TestCase):
@@ -776,18 +794,21 @@ class TestOneAxisRefusingIsNotTheRowRefusing(HaplotypeScoresMixin, unittest.Test
     above the threshold.
     """
 
-    def test_a_refused_cfd_beside_a_real_cb_is_still_scored(self):
-        """BOTH facts. The row has a number AND an axis declined it -- two earlier
-        versions let one erase the other."""
+    def test_a_refused_cfd_and_a_real_cb_are_separate_rows_with_separate_answers(self):
+        """In the REAL schema no observation carries both scores: each block has exactly
+        one score column. So "CFD refused while CB scored" is two ROWS, and each must
+        tell the truth about itself."""
         rows = [_row("chr1", 100, HAP_ONE, -1.0, 0.004, "chr1_100_A_C")]
         _res, text, _msgs = self._run(rows)
-        scored = [r for r in self._parse(text) if r["crispr_bulge"] != "NA"]
-        self.assertEqual(len(scored), 1)
-        self.assertTrue(scored[0]["score_status"].startswith("scored"),
-                        scored[0]["score_status"])
-        self.assertIn("cfd-model-refused", scored[0]["score_status"],
-                      "the refusal was erased by the surviving score")
-        self.assertEqual(scored[0]["above_threshold"], "yes")
+        body = self._parse(text)
+        cb = [r for r in body if "CRISPR_BULGE" in r["haplotype_id"]]
+        cfd = [r for r in body if "CRISPR_BULGE" not in r["haplotype_id"]]
+        self.assertEqual(len(cb), 1)
+        self.assertEqual(cb[0]["score_status"], "scored")
+        self.assertEqual(cb[0]["above_threshold"], "yes")
+        for r in cfd:
+            self.assertIn("model-refused", r["score_status"],
+                          "a -1 CFD must not read as never measured")
 
     def test_a_row_is_never_both_above_threshold_and_never_scored(self):
         rows = [_row("chr1", 100, HAP_ONE, -1.0, 0.004, "chr1_100_A_C")]
@@ -863,13 +884,21 @@ class TestARefusalIsNeverErased(HaplotypeScoresMixin, unittest.TestCase):
     """
 
     def test_a_declined_cb_does_not_look_like_an_absent_column(self):
+        """THE LIVE CASE: 139,656 rows of a real run. The CRISPR-Bulge axis was reached
+        and declined; the other two blocks have no CRISPR-Bulge column at all. Both end
+        with crispr_bulge=NA, so above_threshold is the only thing that can tell them
+        apart -- and it read a bare 'unknown' on both, which the header defines as never
+        measured."""
         declined = self._run([_row("chr1", 100, HAP_ONE, 0.6, -1.0, "chr1_100_A_C")])[1]
-        rows = {r["alignment_frame"] + r["site_start"]: r for r in self._parse(declined)}
-        cb_row = [r for r in self._parse(declined)
-                  if "CRISPR_BULGE" in r["haplotype_id"]][0]
-        self.assertIn("cb-model-refused", cb_row["score_status"],
-                      "declined renders the same as never-measured")
+        body = self._parse(declined)
+        cb_row = [r for r in body if "CRISPR_BULGE" in r["haplotype_id"]][0]
+        other = [r for r in body if "CRISPR_BULGE" not in r["haplotype_id"]]
+        self.assertIn("model-refused", cb_row["score_status"])
         self.assertEqual(cb_row["above_threshold"], "unknown(model-refused)")
+        self.assertTrue(other)
+        for r in other:
+            self.assertEqual(r["above_threshold"], "unknown",
+                             "never-measured must stay distinguishable from declined")
 
     def test_an_axis_with_no_column_still_says_plain_unknown(self):
         """The contrast that makes the value above mean something."""
@@ -937,6 +966,161 @@ class TestADamagedPreferredSourceIsAnnounced(HaplotypeScoresMixin, unittest.Test
         msgs = []
         hs.probe_source(self.dir, msgs.append)
         self.assertEqual(msgs, [])
+
+
+class TestTheThreeValuesAreEachExercised(HaplotypeScoresMixin, unittest.TestCase):
+    """"THREE VALUES, NOT TWO" is the file's headline claim, and 'no' -- measured and
+    BELOW -- had no positive assertion anywhere: flipping the branch to "yes" left the
+    suite green. Same for needs-realignment and a non-zero n_not_scored, the module's
+    stated contract for the Tier-2 case it deliberately did not build."""
+
+    def test_measured_and_below_reads_no(self):
+        thr = hs._threshold()[0]
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, thr / 190.0, "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        cb = [r for r in self._parse(text) if "CRISPR_BULGE" in r["haplotype_id"]][0]
+        self.assertEqual(cb["above_threshold"], "no")
+        self.assertEqual(cb["score_status"], "scored")
+
+    def test_at_the_threshold_exactly_reads_yes(self):
+        thr = hs._threshold()[0]
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, thr, "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        cb = [r for r in self._parse(text) if "CRISPR_BULGE" in r["haplotype_id"]][0]
+        self.assertEqual(cb["above_threshold"], "yes")
+
+    def test_no_score_on_any_axis_is_needs_realignment_and_counted(self):
+        rows = [_row("chr1", 100, HAP_ONE, "NA", "NA", "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        body = self._parse(text)
+        self.assertTrue(body)
+        for r in body:
+            self.assertTrue(r["score_status"].startswith("needs-realignment:"),
+                            r["score_status"])
+            self.assertIn("chr1", r["score_status"], "the site key must be in it")
+            self.assertEqual(r["n_not_scored"], "1")
+            self.assertEqual(r["n_haplotypes_at_site"], "1")
+
+
+class TestTheFourthReconciliationAbsence(HaplotypeScoresMixin, unittest.TestCase):
+    """n/a asserts a MEASURED fact: "it reported a REFERENCE haplotype, so there is no
+    ALT for it to appear among". Folding "the table has no origin column" and "the
+    Variant cell did not parse" into it asserted a reason nobody read, left unreconciled
+    empty, printed nothing, and made --strict exit 0 on a genuine failure."""
+
+    def _targets_raw(self, header, row):
+        path = os.path.join(self.dir, "t.tsv")
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write(header + "\n" + row + "\n")
+        return path
+
+    def test_an_absent_origin_column_is_not_n_a(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")]
+        tgt = self._targets_raw("Chromosome\tPosition\tVariant",
+                                "chr1\t100\tchr1;100;A;T (rs9)")
+        _res, text, msgs = self._run(rows, targets=tgt)
+        vals = set(r["row_reported_alignment_found"] for r in self._parse(text))
+        self.assertEqual(vals, {"unknown(origin-not-in-targets)"}, vals)
+        self.assertTrue(any("no REF/ALT_origin column" in m for m in msgs), msgs)
+
+    def test_an_unparsable_variant_on_an_alt_row_is_not_n_a(self):
+        """generate_report._format_variant_id documents falling back to the rsID when no
+        coordinate is available, so this is a shape the producer emits."""
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")]
+        tgt = self._targets_raw("Chromosome\tPosition\tVariant\tREF/ALT_origin",
+                                "chr1\t100\trs10136\talt")
+        _res, text, _msgs = self._run(rows, targets=tgt)
+        vals = set(r["row_reported_alignment_found"] for r in self._parse(text))
+        self.assertEqual(vals, {"unknown(unparsable-variant-in-targets)"}, vals)
+
+    def test_a_real_ref_row_still_reads_n_a(self):
+        """The contrast that makes n/a mean something."""
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "REF")])
+        _res, text, _msgs = self._run(rows, targets=tgt)
+        self.assertEqual(set(r["row_reported_alignment_found"]
+                             for r in self._parse(text)), {"n/a"})
+
+
+class TestAnEmptyTargetsTableIsNotNoTargets(HaplotypeScoresMixin, unittest.TestCase):
+    """Branching on the truthiness of the parsed table made a --targets file that
+    yielded zero usable rows indistinguishable from not passing --targets at all: the
+    filter switched off and the WHOLE run was written, with none of the per-site
+    accounting the flag exists for, and nothing said."""
+
+    def test_a_targets_table_with_no_usable_rows_refuses(self):
+        path = os.path.join(self.dir, "empty_targets.tsv")
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("Chromosome\tPosition\tVariant\tREF/ALT_origin\n")
+        self._write_source([_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C"),
+                            _row("chr9", 900, HAP_TWO, 0.4, 0.9, "chr9_900_A_C")])
+        with self.assertRaises(hs.HaplotypeScoreError) as cm:
+            hs.build(self.dir, os.path.join(self.dir, "o.tsv"),
+                     log=lambda m: None, targets=path)
+        self.assertIn("no usable rows", str(cm.exception))
+
+    def test_it_does_not_quietly_write_the_whole_run(self):
+        path = os.path.join(self.dir, "empty_targets.tsv")
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("Chromosome\tPosition\tVariant\tREF/ALT_origin\n")
+        out = os.path.join(self.dir, "o.tsv")
+        self._write_source([_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")])
+        rc = hs.main(["--results", self.dir, "--out", out, "--targets", path])
+        self.assertNotEqual(rc, 0)
+        self.assertFalse(os.path.exists(out))
+
+
+class TestAnAltSiteHoldingOnlyRefRowsIsAGap(HaplotypeScoresMixin, unittest.TestCase):
+    """The curated row says ALT; this source holds only REF rows. The user's own table
+    says a variant haplotype is there. Reporting "no variant haplotype here" is the worst
+    answer available -- it is a clean, asserted against their own evidence."""
+
+    def test_it_is_called_a_gap_not_a_clean(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C", origin="ref")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT")])
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        self.assertTrue([m for m in msgs if "ALT-origin in the curated table" in m], msgs)
+        self.assertFalse([m for m in msgs if "no variant haplotype here" in m
+                          and "NOT" not in m], msgs)
+
+    def test_a_curated_ref_row_is_still_reported_as_present_with_no_alt(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C", origin="ref")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "REF")])
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        self.assertTrue([m for m in msgs if "carry only reference rows" in m], msgs)
+        self.assertFalse([m for m in msgs if "ALT-origin in the curated" in m], msgs)
+
+
+class TestABudgetLabelIsNotAGate(HaplotypeScoresMixin, unittest.TestCase):
+    """The budget is rendered into the header and quoted in score_status; nothing
+    computes with it. Refusing the whole file over a missing label made the companion
+    impossible for an assembly-search combined run, whose .Params.txt has no
+    Max_total_edits by construction (pages/history_page.py carries a fallback for the
+    same gap), and blamed search parameters that were all present."""
+
+    def test_a_missing_max_total_edits_still_writes(self):
+        with io.open(os.path.join(self.dir, ".Params.txt"), "w", encoding="utf-8") as fh:
+            fh.write(PARAMS.replace("Max_total_edits\t8\n", ""))
+        _res, text, _msgs = self._run([_row("chr1", 100, HAP_ONE, 0.4, 0.9,
+                                            "chr1_100_A_C")])
+        self.assertIn("?total", text, "the header must SHOW the gap, not hide it")
+        self.assertTrue(self._parse(text))
+
+    def test_a_missing_scorer_still_writes(self):
+        with io.open(os.path.join(self.dir, ".Params.txt"), "w", encoding="utf-8") as fh:
+            fh.write(PARAMS.replace("Scorer\tcrispr-bulge\n", ""))
+        _res, text, _msgs = self._run([_row("chr1", 100, HAP_ONE, 0.4, 0.9,
+                                            "chr1_100_A_C")])
+        self.assertTrue(self._parse(text))
+
+    def test_no_params_file_at_all_still_refuses(self):
+        os.remove(os.path.join(self.dir, ".Params.txt"))
+        with self.assertRaises(hs.HaplotypeScoreError):
+            hs.build(self.dir, os.path.join(self.dir, "o.tsv"), log=lambda m: None)
+
+    def test_the_budget_text_never_invents_a_number(self):
+        self.assertEqual(hs.budget_text({"mismatches": 6, "dna": 1, "rna": 1}),
+                         "6mm/1DNA/1RNA/?total")
 
 
 if __name__ == "__main__":

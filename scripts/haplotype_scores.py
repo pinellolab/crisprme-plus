@@ -65,6 +65,7 @@ import os
 import re
 import sys
 import zipfile
+import zlib
 
 # --------------------------------------------------------------------------- #
 # score_status -- the vocabulary. A cell is NEVER blank and NEVER -1.0.
@@ -133,6 +134,13 @@ def fmt_score(value):
 # the run's own budget -- read, never a flag
 
 
+# The budget is DESCRIPTIVE: it is rendered into the file header and quoted inside
+# score_status, and nothing here computes with it. So a missing key costs its own value,
+# not the file. Refusing outright made the companion impossible to produce for an
+# assembly-search combined run, whose .Params.txt has no Max_total_edits by construction
+# (pages/history_page.py and results_page.py both carry a fallback for that same gap),
+# and the message blamed "the search's budget (mismatches, bulges, PAM)" -- sending the
+# operator to look at search parameters that were all present.
 BUDGET_KEYS = (
     ("mismatches", "Mismatches"),
     ("dna", "DNA"),
@@ -168,24 +176,36 @@ def read_budget(results_dir):
             missing.append(name)
         else:
             out[key] = raw[name]
-    if missing:
-        raise HaplotypeScoreError(
-            "%s does not record %s: cannot establish the search's budget, so refusing "
-            "rather than guessing one." % (path, ", ".join(missing)))
+    out["_missing"] = missing
     for k in ("mismatches", "dna", "rna", "max_total"):
+        if k not in out:
+            continue                      # absent: budget_text renders it "?"
         try:
             out[k] = int(out[k])
         except ValueError:
+            # Present but not a number is a DIFFERENT fact from absent, and a value this
+            # file cannot render honestly, so it still refuses.
             raise HaplotypeScoreError(
                 "%s records %s as %r, which is not a number." % (path, k, out[k]))
+    if missing:
+        say_missing = ", ".join(missing)
+        out["_note"] = (
+            "%s does not record %s. Those are LABELS -- they are printed in this file's "
+            "header and quoted in score_status, and nothing is computed from them -- so "
+            "they render as '?' rather than costing you the file. An assembly-search "
+            "combined run has no Max_total_edits by construction."
+            % (path, say_missing))
     return out
 
 
 def budget_text(budget):
     """``6mm/1DNA/1RNA/8total`` -- quoted INSIDE score_status, so a row that found no
     alignment says which budget failed to find one."""
-    return "%dmm/%dDNA/%dRNA/%dtotal" % (
-        budget["mismatches"], budget["dna"], budget["rna"], budget["max_total"])
+    def v(k, suffix):
+        # "?" where the run did not record it -- never a number this file invented.
+        return ("%s%s" % (budget[k], suffix)) if budget.get(k) is not None else ("?" + suffix)
+    return "".join((v("mismatches", "mm/"), v("dna", "DNA/"),
+                    v("rna", "RNA/"), v("max_total", "total")))
 
 
 # --------------------------------------------------------------------------- #
@@ -422,7 +442,7 @@ def has_data_row(path):
             for line in stream:
                 if line.strip():
                     return True
-    except (OSError, zipfile.BadZipFile) as exc:
+    except (OSError, EOFError, zipfile.BadZipFile, zlib.error) as exc:
         raise HaplotypeScoreError(
             "%s cannot be read (%s). This is not an empty run: the file is there and "
             "unreadable, which is a different problem from 'nothing was enumerated'. "
@@ -598,7 +618,14 @@ def harvest_rows(stream, spacer_hint=None):
 
 
 def classify(obs, budget, axis_named):
-    """``(cfd, crispr_bulge, score_status)`` for one harvested observation.
+    """``(cfd, crispr_bulge, score_status, cb_refused)`` for one harvested observation.
+
+    ``cb_refused`` is returned as its OWN value rather than left to be recovered from the
+    status string. The caller used to test ``"cb-model-refused" in status``, which is
+    false for the out-of-domain status -- so on the 139,656 real rows where the
+    CRISPR-Bulge axis was reached and declined, above_threshold read a bare "unknown",
+    which this file's header defines as NEVER MEASURED. The flagship invariant, broken by
+    sniffing a string for a fact that was already known.
 
     ``axis_named`` says which axis named this haplotype. The other axis gets no number
     and says so -- never a blank, never a borrowed value.
@@ -639,11 +666,12 @@ def classify(obs, budget, axis_named):
         # Scored -- and if the OTHER axis was reached and declined, the status says which.
         declined = [n for n, r in (("cb", cb_refused), ("cfd", cfd_refused)) if r]
         if declined:
-            return cfd, cb, ST_SCORED_REFUSED % "+".join(declined)
-        return cfd, cb, ST_SCORED
+            return cfd, cb, ST_SCORED_REFUSED % "+".join(declined), cb_refused
+        return cfd, cb, ST_SCORED, cb_refused
     if cb_refused or cfd_refused:
-        return None, None, ST_OUT_OF_DOMAIN % "model-refused(n/length/multi-gap)"
-    return None, None, ST_NEEDS_REALIGN % obs.site
+        return (None, None,
+                ST_OUT_OF_DOMAIN % "model-refused(n/length/multi-gap)", cb_refused)
+    return None, None, ST_NEEDS_REALIGN % obs.site, cb_refused
 
 
 # --------------------------------------------------------------------------- #
@@ -661,7 +689,7 @@ class Site(object):
     __slots__ = ("key", "chrom", "start", "strand", "spacer", "rows",
                  "haplotypes", "above", "scored_any", "max_cb",
                  "reported_alignments", "seen_alignments", "applicable", "has_report",
-                 "ambiguous")
+                 "ambiguous", "unreadable_report")
 
     def __init__(self, key, chrom, start, strand, spacer):
         self.key = key
@@ -679,6 +707,7 @@ class Site(object):
         self.applicable = False
         self.has_report = False
         self.ambiguous = False
+        self.unreadable_report = ""
 
     def add(self, row, cb_value, above, scored, aligned, hap_key):
         self.haplotypes.add(hap_key)                # COUNT first, and by haplotype
@@ -720,6 +749,13 @@ class Site(object):
         #   yes/no  -- it reported an ALT haplotype, and it is or is not among them
         if self.ambiguous:
             return "unknown(ambiguous-in-targets)"
+        if self.unreadable_report:
+            # NOT n/a. n/a asserts "it reported a REFERENCE haplotype, so there is no ALT
+            # for it to appear among" -- a measured fact. Folding "the table has no origin
+            # column" and "the Variant cell did not parse" into it asserted a reason
+            # nobody read, left unreconciled empty, printed nothing, and made --strict --
+            # the flag whose only job is to fail here -- exit 0 on a genuine failure.
+            return "unknown(%s)" % self.unreadable_report
         if not self.has_report:
             return "unknown"
         if not self.applicable:
@@ -761,10 +797,27 @@ def file_header(source_path, source_kind, budget, threshold, recall, cap, strict
         "#   were never measured against the operating point. 'no' means measured and",
         "#   below; 'unknown' means not measured. Filtering above_threshold != 'yes'",
         "#   therefore keeps rows nobody scored -- that is deliberate.",
-        "#   row_reported_alignment_found likewise has unknown, n/a,",
-        "#   unknown(ambiguous-in-targets) when --targets described a locus twice",
-        "#   incompatibly, and yes(among-all-haplotypes-not-all-shown) when a cap hid the",
-        "#   matching haplotype.",
+        "#   MEASURED on a real NRR run: of 460,714 rows, 139,656 read",
+        "#   unknown(model-refused) and 304,003 a bare unknown. Before they were one",
+        "#   value, so 30% of the file said 'never measured' about rows the model had",
+        "#   reached and declined.",
+        "#   row_reported_alignment_found is one of:",
+        "#     yes / no                   -- it reported an ALT haplotype, and it is or",
+        "#                                   is not among the ones written",
+        "#     n/a                        -- the curated table SAYS ref, so there is no",
+        "#                                   ALT for it to appear among. A measured fact;",
+        "#                                   never used for an absence.",
+        "#     unknown                    -- no --targets, so nothing said what it",
+        "#                                   reported",
+        "#     unknown(origin-not-in-targets)        -- the curated table has no",
+        "#                                   REF/ALT_origin column, so ref was never read",
+        "#     unknown(unparsable-variant-in-targets) -- an ALT row whose Variant cell",
+        "#                                   this file cannot reduce to records",
+        "#     unknown(ambiguous-in-targets)         -- the table described that locus",
+        "#                                   twice, incompatibly",
+        "#     unknown(key-looks-wrong)   -- the comparison looks mis-keyed across the",
+        "#                                   run, so a 'no' here is not reported as one",
+        "#     yes(among-all-haplotypes-not-all-shown) -- a cap hid the matching one",
         "#",
         "# RANK IS ONE ORDERING, NOT ONE PER AXIS. rank_in_site_by_score numbers the",
         "#   site's rows 1..n in the order a cap takes them: CRISPR-Bulge-bearing rows",
@@ -874,10 +927,10 @@ def canonical_variants(text):
     return tuple(sorted(out))
 
 
-Reported = collections.namedtuple("Reported", "variants origin")
+Reported = collections.namedtuple("Reported", "variants origin origin_known")
 
 # a locus the curated table describes twice, incompatibly: never reconciled against
-_AMBIGUOUS = Reported(variants=(), origin="ambiguous")
+_AMBIGUOUS = Reported(variants=(), origin="ambiguous", origin_known=True)
 
 
 # the curated table's guide column, under any of the names it has shipped with
@@ -910,6 +963,12 @@ def read_reported(targets_path, say=None):
             raise HaplotypeScoreError(
                 "%s is not a curated results table: it needs Chromosome, Position and "
                 "Variant to say which haplotype each site reported." % targets_path)
+        if o_i is None:
+            say("haplotype-scores: NOTE %s has no REF/ALT_origin column, so no site can "
+                "be shown to have reported a REFERENCE haplotype. Reconciliation for "
+                "every site is 'unknown(origin-not-in-targets)', NOT 'n/a' -- n/a would "
+                "assert a reason that was never read."
+                % os.path.basename(targets_path))
         if s_i is None:
             say("haplotype-scores: NOTE %s names no guide column (%s), so two guides "
                 "reporting at the same locus cannot be told apart; any such locus is "
@@ -922,7 +981,8 @@ def read_reported(targets_path, say=None):
                       if o_i is not None and o_i < len(row) else "")
             spacer = (row[s_i].strip() if s_i is not None and s_i < len(row) else "")
             key = (row[c_i].strip(), row[p_i].strip(), spacer)
-            rep = Reported(variants=canonical_variants(row[v_i]), origin=origin)
+            rep = Reported(variants=canonical_variants(row[v_i]), origin=origin,
+                           origin_known=(o_i is not None and origin in ("ref", "alt")))
             prev = out.get(key)
             if prev is not None and prev != rep:
                 # Two curated rows claim the same (locus, guide) with DIFFERENT reported
@@ -956,6 +1016,15 @@ def build(results_dir, out_path, cap=0, strict=False,
     budget = read_budget(results_dir)
     source_path, source_kind = probe_source(results_dir, say)
     reported = read_reported(targets, say) if targets else {}
+    if targets and not reported:
+        # Branching on the truthiness of `reported` made a table that parsed to zero
+        # usable rows indistinguishable from "no --targets given": the filter switched
+        # off and the WHOLE run was written, with none of the per-site accounting the
+        # flag exists for, and nothing said.
+        raise HaplotypeScoreError(
+            "%s yielded no usable rows: it has the required columns but every data row "
+            "was unreadable or empty. Writing the whole run instead would silently give "
+            "you the opposite of the shortlist you asked for. Refusing." % targets)
     ancestry = read_ancestry(results_dir)
     say("haplotype-scores: ancestry for %s individual(s) from the run's .sampleID.txt"
         % (len(ancestry) if ancestry else "no"))
@@ -967,12 +1036,15 @@ def build(results_dir, out_path, cap=0, strict=False,
             "is 'unknown' on every row (never 'yes')")
     say("haplotype-scores: source %s (%s)" % (source_kind, os.path.basename(source_path)))
     say("haplotype-scores: budget %s from the run's .Params.txt" % budget_text(budget))
+    if budget.get("_note"):
+        say("haplotype-scores: NOTE %s" % budget["_note"])
 
     threshold, recall = _threshold()
     sites = collections.OrderedDict()
     # The FILTER is coarse (chrom, start) on purpose: the precise match, which also
     # takes the guide into account, happens in lookup_reported.
-    wanted = set((c, p) for c, p, _ in reported) if reported else None
+    # Keyed on whether --targets was GIVEN, not on whether it yielded anything.
+    wanted = set((c, p) for c, p, _ in reported) if targets else None
     seen_anchors = set()        # anchors that produced an ALT haplotype row
     ref_only_anchors = set()    # anchors the source DOES hold, but only as reference
     guide_mismatch = set()      # the locus is in --targets, but under a different guide
@@ -1014,13 +1086,21 @@ def build(results_dir, out_path, cap=0, strict=False,
                 site.has_report = rep is not None and rep is not _AMBIGUOUS
                 if rep is _AMBIGUOUS:
                     site.ambiguous = True
+                if site.has_report and not rep.origin_known:
+                    site.unreadable_report = "origin-not-in-targets"
+                elif site.has_report and rep.origin == "alt" and not rep.variants:
+                    # The table names an ALT site whose Variant cell this file cannot
+                    # read (an rsID-only row, which generate_report._format_variant_id
+                    # does emit as a documented fallback). The check APPLIES and could
+                    # not be run; that is not "no ALT to check".
+                    site.unreadable_report = "unparsable-variant-in-targets"
                 if site.has_report:
                     # REF-origin: the representative IS the reference sequence, so it has
                     # no ALT haplotype to appear among. Not applicable, not a failure.
                     site.applicable = (rep.origin == "alt") and bool(rep.variants)
                     site.reported_alignments = {rep.variants} if site.applicable else set()
                 sites[obs.site] = site
-            cfd, cb, status = classify(obs, budget, obs.block)
+            cfd, cb, status, cb_refused = classify(obs, budget, obs.block)
             _cb = carrier_breakdown(obs.samples, ancestry)
             # NEVER ASSERT "no" ABOUT A ROW NOBODY SCORED. Two of the three frames never
             # carry a CRISPR-Bulge score at all, so a bare "no" here told a reader the
@@ -1029,8 +1109,7 @@ def build(results_dir, out_path, cap=0, strict=False,
             # exists to stop. Three values, like every other absence here.
             above = ("yes" if (cb is not None and cb >= threshold)
                      else ("no" if cb is not None
-                           else ("unknown(model-refused)"
-                                 if "cb-model-refused" in status else "unknown")))
+                           else ("unknown(model-refused)" if cb_refused else "unknown")))
             row = {
                 "site_key": obs.site, "chrom": obs.chrom, "site_start": obs.start,
                 "strand": obs.strand, "spacer": obs.spacer,
@@ -1089,15 +1168,31 @@ def build(results_dir, out_path, cap=0, strict=False,
                          for m in sorted(guide_mismatch)[:3])))
 
     if wanted is not None:
-        ref_only = sorted((wanted - seen_anchors) & ref_only_anchors)
+        ref_all = (wanted - seen_anchors) & ref_only_anchors
+        # A curated row that says ALT while the source holds only REF rows is NOT "no
+        # variant haplotype here". The user's own table says there is one; this source
+        # does not have it. Calling that a clean is the worst answer available.
+        contradicted = sorted(
+            k for k in ref_all
+            if (lambda r: r is not None and r is not _AMBIGUOUS and r.origin == "alt")(
+                reported.get((k[0], k[1], "")) or next(
+                    (v for (c, pp, _g), v in reported.items() if (c, pp) == k), None)))
+        ref_only = sorted(ref_all - set(contradicted))
         if ref_only:
             say("haplotype-scores: %d of the %d site(s) --targets names are PRESENT in "
-                "%s but carry only reference rows, so they have no ALT haplotype to "
-                "list. That is 'no variant haplotype here', NOT 'not enumerated'. "
-                "First: %s"
+                "%s but carry only reference rows, and the curated table agrees they are "
+                "REF-origin, so they have no ALT haplotype to list. That is 'no variant "
+                "haplotype here', NOT 'not enumerated'. First: %s"
                 % (len(ref_only), len(wanted), os.path.basename(source_path),
                    ", ".join("%s:%s" % m for m in ref_only[:5])))
-        missing = sorted(wanted - seen_anchors - ref_only_anchors)
+        if contradicted:
+            say("haplotype-scores: WARNING %d of the %d site(s) --targets names are "
+                "ALT-origin in the curated table but carry ONLY reference rows in %s. "
+                "The ALT haplotype the curated row reports is NOT in this source -- this "
+                "is a GAP, not 'no variant haplotype here'. First: %s"
+                % (len(contradicted), len(wanted), os.path.basename(source_path),
+                   ", ".join("%s:%s" % m for m in contradicted[:5])))
+        missing = sorted(wanted - seen_anchors - ref_all)
         if missing:
             say("haplotype-scores: WARNING %d of the %d site(s) --targets names produced "
                 "NO rows and are absent from this file: they are not in %s at that "
@@ -1125,13 +1220,16 @@ def build(results_dir, out_path, cap=0, strict=False,
     if (len(checked) >= MIN_SITES_FOR_MISKEY
             and len(matched) * MATCH_RATE_FLOOR < len(checked)):
         mis_keyed = True
-        say("haplotype-scores: WARNING the reported alignments match a written haplotype "
-            "on only %d of %d site(s). That is a mis-keyed comparison, not %d real "
-            "failures: the curated table's Aligned_protospacer+PAM is not the same "
-            "representation as the per-haplotype alignment (measured: it equals the ALT "
-            "column on 0 of 244 rows of the delivering run). Reporting "
-            "row_reported_alignment_found=unknown rather than a wall of false 'no'."
-            % (len(matched), len(checked), len(checked) - len(matched)))
+        say("haplotype-scores: WARNING the curated table's Variant column and this "
+            "source's Variant_info_genome reduce to the same records on only %d of %d "
+            "site(s). That LOOKS like a mis-keyed comparison rather than %d real "
+            "failures -- check the chromosome prefix, the coordinate base and the "
+            "REF/ALT order in %s. The sites that did NOT match are reported as "
+            "row_reported_alignment_found=unknown rather than a wall of 'no'; the ones "
+            "that DID match keep their answer. If the key is right and these really are "
+            "failures, that is what the per-site lines above say."
+            % (len(matched), len(checked), len(checked) - len(matched),
+               os.path.basename(targets) if targets else "the curated table"))
 
     n_rows = 0
     unreconciled = []
@@ -1190,7 +1288,12 @@ def build(results_dir, out_path, cap=0, strict=False,
             # The reconciliation speaks about the haplotypes THIS FILE SHOWS. If a cap
             # removed some, a "yes" earned by a hidden row would be a claim the reader
             # cannot check against anything in front of them.
-            found = "unknown" if mis_keyed else site.row_reported_alignment_found
+            # Degrade ONLY the sites that did not match. Blanking the matched ones too
+            # made "fully reconstructed" and "nobody could check this" read identically
+            # -- the collapse this file exists to prevent, applied to its own column.
+            found = site.row_reported_alignment_found
+            if mis_keyed and found == "no":
+                found = "unknown(key-looks-wrong)"
             # Only downgrade when the matching haplotype is actually out of sight. A cap
             # that hid other FRAMES of a shown haplotype hides nothing the reader needs.
             if found == "yes" and hidden_haplotypes:
