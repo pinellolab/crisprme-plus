@@ -422,6 +422,106 @@ def load_carrier_gate(result_dir, integrated_tsv, df):
     return df, gate
 
 
+# The phase-confirmation companion the SCAN already writes, merged in this layer.
+#
+# CONFIRMED means a real phased same-phase-set cis haplotype; PUTATIVE means at least one
+# carrier was unphased, cross-phase-set, or in a PS-absent single block. That is the
+# real-versus-inferred distinction somebody needs before they trust a haplotype enough to
+# order a cell line or design an amplicon against it -- and until now it never reached a
+# user: this file wrote "NA" into every Phase cell while the labels sat on disk beside it.
+#
+# WHY A JOIN AND NOT A COLUMN ON THE ROW. The per-block row is pasted three times into the
+# 72-column bestMerge, so a column added at the end of a block lands in the MIDDLE of the
+# merged row; and the scorers address the row's tail by negative index (cbulge_rows.py
+# t[-2], target[-3]). There is no position in that row that is both scorer-safe and
+# merge-safe. Joining here touches nothing upstream, so every byte the search wrote --
+# the best files, bestMerge, integrated_results, the sqlite db -- is unchanged.
+#
+# THE JOIN IS INVERTED ON PURPOSE. The companion is per-chromosome and can reach several
+# GB on a genome-wide run, while the rows that need a label are the few thousand this
+# report displays. So the SMALL side is indexed and the big side is streamed, keeping only
+# keys that were asked for. Memory is the size of the report, not of the run.
+_PHASE_GLOB = "*phase_confirmation.tsv"
+PHASE_NOT_COMPUTED = "not-computed-on-this-path"
+PHASE_NOT_RECORDED = "not-recorded"
+
+
+def load_phase_labels(folder, coarse):
+    """``{key: "CONFIRMED"|"PUTATIVE"}`` for the sites asked for, or ``None``.
+
+    CALL THIS ONCE PER REPORT, NEVER PER SITE. The companions total several GB on a
+    genome-wide run; calling it inside the per-site loop re-reads all of them for every
+    site, which is quadratic in the worst place possible.
+
+    ``coarse`` is a set of ``(chrom, position)`` pairs -- a cheap pre-filter that bounds
+    memory to the rows this report can display, taken from the integrated frame before any
+    clustering. Full identity keys are built only for rows that survive it. ``None`` means no
+    companion was found at all, which the caller must render as a DIFFERENT state from "a
+    companion exists and does not name this row": the first says the run never computed
+    phase (an older build, a reference-only search, a path where the dict-less branch did
+    not run), the second says it did and this row was not among its rows. Collapsing them
+    would be the familiar failure -- a not-measured cell wearing the clothes of a measured
+    one.
+    """
+    try:
+        paths = sorted(glob.glob(os.path.join(folder, _PHASE_GLOB)))
+    except OSError:
+        return None
+    if not paths:
+        return None
+    found = {}
+    for path in paths:
+        try:
+            with open(path) as fh:
+                for line in fh:
+                    if line.startswith("#"):
+                        continue
+                    f = line.rstrip("\n").split("\t")
+                    if len(f) < 7:
+                        continue
+                    if (f[0].strip(), f[1].strip()) not in coarse:
+                        continue        # cheap reject before building a key
+                    found[_phase_key(f[0], f[1], f[2], f[3], f[4], f[5])] = f[6].strip()
+        except Exception as exc:        # noqa: BLE001 - a companion must never abort a report
+            # ANY failure here, not just OSError: a malformed or truncated companion must
+            # cost its own labels and nothing else. Letting it propagate would destroy the
+            # entire observed-haplotypes bundle and every per-site modal, for a file that
+            # is additive by design.
+            sys.stderr.write(
+                f"generate-report: phase companion {os.path.basename(path)} unreadable "
+                f"({exc}); rows it would have labelled fall back to the stated absence\n")
+            continue
+    return found
+
+
+def _phase_for(labels, rec):
+    """The scan's label for a record, trying every axis that contributed to it.
+
+    ``labels is None`` means the run wrote no companion at all -- a different statement
+    from "a companion exists and does not name this row", and both differ from a real
+    label. Collapsing any pair of those would turn an absence into a claim.
+    """
+    if labels is None:
+        return PHASE_NOT_COMPUTED
+    for key in rec.get("_phase_keys", ()):
+        hit = labels.get(key)
+        if hit:
+            return hit
+    return PHASE_NOT_RECORDED
+
+
+def _phase_key(chrom, pos, direction, crrna, dna, snp):
+    """The companion's own identity key, normalised identically on both sides.
+
+    The variant set is put through ``_oh_norm_varset`` on BOTH sides rather than compared
+    as written: the same set can be ordered differently between the companion and the
+    integrated row, and comparing the raw strings would silently miss those rows -- a join
+    that looks like a finding instead of a bug.
+    """
+    return (str(chrom).strip(), str(pos).strip(), str(direction).strip(),
+            str(crrna).strip(), str(dna).strip(), _oh_norm_varset(snp))
+
+
 def _gate_panels(gate):
     """The panels the gate read, "hg38_HGDP1kGP (4,091 samples, 8,182 haplotypes)", each
     as HTML."""
@@ -5914,6 +6014,16 @@ _OH_CFD_BULGES = "Bulges_(highest_CFD)"
 _OH_CFD_BTYPE = "Bulge_type_(highest_CFD)"
 _OH_CFD_SCORE = "CFD_score_(highest_CFD)"
 _OH_CFD_ALNALT = "Aligned_protospacer+PAM_ALT_(highest_CFD)"
+_OH_CFD_ALNSP = "Aligned_spacer+PAM_(highest_CFD)"
+_OH_CB_ALNSP = "Aligned_spacer+PAM_(highest_CRISPR_BULGE)"
+# The CRISPR-Bulge axis's OWN coordinates. _OH_START/_OH_STRAND are the highest-CFD
+# ones and are what the site clustering and the emitted Site_start use -- left exactly
+# as they are. These are read ONLY to key the phase join, because the two axes are
+# independent projections and can place the same haplotype at different starts (about
+# 6% of rows on a real run). Keying a CRISPR-Bulge observation with the CFD coordinate
+# looks up the wrong companion row and reports a label the scan wrote as "not-recorded".
+_OH_CB_START = "Start_coordinate_(highest_CRISPR_BULGE)"
+_OH_CB_STRAND = "Strand_(highest_CRISPR_BULGE)"
 _OH_CB_ORIGIN = "REF/ALT_origin_(highest_CRISPR_BULGE)"
 _OH_CB_VARSET = "Variant_info_genome_(highest_CRISPR_BULGE)"
 _OH_CB_SAMPLES = "Variant_samples_(highest_CRISPR_BULGE)"
@@ -6138,6 +6248,9 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         "bulges": _oh_get(_rec, _OH_CFD_BULGES, "NA"),
                         "bulge_type": _oh_get(_rec, _OH_CFD_BTYPE, "NA"),
                         "aligned": _oh_get(_rec, _OH_CFD_ALNALT, "NA"),
+                        "aln_spacer": _oh_get(_rec, _OH_CFD_ALNSP, "NA"),
+                        "key_start": str(_oh_get(_rec, _OH_START, "")).strip(),
+                        "key_strand": str(_oh_get(_rec, _OH_STRAND, "NA")).strip(),
                         "cfd": _oh_get(_rec, _OH_CFD_SCORE, None),
                         "crispr_bulge": None,
                         "axis": "cfd",
@@ -6158,6 +6271,9 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         "bulges": _oh_get(_rec, _OH_CB_BULGES, "NA"),
                         "bulge_type": _oh_get(_rec, _OH_CB_BTYPE, "NA"),
                         "aligned": _oh_get(_rec, _OH_CB_ALNALT, "NA"),
+                        "aln_spacer": _oh_get(_rec, _OH_CB_ALNSP, "NA"),
+                        "key_start": str(_oh_get(_rec, _OH_CB_START, "")).strip(),
+                        "key_strand": str(_oh_get(_rec, _OH_CB_STRAND, "NA")).strip(),
                         "cfd": None,
                         "crispr_bulge": _oh_get(_rec, _OH_CB_SCORE, None),
                         "axis": "cb",
@@ -6217,6 +6333,26 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
         # companion row dicts for that SITE (so a report table row, keyed by its raw
         # (Chromosome, Start_coordinate_(highest_CFD)), can find every observed
         # haplotype at its site to populate the per-site modal).
+        # ONE read of the phase companions for the whole report. The coarse set is every
+        # (chromosome, start) the integrated frame names on any axis, so a row whose
+        # CRISPR-Bulge alignment sits at a different start than its CFD alignment is still
+        # matched -- those differ on about 6% of rows, and keying the pre-filter on one
+        # axis alone would drop exactly those.
+        _coarse = set()
+        for _c in ("Chromosome",):
+            if _c not in df.columns:
+                break
+        else:
+            _chroms = df["Chromosome"].astype(str).tolist()
+            for _startcol in ("Start_coordinate_(highest_CFD)",
+                              "Start_coordinate_(fewest_mm+b)",
+                              "Start_coordinate_(highest_CRISPR_BULGE)"):
+                if _startcol in df.columns:
+                    for _ch, _st in zip(_chroms, df[_startcol].astype(str).tolist()):
+                        _coarse.add((_ch.strip(), _st.strip()))
+        _phase = load_phase_labels(
+            result_dir or os.path.dirname(os.path.abspath(integrated_tsv)), _coarse)
+
         site_map = {}
         for cluster in sites:
             site_start = min(o["start"] for o in cluster)
@@ -6235,6 +6371,18 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         "_has_cfd_axis": False,
                     }
                     by_varset[vs] = rec
+                # One phase key PER CONTRIBUTING OBSERVATION, not one per record. The
+                # three alignment blocks are independent projections: a haplotype named on
+                # the CRISPR-Bulge axis can sit at a different start, strand and alignment
+                # than the same haplotype on the CFD axis. Keying the record by whichever
+                # observation happened to arrive first would look up the wrong row and
+                # render a label the scan DID write as "not-recorded" -- a false statement
+                # about the scan's own output.
+                rec.setdefault("_phase_keys", []).append(_phase_key(
+                    obs["chrom"],
+                    obs.get("key_start") or obs.get("start", ""),
+                    obs.get("key_strand") or obs["strand"],
+                    obs.get("aln_spacer", "NA"), obs.get("aligned", "NA"), vs))
                 # prefer a non-None CFD / CRISPR-Bulge from whichever obs carries it
                 if rec["cfd"] is None and _score_val(obs.get("cfd")) is not None:
                     rec["cfd"] = obs["cfd"]
@@ -6250,6 +6398,8 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                     rec["bulges"] = obs["bulges"]
                     rec["bulge_type"] = obs["bulge_type"]
                     rec["aligned"] = obs["aligned"]
+                    rec["aln_spacer"] = obs.get("aln_spacer", "NA")
+                    rec["row_start"] = obs.get("start", "")
                     rec["_has_cfd_axis"] = True
                 elif obs["axis"] == "cb" and not rec["_has_cfd_axis"]:
                     # fill only what is still unset (so a later CFD obs can override).
@@ -6270,6 +6420,8 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         rec["bulge_type"] = obs["bulge_type"]
                     if str(rec["aligned"]).lower() in _OH_NA:
                         rec["aligned"] = obs["aligned"]
+                        rec.setdefault("aln_spacer", obs.get("aln_spacer", "NA"))
+                        rec.setdefault("row_start", obs.get("start", ""))
 
             if len(by_varset) < 2:
                 continue  # need >=2 DISTINCT variant haplotypes to be interesting
@@ -6300,7 +6452,14 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         "NA" if _DROP_MAF
                         else (rec["maf"] if str(rec["maf"]).lower() not in _OH_NA else "NA")
                     ),
-                    "Phase": "NA",  # integrated_results carries no phase column
+                    # The scan's own CONFIRMED/PUTATIVE label, joined from the
+                    # companion it already writes. Three distinct states, never
+                    # collapsed: the real label; "not-recorded" when a companion exists
+                    # but does not name this row; and "not-computed-on-this-path" when
+                    # the run wrote none at all (an older build, a reference-only search,
+                    # a path where the dict-less branch never ran). A run that never
+                    # computed phase must not read as PUTATIVE, and must not read blank.
+                    "Phase": _phase_for(_phase, rec),
                     "N_carriers": _oh_count_carriers(rec["samples"]),
                     "Carriers": (
                         rec["samples"]
