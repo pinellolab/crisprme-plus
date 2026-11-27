@@ -766,5 +766,87 @@ class TestAnUnreadableSourceIsNotCalledEmpty(HaplotypeScoresMixin, unittest.Test
         self.assertNotIn("header-only", msg)
 
 
+class TestOneAxisRefusingIsNotTheRowRefusing(HaplotypeScoresMixin, unittest.TestCase):
+    """Introduced by the fix for the CFD sentinel, caught on the next review pass.
+
+    Marking the row out-of-domain whenever EITHER axis held the -1 sentinel made a
+    haplotype with a real CRISPR-Bulge score of 0.004 -- twenty times the operating
+    point -- count as never scored. The same row was above_threshold=yes AND part of
+    n_not_scored, and a reader keeping only score_status=scored discarded the one row
+    above the threshold.
+    """
+
+    def test_a_refused_cfd_beside_a_real_cb_is_still_scored(self):
+        rows = [_row("chr1", 100, HAP_ONE, -1.0, 0.004, "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        scored = [r for r in self._parse(text) if r["crispr_bulge"] != "NA"]
+        self.assertEqual(len(scored), 1)
+        self.assertEqual(scored[0]["score_status"], "scored")
+        self.assertEqual(scored[0]["above_threshold"], "yes")
+
+    def test_a_row_is_never_both_above_threshold_and_never_scored(self):
+        rows = [_row("chr1", 100, HAP_ONE, -1.0, 0.004, "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        for r in self._parse(text):
+            if int(r["n_above_threshold"]) > 0:
+                self.assertEqual(r["n_not_scored"], "0",
+                                 "the one haplotype is counted as both")
+
+    def test_nothing_surviving_is_still_out_of_domain(self):
+        rows = [_row("chr1", 100, HAP_ONE, -1.0, -1.0, "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        self.assertTrue(all("model-refused" in r["score_status"]
+                            for r in self._parse(text)))
+
+
+class TestAnUnreadableCandidateDoesNotKillTheFallback(HaplotypeScoresMixin,
+                                                      unittest.TestCase):
+    """Also introduced by the previous fix. Making has_data_row raise aborted
+    probe_source before the alt table was looked at, so a corrupt raw sidecar beside a
+    complete alt table refused a run that could be answered."""
+
+    def _write(self, name, rows):
+        path = os.path.join(self.dir, name)
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("\t".join(_header()) + "\n")
+            for r in rows:
+                fh.write("\t".join(r) + "\n")
+        return path
+
+    def test_a_corrupt_raw_falls_through_to_a_good_alt_table(self):
+        with io.open(os.path.join(self.dir, "x_observed_haplotypes_raw.zip"), "wb") as fh:
+            fh.write(b"this is not a zip file")
+        self._write("x_all_results_with_alternative_alignments.tsv",
+                    [_row("chr1", 100, HAP_ONE, 0.4, 0.9, "chr1_100_A_C")])
+        path, kind = hs.probe_source(self.dir)
+        self.assertEqual(kind, "all_results_with_alternative_alignments", path)
+
+    def test_it_still_refuses_when_nothing_is_usable(self):
+        with io.open(os.path.join(self.dir, "x_observed_haplotypes_raw.zip"), "wb") as fh:
+            fh.write(b"this is not a zip file")
+        with self.assertRaises(hs.HaplotypeScoreError) as cm:
+            hs.probe_source(self.dir)
+        self.assertIn("cannot be read", str(cm.exception))
+
+
+class TestHiddenCountsTheSameHaplotypeTheCountersDo(HaplotypeScoresMixin,
+                                                    unittest.TestCase):
+    """``_hap`` tested ``variant_set`` for truthiness, but it is written as
+    ``obs.variants or "-"`` and so is never empty -- the fallback to the aligned
+    sequence was unreachable. Two variantless haplotypes with DIFFERENT sequences
+    collapsed to one, so a cap hid a whole haplotype and reported 0 hidden."""
+
+    def test_two_variantless_haplotypes_are_two(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.4, 0.9, ""),
+                _row("chr1", 100, HAP_TWO, 0.3, 0.8, "")]
+        _res, text, msgs = self._run(rows, cap=1)
+        body = self._parse(text)
+        self.assertEqual(body[0]["n_haplotypes_at_site"], "2")
+        note = [m for m in msgs if "not written" in m]
+        self.assertTrue(note, msgs)
+        self.assertNotIn("0 haplotype(s)", note[0],
+                         "a whole haplotype was hidden and the message said 0")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -345,11 +345,28 @@ def probe_source(results_dir):
             raw.append(full)
         elif ALT_TABLE_RE.search(name):
             alt.append(full)
+    # An unreadable candidate costs ITS OWN turn, not the fallback's. Raising here aborted
+    # probe_source before the alt table was ever looked at, so a corrupt raw sidecar beside
+    # a complete alt table refused the whole run.
+    unreadable = []
     for paths, kind in ((raw, "observed_haplotypes_raw"),
                         (alt, "all_results_with_alternative_alignments")):
         for path in paths:
-            if has_data_row(path):
-                return path, kind
+            try:
+                if has_data_row(path):
+                    return path, kind
+            except HaplotypeScoreError as exc:
+                unreadable.append(str(exc))
+    if unreadable and not (raw or alt):
+        raise HaplotypeScoreError("; ".join(unreadable))
+    if unreadable:
+        raise HaplotypeScoreError(
+            "no haplotype source in %s could be used. %s%s Refusing to write: an "
+            "unreadable file is a different problem from an empty run, and an empty "
+            "companion would be read as the second."
+            % (results_dir, " ".join(unreadable),
+               (" The remaining candidates are header-only." if len(unreadable) < len(raw) + len(alt)
+                else "")))
     if raw or alt:
         raise HaplotypeScoreError(
             "every haplotype source in %s is header-only (%s). A source with no data "
@@ -402,8 +419,12 @@ def open_table(path):
         if not names:
             zf.close()
             raise HaplotypeScoreError("%s holds no .tsv member" % path)
-        handle = zf.open(names[0])
-        wrapper = io.TextIOWrapper(handle, encoding="utf-8", errors="replace")
+        try:
+            handle = zf.open(names[0])
+            wrapper = io.TextIOWrapper(handle, encoding="utf-8", errors="replace")
+        except Exception:
+            zf.close()          # a truncated member or bad CRC header leaked it otherwise
+            raise
         # Closing the wrapper must close the archive too: probe_source now opens one per
         # candidate, so a leaked ZipFile per call is a real descriptor leak.
         _close = wrapper.close
@@ -585,12 +606,17 @@ def classify(obs, budget, axis_named):
     # the two blocks with no CB column a refused CFD left cfd=None, cb=None and typed the
     # row "needs-realignment", which says the frame could not hold it; the truth is the
     # scorer reached it and declined. Same conflation, on the commoner axis.
+    # A REFUSAL ON ONE AXIS IS NOT A REFUSAL OF THE ROW. Marking the row out-of-domain
+    # whenever either axis held the sentinel made a haplotype with a real CRISPR-Bulge
+    # score of 0.004 -- twenty times the operating point -- count as NEVER SCORED, so the
+    # same row was both above_threshold=yes and part of n_not_scored, and a reader keeping
+    # only score_status=scored discarded the one row above the threshold. Out-of-domain is
+    # for a row where nothing survived.
+    if cfd is not None or cb is not None:
+        return cfd, cb, ST_SCORED
     if cb_refused or cfd_refused:
-        # reached and declined: whichever number DID survive is still written beside it
-        return cfd, cb, ST_OUT_OF_DOMAIN % "model-refused(n/length/multi-gap)"
-    if cfd is None and cb is None:
-        return None, None, ST_NEEDS_REALIGN % obs.site
-    return cfd, cb, ST_SCORED
+        return None, None, ST_OUT_OF_DOMAIN % "model-refused(n/length/multi-gap)"
+    return None, None, ST_NEEDS_REALIGN % obs.site
 
 
 # --------------------------------------------------------------------------- #
@@ -713,11 +739,14 @@ def file_header(source_path, source_kind, budget, threshold, recall, cap, strict
         "#   incompatibly, and yes(among-all-haplotypes-not-all-shown) when a cap hid the",
         "#   matching haplotype.",
         "#",
-        "# RANK IS WITHIN AN AXIS. rank_score_axis says which score rank_in_site_by_score",
-        "#   used. CRISPR-Bulge-bearing rows rank first, then CFD-only, then unscored --",
-        "#   the two scales are never compared (CFD runs 0..1; the CB operating point is",
-        "#   1.9e-4), so a cap can never discard a CRISPR-Bulge row in favour of a",
-        "#   larger-looking CFD one.",
+        "# RANK IS ONE ORDERING, NOT ONE PER AXIS. rank_in_site_by_score numbers the",
+        "#   site's rows 1..n in the order a cap takes them: CRISPR-Bulge-bearing rows",
+        "#   first (by CRISPR-Bulge), then CFD-only (by CFD), then unscored. So rank 1 is",
+        "#   the site's top CRISPR-Bulge row where it has one, and the top CFD row ranks",
+        "#   below it -- NOT also 1. rank_score_axis says which score fixed each row's",
+        "#   place. The two scales are never compared (CFD runs 0..1; the CB operating",
+        "#   point is 1.9e-4), which is why a cap can no longer discard a CRISPR-Bulge",
+        "#   row in favour of a larger-looking CFD one.",
         "#",
         "# NEVER A BLANK. score_status is always set. A never-scored cell and the",
         "#   CRISPR-Bulge out-of-domain sentinel both used to render 'NA', so filtering",
@@ -1107,11 +1136,17 @@ def build(results_dir, out_path, cap=0, strict=False,
             # counting dropped ROWS reported "2 haplotype(s) not written" for a site whose
             # own rows said n_haplotypes_at_site=1.
             def _hap(r):
-                return r["variant_set"] or r["aligned_protospacer_pam"] or "-"
+                """The SAME identity Site.add counts on (``obs.variants or
+                obs.aligned_alt or "-"``). ``variant_set`` is written as
+                ``obs.variants or "-"``, so testing it for truthiness never fell through
+                to the sequence -- two variantless haplotypes with different sequences
+                collapsed to one and the cap reported 0 hidden while hiding a whole
+                haplotype."""
+                vs = r["variant_set"]
+                return (vs if vs != "-" else "") or r["aligned_protospacer_pam"] or "-"
             hidden_haplotypes = len(set(_hap(r) for r in ranked)
                                     - set(_hap(r) for r in kept))
             hidden_rows = len(ranked) - len(kept)
-            hidden = hidden_haplotypes
             # The reconciliation speaks about the haplotypes THIS FILE SHOWS. If a cap
             # removed some, a "yes" earned by a hidden row would be a claim the reader
             # cannot check against anything in front of them.
