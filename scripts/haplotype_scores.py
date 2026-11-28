@@ -78,7 +78,7 @@ ST_SCORED = "scored"
 # and-declined axis identically to one that has no column at all. The status says both.
 ST_SCORED_REFUSED = "scored(%s-model-refused)"
 ST_OUT_OF_DOMAIN = "out-of-domain:%s"          # the model's own refusal rule
-ST_NOT_SCORED_PAM = "not-scored:cfd-not-defined-for-this-pam(%s)"
+ST_NOT_SCORED_PAM = "not-scored:scores-not-defined-for-this-pam(%s)"
 ST_NEEDS_REALIGN = "needs-realignment:%s"       # site_key; Tier 2 would resolve it
 
 FRAME_CANDIDATE = "candidate_frame"
@@ -235,11 +235,12 @@ VERDICTS = (
      "value is never a surprise; see test_the_composite_status_is_unreachable_today"),
     ("score_status", "out-of-domain:model-refused(n/length/multi-gap)",
      "reached, declined, and NO axis produced a number"),
-    ("score_status", "not-scored:cfd-not-defined-for-this-pam(<pam>)",
-     "CFD was NEVER COMPUTED for this run: the pipeline only scores a 20 nt guide with "
-     "a 3 nt 3-prime PAM, and 11 of the 17 shipped PAM files are not that (every "
-     "Cas12a and SaCas9 among them). The same -1 the model writes to decline a target "
-     "also means this, and reporting it as a refusal asserts a judgement nothing made"),
+    ("score_status", "not-scored:scores-not-defined-for-this-pam(<pam>)",
+     "NO SCORE WAS COMPUTED for this run, on either axis: the pipeline scores only a "
+     "20 nt guide with a 3 nt 3-prime PAM, and 11 of the 17 shipped PAM files are not "
+     "that (every Cas12a and SaCas9 among them). The same -1 a model writes to decline "
+     "a target also means this, and calling it a refusal asserts a judgement nothing "
+     "made"),
     ("score_status", "needs-realignment:<site>",
      "the fixed alignment frame cannot hold it; no number, and none invented"),
 
@@ -252,6 +253,9 @@ VERDICTS = (
     ("above_threshold", "unknown(model-refused)",
      "measured in the sense that the model reached it, and DECLINED it. A different "
      "fact from never measured, and on a real run the commoner one"),
+    ("above_threshold", "unknown(not-computed-for-this-pam)",
+     "no score was computed for this RUN: the pipeline scores only a 20 nt guide with a "
+     "3 nt 3-prime PAM, and nulls both axes otherwise. Neither measured nor declined"),
 
     ("row_reported_alignment_found", "yes",
      "the site's own reported haplotype is among those written"),
@@ -606,6 +610,14 @@ def open_table(path):
 # the three alignment blocks
 
 
+# QUOTE_NONE EVERYWHERE, and that is the point. A TSV is not a CSV: a results table has
+# no quoting convention, a double quote in a cell is a double quote, and csv's default
+# dialect swallows it -- and where a cell opens a quote that closes on a later line, it
+# JOINS those lines into one row, silently dropping every row between. One stray quote
+# in a sample list or an alignment therefore truncated the companion with no error and
+# no short-row to trip the truncation guard. PostProcess/extract_flanks.py:310 already
+# documents this exact failure for these exact tables; this file simply had not followed
+# it.
 BLOCKS = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
 # The axis that defines a site's identity. The curated tables publish this block's
 # coordinate as "Position", so a --targets list and these rows agree by construction.
@@ -673,7 +685,7 @@ def harvest_rows(stream, spacer_hint=None):
     cross-axis score, which is exactly why most rows of the delivered companion are NA on
     one of them. Promising both from this source would be inventing a number.
     """
-    reader = csv.reader(stream, delimiter="\t")
+    reader = csv.reader(stream, delimiter="\t", quoting=csv.QUOTE_NONE)
     try:
         header = next(reader)
     except StopIteration:
@@ -694,8 +706,11 @@ def harvest_rows(stream, spacer_hint=None):
 
     width = len(header)
     for row in reader:
-        if not row or len(row) < 3:
-            continue
+        if not row or (len(row) == 1 and not row[0].strip()):
+            continue            # a genuinely blank line, the only one we skip
+        # Anything else shorter than the header is a CUT, and the refusal below says so.
+        # Skipping rows of fewer than three fields meant a file cut inside its first
+        # cells was accepted silently and the companion written as if complete.
         if len(row) < width:
             # A SOURCE CUT MID-ROW IS NOT A ROW WITH NO SCORES. Short rows used to fall
             # through cell()'s bounds check and emit a complete-looking NA/unknown row,
@@ -735,7 +750,21 @@ def harvest_rows(stream, spacer_hint=None):
         # whole loci from the file. This pipeline writes NA for "not set"; it is an
         # absence, and an absence cannot anchor anything.
         if not _is_coordinate(anchor_start):
-            anchor_start, anchor_strand = "", ''
+            # ONE ROW IS ONE SITE, even when the preferred anchor block is unset.
+            # Falling back to each block's OWN start re-split the row into up to three
+            # sites and re-opened the --targets false clean the anchor was introduced to
+            # close: the coarse filter compares the curated Position against the block's
+            # start, so the CRISPR-Bulge observation was dropped and its score with it.
+            # The next block that HAS a coordinate anchors the whole row instead.
+            anchor_start, anchor_strand = "", ""
+            for _b in BLOCKS:
+                _c = blocks.get(_b)
+                if not _c:
+                    continue
+                _s = cell(row, _c, "start")
+                if _is_coordinate(_s):
+                    anchor_start, anchor_strand = _s, cell(row, _c, "strand")
+                    break
         for block, cols in blocks.items():
             start = cell(row, cols, "start")
             if not _is_coordinate(start):
@@ -762,14 +791,23 @@ def harvest_rows(stream, spacer_hint=None):
 # scoring status
 
 
-def cfd_is_defined(budget):
-    """Whether this run's shape lets the pipeline compute CFD at all.
+def scores_are_defined(budget):
+    """Whether this run's shape lets the pipeline compute ANY score -- the ``do_scores``
+    flag, reconstructed from the run's own PAM.
 
-    ``new_simple_analysis.py`` sets ``do_scores = False`` when the PAM is not 3 nt, the
-    guide is not 20 nt, or the PAM is 5-prime, and then writes the SAME -1 it uses for
-    "the model declined this target". Eleven of the seventeen shipped PAM files are in
-    that set, so on a Cas12a or SaCas9 run every row's -1 means "never computed" and
-    reporting it as a refusal asserts a judgement nothing made.
+    BOTH AXES, not just CFD. ``new_simple_analysis.py`` sets ``do_scores = False`` when
+    the PAM is not 3 nt, the guide is not 20 nt, or the PAM is 5-prime, and passes the
+    same flag to both writers: ``preprocess_CFD_score`` writes -1.000, and
+    ``cbulge_rows.py:103`` returns -1 for every row BEFORE the model is loaded --
+    "every row then gets -1", in its own words. Eleven of the seventeen shipped PAM
+    files are in that set.
+
+    This was first written as cfd_is_defined and applied only where a CFD sentinel was
+    seen. The CRISPR-Bulge block carries NO CFD column, so the check could never fire on
+    the one frame holding the CRISPR-Bulge axis: on every Cas12a and SaCas9 run those
+    rows still said the model reached the target and declined it -- naming three
+    specific reasons (N / length / multi-gap) nothing had evaluated -- while the two
+    frames beside them correctly said it was never computed, from the identical -1.
     """
     pam = str(budget.get("pam") or "").strip()
     return len(pam) == 3 if pam else True      # unknown PAM: do not invent a verdict
@@ -826,11 +864,12 @@ def classify(obs, budget, axis_named):
         if declined:
             return cfd, cb, ST_SCORED_REFUSED % "+".join(declined), cb_refused
         return cfd, cb, ST_SCORED, cb_refused
-    if cfd_refused and not cb_refused and not cfd_is_defined(budget):
-        # The -1 is the "not calculated" one, not the "declined" one.
+    if (cfd_refused or cb_refused) and not scores_are_defined(budget):
+        # The -1 is the "not calculated" one, on EITHER axis, so this is checked before
+        # the refusal branch below and without asking which axis carried it.
         return (None, None,
                 ST_NOT_SCORED_PAM % (str(budget.get("pam") or "?").strip() or "?"),
-                cb_refused)
+                False)          # NOT a refusal: nothing reached this row to refuse it
     if cb_refused or cfd_refused:
         return (None, None,
                 ST_OUT_OF_DOMAIN % "model-refused(n/length/multi-gap)", cb_refused)
@@ -1111,7 +1150,7 @@ def read_reported(targets_path, say=None):
     out = {}
     ambiguous = set()
     with io.open(targets_path, "r", encoding="utf-8", errors="replace") as fh:
-        reader = csv.reader(fh, delimiter="\t")
+        reader = csv.reader(fh, delimiter="\t", quoting=csv.QUOTE_NONE)
         try:
             header = next(reader)
         except StopIteration:
@@ -1135,8 +1174,13 @@ def read_reported(targets_path, say=None):
                 "reporting at the same locus cannot be told apart; any such locus is "
                 "left 'unknown(ambiguous-in-targets)' rather than guessed"
                 % (os.path.basename(targets_path), "/".join(_TARGET_SPACER_COLS)))
+        short = 0
         for row in reader:
             if max(c_i, p_i, v_i) >= len(row):
+                # COUNTED, NOT DROPPED. A short curated row silently shrank the
+                # shortlist the run then reported on, so the per-site accounting was
+                # complete about a list the user did not hand over.
+                short += 1
                 continue
             # The column being ABSENT and the cell being unreadable are different
             # facts, and folding them into one value made the legend true of only one.
@@ -1153,6 +1197,12 @@ def read_reported(targets_path, say=None):
                 # row happened to be later in the file, so neither is used.
                 ambiguous.add(key)
             out[key] = rep
+    if short:
+        say("haplotype-scores: WARNING %d row(s) of %s are too short to read (they do "
+            "not carry Chromosome, Position and Variant) and are NOT among the %d "
+            "site(s) reported on below. The shortlist this run answers about is "
+            "smaller than the one you supplied."
+            % (short, os.path.basename(targets_path), len(out)))
     for key in ambiguous:
         out[key] = _AMBIGUOUS
         say("haplotype-scores: WARNING %s:%s%s is named more than once in --targets with "
@@ -1285,7 +1335,12 @@ def build(results_dir, out_path, cap=0, strict=False,
     # guide its row is about; if the source carries more than one there, every answer
     # but "unknown" is a claim about a guide the table never described.
     guides_at = collections.defaultdict(set)
-    targets_name_guides = any(k.spacer for k in (reported or {}))
+    mismatched_coarse_all = set()
+    # PER LOCUS, NOT PER TABLE. A run-wide any() meant ONE curated row with a blank
+    # guide cell, in a table that names guides everywhere else, switched the
+    # guide-ambiguity guard off for the WHOLE run -- so the file answered yes/no about
+    # a guide the table never described, and --strict failed on it.
+    guided_coarse = set(coarse_key(k) for k in (reported or {}) if k.spacer)
     if wanted is not None:
         say("haplotype-scores: restricted to the %d site(s) --targets names" % len(wanted))
 
@@ -1293,6 +1348,15 @@ def build(results_dir, out_path, cap=0, strict=False,
         for obs in harvest_rows(stream):
             is_ref = bool(obs.origin) and obs.origin.lower() == "ref"
             obs_key = obs_target_key(reported, obs) if wanted is not None else None
+            if (wanted is not None and coarse_key(obs_key) in wanted_coarse
+                    and obs_key not in wanted):
+                # RECORDED FOR REF ROWS TOO. This lived inside the `site is None`
+                # branch, which a reference observation never reaches (they are
+                # filtered out just below), so a REF-only locus whose curated guide is
+                # spelled differently was reported as "not in <source> at that
+                # coordinate" -- false; it is in the source, under another spelling.
+                guide_mismatch.add(target_key(obs.chrom, obs.anchor_start, obs.spacer))
+                mismatched_coarse_all.add(coarse_key(obs_key))
             if wanted is not None and is_ref and coarse_key(obs_key) in wanted_coarse:
                 # RECORDED BEFORE THE REF FILTER. A curated table is mostly REF-origin
                 # (115 of 187 sites on the delivering run), and those sites are PRESENT in
@@ -1353,7 +1417,10 @@ def build(results_dir, out_path, cap=0, strict=False,
             # exists to stop. Three values, like every other absence here.
             above = ("yes" if (cb is not None and cb >= threshold)
                      else ("no" if cb is not None
-                           else ("unknown(model-refused)" if cb_refused else "unknown")))
+                           else ("unknown(model-refused)" if cb_refused
+                                 else ("unknown(not-computed-for-this-pam)"
+                                       if status.startswith("not-scored:") else
+                                       "unknown"))))
             row = {
                 "site_key": obs.site, "chrom": obs.chrom, "site_start": obs.start,
                 "strand": obs.strand, "spacer": obs.spacer,
@@ -1417,7 +1484,11 @@ def build(results_dir, out_path, cap=0, strict=False,
                          for m in sorted(guide_mismatch)[:3])))
 
     if wanted is not None:
-        ref_all = (wanted - seen_anchors) & ref_only_anchors
+        ref_coarse = set(coarse_key(k) for k in ref_only_anchors)
+        ref_all = set(k for k in (wanted - seen_anchors)
+                      if k in ref_only_anchors
+                      or (coarse_key(k) in ref_coarse
+                          and coarse_key(k) in mismatched_coarse_all))
         # A curated row that says ALT while the source holds only REF rows is NOT "no
         # variant haplotype here". The user's own table says there is one; this source
         # does not have it. Calling that a clean is the worst answer available.
@@ -1490,7 +1561,21 @@ def build(results_dir, out_path, cap=0, strict=False,
         #       rows ARE in the file; calling the locus absent contradicts them.
         # Only (b) is suppressed, and it is identified by guide_mismatch -- which is
         # populated exactly when a locus was reached but no curated guide matched it.
+        # SUPPRESS ONLY WHERE NO CURATED GUIDE MATCHED ANYTHING AT ALL.
+        #
+        # The previous rule dropped every curated key sharing a coordinate with a
+        # mismatch, so at a locus where guide A matched exactly and guide B genuinely
+        # produced nothing, B was silently removed from the gap list -- the very case
+        # the rule's own comment promised was still reported. The two situations differ
+        # by whether ANY curated key at that coordinate was matched:
+        #   matched there  -> the table does describe this locus, so a curated guide
+        #                     that produced nothing really is a gap. Say it.
+        #   nothing matched -> no curated key resolved; the rows are in the file under a
+        #                     spelling the table does not use. That is the mismatch
+        #                     warning's business, not a gap.
         mismatched_coarse = set(coarse_key(k) for k in guide_mismatch)
+        matched_coarse = set(coarse_key(k) for k in seen_anchors if k in reported)
+        mismatched_coarse -= matched_coarse
         missing = sorted(k for k in (wanted - seen_anchors - ref_all)
                          if coarse_key(k) not in mismatched_coarse)
         if missing:
@@ -1537,8 +1622,14 @@ def build(results_dir, out_path, cap=0, strict=False,
     with io.open(out_path, "w", encoding="utf-8", newline="") as out:
         out.write(file_header(source_path, source_kind, budget, threshold, recall,
                               cap, strict))
+        # THE WRITER MATCHES THE READER. With the default dialect a cell holding a
+        # double quote came back out as ""a""b,c"" -- a file written as CSV while every
+        # reader in this project, including this file's own, parses it as a TSV. A TSV
+        # has no quoting convention: quotechar=None says so, and no cell can hold a tab
+        # because the source is tab-separated.
         writer = csv.DictWriter(out, fieldnames=COLUMNS, delimiter="\t",
-                                lineterminator="\n", extrasaction="ignore")
+                                lineterminator="\n", extrasaction="ignore",
+                                quoting=csv.QUOTE_NONE, quotechar=None)
         writer.writeheader()
         for site in sites.values():
             def _rank_key(r):
@@ -1598,8 +1689,12 @@ def build(results_dir, out_path, cap=0, strict=False,
             # guides at one coordinate, lookup_reported hands the SAME curated row to
             # all of them and each answers yes/no -- an answer about a guide the table
             # never described. One of them is necessarily wrong, and nothing said so.
-            if (found in ("yes", "no") and not targets_name_guides
-                    and len(guides_at.get((site.chrom, site.anchor), ())) > 1):
+            # n/a IS ALSO AN ANSWER. It asserts "the curated table says this site
+            # reported a REFERENCE haplotype" -- about a guide the table may never have
+            # named -- so it needs the same guard as yes/no.
+            _coarse = (site.chrom, site.anchor)
+            if (found in ("yes", "no", "n/a") and _coarse not in guided_coarse
+                    and len(guides_at.get(_coarse, ())) > 1):
                 found = "unknown(guide-ambiguous-in-targets)"
             if mis_keyed and found == "no":
                 found = "unknown(key-looks-wrong)"

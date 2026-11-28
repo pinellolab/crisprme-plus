@@ -321,7 +321,11 @@ class HaplotypeScoresFixture(HaplotypeScoresMixin, unittest.TestCase):
         for needle in ("score_source=", "budget=6mm/1DNA/1RNA/8total",
                        "[5.8e-06, 3.1e-03]", "candidate_frame", "COUNT BEFORE CAP",
                        "population-level fast mode", "targets-scoring"):
-            self.assertIn(needle, text, "the header must carry %r" % needle)
+            comments = "\n".join(l for l in text.splitlines() if l.startswith("#"))
+            self.assertIn(needle, comments,
+                          "the HEADER must carry %r -- asserted against the comment "
+                          "block only, because searching the whole file let a data "
+                          "row satisfy a claim about the header" % needle)
 
     def test_carrier_identities_can_be_withheld(self):
         """Withheld, and SAID to be withheld.
@@ -1614,17 +1618,23 @@ class TestNeverComputedIsNotDeclined(HaplotypeScoresMixin, unittest.TestCase):
             fh.write(PARAMS.replace("Pam\tNRR", "Pam\t%s" % pam))
 
     def test_a_four_nt_pam_says_not_computed_not_declined(self):
+        """A do_scores=False run nulls BOTH axes, so every frame says not-computed --
+        including the CRISPR-Bulge one, which has no CFD column and so could never
+        reach the first version of this check."""
         self._params("TTTV")
-        rows = [_row("chr1", 100, HAP_ONE, -1.0, "NA", "chr1_100_A_C")]
+        rows = [_row("chr1", 100, HAP_ONE, -1.0, -1.0, "chr1_100_A_C")]
         _res, text, _msgs = self._run(rows)
-        statuses = set(r["score_status"] for r in self._parse(text))
-        self.assertTrue(any("cfd-not-defined-for-this-pam" in st for st in statuses),
-                        statuses)
+        body = self._parse(text)
+        statuses = set(r["score_status"] for r in body)
+        self.assertTrue(all("scores-not-defined-for-this-pam" in st
+                            for st in statuses), statuses)
         self.assertFalse([st for st in statuses if "model-refused" in st], statuses)
+        self.assertEqual(set(r["above_threshold"] for r in body),
+                         {"unknown(not-computed-for-this-pam)"})
 
     def test_the_pam_is_named_so_the_reader_can_check(self):
         self._params("TTTV")
-        rows = [_row("chr1", 100, HAP_ONE, -1.0, "NA", "chr1_100_A_C")]
+        rows = [_row("chr1", 100, HAP_ONE, -1.0, -1.0, "chr1_100_A_C")]
         _res, text, _msgs = self._run(rows)
         self.assertIn("TTTV", [r["score_status"] for r in self._parse(text)][0])
 
@@ -1635,13 +1645,201 @@ class TestNeverComputedIsNotDeclined(HaplotypeScoresMixin, unittest.TestCase):
         self.assertTrue(any("model-refused" in r["score_status"]
                             for r in self._parse(text)))
 
-    def test_a_crispr_bulge_refusal_is_unaffected_by_the_pam(self):
-        """The do_scores gate is CFD-specific; CRISPR-Bulge has its own domain rule."""
+    def test_the_crispr_bulge_frame_is_covered_too(self):
+        """This test previously asserted the OPPOSITE, with the docstring "the
+        do_scores gate is CFD-specific; CRISPR-Bulge has its own domain rule".
+
+        That is contradicted by the source: PostProcess/cbulge_rows.py:103 is
+        `if not do_scores: ... return` -- every row gets -1 BEFORE the model is loaded,
+        "every row then gets -1" in its own words. I wrote that docstring from an
+        assumption instead of reading the writer, and it pinned the defect as the
+        contract on every Cas12a and SaCas9 run. Its fixture (cfd=0.5 under TTTV) was
+        also a shape such a run cannot produce, since do_scores=False forces CFD to -1
+        on every row.
+        """
         self._params("TTTV")
+        rows = [_row("chr1", 100, HAP_ONE, -1.0, -1.0, "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        cb = [r for r in self._parse(text) if "CRISPR_BULGE" in r["haplotype_id"]][0]
+        self.assertNotIn("model-refused", cb["score_status"],
+                         "it names refusal reasons nothing evaluated")
+        self.assertIn("scores-not-defined-for-this-pam", cb["score_status"])
+
+    def test_a_real_refusal_on_a_three_nt_pam_is_still_a_refusal(self):
+        """The contrast. With a scorable shape, -1 really is the model declining."""
+        self._params("NRR")
         rows = [_row("chr1", 100, HAP_ONE, 0.5, -1.0, "chr1_100_A_C")]
         _res, text, _msgs = self._run(rows)
         cb = [r for r in self._parse(text) if "CRISPR_BULGE" in r["haplotype_id"]][0]
         self.assertIn("model-refused", cb["score_status"])
+        self.assertEqual(cb["above_threshold"], "unknown(model-refused)")
+
+    def test_every_frame_of_such_a_run_agrees_with_every_other(self):
+        """The row group used to contradict itself: two frames said not-computed and
+        the third said declined, from the identical -1 and the identical cause."""
+        self._params("TTTV")
+        rows = [_row("chr1", 100, HAP_ONE, -1.0, -1.0, "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        self.assertEqual(len(set(r["score_status"] for r in self._parse(text))), 1)
+
+
+class TestAStrayQuoteCannotSwallowTheFile(HaplotypeScoresMixin, unittest.TestCase):
+    """A TSV is not a CSV. csv's default dialect treats a double quote as an opening
+    quote and, where it closes on a later line, JOINS those lines into one row --
+    silently dropping every row between, with no short row to trip the truncation
+    guard. PostProcess/extract_flanks.py:310 documents this exact failure for these
+    exact tables; this file had not followed it."""
+
+    def test_rows_after_a_quoted_cell_are_still_read(self):
+        """The quote must OPEN a cell. Mid-cell csv treats it literally; at the start
+        of a field it opens a quoted region that closes on a later line, and every row
+        between is joined into one -- measured: 4 lines become 2 rows."""
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, 'chr1_100_A_C',
+                     samples='"opens'),
+                _row("chr2", 200, HAP_TWO, 0.5, 0.9, "chr2_200_G_T"),
+                _row("chr3", 300, HAP_ONE, 0.5, 0.9, "chr3_300_T_A")]
+        (_n, n_sites, _u), text, _msgs = self._run(rows)
+        chroms = set(r["chrom"] for r in self._parse(text))
+        self.assertEqual(chroms, {"chr1", "chr2", "chr3"},
+                         "rows after the quote were swallowed: %s" % chroms)
+        self.assertEqual(n_sites, 3)
+
+    def test_the_quote_survives_into_the_output_verbatim(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C",
+                     samples='a"b,c')]
+        _res, text, _msgs = self._run(rows)
+        body = [l for l in text.splitlines() if not l.startswith("#")]
+        self.assertTrue(any('a"b,c' in l for l in body),
+                        "a double quote in a cell is a double quote, in and out")
+        self.assertFalse(any('""' in l for l in body),
+                         "the writer CSV-quoted a file every reader parses as a TSV")
+
+
+class TestAnUnsetAnchorStillKeepsOneRowOneSite(HaplotypeScoresMixin,
+                                               unittest.TestCase):
+    """When the preferred anchor block is unset, falling back to each block's OWN start
+    re-split one row into up to three sites and re-opened the --targets false clean the
+    anchor exists to close."""
+
+    def _row_na_cfd(self, start, cb_start):
+        r = _row("chr1", start, HAP_ONE, 0.5, 0.9, "chr1_%d_A_C" % start,
+                 cb_start=cb_start)
+        cols = _header()
+        r[cols.index("Start_coordinate_(highest_CFD)")] = "NA"
+        return r
+
+    def test_the_row_is_one_site(self):
+        (_n, n_sites, _u), text, _msgs = self._run([self._row_na_cfd(100, 97)])
+        self.assertEqual(n_sites, 1,
+                         "one row became %d sites: %s"
+                         % (n_sites, set(r["site_key"]
+                                         for r in self._parse(text))))
+
+    def test_the_crispr_bulge_score_is_not_dropped_under_targets(self):
+        """The false clean: the curated Position matches the fallback anchor, and the
+        CRISPR-Bulge observation 3 bp away must not be filtered out with its score."""
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT")])
+        _res, text, _msgs = self._run([self._row_na_cfd(100, 97)], targets=tgt)
+        cb = set(r["crispr_bulge"] for r in self._parse(text))
+        self.assertIn("0.9", cb, "the CRISPR-Bulge score was dropped: %s" % cb)
+
+
+class TestAGapIsStillNamedWhenAnotherGuideMatched(HaplotypeScoresMixin,
+                                                  unittest.TestCase):
+    """The suppression added last round dropped every curated key sharing a coordinate
+    with a mismatch -- including a curated guide that genuinely produced nothing, the
+    very case its own comment promised was still reported."""
+
+    OTHER = "TTTTGGGGCCCCAAAATTTTNNN"
+
+    def test_an_exact_match_beside_a_genuine_gap_still_reports_the_gap(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT", SPACER),
+                             ("chr1", "100", "chr1;100;A;T (rs9)", "ALT", self.OTHER)])
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        gap = [m for m in msgs if "NO rows" in m]
+        self.assertTrue(gap, "a curated guide that produced nothing was swallowed")
+        self.assertIn(self.OTHER, gap[0])
+
+    def test_a_pure_spelling_mismatch_is_still_not_called_absent(self):
+        path = os.path.join(self.dir, "t.tsv")
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("Chromosome\tPosition\tVariant\tREF/ALT_origin\tcrRNA\n")
+            fh.write("chr1\t100\tchr1;100;A;C (rs1)\tALT\t%s\n" % SPACER[:20])
+        self._write_source([_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C")])
+        msgs = []
+        hs.build(self.dir, os.path.join(self.dir, "o.tsv"), log=msgs.append,
+                 targets=path)
+        self.assertFalse([m for m in msgs if "NO rows" in m], msgs)
+
+
+class TestOneBlankGuideCellDoesNotDisarmTheGuard(HaplotypeScoresMixin,
+                                                 unittest.TestCase):
+    """targets_name_guides was a run-wide any(), so ONE curated row with a blank guide
+    cell switched the guide-ambiguity guard off for the whole run."""
+
+    OTHER = "TTTTGGGGCCCCAAAATTTTNNN"
+
+    def test_a_blank_cell_elsewhere_does_not_affect_this_locus(self):
+        rows = [_row("chr1", 100, REPORTED, 0.5, 0.004, "chr1_100_A_C"),
+                _row("chr1", 100, HAP_TWO, 0.5, 0.004, "chr1_100_A_C")]
+        rows[1][0] = self.OTHER
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT", ""),
+                             ("chr9", "777", "chr9;777;G;T (rs7)", "ALT", SPACER)])
+        _res, text, _msgs = self._run(rows, targets=tgt)
+        vals = set(r["row_reported_alignment_found"] for r in self._parse(text))
+        self.assertEqual(vals, {"unknown(guide-ambiguous-in-targets)"}, vals)
+
+    def test_n_a_is_guarded_too(self):
+        """n/a asserts the table says REF -- about a guide it may never have named."""
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C"),
+                _row("chr1", 100, HAP_TWO, 0.5, 0.004, "chr1_100_A_C")]
+        rows[1][0] = self.OTHER
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "REF")])
+        _res, text, _msgs = self._run(rows, targets=tgt)
+        vals = set(r["row_reported_alignment_found"] for r in self._parse(text))
+        self.assertNotIn("n/a", vals, "n/a asserted for an unnamed guide")
+
+
+class TestACutInTheFirstCellsIsStillACut(HaplotypeScoresMixin, unittest.TestCase):
+
+    def test_a_row_cut_to_two_fields_refuses(self):
+        path = os.path.join(self.dir, "x_observed_haplotypes_raw.tsv")
+        full = "\t".join(_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C"))
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("\t".join(_header()) + "\n")
+            fh.write(full + "\n")
+            fh.write("\t".join(full.split("\t")[:2]) + "\n")
+        with self.assertRaises(hs.HaplotypeScoreError) as cm:
+            hs.build(self.dir, os.path.join(self.dir, "o.tsv"), log=lambda m: None)
+        self.assertIn("truncated", str(cm.exception))
+
+    def test_a_blank_line_is_still_skipped(self):
+        path = os.path.join(self.dir, "x_observed_haplotypes_raw.tsv")
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("\t".join(_header()) + "\n")
+            fh.write("\t".join(_row("chr1", 100, HAP_ONE, 0.5, 0.004,
+                                     "chr1_100_A_C")) + "\n")
+            fh.write("\n")
+        n_rows, _s, _u = hs.build(self.dir, os.path.join(self.dir, "o.tsv"),
+                                  log=lambda m: None)
+        self.assertGreater(n_rows, 0)
+
+
+class TestAnUnreadableCuratedRowIsCounted(HaplotypeScoresMixin, unittest.TestCase):
+
+    def test_a_short_curated_row_is_reported_not_dropped(self):
+        path = os.path.join(self.dir, "t.tsv")
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("Chromosome\tPosition\tVariant\tREF/ALT_origin\n")
+            fh.write("chr1\t100\tchr1;100;A;C (rs1)\tALT\n")
+            fh.write("chr9\n")                       # too short to read
+        self._write_source([_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C")])
+        msgs = []
+        hs.build(self.dir, os.path.join(self.dir, "o.tsv"), log=msgs.append,
+                 targets=path)
+        self.assertTrue([m for m in msgs if "too short to read" in m],
+                        "the shortlist shrank silently: %s" % msgs)
 
 
 if __name__ == "__main__":
