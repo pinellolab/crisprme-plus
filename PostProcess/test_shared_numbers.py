@@ -128,19 +128,23 @@ def _prose(html):
 def _newest_changelog_section():
     """The section the entries this suite holds are written in.
 
-    While a release is being written that is ``[Unreleased]``. At the release it is
-    emptied and its entries move into the dated ``[X.Y.Z]`` section below it
-    (``docs/RELEASING.md`` step 3), so an empty ``[Unreleased]`` means the section to
-    read is the next one. Reading ``[Unreleased]`` alone would have made every
-    assertion below vacuous the moment a release was cut.
+    While a release is being written the entries are in ``[Unreleased]``. At the release
+    they move into the dated ``[X.Y.Z]`` section below it (``docs/RELEASING.md`` step 3).
+    So BOTH are returned, always.
+
+    This used to return whichever of the two was non-empty, newest first. That guessed
+    that anything in ``[Unreleased]`` must be these entries -- and the first unrelated
+    entry added there (a companion file, a new column) hid the released section and made
+    every assertion below fail at once, reporting a dozen numbers as missing from a
+    changelog that states all of them. Reading both keeps the protection the single-
+    section read was for -- the numbers must be stated in a CURRENT entry, not in some
+    ancient one -- without assuming what else the open section contains.
     """
     txt = _read("CHANGELOG.md")
     start = txt.index("## [Unreleased]")
     end = txt.index("\n## [", start + 1)
-    if txt[start + len("## [Unreleased]"):end].strip():
-        return txt[start:end]
-    start = end + 1
-    return txt[start:txt.index("\n## [", start + 1)]
+    nxt = end + 1
+    return txt[start:end] + "\n" + txt[nxt:txt.index("\n## [", nxt + 1)]
 
 
 def _block(text, opening, closing):
@@ -808,6 +812,41 @@ class TestChangelogQuotesTheArtifacts(_Surfaces):
             with self.subTest(curve=key):
                 self.assertIn(f'{float(self.d[key]):.3f}', self.changelog)
         self.assertIn(f'{float(self.d["scfd_all_ap"]):.3f}', self.changelog)
+
+
+class TestTheChangelogReadItself(unittest.TestCase):
+    """The helper every assertion in this file depends on.
+
+    It used to return whichever of [Unreleased] / the newest dated section was non-empty,
+    newest first. Adding an unrelated entry to [Unreleased] -- a new companion file --
+    therefore hid the released section and failed a dozen assertions at once, each saying
+    the changelog does not state a number the changelog states.
+    """
+
+    def test_it_returns_both_sections(self):
+        got = _newest_changelog_section()
+        self.assertIn("## [Unreleased]", got)
+        self.assertRegex(got, r"## \[\d+\.\d+\.\d+\]")
+
+    def test_an_unrelated_unreleased_entry_does_not_hide_the_released_one(self):
+        """The exact break. A number in the dated section must still be found when
+        [Unreleased] has content of its own."""
+        got = _newest_changelog_section()
+        self.assertIn("### Added", got)
+        # the released section's own text survives alongside whatever is open
+        txt = _read("CHANGELOG.md")
+        start = txt.index("## [Unreleased]")
+        nxt = txt.index("\n## [", start + 1) + 1
+        dated = txt[nxt:txt.index("\n## [", nxt + 1)]
+        probe = next((l for l in dated.splitlines() if len(l.strip()) > 40), None)
+        self.assertIsNotNone(probe, "the dated section has no prose to probe with")
+        self.assertIn(probe, got)
+
+    def test_it_stops_before_the_section_below(self):
+        """Both sections, not the whole file: a number stated only in an ancient entry
+        must not satisfy an assertion about a current one."""
+        txt = _read("CHANGELOG.md")
+        self.assertLess(len(_newest_changelog_section()), len(txt) / 2)
 
 
 if __name__ == "__main__":

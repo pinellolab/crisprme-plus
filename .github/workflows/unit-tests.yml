@@ -553,6 +553,27 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_haplotype_prioritizer -v
 
+      - name: "A row per observed haplotype, each with a score and a never-blank status"
+        # scripts/haplotype_scores.py: the per-haplotype scored companion. Stdlib only,
+        # synthetic fixtures -- no run, no network. Pins the invariants that make the file
+        # trustworthy to filter on: never a blank score_status, the -1.0 sentinel never
+        # printed, counters computed before any cap, zygosity reported as "unknown" rather
+        # than 0 when the source records no slot, and the reconciliation keyed on the
+        # variant set (an alignment-string key fired on 106 of 114 real sites).
+        working-directory: PostProcess
+        run: python -m unittest test_haplotype_scores -v
+
+      - name: "The companion's standing gate: its own invariants, asserted on a real file"
+        # scripts/check_haplotype_scores.py is what makes the companion trustworthy to a
+        # reader who did not generate it -- it asserts, mechanically, the things the file
+        # promises about itself. A checker nobody checks is a rubber stamp, so every
+        # invariant is exercised BOTH ways here: a violating file must fail AND a correct
+        # one must pass. On its first real run it failed a CORRECT 460,714-row file by
+        # comparing rows to haplotypes, and its threshold parser silently skipped the
+        # score-vs-verdict check on every real header; both are pinned.
+        working-directory: PostProcess
+        run: python -m unittest test_check_haplotype_scores -v
+
       - name: "SNP rows drop a carrier whose SNP haplotype holds an indel changing the target"
         working-directory: PostProcess
         run: python -m unittest test_snp_row_indel_carriers -v

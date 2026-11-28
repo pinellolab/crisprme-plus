@@ -13,6 +13,25 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/haplotype_scores.py`: a per-haplotype scored companion — one row per
+  site × haplotype × alignment frame, each carrying a score and a never-blank
+  `score_status`. Answers "give me every ALT above a threshold, not one
+  representative per site": each of the existing per-site products collapses the
+  observed haplotypes by a different key (score per axis, variant set, carrier
+  count), so none of them attaches a score to a haplotype. Written as a companion
+  file rather than extra columns because both scorers address the results row by
+  negative index, so a trailing column silently corrupts every variant row's score.
+  Carriers are reported with their zygosity, population and superpopulation and are
+  never used to rank or filter. `--targets` restricts the file to a curated list and
+  reconciles each site's own reported haplotype against the ones written, reporting
+  the sites it could not cover rather than returning a shorter file in silence.
+- `Phase` in the report: the scan's CONFIRMED/PUTATIVE label, joined from the
+  companion the scan already writes instead of recomputing it. CONFIRMED means a
+  real phased same-phase-set cis relationship; PUTATIVE means unphased or
+  cross-phase-set. The column previously read `NA` on every row.
+
 ## [2.10.1] - 2026-11-25
 
 CRISPRme 2.10.1 runs on CRISPRitz 2.10.0 and on the indexes of 2.10.0: no index is built again.
