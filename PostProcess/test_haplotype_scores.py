@@ -1483,5 +1483,166 @@ class TestEveryCombinationUpholdsTheInvariants(HaplotypeScoresMixin, unittest.Te
             seen[val] = name
 
 
+class TestNAIsNotACoordinate(HaplotypeScoresMixin, unittest.TestCase):
+    """cell() returns this pipeline's "NA" as a truthy string, so `anchor_start or
+    start` kept it: every row with an unset anchor was keyed chr1:NA:NA:<guide>, merging
+    PHYSICALLY DISTINCT LOCI into one site. One locus's site_max_crispr_bulge was then
+    stamped on another's rows, and a cap could delete whole loci from the file."""
+
+    def _rows_with_na_anchor(self):
+        out = []
+        for start, cb in ((100, 0.9), (500000, 0.001)):
+            r = _row("chr1", start, HAP_ONE, 0.4, cb, "chr1_%d_A_C" % start)
+            cols = _header()
+            r[cols.index("Start_coordinate_(highest_CFD)")] = "NA"
+            r[cols.index("Strand_(highest_CFD)")] = "NA"
+            out.append(r)
+        return out
+
+    def test_two_distant_loci_do_not_become_one_site(self):
+        (_n, n_sites, _u), text, _msgs = self._run(self._rows_with_na_anchor())
+        keys = set(r["site_key"] for r in self._parse(text))
+        self.assertNotIn("chr1:NA:NA:%s" % SPACER, keys, keys)
+        self.assertGreater(len(keys), 1,
+                           "500 kb apart and merged into one site: %s" % keys)
+
+    def test_a_rollup_from_one_locus_is_not_stamped_on_another(self):
+        _res, text, _msgs = self._run(self._rows_with_na_anchor())
+        for r in self._parse(text):
+            if r["crispr_bulge"] not in ("NA", ""):
+                self.assertGreaterEqual(float(r["site_max_crispr_bulge"]),
+                                        float(r["crispr_bulge"]))
+                self.assertEqual(r["site_max_crispr_bulge"], r["crispr_bulge"],
+                                 "another locus's maximum on this row")
+
+
+class TestAGuidelessTableCannotSpeakForTwoGuides(HaplotypeScoresMixin,
+                                                 unittest.TestCase):
+    """The SHIPPED curated shape has no guide column. When the source carries several
+    guides at one coordinate, lookup_reported hands the same curated row to all of them
+    and each answers yes/no -- an answer about a guide the table never described, one of
+    which is necessarily wrong."""
+
+    OTHER = "TTTTGGGGCCCCAAAATTTTNNN"
+
+    def test_it_answers_unknown_rather_than_guessing(self):
+        rows = [_row("chr1", 100, REPORTED, 0.5, 0.004, "chr1_100_A_C"),
+                _row("chr1", 100, HAP_TWO, 0.5, 0.004, "chr1_100_A_C")]
+        rows[1][0] = self.OTHER                      # a second guide at the same locus
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT")])
+        _res, text, _msgs = self._run(rows, targets=tgt)
+        vals = set(r["row_reported_alignment_found"] for r in self._parse(text))
+        self.assertEqual(vals, {"unknown(guide-ambiguous-in-targets)"}, vals)
+
+    def test_one_guide_at_the_locus_still_answers(self):
+        rows = [_row("chr1", 100, REPORTED, 0.5, 0.004, "chr1_100_A_C")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT")])
+        _res, text, _msgs = self._run(rows, targets=tgt)
+        self.assertEqual(set(r["row_reported_alignment_found"]
+                             for r in self._parse(text)), {"yes"})
+
+    def test_a_table_that_names_guides_still_answers_for_both(self):
+        rows = [_row("chr1", 100, REPORTED, 0.5, 0.004, "chr1_100_A_C"),
+                _row("chr1", 100, HAP_TWO, 0.5, 0.004, "chr1_100_A_C")]
+        rows[1][0] = self.OTHER
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT", SPACER),
+                             ("chr1", "100", "chr1;100;A;C (rs1)", "ALT", self.OTHER)])
+        _res, text, _msgs = self._run(rows, targets=tgt)
+        vals = set(r["row_reported_alignment_found"] for r in self._parse(text))
+        self.assertNotIn("unknown(guide-ambiguous-in-targets)", vals, vals)
+
+
+class TestASiteInTheFileIsNeverCalledAbsent(HaplotypeScoresMixin, unittest.TestCase):
+    """A crRNA column holds the 20-mer without the PAM -- the shape the guide-mismatch
+    warning exists for. Every such site was reported as 'produced NO rows and is absent
+    from this file' in the SAME run as the warning saying its rows matched under a
+    different guide, while its rows were in the file."""
+
+    def _targets_crrna(self, guide):
+        path = os.path.join(self.dir, "t_crrna.tsv")
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("Chromosome\tPosition\tVariant\tREF/ALT_origin\tcrRNA\n")
+            fh.write("chr1\t100\tchr1;100;A;C (rs1)\tALT\t%s\n" % guide)
+        return path
+
+    def test_a_locus_whose_rows_are_written_is_not_called_absent(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C")]
+        tgt = self._targets_crrna(SPACER[:20])       # the 20-mer, no PAM
+        _res, text, msgs = self._run(rows, targets=tgt)
+        self.assertTrue(self._parse(text), "no rows were written at all")
+        self.assertFalse([m for m in msgs if "NO rows" in m],
+                         "its rows are in the file and it was called absent: %s" % msgs)
+        self.assertTrue([m for m in msgs if "DIFFERENT guide" in m], msgs)
+
+    def test_a_genuinely_absent_locus_is_still_named(self):
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C")]
+        tgt = self._targets([("chr1", "100", "chr1;100;A;C (rs1)", "ALT", SPACER),
+                             ("chr9", "777", "chr9;777;G;T (rs7)", "ALT", SPACER)])
+        _res, _text, msgs = self._run(rows, targets=tgt)
+        gap = [m for m in msgs if "NO rows" in m]
+        self.assertTrue(gap, msgs)
+        self.assertIn("chr9:777", gap[0])
+
+
+class TestTheRefOnlyBucketNeverAssertsAnUnreadOrigin(HaplotypeScoresMixin,
+                                                     unittest.TestCase):
+
+    def test_no_origin_column_is_not_the_table_agreeing(self):
+        path = os.path.join(self.dir, "t.tsv")
+        with io.open(path, "w", encoding="utf-8") as fh:
+            fh.write("Chromosome\tPosition\tVariant\n")
+            fh.write("chr1\t100\tchr1;100;A;C (rs1)\n")
+        self._write_source([_row("chr1", 100, HAP_ONE, 0.5, 0.004, "chr1_100_A_C",
+                                 origin="ref")])
+        msgs = []
+        hs.build(self.dir, os.path.join(self.dir, "o.tsv"), log=msgs.append,
+                 targets=path)
+        self.assertFalse([m for m in msgs if "curated table agrees" in m],
+                         "it asserted an origin the table never stated: %s" % msgs)
+        self.assertTrue([m for m in msgs if "never read" in m], msgs)
+
+
+class TestNeverComputedIsNotDeclined(HaplotypeScoresMixin, unittest.TestCase):
+    """11 of the 17 shipped PAM files are not 3 nt, so CFD is never computed for them
+    and the pipeline writes the SAME -1 it uses to decline a target. Reporting that as
+    a refusal asserts a judgement nothing made -- on every row of every Cas12a and
+    SaCas9 run."""
+
+    def _params(self, pam):
+        with io.open(os.path.join(self.dir, ".Params.txt"), "w",
+                     encoding="utf-8") as fh:
+            fh.write(PARAMS.replace("Pam\tNRR", "Pam\t%s" % pam))
+
+    def test_a_four_nt_pam_says_not_computed_not_declined(self):
+        self._params("TTTV")
+        rows = [_row("chr1", 100, HAP_ONE, -1.0, "NA", "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        statuses = set(r["score_status"] for r in self._parse(text))
+        self.assertTrue(any("cfd-not-defined-for-this-pam" in st for st in statuses),
+                        statuses)
+        self.assertFalse([st for st in statuses if "model-refused" in st], statuses)
+
+    def test_the_pam_is_named_so_the_reader_can_check(self):
+        self._params("TTTV")
+        rows = [_row("chr1", 100, HAP_ONE, -1.0, "NA", "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        self.assertIn("TTTV", [r["score_status"] for r in self._parse(text)][0])
+
+    def test_a_three_nt_pam_still_reports_a_real_refusal(self):
+        self._params("NRR")
+        rows = [_row("chr1", 100, HAP_ONE, -1.0, "NA", "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        self.assertTrue(any("model-refused" in r["score_status"]
+                            for r in self._parse(text)))
+
+    def test_a_crispr_bulge_refusal_is_unaffected_by_the_pam(self):
+        """The do_scores gate is CFD-specific; CRISPR-Bulge has its own domain rule."""
+        self._params("TTTV")
+        rows = [_row("chr1", 100, HAP_ONE, 0.5, -1.0, "chr1_100_A_C")]
+        _res, text, _msgs = self._run(rows)
+        cb = [r for r in self._parse(text) if "CRISPR_BULGE" in r["haplotype_id"]][0]
+        self.assertIn("model-refused", cb["score_status"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

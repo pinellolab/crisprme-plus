@@ -78,6 +78,7 @@ ST_SCORED = "scored"
 # and-declined axis identically to one that has no column at all. The status says both.
 ST_SCORED_REFUSED = "scored(%s-model-refused)"
 ST_OUT_OF_DOMAIN = "out-of-domain:%s"          # the model's own refusal rule
+ST_NOT_SCORED_PAM = "not-scored:cfd-not-defined-for-this-pam(%s)"
 ST_NEEDS_REALIGN = "needs-realignment:%s"       # site_key; Tier 2 would resolve it
 
 FRAME_CANDIDATE = "candidate_frame"
@@ -234,6 +235,11 @@ VERDICTS = (
      "value is never a surprise; see test_the_composite_status_is_unreachable_today"),
     ("score_status", "out-of-domain:model-refused(n/length/multi-gap)",
      "reached, declined, and NO axis produced a number"),
+    ("score_status", "not-scored:cfd-not-defined-for-this-pam(<pam>)",
+     "CFD was NEVER COMPUTED for this run: the pipeline only scores a 20 nt guide with "
+     "a 3 nt 3-prime PAM, and 11 of the 17 shipped PAM files are not that (every "
+     "Cas12a and SaCas9 among them). The same -1 the model writes to decline a target "
+     "also means this, and reporting it as a refusal asserts a judgement nothing made"),
     ("score_status", "needs-realignment:<site>",
      "the fixed alignment frame cannot hold it; no number, and none invented"),
 
@@ -258,11 +264,18 @@ VERDICTS = (
      "nothing said what this site reported: either no --targets, or --targets names "
      "the locus only under a DIFFERENT guide (stderr says which; this file cannot)"),
     ("row_reported_alignment_found", "unknown(origin-not-in-targets)",
-     "the curated table has no REF/ALT_origin column, so ref was never read"),
+     "the curated table has NO REF/ALT_origin column, so ref was never read"),
+    ("row_reported_alignment_found", "unknown(unreadable-origin-in-targets)",
+     "the curated table HAS that column and this row's value is neither ref nor alt. "
+     "A different fact from the column being absent, and it used to share its value"),
     ("row_reported_alignment_found", "unknown(unparsable-variant-in-targets)",
      "an ALT row whose Variant cell this file cannot reduce to records"),
     ("row_reported_alignment_found", "unknown(ambiguous-in-targets)",
      "the curated table described that locus twice, incompatibly"),
+    ("row_reported_alignment_found", "unknown(guide-ambiguous-in-targets)",
+     "the source carries SEVERAL guides at this locus and the curated table names no "
+     "guide column, so which of them its row describes cannot be known. Answering "
+     "yes/no would be answering about a guide the table never described"),
     ("row_reported_alignment_found", "unknown(key-looks-wrong)",
      "the comparison looks mis-keyed across the run, so a 'no' is not reported as one"),
     ("row_reported_alignment_found", "yes(among-all-haplotypes-not-all-shown)",
@@ -632,6 +645,12 @@ def block_columns(header):
     return out, idx
 
 
+def _is_coordinate(text):
+    """A real genomic start, not one of this pipeline's several ways of saying 'unset'."""
+    t = str(text or "").strip()
+    return bool(t) and t.lstrip("+-").isdigit()
+
+
 def site_key(chrom, start, strand, spacer):
     return "%s:%s:%s:%s" % (chrom, start, strand, spacer)
 
@@ -709,10 +728,18 @@ def harvest_rows(stream, spacer_hint=None):
         anchor = blocks.get(ANCHOR_BLOCK) or {}
         anchor_start = cell(row, anchor, "start") if anchor else ""
         anchor_strand = cell(row, anchor, "strand") if anchor else ""
+        # "NA" IS NOT A COORDINATE. cell() returns it as a truthy string, so
+        # `anchor_start or start` kept it and every row with an unset anchor was keyed
+        # chr1:NA:NA:<guide> -- merging physically distinct loci into one site, stamping
+        # one locus's site_max_crispr_bulge onto another's rows, and letting a cap delete
+        # whole loci from the file. This pipeline writes NA for "not set"; it is an
+        # absence, and an absence cannot anchor anything.
+        if not _is_coordinate(anchor_start):
+            anchor_start, anchor_strand = "", ''
         for block, cols in blocks.items():
             start = cell(row, cols, "start")
-            if not start:
-                continue
+            if not _is_coordinate(start):
+                continue       # this block did not place the target anywhere
             strand = cell(row, cols, "strand")
             variants = cell(row, cols, "variants")
             origin = cell(row, cols, "origin")
@@ -733,6 +760,19 @@ def harvest_rows(stream, spacer_hint=None):
 
 # --------------------------------------------------------------------------- #
 # scoring status
+
+
+def cfd_is_defined(budget):
+    """Whether this run's shape lets the pipeline compute CFD at all.
+
+    ``new_simple_analysis.py`` sets ``do_scores = False`` when the PAM is not 3 nt, the
+    guide is not 20 nt, or the PAM is 5-prime, and then writes the SAME -1 it uses for
+    "the model declined this target". Eleven of the seventeen shipped PAM files are in
+    that set, so on a Cas12a or SaCas9 run every row's -1 means "never computed" and
+    reporting it as a refusal asserts a judgement nothing made.
+    """
+    pam = str(budget.get("pam") or "").strip()
+    return len(pam) == 3 if pam else True      # unknown PAM: do not invent a verdict
 
 
 def classify(obs, budget, axis_named):
@@ -786,6 +826,11 @@ def classify(obs, budget, axis_named):
         if declined:
             return cfd, cb, ST_SCORED_REFUSED % "+".join(declined), cb_refused
         return cfd, cb, ST_SCORED, cb_refused
+    if cfd_refused and not cb_refused and not cfd_is_defined(budget):
+        # The -1 is the "not calculated" one, not the "declined" one.
+        return (None, None,
+                ST_NOT_SCORED_PAM % (str(budget.get("pam") or "?").strip() or "?"),
+                cb_refused)
     if cb_refused or cfd_refused:
         return (None, None,
                 ST_OUT_OF_DOMAIN % "model-refused(n/length/multi-gap)", cb_refused)
@@ -807,7 +852,7 @@ class Site(object):
     __slots__ = ("key", "chrom", "start", "strand", "spacer", "rows",
                  "haplotypes", "above", "scored_any", "max_cb",
                  "reported_alignments", "seen_alignments", "applicable", "has_report",
-                 "ambiguous", "unreadable_report")
+                 "ambiguous", "unreadable_report", "anchor")
 
     def __init__(self, key, chrom, start, strand, spacer):
         self.key = key
@@ -826,6 +871,11 @@ class Site(object):
         self.has_report = False
         self.ambiguous = False
         self.unreadable_report = ""
+        # The site's ANCHOR coordinate, which is what every --targets set is keyed on.
+        # site.start is the creating observation's own block start, and the two differ
+        # on about 2% of real rows -- looking the site up by site.start is the exact
+        # mistake that produced three earlier findings.
+        self.anchor = ""
 
     def add(self, row, cb_value, above, scored, aligned, hap_key):
         self.haplotypes.add(hap_key)                # COUNT first, and by haplotype
@@ -1040,6 +1090,8 @@ Reported = collections.namedtuple("Reported", "variants origin origin_known")
 
 # a locus the curated table describes twice, incompatibly: never reconciled against
 _AMBIGUOUS = Reported(variants=(), origin="ambiguous", origin_known=True)
+# the curated table had no REF/ALT_origin column at all, as against a cell we cannot read
+_ORIGIN_NO_COLUMN = "<no-origin-column>"
 
 
 # the curated table's guide column, under any of the names it has shipped with
@@ -1086,8 +1138,10 @@ def read_reported(targets_path, say=None):
         for row in reader:
             if max(c_i, p_i, v_i) >= len(row):
                 continue
+            # The column being ABSENT and the cell being unreadable are different
+            # facts, and folding them into one value made the legend true of only one.
             origin = (row[o_i].strip().lower()
-                      if o_i is not None and o_i < len(row) else "")
+                      if o_i is not None and o_i < len(row) else _ORIGIN_NO_COLUMN)
             spacer = (row[s_i].strip() if s_i is not None and s_i < len(row) else "")
             key = target_key(row[c_i], row[p_i], spacer)
             rep = Reported(variants=canonical_variants(row[v_i]), origin=origin,
@@ -1227,6 +1281,11 @@ def build(results_dir, out_path, cap=0, strict=False,
     seen_anchors = set()        # anchors that produced an ALT haplotype row
     ref_only_anchors = set()    # anchors the source DOES hold, but only as reference
     guide_mismatch = set()      # the locus is in --targets, but under a different guide
+    # Guides seen per coordinate. A curated table with NO guide column cannot say which
+    # guide its row is about; if the source carries more than one there, every answer
+    # but "unknown" is a claim about a guide the table never described.
+    guides_at = collections.defaultdict(set)
+    targets_name_guides = any(k.spacer for k in (reported or {}))
     if wanted is not None:
         say("haplotype-scores: restricted to the %d site(s) --targets names" % len(wanted))
 
@@ -1251,9 +1310,11 @@ def build(results_dir, out_path, cap=0, strict=False,
                 continue
             if wanted is not None:
                 seen_anchors.add(obs_key)
+                guides_at[coarse_key(obs_key)].add(obs.spacer)
             site = sites.get(obs.site)
             if site is None:
                 site = Site(obs.site, obs.chrom, obs.start, obs.strand, obs.spacer)
+                site.anchor = obs.anchor_start
                 rep = lookup_reported(reported, obs.chrom, obs.anchor_start, obs.spacer)
                 if rep is None and reported:
                     # The locus passed the coarse filter, so --targets DOES name it -- but
@@ -1268,7 +1329,9 @@ def build(results_dir, out_path, cap=0, strict=False,
                 if rep is _AMBIGUOUS:
                     site.ambiguous = True
                 if site.has_report and not rep.origin_known:
-                    site.unreadable_report = "origin-not-in-targets"
+                    site.unreadable_report = ("origin-not-in-targets"
+                                              if rep.origin == _ORIGIN_NO_COLUMN
+                                              else "unreadable-origin-in-targets")
                 elif site.has_report and rep.origin == "alt" and not rep.variants:
                     # The table names an ALT site whose Variant cell this file cannot
                     # read (an rsID-only row, which generate_report._format_variant_id
@@ -1363,7 +1426,7 @@ def build(results_dir, out_path, cap=0, strict=False,
         # row at this coordinate", so at a locus curated under two guides the verdict was
         # whichever row the dict happened to yield -- the same data gave "GAP" or "no
         # variant haplotype here" depending on the ORDER OF LINES in the table.
-        contradicted, ref_only, ambiguous_ref = [], [], []
+        contradicted, ref_only, ambiguous_ref, origin_unknown = [], [], [], []
         for k in sorted(ref_all):
             rep = reported.get(k)
             if rep is _AMBIGUOUS:
@@ -1371,10 +1434,23 @@ def build(results_dir, out_path, cap=0, strict=False,
                 # neither "gap" nor "clean". A bucket that asserts is worse than one
                 # that says it does not know.
                 ambiguous_ref.append(k)
+            elif rep is not None and not rep.origin_known:
+                # THE TABLE NEVER SAID. Saying "the curated table agrees they are
+                # REF-origin" about a table with no origin column -- in the same run as
+                # the NOTE saying that column is missing -- asserts the one thing that
+                # was not read. Not a gap either; its own line.
+                origin_unknown.append(k)
             elif rep is not None and rep.origin == "alt":
                 contradicted.append(k)
             else:
                 ref_only.append(k)
+        if origin_unknown:
+            say("haplotype-scores: %d of the %d site(s) --targets names are present in "
+                "%s as reference rows only. Whether an ALT haplotype was EXPECTED there "
+                "was never read -- the curated table does not say its origin -- so this "
+                "is neither a gap nor 'no variant haplotype here'. First: %s"
+                % (len(origin_unknown), len(wanted), os.path.basename(source_path),
+                   ", ".join("%s:%s" % (m[0], m[1]) for m in origin_unknown[:5])))
         if ambiguous_ref:
             say("haplotype-scores: %d of the %d site(s) --targets names carry only "
                 "reference rows in %s AND are described more than once, incompatibly, in "
@@ -1398,7 +1474,25 @@ def build(results_dir, out_path, cap=0, strict=False,
                 % (len(contradicted), len(wanted), os.path.basename(source_path),
                    ", ".join("%s:%s%s" % (m[0], m[1], (" guide %s" % m[2]) if m[2] else "")
                              for m in contradicted[:5])))
-        missing = sorted(wanted - seen_anchors - ref_all)
+        # A LOCUS WHOSE COORDINATE WAS REACHED IS NOT ABSENT, whatever guide reached
+        # it. When the curated table spells the guide differently -- a crRNA column
+        # holding the 20-mer while the source's Spacer+PAM includes it, the documented
+        # common case -- obs_target_key falls back to the guide-less key, so the exact
+        # curated key never lands in seen_anchors. Every such site was then reported as
+        # "produced NO rows and is absent from this file" IN THE SAME RUN as the warning
+        # saying its rows were matched under a different guide, while its rows were in
+        # the file. Two contradictory statements about one site; the second is false.
+        # The suppression is narrow ON PURPOSE. Two cases look alike and are not:
+        #   (a) the table names guide B at a locus where only guide A was enumerated.
+        #       Guide B genuinely produced nothing: that IS a gap and must be said.
+        #   (b) the table spells the guide differently from the source, so NO curated
+        #       key matched and every observation fell back to the guide-less key. The
+        #       rows ARE in the file; calling the locus absent contradicts them.
+        # Only (b) is suppressed, and it is identified by guide_mismatch -- which is
+        # populated exactly when a locus was reached but no curated guide matched it.
+        mismatched_coarse = set(coarse_key(k) for k in guide_mismatch)
+        missing = sorted(k for k in (wanted - seen_anchors - ref_all)
+                         if coarse_key(k) not in mismatched_coarse)
         if missing:
             say("haplotype-scores: WARNING %d of the %d site(s) --targets names produced "
                 "NO rows and are absent from this file: they are not in %s at that "
@@ -1499,6 +1593,14 @@ def build(results_dir, out_path, cap=0, strict=False,
             # made "fully reconstructed" and "nobody could check this" read identically
             # -- the collapse this file exists to prevent, applied to its own column.
             found = site.row_reported_alignment_found
+            # A GUIDE-LESS CURATED TABLE CANNOT SPEAK FOR TWO GUIDES. The shipped
+            # curated shape has no guide column, so when the source carries several
+            # guides at one coordinate, lookup_reported hands the SAME curated row to
+            # all of them and each answers yes/no -- an answer about a guide the table
+            # never described. One of them is necessarily wrong, and nothing said so.
+            if (found in ("yes", "no") and not targets_name_guides
+                    and len(guides_at.get((site.chrom, site.anchor), ())) > 1):
+                found = "unknown(guide-ambiguous-in-targets)"
             if mis_keyed and found == "no":
                 found = "unknown(key-looks-wrong)"
             # Only downgrade when the matching haplotype is actually out of sight. A cap
